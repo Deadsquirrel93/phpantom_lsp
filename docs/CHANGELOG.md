@@ -346,6 +346,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Return-type quick fixes edit the closure they were offered for.** On a PHPStan error inside a closure or arrow function, "Update return type" and the other return-type fixes now change that function's own return type, instead of writing the enclosing method's type onto it and adding a docblock above it. "Remove return statement" also no longer adds a `return;` at the end of a method that another method follows.
 - **Typing in a `namespace { }` block.** While a call in a braced `namespace` block is still missing its `)`, or the block its closing `}`, signature help and completion use the block's own namespace and imports instead of an earlier block's, and the classes and functions it declares stay available to other files.
 - **"Import all missing classes" with the cursor at the start of a name.** The bulk import is now offered there too, wherever "Import class" is.
+- **Completion shows member types next to the name.** Method and property suggestions show their return or property type right after the name (e.g. `findOneByEmail($email): ?User`) in editors such as PhpStorm and VS Code, where previously only the class name was visible. Contributed by @EranNL.
 
 ## [0.11.1] - 2026-10-07
 
