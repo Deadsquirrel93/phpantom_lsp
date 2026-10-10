@@ -196,7 +196,11 @@ impl MemberSlot {
     }
 
     pub(crate) fn kind(self) -> MemberRefKind {
-        MemberRefKind::of_method(self.is_method)
+        if self.is_method {
+            MemberRefKind::Method
+        } else {
+            MemberRefKind::Property
+        }
     }
 }
 

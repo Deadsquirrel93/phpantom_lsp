@@ -1701,3 +1701,91 @@ async fn prepare_rename_refuses_an_implementation_before_asking_for_a_name() {
             .is_some()
     );
 }
+
+// ─── Constants versus same-named methods and properties ─────────────────────
+
+const TAG: &str = concat!(
+    "<?php\n",
+    "class Tag {\n",
+    "    const name = 'tag';\n",
+    "    public string $name = 'tag';\n",
+    "    public function name(): string {\n",
+    "        return self::name . $this->name . $this->name();\n",
+    "    }\n",
+    "}\n",
+    "echo Tag::name;\n",
+);
+
+#[tokio::test]
+async fn renaming_a_constant_leaves_a_same_named_method_and_property_alone() {
+    let expected = TAG
+        .replace("const name", "const label")
+        .replace("self::name", "self::label")
+        .replace("Tag::name", "Tag::label");
+    for needle in ["const name", "self::name", "Tag::name"] {
+        assert_eq!(
+            renamed_text(TAG, needle, "name", "label").await,
+            expected,
+            "renaming from {needle:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn renaming_a_method_or_property_leaves_a_same_named_constant_alone() {
+    for needle in ["function name", "$this->name()", "$name = 'tag'"] {
+        let renamed = renamed_text(TAG, needle, "name", "label").await;
+        for constant in ["const name", "self::name", "Tag::name"] {
+            assert!(
+                renamed.contains(constant),
+                "renaming from {needle:?} touched {constant:?}:\n{renamed}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn renaming_a_static_property_or_a_constant_leaves_the_other_alone() {
+    let text = concat!(
+        "<?php\n",
+        "class Config {\n",
+        "    const path = '/etc';\n",
+        "    public static string $path = '/tmp';\n",
+        "}\n",
+        "echo Config::path;\n",
+        "echo Config::$path;\n",
+    );
+    assert_eq!(
+        renamed_text(text, "Config::path", "path", "root").await,
+        text.replace("const path", "const root")
+            .replace("Config::path", "Config::root"),
+    );
+    assert_eq!(
+        renamed_text(text, "Config::$path", "path", "root").await,
+        text.replace("$path", "$root"),
+    );
+}
+
+#[tokio::test]
+async fn renaming_an_enum_case_leaves_a_same_named_static_method_alone() {
+    let text = concat!(
+        "<?php\n",
+        "enum Suit {\n",
+        "    case Hearts;\n",
+        "    public static function Hearts(): self { return self::Hearts; }\n",
+        "}\n",
+        "Suit::Hearts();\n",
+        "$s = Suit::Hearts;\n",
+    );
+    assert_eq!(
+        renamed_text(text, "case Hearts", "Hearts", "Spades").await,
+        text.replace("case Hearts", "case Spades")
+            .replace("self::Hearts", "self::Spades")
+            .replace("$s = Suit::Hearts", "$s = Suit::Spades"),
+    );
+    assert_eq!(
+        renamed_text(text, "function Hearts", "Hearts", "Deal").await,
+        text.replace("function Hearts", "function Deal")
+            .replace("Suit::Hearts()", "Suit::Deal()"),
+    );
+}
