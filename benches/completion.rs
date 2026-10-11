@@ -15,8 +15,9 @@
 //! `DiagnosticsBench` (from `lib/WorseReflection/Tests/Benchmarks/`) for
 //! a direct 1:1 comparison.
 
-use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use phpantom_lsp::Backend;
+use std::hint::black_box;
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 

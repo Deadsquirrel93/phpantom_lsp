@@ -2,8 +2,9 @@
 //!
 //! Run with: `cargo bench --bench references`
 
-use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use phpantom_lsp::Backend;
+use std::hint::black_box;
 use tower_lsp::lsp_types::*;
 
 /// Generate a large project with `num_classes` classes.
