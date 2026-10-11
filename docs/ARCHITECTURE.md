@@ -580,7 +580,7 @@ This is analogous to the [Laravel Class Patches](#laravel-class-patches) system 
 
 #### Class patches
 
-Class stub patches work the same way but are applied by `apply_class_stub_patches(class)` in `parse_and_cache_content_versioned` for URIs starting with `phpantom-stub://` or `phpantom-stub-fn://`. Current class patches add `@template` parameters and `@implements` generics to SPL collection classes (`ArrayIterator`, `ArrayObject`, `SplDoublyLinkedList`, `SplQueue`, `SplStack`, `SplPriorityQueue`, `SplFixedArray`, `SplObjectStorage`, `WeakMap`) that are missing them in phpstorm-stubs. These patches enable generic type substitution through the interface chain (e.g. `ArrayIterator<int, Rule>::current()` resolves to `Rule` via `Iterator::current()` returning `TValue`).
+Class stub patches work the same way but are applied by `apply_class_stub_patches(class)` in `parse_and_cache_content_versioned` for URIs starting with `phpantom-stub://` or `phpantom-stub-fn://`. Current class patches add `@template` parameters, `@extends`/`@implements` generics, and constructor bindings to the SPL iterator wrappers (`IteratorIterator` and its subclasses), which phpstorm-stubs leave ungeneric. This lets generic types flow through the wrapper (e.g. `new LimitIterator($rules)` over an `ArrayIterator<int, Rule>` yields `Rule` from `current()`). Other class patches tighten individual method return types on `ReflectionClass`, `SimpleXMLElement`, and the DOM classes. The full inventory is in the `stub_patches` module documentation.
 
 ### Runtime Lookup — Constants
 

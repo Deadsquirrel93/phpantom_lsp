@@ -23,8 +23,8 @@ PHPantom embeds JetBrains phpstorm-stubs at compile time via
 arrays and indexed by class, function, and constant name. Stub files
 are parsed lazily on first access and cached under `phpantom-stub://`
 URIs, and `src/stub_patches/` corrects or enriches individual
-declarations after parsing (templates on the SPL iterators and
-`WeakMap`, precise return types for many functions).
+declarations after parsing (templates on the SPL iterator wrappers,
+precise return types for many functions).
 
 Built-in names always resolve to the embedded stubs. In
 `find_or_load_class`, Phase 0.5 sends any global-namespace class the

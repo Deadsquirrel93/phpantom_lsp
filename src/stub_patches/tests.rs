@@ -40,23 +40,6 @@ fn empty_function(name: &str) -> FunctionInfo {
 }
 
 #[test]
-fn weak_map_gets_array_access_generics() {
-    let mut class = empty_class("WeakMap");
-    apply_class_stub_patches(&mut class);
-
-    assert!(
-        class
-            .implements_generics
-            .iter()
-            .any(|(n, args)| n.as_str() == "ArrayAccess"
-                && args.len() == 2
-                && args[0] == PhpType::named(atom("TKey"))
-                && args[1] == PhpType::named(atom("TValue"))),
-        "Should have @implements ArrayAccess<TKey, TValue>"
-    );
-}
-
-#[test]
 fn unrelated_class_not_patched() {
     let mut class = empty_class("MyApp\\Foo");
     let original_params = class.template_params.clone();

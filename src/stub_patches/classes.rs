@@ -14,7 +14,6 @@ use crate::types::ClassInfo;
 /// This is the class-level counterpart of [`apply_function_stub_patches`].
 pub fn apply_class_stub_patches(class: &mut ClassInfo) {
     match class.name.as_str() {
-        "WeakMap" => patch_weak_map(class),
         "IteratorIterator" => patch_iterator_iterator(class),
         "RecursiveIteratorIterator" => patch_recursive_iterator_iterator(class),
         "FilterIterator" => patch_filter_iterator(class),
@@ -23,7 +22,6 @@ pub fn apply_class_stub_patches(class: &mut ClassInfo) {
         "InfiniteIterator" => patch_infinite_iterator(class),
         "LimitIterator" => patch_limit_iterator(class),
         "CallbackFilterIterator" => patch_callback_filter_iterator(class),
-        "ArrayIterator" => patch_array_iterator(class),
         "SimpleXMLElement" => patch_simple_xml_element(class),
         "ReflectionClass" => patch_reflection_class(class),
         "ReflectionObject" => patch_reflection_object(class),
@@ -192,15 +190,6 @@ fn mark_benevolent_methods(class: &mut ClassInfo) {
         method.return_type = Some(tagged);
         class.methods.make_mut()[idx] = std::sync::Arc::new(method);
     }
-}
-
-/// Add `@implements ArrayAccess<TKey, TValue>` for WeakMap.
-///
-/// Upstream phpstorm-stubs have `@template TKey of object`, `@template TValue`,
-/// and `@template-implements IteratorAggregate<TKey, TValue>`, but are still
-/// missing `@template-implements ArrayAccess<TKey, TValue>`.
-fn patch_weak_map(class: &mut ClassInfo) {
-    add_implements_generics(class, "ArrayAccess", &["TKey", "TValue"]);
 }
 
 /// Add `@template TKey`, `@template TValue`,
@@ -396,47 +385,6 @@ fn patch_callback_filter_iterator(class: &mut ClassInfo) {
     }
     patch_iterator_iterator_subclass(class, "FilterIterator");
     patch_constructor_iterator_binding(class);
-}
-
-/// Patch `ArrayIterator` constructor to bind template params from the `$array` arg.
-///
-/// phpstorm-stubs declare `@template TKey of array-key` and `@template TValue`
-/// on the class, but the constructor's `@param` is just `object|array` with no
-/// generics.  PHPStan's stubs use `@param array<TKey, TValue> $array`.
-/// PHPStan ref: `stubs/iterable.stub`
-fn patch_array_iterator(class: &mut ClassInfo) {
-    if let Some(ctor_idx) = class
-        .methods
-        .iter()
-        .position(|m| m.name.as_str() == "__construct")
-    {
-        let mut ctor = (*class.methods[ctor_idx]).clone();
-
-        for tpl_name in ["TKey", "TValue"] {
-            bind_ctor_template(
-                &mut ctor,
-                &class.template_params,
-                atom(tpl_name),
-                atom("$array"),
-            );
-        }
-
-        // Set the parameter type hint to array<TKey, TValue> so that
-        // classify_template_binding can determine the GenericWrapper mode.
-        if let Some(param) = ctor
-            .parameters
-            .make_mut()
-            .iter_mut()
-            .find(|p| p.name == "$array")
-        {
-            param.type_hint = Some(PhpType::generic(
-                "array",
-                vec![PhpType::named(atom("TKey")), PhpType::named(atom("TValue"))],
-            ));
-        }
-
-        class.methods.make_mut()[ctor_idx] = std::sync::Arc::new(ctor);
-    }
 }
 
 /// Type `DOMNamedNodeMap::item()` by the map's node type.

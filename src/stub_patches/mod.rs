@@ -122,11 +122,7 @@
 //!
 //! ### Class patches
 //!
-//! 1. **`WeakMap`** -- phpstorm-stubs have `@template TKey of object`,
-//!    `@template TValue`, `@template-implements IteratorAggregate<TKey, TValue>`
-//!    but are still missing `@template-implements ArrayAccess<TKey, TValue>`.
-//!
-//! 2. **`IteratorIterator`** -- phpstorm-stubs lack `@template` and `@mixin`.
+//! 1. **`IteratorIterator`** -- phpstorm-stubs lack `@template` and `@mixin`.
 //!    PHPStan adds `@template TKey`, `@template TValue`,
 //!    `@template TIterator of Traversable<TKey, TValue>`,
 //!    `@implements OuterIterator<TKey, TValue>`,
@@ -134,29 +130,24 @@
 //!    iterator available on the wrapper.
 //!    PHPStan ref: `stubs/iterable.stub`
 //!
-//! 3. **`FilterIterator`** -- extends `IteratorIterator` but stubs lack
+//! 2. **`FilterIterator`** -- extends `IteratorIterator` but stubs lack
 //!    `@template` params.  PHPStan adds the same three template params
 //!    and `@template-extends IteratorIterator<TKey, TValue, TIterator>`.
 //!
-//! 4. **`NoRewindIterator`**, **`CachingIterator`**, **`InfiniteIterator`**,
+//! 3. **`NoRewindIterator`**, **`CachingIterator`**, **`InfiniteIterator`**,
 //!    **`LimitIterator`** -- all extend `IteratorIterator`.  Same template
 //!    params + `@extends` generics + constructor binding `TIterator → $iterator`.
 //!
-//! 5. **`CallbackFilterIterator`** -- extends `FilterIterator`.
+//! 4. **`CallbackFilterIterator`** -- extends `FilterIterator`.
 //!    Same template params + `@extends FilterIterator<TKey, TValue, TIterator>`
 //!    + constructor binding.
 //!
-//! 6. **`ArrayIterator`** -- phpstorm-stubs declare `@template TKey of
-//!    array-key` / `@template TValue` on the class but the constructor's
-//!    `@param` is untyped `object|array`.  We bind `TKey`/`TValue` from
-//!    the `$array` argument, matching PHPStan's stubs.
-//!
-//! 7. **`SimpleXMLElement`** -- `asXML()` and `saveXML()` are declared
+//! 5. **`SimpleXMLElement`** -- `asXML()` and `saveXML()` are declared
 //!    `string|bool`, but without a filename they serialise to a string and
 //!    with one they report whether the write succeeded. Each gets a
 //!    conditional return type keyed on `$filename`.
 //!
-//! 8. **`ReflectionClass`** -- `newInstanceArgs()` is declared
+//! 6. **`ReflectionClass`** -- `newInstanceArgs()` is declared
 //!    `@return T|null` where `newInstance()` is `@return T`, so the same
 //!    instantiation carries a null branch depending on which one built
 //!    it. The method throws instead of returning null, so we drop the
@@ -164,15 +155,15 @@
 //!    bare `array`, losing the fact that reflection only reports interfaces
 //!    that exist; it becomes `list<class-string>`, as in PHPStan's stub.
 //!
-//! 9. **`ReflectionObject`** -- the instance-only specialisation of
+//! 7. **`ReflectionObject`** -- the instance-only specialisation of
 //!    `ReflectionClass`, but without its `@template T of object` or an
 //!    `@extends ReflectionClass<T>`, so it forgets the class it reflects.
 //!    PHPStan's stubs declare both, plus the constructor binding
 //!    `T → $object`.
 //!
-//! 10. **Benevolent methods** -- the class-level half of function patch 11,
-//!     covering `Redis`, `SplFileInfo`, the DOM classes, `PDO::prepare`,
-//!     `DateTime::modify` and `Closure::bind`.
+//! 8. **Benevolent methods** -- the class-level half of function patch 11,
+//!    covering `Redis`, `SplFileInfo`, the DOM classes, `PDO::prepare`,
+//!    `DateTime::modify` and `Closure::bind`.
 //!
 //! ## Removing patches
 //!

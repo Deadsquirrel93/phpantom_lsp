@@ -30,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Faster startup.** Hiding the standard library functions, classes, and constants that the project's PHP version no longer has takes a few milliseconds instead of about 50.
 - **Lower memory use on large projects.** Classes that inherit the same method or property now share one copy of it, and each method takes far less memory. On a large Laravel project this cuts peak memory by about 17%. What PHPantom keeps about each call in the project's files also takes much less memory, cutting a further 4%. Memory left behind by edited files is now reclaimed during a long editing session instead of accumulating.
 - **Faster go-to-implementation on library classes.** Finding the implementations of a class or interface from a Composer package now reads only the files that could hold one, instead of loading every class the project depends on.
+- **Updated embedded phpstorm-stubs.** Adds the `ps`, `proctitle`, and `yaz` extensions, updates Judy and Relay, and corrects many parameter and return types to match the PHP documentation, including `oci_fetch_object()`, `pg_loopen()`, and nullable RdKafka message payloads.
 
 ### Fixed
 
