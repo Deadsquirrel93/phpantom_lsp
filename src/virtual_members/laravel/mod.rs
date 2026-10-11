@@ -1294,7 +1294,7 @@ impl VirtualMemberProvider for LaravelModelProvider {
                 push_or_replace_property(
                     &mut properties,
                     PropertyInfo {
-                        deprecation_message: method.deprecation_message.clone(),
+                        deprecation_message: method.deprecation_message().map(str::to_owned),
                         description: method.description.clone(),
                         source: Some(source),
                         ..PropertyInfo::virtual_property_typed(
@@ -1326,7 +1326,7 @@ impl VirtualMemberProvider for LaravelModelProvider {
                 push_or_replace_property(
                     &mut properties,
                     PropertyInfo {
-                        deprecation_message: method.deprecation_message.clone(),
+                        deprecation_message: method.deprecation_message().map(str::to_owned),
                         description: method.description.clone(),
                         source: Some(source),
                         ..PropertyInfo::virtual_property_typed(&prop_name, Some(&accessor_type))

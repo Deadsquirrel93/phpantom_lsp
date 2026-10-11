@@ -723,12 +723,12 @@ fn cache_facade_remember_gets_template() {
         "return type should be the restored template"
     );
     assert_eq!(
-        method.template_params,
+        method.template_params(),
         vec![atom("TCacheValue")],
         "the method-level template should be added"
     );
     assert_eq!(
-        method.template_bindings,
+        method.template_bindings(),
         vec![(atom("TCacheValue"), atom("$callback"))],
         "TCacheValue should bind from the $callback closure"
     );
@@ -929,7 +929,7 @@ fn cache_facade_non_callback_method_untouched() {
         "mixed",
         "methods without a $callback closure should be left as-is"
     );
-    assert!(method.template_params.is_empty());
+    assert!(method.template_params().is_empty());
 }
 
 // ─── Testing mock() / partialMock() / spy() generics ────────────────────────
@@ -975,13 +975,13 @@ fn testing_mock_helpers_become_generic() {
             method.name
         );
         assert_eq!(
-            method.template_params,
+            method.template_params(),
             vec![atom("TMock")],
             "{} should declare the TMock template",
             method.name
         );
         assert_eq!(
-            method.template_bindings,
+            method.template_bindings(),
             vec![(atom("TMock"), atom("$abstract"))],
             "{} should bind TMock from $abstract",
             method.name
@@ -1029,7 +1029,7 @@ fn testing_mock_helper_with_concrete_return_is_untouched() {
         concrete.to_string(),
         "a method that already returns the intersection is left as-is"
     );
-    assert!(method.template_params.is_empty());
+    assert!(method.template_params().is_empty());
 }
 
 // ─── Mockery verification return types ─────────────────────────────────────

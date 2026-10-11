@@ -297,12 +297,12 @@ fn constant_names_alias(constant: &ConstantInfo, keys: &[String]) -> bool {
 /// Whether [`substitute_in_method`] would rewrite anything in `method`.
 fn method_names_alias(method: &MethodInfo, keys: &[String]) -> bool {
     let visible: Vec<String>;
-    let keys = if method.template_params.is_empty() {
+    let keys = if method.template_params().is_empty() {
         keys
     } else {
         visible = keys
             .iter()
-            .filter(|k| !method.template_params.iter().any(|t| t == k.as_str()))
+            .filter(|k| !method.template_params().iter().any(|t| t == k.as_str()))
             .cloned()
             .collect();
         &visible
@@ -311,19 +311,19 @@ fn method_names_alias(method: &MethodInfo, keys: &[String]) -> bool {
         return false;
     }
     names_any(method.return_type.as_ref(), keys)
-        || names_any(method.conditional_return.as_ref(), keys)
-        || names_any(method.if_this_is.as_ref(), keys)
-        || names_any(method.self_out.as_ref(), keys)
+        || names_any(method.conditional_return(), keys)
+        || names_any(method.if_this_is(), keys)
+        || names_any(method.self_out(), keys)
         || method
-            .type_assertions
+            .type_assertions()
             .iter()
             .any(|a| a.asserted_type.references_any_template_param(keys))
         || method
-            .template_param_bounds
+            .template_param_bounds()
             .values()
             .any(|b| b.references_any_template_param(keys))
         || method
-            .template_param_defaults
+            .template_param_defaults()
             .iter()
             .any(|(_, d)| d.references_any_template_param(keys))
         || method.parameters.iter().any(|p| {
@@ -334,13 +334,13 @@ fn method_names_alias(method: &MethodInfo, keys: &[String]) -> bool {
 fn substitute_in_method(method: &mut MethodInfo, aliases: &HashMap<String, PhpType>) {
     let visible: HashMap<String, PhpType>;
     let aliases = if method
-        .template_params
+        .template_params()
         .iter()
         .any(|t| aliases.contains_key(t.as_str()))
     {
         visible = aliases
             .iter()
-            .filter(|(k, _)| !method.template_params.iter().any(|t| t == k.as_str()))
+            .filter(|(k, _)| !method.template_params().iter().any(|t| t == k.as_str()))
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
         &visible
@@ -353,17 +353,19 @@ fn substitute_in_method(method: &mut MethodInfo, aliases: &HashMap<String, PhpTy
         }
     };
     sub(&mut method.return_type);
-    sub(&mut method.conditional_return);
-    sub(&mut method.if_this_is);
-    sub(&mut method.self_out);
-    for assertion in &mut method.type_assertions {
-        assertion.asserted_type = assertion.asserted_type.substitute(aliases);
-    }
-    for bound in method.template_param_bounds.values_mut() {
-        *bound = bound.substitute(aliases);
-    }
-    for (_, default) in method.template_param_defaults.iter_mut() {
-        *default = default.substitute(aliases);
+    if let Some(extras) = method.extras.as_deref_mut() {
+        sub(&mut extras.conditional_return);
+        sub(&mut extras.if_this_is);
+        sub(&mut extras.self_out);
+        for assertion in &mut extras.type_assertions {
+            assertion.asserted_type = assertion.asserted_type.substitute(aliases);
+        }
+        for bound in extras.template_param_bounds.values_mut() {
+            *bound = bound.substitute(aliases);
+        }
+        for (_, default) in extras.template_param_defaults.iter_mut() {
+            *default = default.substitute(aliases);
+        }
     }
     let keys: Vec<String> = aliases.keys().cloned().collect();
     if method.parameters.iter().any(|p| {

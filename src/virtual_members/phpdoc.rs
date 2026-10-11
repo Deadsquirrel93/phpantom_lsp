@@ -970,7 +970,7 @@ fn collect_mixin_members(
                 // origin is lost once the method is merged into the consumer —
                 // and resolution falls back to the else branch.
                 if !template_values.is_empty()
-                    && let Some(cond) = method.conditional_return.as_ref()
+                    && let Some(cond) = method.conditional_return()
                     && let Some(resolved) =
                         crate::type_engine::conditional_resolution::resolve_conditional_from_values(
                             cond,
@@ -978,7 +978,7 @@ fn collect_mixin_members(
                         )
                 {
                     method.return_type = Some(resolved);
-                    method.conditional_return = None;
+                    method.extras_mut().conditional_return = None;
                 }
                 // A docblock's `self` names the class the docblock is written
                 // in, so `@return self<T>` on the mixin returns the *mixin*

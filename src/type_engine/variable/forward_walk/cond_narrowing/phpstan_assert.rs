@@ -151,8 +151,8 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
             };
             let declaring_namespace = namespace_of_fqn(&declaring_fqn);
             let skip_negations =
-                negations_are_disjunctive(&method.type_assertions, function_returned_true);
-            for assertion in &method.type_assertions {
+                negations_are_disjunctive(method.type_assertions(), function_returned_true);
+            for assertion in method.type_assertions() {
                 let applies_positively = match assertion.kind {
                     AssertionKind::IfTrue => function_returned_true,
                     AssertionKind::IfFalse => !function_returned_true,
@@ -172,8 +172,8 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
                 let should_exclude = assertion.negated ^ !applies_positively;
                 let asserted_type = narrowing::bind_call_templates(
                     &assertion.asserted_type,
-                    &method.template_params,
-                    &method.template_bindings,
+                    method.template_params(),
+                    method.template_bindings(),
                     &method.parameters,
                     &static_call.argument_list,
                     &build_var_ctx("", ctx, &scope_resolver),
@@ -254,8 +254,8 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
                     _ => HashMap::new(),
                 };
                 let skip_negations =
-                    negations_are_disjunctive(&method.type_assertions, function_returned_true);
-                for assertion in &method.type_assertions {
+                    negations_are_disjunctive(method.type_assertions(), function_returned_true);
+                for assertion in method.type_assertions() {
                     let applies_positively = match assertion.kind {
                         AssertionKind::IfTrue => function_returned_true,
                         AssertionKind::IfFalse => !function_returned_true,
@@ -267,8 +267,8 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
                     let should_exclude = assertion.negated ^ !applies_positively;
                     let asserted_type = narrowing::bind_call_templates(
                         &assertion.asserted_type,
-                        &method.template_params,
-                        &method.template_bindings,
+                        method.template_params(),
+                        method.template_bindings(),
                         &method.parameters,
                         &method_call.argument_list,
                         &build_var_ctx("", ctx, &scope_resolver),

@@ -155,11 +155,11 @@ impl Backend {
                         .get_method(member_name)
                         .or_else(|| resolved.get_method(member_name));
 
-                    let replacement_template =
-                        match method.and_then(|m| m.deprecated_replacement.as_ref()) {
-                            Some(r) => r.clone(),
-                            None => continue,
-                        };
+                    let replacement_template = match method.and_then(|m| m.deprecated_replacement())
+                    {
+                        Some(r) => r,
+                        None => continue,
+                    };
 
                     // When the template contains %class%, the expanded
                     // replacement already includes the subject expression,
@@ -178,7 +178,7 @@ impl Backend {
 
                     let subject = Some(subject_text.as_str(source).trim().to_string());
                     let replacement =
-                        expand_template(&replacement_template, &args_text, subject.as_deref());
+                        expand_template(replacement_template, &args_text, subject.as_deref());
 
                     let title = format!("Replace with {}", summarize_replacement(&replacement));
                     emit_action(uri, title, range, &replacement, out);

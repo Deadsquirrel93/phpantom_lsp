@@ -162,10 +162,10 @@ fn resolve_conditional_return_hint(
     owner: &ClassInfo,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<PhpType> {
-    let cond = method.conditional_return.as_ref()?;
+    let cond = method.conditional_return()?;
     let declaring_fqn = owner.fqn();
     let class_values =
-        crate::inheritance::class_scoped_template_values(template_subs, &method.template_params);
+        crate::inheritance::class_scoped_template_values(template_subs, method.template_params());
     let this_type = receiver_type_for_condition(
         declaring_fqn.as_str(),
         &owner.template_params,
@@ -173,8 +173,8 @@ fn resolve_conditional_return_hint(
     );
     let tpl = TemplateContext {
         defaults: Some(class_values.as_ref()),
-        params: &method.template_params,
-        bindings: &method.template_bindings,
+        params: method.template_params(),
+        bindings: method.template_bindings(),
         arg_type_resolver: None,
         this_type: Some(&this_type),
     };

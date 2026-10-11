@@ -596,7 +596,7 @@ pub(crate) fn format_return_type(
         // itself uses for fluent returns.
         let ret = replace_this_with_static(ret);
         let shortened = shorten_php_type_direct(&ret, use_map, file_namespace);
-        if is_valid_native_hint(&ret, &method.template_params) && !shortened.is_empty() {
+        if is_valid_native_hint(&ret, method.template_params()) && !shortened.is_empty() {
             return format!(": {}", shortened);
         }
     }
@@ -619,7 +619,7 @@ pub(crate) fn native_hint_expresses_return_type(method: &MethodInfo) -> bool {
     if let Some(native) = method.native_return_type.as_ref() {
         return native == ret;
     }
-    replace_this_with_static(ret) == *ret && is_valid_native_hint(ret, &method.template_params)
+    replace_this_with_static(ret) == *ret && is_valid_native_hint(ret, method.template_params())
 }
 
 /// The effective type of the native hint a generated signature carries for
@@ -716,7 +716,7 @@ pub(crate) fn detect_class_indent(content: &str, class: &ClassInfo) -> String {
 mod tests {
     use super::*;
     use crate::php_type::PhpType;
-    use crate::types::{ParameterInfo, Visibility};
+    use crate::types::{MethodExtras, ParameterInfo, Visibility};
 
     // ── shorten_type tests ──────────────────────────────────────────────
 
@@ -921,7 +921,11 @@ mod tests {
         let method = MethodInfo {
             native_return_type: None,
             return_type: Some(PhpType::parse("T")),
-            template_params: vec![crate::atom::atom("T")],
+            extras: MethodExtras {
+                template_params: vec![crate::atom::atom("T")],
+                ..Default::default()
+            }
+            .into_option(),
             ..MethodInfo::virtual_method("test", Some("T"))
         };
 

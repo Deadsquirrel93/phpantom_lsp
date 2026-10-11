@@ -370,7 +370,7 @@ fn infer_body_return_type(
     // user as if it were a real type, so reject it the same way.
     if let Some(decl) = declaring_class.as_ref() {
         let mut template_params: Vec<String> = method
-            .template_params
+            .template_params()
             .iter()
             .map(|p| p.to_string())
             .collect();

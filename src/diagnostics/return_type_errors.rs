@@ -716,8 +716,8 @@ fn process_class_member(
     );
     if let Some(mi) = method_info {
         bounds.extend(template_bounds(
-            &mi.template_params,
-            &mi.template_param_bounds,
+            mi.template_params(),
+            mi.template_param_bounds(),
         ));
     }
     let template_bounds = bounds;

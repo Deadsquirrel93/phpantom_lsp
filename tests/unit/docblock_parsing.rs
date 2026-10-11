@@ -64,7 +64,7 @@ fn method_tag_no_return_type() {
     assert_eq!(methods[0].parameters[2].name, "$connection");
     assert_eq!(
         methods[0].parameters[2].type_hint_str().as_deref(),
-        Some("string")
+        Some("?string")
     );
     assert!(!methods[0].parameters[2].is_required);
 }
@@ -2118,14 +2118,14 @@ fn method_tag_with_template_params() {
     assert_eq!(methods.len(), 1, "Should parse one method");
     assert_eq!(methods[0].name, "get");
     assert_eq!(methods[0].return_type_str().as_deref(), Some("TVal"));
-    assert_eq!(methods[0].template_params.len(), 1);
-    assert_eq!(methods[0].template_params[0].as_str(), "TVal");
+    assert_eq!(methods[0].template_params().len(), 1);
+    assert_eq!(methods[0].template_params()[0].as_str(), "TVal");
     assert!(
         methods[0]
-            .template_param_bounds
+            .template_param_bounds()
             .contains_key(&phpantom_lsp::atom::atom("TVal"))
     );
-    assert_eq!(methods[0].template_bindings.len(), 1);
-    assert_eq!(methods[0].template_bindings[0].0.as_str(), "TVal");
-    assert_eq!(methods[0].template_bindings[0].1.as_str(), "$default");
+    assert_eq!(methods[0].template_bindings().len(), 1);
+    assert_eq!(methods[0].template_bindings()[0].0.as_str(), "TVal");
+    assert_eq!(methods[0].template_bindings()[0].1.as_str(), "$default");
 }

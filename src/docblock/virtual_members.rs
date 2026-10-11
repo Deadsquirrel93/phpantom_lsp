@@ -15,7 +15,7 @@ use super::parser::{DocblockInfo, parse_docblock_for_tags, vendor_rank};
 use super::tags::sanitise_and_parse_docblock_type;
 use super::type_strings::split_type_token;
 use crate::php_type::PhpType;
-use crate::types::{MethodInfo, ParameterInfo, Visibility};
+use crate::types::{MethodExtras, MethodInfo, ParameterInfo, Visibility};
 
 // ─── @property Tags ─────────────────────────────────────────────────────────
 
@@ -199,31 +199,24 @@ pub fn extract_method_tags_from_info(info: &DocblockInfo) -> Vec<MethodInfo> {
             return_type,
             native_return_type: None,
             description: None,
-            return_description: None,
-            links: Vec::new(),
-            see_refs: Vec::new(),
             is_static,
             visibility: Visibility::Public,
-            conditional_return: None,
-            deprecation_message: None,
-            deprecated_replacement: None,
-            template_params,
-            template_param_bounds,
-            template_param_defaults: Default::default(),
-            template_bindings,
             has_scope_attribute: false,
             is_abstract: false,
             is_final: false,
             is_virtual: true,
             is_macro: false,
             is_inferred_return: false,
-            type_assertions: Vec::new(),
-            throws: Vec::new(),
-            if_this_is: None,
-            self_out: None,
             is_pure: false,
             is_impure: false,
             reads_func_args: false,
+            extras: MethodExtras {
+                template_params,
+                template_param_bounds,
+                template_bindings,
+                ..Default::default()
+            }
+            .into_option(),
         });
     }
 
@@ -288,7 +281,7 @@ mod tests {
         assert_eq!(method.name.as_str(), "getString");
         assert!(method.return_type.is_none());
         assert!(method.parameters.is_empty());
-        assert!(method.template_params.is_empty());
+        assert!(method.template_params().is_empty());
     }
 
     #[test]
@@ -332,14 +325,14 @@ mod tests {
         assert_eq!(method.return_type.as_ref().unwrap().to_string(), "TVal");
         assert_eq!(
             method
-                .template_params
+                .template_params()
                 .iter()
                 .map(|t| t.as_str())
                 .collect::<Vec<_>>(),
             ["TVal"]
         );
         assert_eq!(
-            method.template_param_bounds[&atom("TVal")].to_string(),
+            method.template_param_bounds()[&atom("TVal")].to_string(),
             "mixed"
         );
         assert_eq!(method.parameters.len(), 1);
@@ -352,7 +345,7 @@ mod tests {
         assert_eq!(method.name.as_str(), "doThing");
         assert_eq!(
             method
-                .template_params
+                .template_params()
                 .iter()
                 .map(|t| t.as_str())
                 .collect::<Vec<_>>(),
@@ -360,7 +353,7 @@ mod tests {
         );
         assert_eq!(method.parameters.len(), 2);
         // Both parameters bind their template directly.
-        assert_eq!(method.template_bindings.len(), 2);
+        assert_eq!(method.template_bindings().len(), 2);
     }
 
     #[test]

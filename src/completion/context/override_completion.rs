@@ -475,9 +475,9 @@ fn trait_override_docblock_edit(
     // params, which are not inherited either — declare them again above
     // the tags that use them.
     let template_lines: Vec<String> = method
-        .template_params
+        .template_params()
         .iter()
-        .map(|tparam| match method.template_param_bounds.get(tparam) {
+        .map(|tparam| match method.template_param_bounds().get(tparam) {
             Some(bound) => {
                 let bound = shorten_type_display(bound, opts.use_map, opts.file_namespace);
                 format!("@template {tparam} of {bound}")

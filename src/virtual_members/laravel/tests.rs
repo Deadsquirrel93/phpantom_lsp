@@ -1618,7 +1618,7 @@ fn legacy_accessor_preserves_deprecated() {
     user.parent_class = Some(atom("Illuminate\\Database\\Eloquent\\Model"));
 
     let mut accessor = make_method("getOldNameAttribute", Some("string"));
-    accessor.deprecation_message = Some("Use newName instead".into());
+    accessor.extras_mut().deprecation_message = Some("Use newName instead".into());
     user.methods.push(Arc::new(accessor));
 
     let model = make_class("Illuminate\\Database\\Eloquent\\Model");
@@ -2855,7 +2855,7 @@ fn builder_scope_preserves_deprecated() {
     let mut model = make_class("App\\Models\\Item");
     model.parent_class = Some(atom(ELOQUENT_MODEL_FQN));
     let mut scope = make_method("scopeOld", Some("void"));
-    scope.deprecation_message = Some("Use scopeNew() instead".into());
+    scope.extras_mut().deprecation_message = Some("Use scopeNew() instead".into());
     model.methods.push(Arc::new(scope));
 
     let loader = |name: &str| -> Option<Arc<ClassInfo>> {
@@ -2870,7 +2870,7 @@ fn builder_scope_preserves_deprecated() {
 
     let methods = build_scope_methods_for_builder("App\\Models\\Item", &loader);
     assert_eq!(methods.len(), 1);
-    assert!(methods[0].deprecation_message.is_some());
+    assert!(methods[0].deprecation_message().is_some());
 }
 
 // ── replace_eloquent_collections_in_type ────────────────────────

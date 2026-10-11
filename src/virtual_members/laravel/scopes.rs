@@ -10,7 +10,7 @@ use crate::atom::atom;
 use std::sync::Arc;
 
 use crate::php_type::{PhpType, TypeKind};
-use crate::types::{ClassInfo, MethodInfo};
+use crate::types::{ClassInfo, MethodExtras, MethodInfo};
 use crate::util::short_name;
 
 use super::ELOQUENT_BUILDER_FQN;
@@ -113,22 +113,30 @@ pub(super) fn build_scope_methods(method: &MethodInfo) -> [MethodInfo; 2] {
 
     let instance_method = MethodInfo {
         parameters: parameters.clone().into(),
-        deprecation_message: method.deprecation_message.clone(),
         return_type: Some(return_type.clone()),
         description: method.description.clone(),
-        links: method.links.clone(),
-        see_refs: method.see_refs.clone(),
+        extras: MethodExtras {
+            deprecation_message: method.deprecation_message().map(str::to_owned),
+            links: method.links().to_vec(),
+            see_refs: method.see_refs().to_vec(),
+            ..Default::default()
+        }
+        .into_option(),
         ..MethodInfo::virtual_method(&name, None)
     };
 
     let static_method = MethodInfo {
         parameters: parameters.into(),
         is_static: true,
-        deprecation_message: method.deprecation_message.clone(),
         return_type: Some(return_type),
         description: method.description.clone(),
-        links: method.links.clone(),
-        see_refs: method.see_refs.clone(),
+        extras: MethodExtras {
+            deprecation_message: method.deprecation_message().map(str::to_owned),
+            links: method.links().to_vec(),
+            see_refs: method.see_refs().to_vec(),
+            ..Default::default()
+        }
+        .into_option(),
         ..MethodInfo::virtual_method(&name, None)
     };
 

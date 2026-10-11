@@ -20,36 +20,6 @@ against that bar.
 
 ---
 
-## P83. Most of `MethodInfo` is fields that 76% of methods leave empty
-
-**Impact: Medium · Complexity: Low-Medium**
-
-`MethodInfo` is 360 B, and about 288 B of that is fields most methods never
-set: `return_description`, `links`, `see_refs`, the two deprecation fields,
-the four `template_*` fields, `throws`, `type_assertions`,
-`conditional_return`, `if_this_is` and `self_out`. Even empty, a `Vec` or
-`Option<String>` costs 24 B and an `AtomMap` 32 B. Across all 382k methods
-on the large Laravel app, `description` is set on 90%, but only 24% set
-any of the others (template fields 11.5%, `throws` 9.3%, conditional or
-`$this`-narrowing types 5.2%, everything else under 3%).
-
-Moving those fields behind one `Option<Box<MethodExtras>>` saves about
-280 B on three methods in four and costs a pointer plus a small allocation
-on the fourth: about 79 MB after `analyze` (8.5% of RSS) and 59 MB in the
-LSP (7%), measured before identical inherited members were shared, which
-lowers the method count and shrinks this to about 5-6%. The earlier
-finding that boxing docblock fields is a net loss still holds for
-`description` (set on 90%), which stays inline.
-
-**Where to look:** `MethodInfo` in `types/mod.rs`. Most readers go through
-a handful of fields, so accessor methods for the moved ones keep the
-change mechanical. `ParameterInfo` (96 B) and `PropertyInfo` (376 B, mostly
-an inline `PropertySource` database variant) have the same shape, but there
-are fewer of them: about 13 MB and 8 MB, worth folding in only if the
-change is already touching them.
-
----
-
 ## P81. Call sites are 160-byte records with up to six side allocations
 
 **Impact: Medium · Complexity: Medium**

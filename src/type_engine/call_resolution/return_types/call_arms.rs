@@ -217,8 +217,8 @@ impl Backend {
                             let arg_ty_resolver = |t: &str| Self::resolve_arg_text_to_type(t, ctx);
                             let tpl = TemplateContext {
                                 defaults: Some(&template_subs),
-                                params: &m.template_params,
-                                bindings: &m.template_bindings,
+                                params: m.template_params(),
+                                bindings: m.template_bindings(),
                                 arg_type_resolver: Some(&arg_ty_resolver),
                                 this_type: None,
                             };

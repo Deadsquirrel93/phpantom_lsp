@@ -262,7 +262,7 @@ impl Backend {
                         if let Some(method) = base_class
                             .get_method(member_name)
                             .or_else(|| resolved.get_method(member_name))
-                            && let Some(msg) = &method.deprecation_message
+                            && let Some(msg) = method.deprecation_message()
                             && !is_within_deprecated_scope(
                                 self,
                                 local_classes,
@@ -284,7 +284,7 @@ impl Backend {
                                 member_name,
                                 Some(&class_fqn),
                                 msg,
-                                &method.see_refs,
+                                method.see_refs(),
                             ));
                         }
                     } else {
@@ -484,7 +484,7 @@ fn is_within_deprecated_scope(
     let resolved = resolve_class_fully_cached(enclosing, class_loader, cache);
     if resolved
         .get_method(&method_name)
-        .is_some_and(|m| m.deprecation_message.is_some())
+        .is_some_and(|m| m.deprecation_message().is_some())
     {
         return true;
     }
@@ -507,7 +507,7 @@ fn is_within_deprecated_scope(
     .any(|bound| {
         resolve_class_fully_cached(bound, class_loader, cache)
             .get_method(&method_name)
-            .is_some_and(|m| m.deprecation_message.is_some())
+            .is_some_and(|m| m.deprecation_message().is_some())
     })
 }
 

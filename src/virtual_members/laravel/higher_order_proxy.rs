@@ -42,7 +42,9 @@ use std::sync::{Arc, LazyLock};
 use crate::atom::{Atom, AtomMap, atom};
 use crate::class_lookup::{is_subtype_of, is_subtype_of_named};
 use crate::php_type::{PhpType, TypeKind};
-use crate::types::{ClassInfo, ELOQUENT_COLLECTION_FQN, MethodInfo, PropertyInfo, Visibility};
+use crate::types::{
+    ClassInfo, ELOQUENT_COLLECTION_FQN, MethodExtras, MethodInfo, PropertyInfo, Visibility,
+};
 use crate::util::short_name;
 use crate::virtual_members::{ResolvedClassCache, resolve_class_fully_with_type_args};
 
@@ -284,8 +286,12 @@ pub(crate) fn inject_higher_order_proxy_members(
         let proxied = MethodInfo {
             parameters: method_info.parameters.clone(),
             description: method_info.description.clone(),
-            deprecation_message: method_info.deprecation_message.clone(),
             return_type: Some(ctx.result_type(member)),
+            extras: MethodExtras {
+                deprecation_message: method_info.deprecation_message().map(str::to_owned),
+                ..Default::default()
+            }
+            .into_option(),
             ..MethodInfo::virtual_method(&method_info.name, None)
         };
         upsert_method(result, &mut method_slots, proxied);

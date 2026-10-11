@@ -113,14 +113,14 @@ fn method_return_is_call_dependent(
 }
 
 fn call_dependent_return(method: &crate::types::MethodInfo) -> bool {
-    if method.conditional_return.is_some() {
+    if method.conditional_return().is_some() {
         return true;
     }
-    if method.template_params.is_empty() {
+    if method.template_params().is_empty() {
         return false;
     }
     let params: Vec<String> = method
-        .template_params
+        .template_params()
         .iter()
         .map(|p| p.to_string())
         .collect();

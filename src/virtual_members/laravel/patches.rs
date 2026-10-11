@@ -452,9 +452,10 @@ fn patch_cache_facade_generics(class: &mut ClassInfo) {
                 break;
             }
         }
-        method.template_params = vec![atom(TEMPLATE)];
-        method.template_param_bounds = Default::default();
-        method.template_bindings = vec![(atom(TEMPLATE), callback_name)];
+        let extras = method.extras_mut();
+        extras.template_params = vec![atom(TEMPLATE)];
+        extras.template_param_bounds = Default::default();
+        extras.template_bindings = vec![(atom(TEMPLATE), callback_name)];
         method.return_type = Some(template_return.clone());
     }
 }
@@ -669,9 +670,10 @@ fn patch_testcase_mock_return_types(class: &mut ClassInfo) {
                 break;
             }
         }
-        method.template_params = vec![atom(TEMPLATE)];
-        method.template_param_bounds = Default::default();
-        method.template_bindings = vec![(atom(TEMPLATE), abstract_name)];
+        let extras = method.extras_mut();
+        extras.template_params = vec![atom(TEMPLATE)];
+        extras.template_param_bounds = Default::default();
+        extras.template_bindings = vec![(atom(TEMPLATE), abstract_name)];
         method.return_type = Some(mock_return.clone());
     }
 }

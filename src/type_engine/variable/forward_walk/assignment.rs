@@ -1663,7 +1663,7 @@ pub(crate) fn process_self_out_narrowing<'b>(
         rt.class_info
             .as_ref()
             .and_then(|c| c.get_method_ci(&method_name))
-            .is_some_and(|m| m.self_out.is_some())
+            .is_some_and(|m| m.self_out().is_some())
     }) {
         return;
     }
@@ -1688,7 +1688,7 @@ pub(crate) fn process_self_out_narrowing<'b>(
     for rt in &before {
         let mutated = rt.class_info.as_ref().and_then(|owner| {
             let method = owner.get_method_ci(&method_name)?;
-            let self_out = method.self_out.clone()?;
+            let self_out = method.self_out().cloned()?;
             let mut template_subs = crate::type_engine::call_resolution::build_call_template_subs(
                 owner,
                 &method_name,
@@ -1697,7 +1697,7 @@ pub(crate) fn process_self_out_narrowing<'b>(
                 &rctx,
             );
             for (name, ty) in template_subs.iter_mut() {
-                let bound = method.template_param_bounds.get(&crate::atom::atom(name));
+                let bound = method.template_param_bounds().get(&crate::atom::atom(name));
                 *ty =
                     crate::type_engine::call_resolution::generalize_object_template_arg(ty, bound);
             }

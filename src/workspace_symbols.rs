@@ -266,7 +266,7 @@ impl Backend {
                             name: format!("{}::{}", fqn, method.name),
                             kind: SymbolKind::METHOD,
                             tags: method
-                                .deprecation_message
+                                .deprecation_message()
                                 .as_ref()
                                 .map(|_| vec![SymbolTag::DEPRECATED]),
                             container_name: Some(fqn.to_string()),

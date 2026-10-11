@@ -150,17 +150,20 @@ pub fn apply_third_party_class_patches(class: &mut ClassInfo) {
             continue;
         };
         // A version that grew the tag upstream keeps its own.
-        if !class.methods[idx].type_assertions.is_empty() {
+        if !class.methods[idx].type_assertions().is_empty() {
             continue;
         }
         let mut method = (*class.methods[idx]).clone();
-        method.type_assertions.push(crate::types::TypeAssertion {
-            kind: crate::types::AssertionKind::IfTrue,
-            param_name: (*subject).to_string(),
-            asserted_type: PhpType::null(),
-            negated: true,
-            is_equality: false,
-        });
+        method
+            .extras_mut()
+            .type_assertions
+            .push(crate::types::TypeAssertion {
+                kind: crate::types::AssertionKind::IfTrue,
+                param_name: (*subject).to_string(),
+                asserted_type: PhpType::null(),
+                negated: true,
+                is_equality: false,
+            });
         class.methods.make_mut()[idx] = std::sync::Arc::new(method);
     }
 }
@@ -248,8 +251,12 @@ fn patch_iterator_iterator(class: &mut ClassInfo) {
     {
         let mut ctor = (*class.methods[ctor_idx]).clone();
         let binding = (atom("TIterator"), atom("$iterator"));
-        if !ctor.template_bindings.iter().any(|(t, _)| t == &binding.0) {
-            ctor.template_bindings.push(binding);
+        if !ctor
+            .template_bindings()
+            .iter()
+            .any(|(t, _)| t == &binding.0)
+        {
+            ctor.extras_mut().template_bindings.push(binding);
         }
         // Update the parameter type hint from Traversable to TIterator
         // so that classify_template_binding recognises a Direct binding.
@@ -301,8 +308,8 @@ fn patch_recursive_iterator_iterator(class: &mut ClassInfo) {
     {
         let mut ctor = (*class.methods[ctor_idx]).clone();
         let binding = (t, atom("$iterator"));
-        if !ctor.template_bindings.iter().any(|(n, _)| *n == t) {
-            ctor.template_bindings.push(binding);
+        if !ctor.template_bindings().iter().any(|(n, _)| *n == t) {
+            ctor.extras_mut().template_bindings.push(binding);
         }
         // A `T` hint (rather than the stub's `Traversable`) is what makes
         // `classify_template_binding` read the argument as a direct bind.
@@ -412,8 +419,12 @@ fn patch_array_iterator(class: &mut ClassInfo) {
 
         for tpl_name in ["TKey", "TValue"] {
             let binding = (atom(tpl_name), atom("$array"));
-            if !ctor.template_bindings.iter().any(|(t, _)| t == &binding.0) {
-                ctor.template_bindings.push(binding);
+            if !ctor
+                .template_bindings()
+                .iter()
+                .any(|(t, _)| t == &binding.0)
+            {
+                ctor.extras_mut().template_bindings.push(binding);
             }
         }
 
@@ -468,13 +479,16 @@ fn patch_dom_node(class: &mut ClassInfo) {
         return;
     };
     let mut method = (*class.methods[idx]).clone();
-    method.type_assertions.push(crate::types::TypeAssertion {
-        kind: crate::types::AssertionKind::IfTrue,
-        param_name: "$this->attributes".to_string(),
-        asserted_type: PhpType::null(),
-        negated: true,
-        is_equality: true,
-    });
+    method
+        .extras_mut()
+        .type_assertions
+        .push(crate::types::TypeAssertion {
+            kind: crate::types::AssertionKind::IfTrue,
+            param_name: "$this->attributes".to_string(),
+            asserted_type: PhpType::null(),
+            negated: true,
+            is_equality: true,
+        });
     class.methods.make_mut()[idx] = std::sync::Arc::new(method);
 }
 
@@ -544,17 +558,18 @@ fn patch_reflection_is_subclass_of(class: &mut ClassInfo) {
     let Some(param) = class.methods[idx].parameters.first().map(|p| p.name) else {
         return;
     };
-    if !class.methods[idx].type_assertions.is_empty() {
+    if !class.methods[idx].type_assertions().is_empty() {
         return;
     }
     let template = atom("TIsSubclassOf");
     let mut method = (*class.methods[idx]).clone();
-    method.template_params.push(template);
-    method
+    let extras = method.extras_mut();
+    extras.template_params.push(template);
+    extras
         .template_param_bounds
         .insert(template, PhpType::object());
-    method.template_bindings.push((template, param));
-    method.type_assertions.push(crate::types::TypeAssertion {
+    extras.template_bindings.push((template, param));
+    extras.type_assertions.push(crate::types::TypeAssertion {
         kind: crate::types::AssertionKind::IfTrue,
         param_name: "$this".to_string(),
         asserted_type: PhpType::generic_atom(
@@ -652,8 +667,12 @@ fn patch_reflection_object(class: &mut ClassInfo) {
     };
     let mut ctor = (*class.methods[ctor_idx]).clone();
     let binding = (atom("T"), atom("$object"));
-    if !ctor.template_bindings.iter().any(|(t, _)| t == &binding.0) {
-        ctor.template_bindings.push(binding);
+    if !ctor
+        .template_bindings()
+        .iter()
+        .any(|(t, _)| t == &binding.0)
+    {
+        ctor.extras_mut().template_bindings.push(binding);
     }
     if let Some(param) = ctor
         .parameters
@@ -689,7 +708,7 @@ fn patch_method_conditional_return(
         return;
     }
     let mut method = (*class.methods[idx]).clone();
-    method.conditional_return = Some(conditional);
+    method.extras_mut().conditional_return = Some(conditional);
     class.methods.make_mut()[idx] = std::sync::Arc::new(method);
 }
 
@@ -738,8 +757,12 @@ fn patch_constructor_iterator_binding(class: &mut ClassInfo) {
     {
         let mut ctor = (*class.methods[ctor_idx]).clone();
         let binding = (atom("TIterator"), atom("$iterator"));
-        if !ctor.template_bindings.iter().any(|(t, _)| t == &binding.0) {
-            ctor.template_bindings.push(binding);
+        if !ctor
+            .template_bindings()
+            .iter()
+            .any(|(t, _)| t == &binding.0)
+        {
+            ctor.extras_mut().template_bindings.push(binding);
         }
         if let Some(param) = ctor
             .parameters

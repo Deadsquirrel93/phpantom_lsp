@@ -2004,7 +2004,7 @@ pub(super) fn resolve_conditional_return_for_call(
     replace_self: impl Fn(&PhpType) -> PhpType,
 ) -> Option<PhpType> {
     let method = method_ref?;
-    let cond = method.conditional_return.as_ref()?;
+    let cond = method.conditional_return()?;
     let params = method.parameters.as_slice();
     let declaring_fqn = owner.fqn();
     let class_ctx = crate::type_engine::conditional_resolution::ConditionalClassContext {
@@ -2012,7 +2012,7 @@ pub(super) fn resolve_conditional_return_for_call(
         declaring: Some(declaring_fqn.as_str()),
     };
     let class_values =
-        crate::inheritance::class_scoped_template_values(template_subs, &method.template_params);
+        crate::inheritance::class_scoped_template_values(template_subs, method.template_params());
     let this_type = crate::type_engine::conditional_resolution::receiver_type_for_condition(
         declaring_fqn.as_str(),
         &owner.template_params,
@@ -2020,8 +2020,8 @@ pub(super) fn resolve_conditional_return_for_call(
     );
     let tpl = crate::type_engine::conditional_resolution::TemplateContext {
         defaults: Some(class_values.as_ref()),
-        params: method.template_params.as_slice(),
-        bindings: method.template_bindings.as_slice(),
+        params: method.template_params(),
+        bindings: method.template_bindings(),
         arg_type_resolver,
         this_type: Some(&this_type),
     };
@@ -2049,8 +2049,8 @@ pub(super) fn resolve_conditional_return_for_call(
     let collapsed = if substituted.contains_conditional() {
         let tpl2 = crate::type_engine::conditional_resolution::TemplateContext {
             defaults: Some(class_values.as_ref()),
-            params: method.template_params.as_slice(),
-            bindings: method.template_bindings.as_slice(),
+            params: method.template_params(),
+            bindings: method.template_bindings(),
             arg_type_resolver,
             this_type: Some(&this_type),
         };
@@ -2400,12 +2400,8 @@ pub(super) fn resolve_owner_method_call(
             let params = method_ref.map(|m| m.parameters.as_slice()).unwrap_or(&[]);
             let tpl = crate::type_engine::conditional_resolution::TemplateContext {
                 defaults: Some(template_subs),
-                params: method_ref
-                    .map(|m| m.template_params.as_slice())
-                    .unwrap_or(&[]),
-                bindings: method_ref
-                    .map(|m| m.template_bindings.as_slice())
-                    .unwrap_or(&[]),
+                params: method_ref.map(|m| m.template_params()).unwrap_or(&[]),
+                bindings: method_ref.map(|m| m.template_bindings()).unwrap_or(&[]),
                 arg_type_resolver: Some(&arg_ty_resolver),
                 this_type: None,
             };

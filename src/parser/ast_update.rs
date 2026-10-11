@@ -2016,30 +2016,24 @@ impl Backend {
                 // class-level skip names.  Otherwise reuse the class-level
                 // resolver.
                 let method_skip: Vec<String>;
-                let method_resolver: &dyn Fn(&str) -> String = if method.template_params.is_empty()
-                {
-                    &resolver
-                } else {
-                    method_skip = skip_names
-                        .iter()
-                        .cloned()
-                        .chain(method.template_params.iter().map(|a| a.to_string()))
-                        .collect();
-                    // SAFETY: `method_skip` lives until end of this
-                    // `for method` iteration, so the closure is valid.
-                    &Self::build_type_resolver(use_map, namespace, &method_skip)
-                };
+                let method_resolver: &dyn Fn(&str) -> String =
+                    if method.template_params().is_empty() {
+                        &resolver
+                    } else {
+                        method_skip = skip_names
+                            .iter()
+                            .cloned()
+                            .chain(method.template_params().iter().map(|a| a.to_string()))
+                            .collect();
+                        // SAFETY: `method_skip` lives until end of this
+                        // `for method` iteration, so the closure is valid.
+                        &Self::build_type_resolver(use_map, namespace, &method_skip)
+                    };
 
                 if let Some(ref ret) = method.return_type {
                     let resolved = ret.resolve_names(method_resolver);
                     if resolved != *ret {
                         method.return_type = Some(resolved);
-                    }
-                }
-                if let Some(ref cond) = method.conditional_return {
-                    let resolved = cond.resolve_names(method_resolver);
-                    if resolved != *cond {
-                        method.conditional_return = Some(resolved);
                     }
                 }
                 for param in method.parameters.make_mut() {
@@ -2070,37 +2064,33 @@ impl Backend {
                         }
                     }
                 }
-                // Resolve exception class names in @throws tags.
-                for throw in &mut method.throws {
-                    let resolved = throw.resolve_names(method_resolver);
-                    if resolved != *throw {
-                        *throw = resolved;
+                let Some(extras) = method.extras.as_deref_mut() else {
+                    continue;
+                };
+                let resolve = |ty: &mut PhpType| {
+                    let resolved = ty.resolve_names(method_resolver);
+                    if resolved != *ty {
+                        *ty = resolved;
                     }
+                };
+                if let Some(cond) = extras.conditional_return.as_mut() {
+                    resolve(cond);
                 }
+                // Resolve exception class names in @throws tags.
+                extras.throws.iter_mut().for_each(resolve);
                 // `@psalm-if-this-is` and `@psalm-this-out` are matched
                 // against the receiver's type, and the method's own
                 // `@template T of Bound` bounds are matched against the
                 // concrete types filling them.  Both sides of those
                 // comparisons have to be spelled the same way, and the
                 // receiver arrives fully qualified.
-                if let Some(ref pattern) = method.if_this_is {
-                    let resolved = pattern.resolve_names(method_resolver);
-                    if resolved != *pattern {
-                        method.if_this_is = Some(resolved);
-                    }
+                if let Some(pattern) = extras.if_this_is.as_mut() {
+                    resolve(pattern);
                 }
-                if let Some(ref self_out) = method.self_out {
-                    let resolved = self_out.resolve_names(method_resolver);
-                    if resolved != *self_out {
-                        method.self_out = Some(resolved);
-                    }
+                if let Some(self_out) = extras.self_out.as_mut() {
+                    resolve(self_out);
                 }
-                for bound in method.template_param_bounds.values_mut() {
-                    let resolved = bound.resolve_names(method_resolver);
-                    if resolved != *bound {
-                        *bound = resolved;
-                    }
-                }
+                extras.template_param_bounds.values_mut().for_each(resolve);
             }
             for prop in class.properties.make_mut() {
                 let Some(hint) = prop.type_hint.as_ref() else {
@@ -2172,13 +2162,13 @@ impl Backend {
                 // params, which must not be namespace-qualified.
                 let method_skip: Vec<String>;
                 let owned_resolver;
-                let method_resolver: &dyn Fn(&str) -> String = if m.template_params.is_empty() {
+                let method_resolver: &dyn Fn(&str) -> String = if m.template_params().is_empty() {
                     resolver
                 } else {
                     method_skip = skip_names
                         .iter()
                         .cloned()
-                        .chain(m.template_params.iter().map(|a| a.to_string()))
+                        .chain(m.template_params().iter().map(|a| a.to_string()))
                         .collect();
                     owned_resolver = Self::build_type_resolver(use_map, namespace, &method_skip);
                     &owned_resolver
@@ -2204,11 +2194,13 @@ impl Backend {
                         }
                     }
                 }
-                for bound in resolved.template_param_bounds.values_mut() {
-                    let r = bound.resolve_names(method_resolver);
-                    if r != *bound {
-                        *bound = r;
-                        method_changed = true;
+                if let Some(extras) = resolved.extras.as_deref_mut() {
+                    for bound in extras.template_param_bounds.values_mut() {
+                        let r = bound.resolve_names(method_resolver);
+                        if r != *bound {
+                            *bound = r;
+                            method_changed = true;
+                        }
                     }
                 }
 

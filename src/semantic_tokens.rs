@@ -1094,7 +1094,7 @@ fn member_extra_modifiers(
             if m.is_static {
                 mods |= TM_STATIC;
             }
-            if m.deprecation_message.is_some() {
+            if m.deprecation_message().is_some() {
                 mods |= TM_DEPRECATED;
             }
         }

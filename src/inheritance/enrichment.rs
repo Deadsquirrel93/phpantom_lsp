@@ -182,17 +182,17 @@ fn method_enrichment_would_change(
     }
 
     // Template parameters (copies bounds, defaults and bindings alongside).
-    if existing.template_params.is_empty() && !ancestor.template_params.is_empty() {
+    if existing.template_params().is_empty() && !ancestor.template_params().is_empty() {
         return true;
     }
 
     // Conditional return type.
-    if existing.conditional_return.is_none() && ancestor.conditional_return.is_some() {
+    if existing.conditional_return().is_none() && ancestor.conditional_return().is_some() {
         return true;
     }
 
     // Type assertions.
-    if existing.type_assertions.is_empty() && !ancestor.type_assertions.is_empty() {
+    if existing.type_assertions().is_empty() && !ancestor.type_assertions().is_empty() {
         return true;
     }
 
@@ -209,13 +209,13 @@ fn method_enrichment_would_change(
     // Deprecation (an override with no docblock of its own inherits the
     // ancestor's `@deprecated` tag, matching PHPStan's phpDoc-inheritance
     // resolver).
-    if existing.deprecation_message.is_none() && ancestor.deprecation_message.is_some() {
+    if existing.deprecation_message().is_none() && ancestor.deprecation_message().is_some() {
         return true;
     }
 
     // Descriptions.
     (existing.description.is_none() && ancestor.description.is_some())
-        || (existing.return_description.is_none() && ancestor.return_description.is_some())
+        || (existing.return_description().is_none() && ancestor.return_description().is_some())
 }
 
 /// Whether [`enrich_constructor_parameters_by_name`] would change any
@@ -314,11 +314,12 @@ pub(crate) fn enrich_method_from_ancestor(
     }
 
     // ── Template parameters ─────────────────────────────────────
-    if existing.template_params.is_empty() && !ancestor.template_params.is_empty() {
-        existing.template_params = ancestor.template_params.clone();
-        existing.template_param_bounds = ancestor.template_param_bounds.clone();
-        existing.template_param_defaults = ancestor.template_param_defaults.clone();
-        existing.template_bindings = ancestor.template_bindings.clone();
+    if existing.template_params().is_empty() && !ancestor.template_params().is_empty() {
+        let extras = existing.extras_mut();
+        extras.template_params = ancestor.template_params().to_vec();
+        extras.template_param_bounds = ancestor.template_param_bounds().clone();
+        extras.template_param_defaults = ancestor.template_param_defaults().into();
+        extras.template_bindings = ancestor.template_bindings().to_vec();
         // Template return types like `T` only make sense when the
         // template params are present — inherit the return type too
         // if we haven't already set it.
@@ -328,16 +329,16 @@ pub(crate) fn enrich_method_from_ancestor(
     }
 
     // ── Conditional return type ─────────────────────────────────
-    if existing.conditional_return.is_none()
-        && let Some(ref conditional) = ancestor.conditional_return
+    if existing.conditional_return().is_none()
+        && let Some(conditional) = ancestor.conditional_return()
     {
-        existing.conditional_return =
-            Some(in_override_param_names(conditional, existing, ancestor));
+        let conditional = in_override_param_names(conditional, existing, ancestor);
+        existing.extras_mut().conditional_return = Some(conditional);
     }
 
     // ── Type assertions ─────────────────────────────────────────
-    if existing.type_assertions.is_empty() && !ancestor.type_assertions.is_empty() {
-        existing.type_assertions = ancestor.type_assertions.clone();
+    if existing.type_assertions().is_empty() && !ancestor.type_assertions().is_empty() {
+        existing.extras_mut().type_assertions = ancestor.type_assertions().to_vec();
     }
 
     // ── Parameters ──────────────────────────────────────────────
@@ -366,17 +367,18 @@ pub(crate) fn enrich_method_from_ancestor(
     }
 
     // ── Deprecation ─────────────────────────────────────────────
-    if existing.deprecation_message.is_none() && ancestor.deprecation_message.is_some() {
-        existing.deprecation_message = ancestor.deprecation_message.clone();
-        existing.deprecated_replacement = ancestor.deprecated_replacement.clone();
+    if existing.deprecation_message().is_none() && ancestor.deprecation_message().is_some() {
+        let extras = existing.extras_mut();
+        extras.deprecation_message = ancestor.deprecation_message().map(str::to_owned);
+        extras.deprecated_replacement = ancestor.deprecated_replacement().map(str::to_owned);
     }
 
     // ── Descriptions ────────────────────────────────────────────
     if existing.description.is_none() && ancestor.description.is_some() {
         existing.description = ancestor.description.clone();
     }
-    if existing.return_description.is_none() && ancestor.return_description.is_some() {
-        existing.return_description = ancestor.return_description.clone();
+    if existing.return_description().is_none() && ancestor.return_description().is_some() {
+        existing.extras_mut().return_description = ancestor.return_description().map(str::to_owned);
     }
 }
 

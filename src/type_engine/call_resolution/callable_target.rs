@@ -74,12 +74,12 @@ impl Backend {
         if !method_subs.is_empty() {
             crate::inheritance::apply_substitution_to_method(&mut bound, &method_subs);
             self_bound_params = super::template_subs::self_bound_template_params(
-                &declared.template_bindings,
+                declared.template_bindings(),
                 &declared.parameters,
                 &split_args,
                 &|tpl| {
                     declared
-                        .template_param_bounds
+                        .template_param_bounds()
                         .get(tpl)
                         .or_else(|| owner.template_param_bounds.get(tpl))
                         .cloned()
@@ -95,8 +95,8 @@ impl Backend {
             let arg_ty_resolver = |t: &str| Self::resolve_arg_text_to_type(t, rctx);
             let tpl = TemplateContext {
                 defaults: Some(&method_subs),
-                params: &bound.template_params,
-                bindings: &bound.template_bindings,
+                params: bound.template_params(),
+                bindings: bound.template_bindings(),
                 arg_type_resolver: Some(&arg_ty_resolver),
                 this_type: None,
             };
@@ -464,17 +464,17 @@ impl Backend {
         // Apply class-level template substitutions from the call-site
         // argument types when the constructor has template bindings.
         if let Some(at) = args_text
-            && !ctor.template_bindings.is_empty()
+            && !ctor.template_bindings().is_empty()
         {
             let split_args = crate::type_engine::types::conditional::split_text_args(at);
             let subs = Self::build_method_template_subs(&merged, "__construct", &split_args, rctx);
             if !subs.is_empty() {
                 let self_bound_params = super::template_subs::self_bound_template_params(
-                    &ctor.template_bindings,
+                    ctor.template_bindings(),
                     &ctor.parameters,
                     &split_args,
                     &|tpl| {
-                        ctor.template_param_bounds
+                        ctor.template_param_bounds()
                             .get(tpl)
                             .or_else(|| merged.template_param_bounds.get(tpl))
                             .cloned()

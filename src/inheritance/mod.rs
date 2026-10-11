@@ -893,7 +893,7 @@ fn resolve_magic_get_return_type(class: &ClassInfo, prop_name: &str) -> Option<P
 
     // When __get has no template params, return the declared return type
     // directly (with self/static resolved to the owning class).
-    if get_method.template_params.is_empty() {
+    if get_method.template_params().is_empty() {
         let resolved = if return_type.contains_self_ref() {
             return_type.replace_self(&class.fqn())
         } else {
@@ -905,7 +905,7 @@ fn resolve_magic_get_return_type(class: &ClassInfo, prop_name: &str) -> Option<P
     // Build a substitution map: for each method-level template parameter,
     // try to infer its value from the property name being accessed.
     let mut method_subs = std::collections::HashMap::new();
-    for tparam in &get_method.template_params {
+    for tparam in get_method.template_params() {
         // The template param is typically bounded by key-of<SomeShape>.
         // After class-level substitution the bound is already concrete
         // (e.g. key-of<array{a: int, b: string}> → 'a'|'b').

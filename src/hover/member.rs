@@ -580,23 +580,23 @@ impl Backend {
             lines.push(desc.clone());
         }
 
-        if let Some(ref msg) = method.deprecation_message {
+        if let Some(msg) = method.deprecation_message() {
             lines.push(format_deprecation_line(msg));
         }
 
-        for url in &method.links {
+        for url in method.links() {
             lines.push(format!("[{}]({})", url, url));
         }
 
-        let resolved_see = self.resolve_see_refs(&method.see_refs, uri, content);
-        format_see_refs(&resolved_see, &method.links, &mut lines);
+        let resolved_see = self.resolve_see_refs(method.see_refs(), uri, content);
+        format_see_refs(&resolved_see, method.links(), &mut lines);
 
         let show_inferred = method.is_inferred_return || inferred_return_type.is_some();
         if let Some(section) = build_param_return_section(
             &method.parameters,
             effective_return,
             method.native_return_type.as_ref(),
-            method.return_description.as_deref(),
+            method.return_description(),
             show_inferred,
         ) {
             lines.push(section);

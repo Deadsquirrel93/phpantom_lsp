@@ -368,7 +368,7 @@ fn simple_xml_serialisers_get_conditional_returns() {
 
     for method in class.methods.iter() {
         assert_eq!(
-            method.conditional_return.as_ref().map(|c| c.to_string()),
+            method.conditional_return().map(|c| c.to_string()),
             Some("$filename is null ? string|false : bool".to_string()),
             "{}",
             method.name

@@ -145,7 +145,7 @@ fn method_signature_eq_different_static() {
 fn method_signature_eq_different_deprecation() {
     let a = method("foo");
     let mut b = method("foo");
-    b.deprecation_message = Some("Use bar() instead".to_string());
+    b.extras_mut().deprecation_message = Some("Use bar() instead".to_string());
     assert!(!a.signature_eq(&b));
 }
 
@@ -191,9 +191,9 @@ fn method_signature_eq_detects_description_change() {
 #[test]
 fn method_signature_eq_detects_return_description_change() {
     let mut a = method("foo");
-    a.return_description = Some("The result".to_string());
+    a.extras_mut().return_description = Some("The result".to_string());
     let mut b = method("foo");
-    b.return_description = None;
+    b.extras_mut().return_description = None;
     assert!(
         !a.signature_eq(&b),
         "Return description changes must break signature_eq"
@@ -203,7 +203,7 @@ fn method_signature_eq_detects_return_description_change() {
 #[test]
 fn method_signature_eq_detects_link_change() {
     let mut a = method("foo");
-    a.links = vec!["https://example.com".to_string()];
+    a.extras_mut().links = vec!["https://example.com".to_string()];
     let b = method("foo");
     assert!(!a.signature_eq(&b), "Link changes must break signature_eq");
 }
@@ -211,7 +211,7 @@ fn method_signature_eq_detects_link_change() {
 #[test]
 fn method_signature_eq_detects_template_change() {
     let mut a = method("foo");
-    a.template_params = vec![atom("T")];
+    a.extras_mut().template_params = vec![atom("T")];
     let b = method("foo");
     assert!(!a.signature_eq(&b));
 }
@@ -219,7 +219,7 @@ fn method_signature_eq_detects_template_change() {
 #[test]
 fn method_signature_eq_detects_conditional_return() {
     let mut a = method("foo");
-    a.conditional_return = Some(PhpType::int());
+    a.extras_mut().conditional_return = Some(PhpType::int());
     let b = method("foo");
     assert!(!a.signature_eq(&b));
 }
@@ -729,8 +729,8 @@ fn class_signature_eq_body_only_change() {
     let mut m_a = method("doWork");
     m_a.name_offset = 100;
     m_a.description = Some("Same description".to_string());
-    m_a.return_description = Some("Same return desc".to_string());
-    m_a.links = vec!["https://same.example.com".to_string()];
+    m_a.extras_mut().return_description = Some("Same return desc".to_string());
+    m_a.extras_mut().links = vec!["https://same.example.com".to_string()];
     let mut p_a = prop("name", "string");
     p_a.name_offset = 200;
     p_a.description = Some("Same prop desc".to_string());
@@ -753,8 +753,8 @@ fn class_signature_eq_body_only_change() {
     let mut m_b = method("doWork");
     m_b.name_offset = 150; // offset changed
     m_b.description = Some("Same description".to_string());
-    m_b.return_description = Some("Same return desc".to_string());
-    m_b.links = vec!["https://same.example.com".to_string()];
+    m_b.extras_mut().return_description = Some("Same return desc".to_string());
+    m_b.extras_mut().links = vec!["https://same.example.com".to_string()];
     let mut p_b = prop("name", "string");
     p_b.name_offset = 250; // offset changed
     p_b.description = Some("Same prop desc".to_string());

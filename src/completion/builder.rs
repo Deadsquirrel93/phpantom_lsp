@@ -409,7 +409,7 @@ pub(crate) fn build_completion_items(
             insert_text: Some(build_callable_snippet(&method.name, &method.parameters)),
             insert_text_format: Some(InsertTextFormat::SNIPPET),
             filter_text: Some(method.name.to_string()),
-            tags: deprecation_tag(method.deprecation_message.is_some()),
+            tags: deprecation_tag(method.deprecation_message().is_some()),
             data,
             ..CompletionItem::default()
         });

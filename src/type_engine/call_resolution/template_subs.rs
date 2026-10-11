@@ -51,7 +51,7 @@ impl Backend {
             || !class_info.interfaces.is_empty()
             || !class_info.used_traits.is_empty();
         let method = match own {
-            Some(m) if !m.template_params.is_empty() || !may_inherit_templates => Some(m.clone()),
+            Some(m) if !m.template_params().is_empty() || !may_inherit_templates => Some(m.clone()),
             _ => {
                 let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
                     class_info,
@@ -66,22 +66,22 @@ impl Backend {
         };
 
         let method = match method {
-            Some(m) if !m.template_params.is_empty() => m,
+            Some(m) if !m.template_params().is_empty() => m,
             _ => return HashMap::new(),
         };
 
         let callee = super::TemplateCallee {
             parameters: &method.parameters,
-            template_bindings: &method.template_bindings,
-            template_param_bounds: &method.template_param_bounds,
+            template_bindings: method.template_bindings(),
+            template_param_bounds: method.template_param_bounds(),
         };
         let mut subs = super::bind_template_args(&callee, arg_texts, None, ctx);
 
         finish_template_subs(
             &mut subs,
-            &method.template_params,
-            &method.template_param_bounds,
-            &method.template_param_defaults,
+            method.template_params(),
+            method.template_param_bounds(),
+            method.template_param_defaults(),
             method.return_type.as_ref(),
             ctx,
         );
@@ -756,15 +756,15 @@ pub(crate) fn build_call_template_subs(
 
     let if_this_is_subs: HashMap<String, PhpType> = owner
         .get_method_ci(method_name)
-        .and_then(|m| m.if_this_is.as_ref())
+        .and_then(|m| m.if_this_is())
         .and_then(|pattern| {
             let method = owner.get_method_ci(method_name)?;
             Some(
                 crate::type_engine::variable::rhs_resolution::infer_if_this_is_subs(
                     pattern,
                     receiver_type?,
-                    &method.template_params,
-                    &method.template_param_bounds,
+                    method.template_params(),
+                    method.template_param_bounds(),
                 ),
             )
         })

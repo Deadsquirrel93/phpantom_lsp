@@ -200,7 +200,7 @@ impl Collect<'_, '_> {
         for class_name in classes {
             match self.merged_class(&class_name) {
                 Some(merged) => match merged.get_method(method_name) {
-                    Some(method) => self.points.add_declared(&method.throws),
+                    Some(method) => self.points.add_declared(method.throws()),
                     None => self.points.implicit = true,
                 },
                 None => self.points.implicit = true,
@@ -319,12 +319,12 @@ impl<'ast, 'arena, 'c, 'w> Walker<'ast, 'arena, Collect<'c, 'w>> for ThrowPointW
         };
         // An exception's constructor only stores its arguments, which is
         // what lets `throw new Foo()` throw just `Foo`.
-        if constructor.throws.is_empty()
+        if constructor.throws().is_empty()
             && crate::class_lookup::is_subtype_of(&merged, "Throwable", c.ctx.class_loader)
         {
             return;
         }
-        c.points.add_declared(&constructor.throws);
+        c.points.add_declared(constructor.throws());
     }
 
     fn walk_in_throw(&self, throw: &'ast Throw<'arena>, c: &mut Collect<'c, 'w>) {

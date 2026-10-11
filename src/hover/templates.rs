@@ -108,12 +108,12 @@ fn find_template_info_in_method(ty: &PhpType, method: &MethodInfo) -> Option<Str
     };
 
     // Method-level template_params stores just the names.
-    if !method.template_params.iter().any(|p| p == name) {
+    if !method.template_params().iter().any(|p| p == name) {
         return None;
     }
 
     let bound_display = method
-        .template_param_bounds
+        .template_param_bounds()
         .get(&crate::atom::atom(name))
         .map(|b| format!(" of `{}`", b.shorten()))
         .unwrap_or_default();

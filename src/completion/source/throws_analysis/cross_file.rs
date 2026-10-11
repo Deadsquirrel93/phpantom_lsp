@@ -523,7 +523,7 @@ pub(crate) fn find_cross_file_propagated_throws(
                         && let Some(class_info) = class_loader(&resolved_class)
                         && let Some(ctor) = class_info.get_method("__construct")
                     {
-                        for exc_type in &ctor.throws {
+                        for exc_type in ctor.throws() {
                             results.push(ThrowInfo {
                                 type_name: exc_type.clone(),
                                 offset: call_start,
@@ -703,7 +703,7 @@ pub(crate) fn collect_method_throws(
     if let Some(class_info) = class_loader(class_name)
         && let Some(method_info) = class_info.get_method(method_name)
     {
-        for exc_type in &method_info.throws {
+        for exc_type in method_info.throws() {
             results.push(ThrowInfo {
                 type_name: exc_type.clone(),
                 offset,

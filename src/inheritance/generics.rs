@@ -22,25 +22,25 @@ pub(crate) fn apply_substitution_to_method(
     if let Some(ref mut ret) = method.return_type {
         *ret = ret.substitute(subs);
     }
-    if let Some(ref mut cond) = method.conditional_return {
-        apply_substitution_to_conditional(cond, subs);
-    }
-    // `@phpstan-assert-if-true T $id` on a generic interface promises the
-    // implementation's `T`, not the bound.
-    for assertion in &mut method.type_assertions {
-        assertion.asserted_type = assertion.asserted_type.substitute(subs);
-    }
-    // `@template TResult = T` falls back to the class's `T`, which the
-    // receiver binds just as it binds `T` in the signature.
-    if !method.template_param_defaults.is_empty() {
-        for (_, default) in method.template_param_defaults.iter_mut() {
+    if let Some(extras) = method.extras.as_deref_mut() {
+        if let Some(ref mut cond) = extras.conditional_return {
+            apply_substitution_to_conditional(cond, subs);
+        }
+        // `@phpstan-assert-if-true T $id` on a generic interface promises the
+        // implementation's `T`, not the bound.
+        for assertion in &mut extras.type_assertions {
+            assertion.asserted_type = assertion.asserted_type.substitute(subs);
+        }
+        // `@template TResult = T` falls back to the class's `T`, which the
+        // receiver binds just as it binds `T` in the signature.
+        for (_, default) in extras.template_param_defaults.iter_mut() {
             *default = default.substitute(subs);
         }
-    }
-    // So does `@template F of E`: an argument is held to the `E` the
-    // receiver bound, not to `E`'s own bound.
-    for bound in method.template_param_bounds.values_mut() {
-        *bound = bound.substitute(subs);
+        // So does `@template F of E`: an argument is held to the `E` the
+        // receiver bound, not to `E`'s own bound.
+        for bound in extras.template_param_bounds.values_mut() {
+            *bound = bound.substitute(subs);
+        }
     }
     // Only copy-on-write the shared parameter list when a parameter
     // actually references a substituted name — substitution usually
@@ -247,10 +247,10 @@ pub(crate) fn method_references_params(method: &MethodInfo, template_params: &[S
         .as_ref()
         .is_some_and(|r| r.references_any_template_param(template_params))
         || method
-            .conditional_return
+            .conditional_return()
             .as_ref()
             .is_some_and(|c| c.references_any_template_param(template_params))
-        || method.type_assertions.iter().any(|a| {
+        || method.type_assertions().iter().any(|a| {
             a.asserted_type
                 .references_any_template_param(template_params)
         })
@@ -260,11 +260,11 @@ pub(crate) fn method_references_params(method: &MethodInfo, template_params: &[S
                 .is_some_and(|h| h.references_any_template_param(template_params))
         })
         || method
-            .template_param_defaults
+            .template_param_defaults()
             .iter()
             .any(|(_, d)| d.references_any_template_param(template_params))
         || method
-            .template_param_bounds
+            .template_param_bounds()
             .values()
             .any(|b| b.references_any_template_param(template_params))
 }
@@ -661,7 +661,7 @@ pub(crate) fn apply_generic_args(class: &ClassInfo, type_args: &[PhpType]) -> Cl
             // erasure, or the argument never gets a chance to bind it
             // (see `class_scoped_template_values`, which strips the same
             // shadowed names from the *values* side of a call).
-            let method_subs = class_scoped_template_values(&subs, &method.template_params);
+            let method_subs = class_scoped_template_values(&subs, method.template_params());
             if method_subs.is_empty() {
                 continue;
             }

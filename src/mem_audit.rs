@@ -24,9 +24,9 @@ use crate::php_type::{
     TypeKind,
 };
 use crate::types::{
-    ClassInfo, ConstantInfo, DocblockMembers, FunctionInfo, LaravelMetadata, MethodInfo,
-    ParameterInfo, PropertyInfo, PropertySource, SharedVec, TraitAlias, TraitPrecedence,
-    TypeAliasDef, TypeAssertion,
+    ClassInfo, ConstantInfo, DocblockMembers, FunctionInfo, LaravelMetadata, MethodExtras,
+    MethodInfo, ParameterInfo, PropertyInfo, PropertySource, SharedVec, TraitAlias,
+    TraitPrecedence, TypeAliasDef, TypeAssertion,
 };
 
 // ─── Counting global allocator ──────────────────────────────────────────────
@@ -668,37 +668,49 @@ impl Audit {
         self.n_methods += 1;
         let mut st = Sz::default();
         st.add(ARC + size_of::<MethodInfo>());
+        if a.extras.is_some() {
+            st.add(size_of::<MethodExtras>());
+        }
         self.m_struct += st;
         let m: &MethodInfo = a;
-        // return_type, native_return_type, conditional_return, if_this_is, self_out
-        self.pt_inline_slots += 5;
+        // return_type, native_return_type
+        self.pt_inline_slots += 2;
+        self.m_types += opt_ty(&m.return_type);
+        self.m_types += opt_ty(&m.native_return_type);
+        self.m_docs += s(&m.description);
+        let Some(e) = m.extras.as_deref() else {
+            if m.description.is_none() {
+                self.m_no_docs += 1;
+            }
+            self.params(&m.parameters);
+            return;
+        };
+        // conditional_return, if_this_is, self_out
+        self.pt_inline_slots += 3;
         if m.description.is_none()
-            && m.return_description.is_none()
-            && m.links.is_empty()
-            && m.see_refs.is_empty()
-            && m.deprecation_message.is_none()
-            && m.deprecated_replacement.is_none()
+            && e.return_description.is_none()
+            && e.links.is_empty()
+            && e.see_refs.is_empty()
+            && e.deprecation_message.is_none()
+            && e.deprecated_replacement.is_none()
         {
             self.m_no_docs += 1;
         }
-        self.m_types += opt_ty(&m.return_type);
-        self.m_types += opt_ty(&m.native_return_type);
-        self.m_types += opt_ty(&m.conditional_return);
-        self.m_types += opt_ty(&m.if_this_is);
-        self.m_types += opt_ty(&m.self_out);
-        self.m_types += ty_vec(&m.throws);
-        self.m_types += assertions(&m.type_assertions);
+        self.m_types += opt_ty(&e.conditional_return);
+        self.m_types += opt_ty(&e.if_this_is);
+        self.m_types += opt_ty(&e.self_out);
+        self.m_types += ty_vec(&e.throws);
+        self.m_types += assertions(&e.type_assertions);
         let mut tp = Sz::default();
-        tp.add(m.template_params.capacity() * size_of::<Atom>());
-        tp.add(m.template_bindings.capacity() * size_of::<(Atom, Atom)>());
+        tp.add(e.template_params.capacity() * size_of::<Atom>());
+        tp.add(e.template_bindings.capacity() * size_of::<(Atom, Atom)>());
         self.m_tmpl += tp;
-        self.m_tmpl += atom_map_ty(&m.template_param_bounds);
-        self.m_docs += s(&m.description);
-        self.m_docs += s(&m.return_description);
-        self.m_docs += vs(&m.links);
-        self.m_docs += vs(&m.see_refs);
-        self.m_docs += s(&m.deprecation_message);
-        self.m_docs += s(&m.deprecated_replacement);
+        self.m_tmpl += atom_map_ty(&e.template_param_bounds);
+        self.m_docs += s(&e.return_description);
+        self.m_docs += vs(&e.links);
+        self.m_docs += vs(&e.see_refs);
+        self.m_docs += s(&e.deprecation_message);
+        self.m_docs += s(&e.deprecated_replacement);
         self.params(&m.parameters);
     }
 

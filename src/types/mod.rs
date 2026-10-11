@@ -482,6 +482,90 @@ pub struct MethodInfo {
     /// This is the free-text portion of the docblock (before any `@tag` lines).
     /// `None` when the docblock has no description or no docblock is present.
     pub description: Option<String>,
+    /// Whether the method is static.
+    pub is_static: bool,
+    /// Visibility of the method (public, protected, or private).
+    pub visibility: Visibility,
+    /// Whether this method has the `#[Scope]` attribute (Laravel 11+).
+    ///
+    /// Methods decorated with `#[\Illuminate\Database\Eloquent\Attributes\Scope]`
+    /// are treated as Eloquent scope methods without needing the `scopeX`
+    /// naming convention.  The method's own name is used directly as the
+    /// public-facing scope name (e.g. `#[Scope] protected function active()`
+    /// becomes `User::active()`).
+    pub has_scope_attribute: bool,
+    /// Whether this method is declared `abstract`.
+    ///
+    /// Abstract methods have no body (`MethodBody::Abstract`) and must be
+    /// implemented by concrete subclasses.  Interface methods are
+    /// implicitly abstract.  Used by the "Implement missing methods"
+    /// code action to detect which inherited methods still need stubs.
+    pub is_abstract: bool,
+    /// Whether this method is declared `final`.
+    ///
+    /// A `final` method cannot be redeclared by a subclass, so override
+    /// completion must not offer one as a candidate.  Note that `final` on
+    /// a *trait* method only binds subclasses of the class using the trait:
+    /// the using class itself may still declare its own version.
+    pub is_final: bool,
+    /// Whether this method is a virtual (synthesized) member.
+    ///
+    /// Virtual methods come from `@method` docblock tags, `@mixin` classes,
+    /// or framework-specific providers (e.g. Laravel model scopes).  They
+    /// have no real declaration in source code.
+    ///
+    /// Set to `true` by [`MethodInfo::virtual_method`] and by providers;
+    /// set to `false` by the parser for real declared methods.
+    pub is_virtual: bool,
+    /// Whether this method originates from a `::macro()` registration.
+    ///
+    /// Used by hover to show a "macro" indicator instead of the generic
+    /// "virtual" label, so the user can distinguish macros from `@method`
+    /// or `@mixin` synthesized members.
+    pub is_macro: bool,
+    /// Whether the return type was inferred from closure body analysis
+    /// rather than explicitly declared via a type hint or docblock.
+    ///
+    /// When `true`, hover appends "(inferred)" to the return type line
+    /// so the user knows the type is best-effort, not authoritative.
+    pub is_inferred_return: bool,
+    /// Whether the method is declared side-effect free via `@pure`,
+    /// `@phpstan-pure` or `@psalm-pure`.
+    ///
+    /// A call that changes state behind its receiver invalidates the
+    /// checks the forward walker recorded about that receiver, and this is
+    /// the author's promise that it does not.  See [`Self::is_impure`] for
+    /// the other half of the signal.
+    pub is_pure: bool,
+    /// Whether the method is declared to have side effects via `@impure`,
+    /// `@phpstan-impure` or `@psalm-impure`.
+    ///
+    /// Without either tag, whether a call changes state is inferred from
+    /// its return type: a method that returns nothing was called for its
+    /// effect, and one that returns a value is assumed to compute it.  The
+    /// tag is how an author overrides that for the value-returning case
+    /// (`$stmt->execute(): bool`), which the return type cannot express.
+    pub is_impure: bool,
+    /// Whether the body calls `func_get_args()` (or a sibling), so the
+    /// callable accepts arguments beyond its declared parameters.
+    pub reads_func_args: bool,
+    /// Docblock-derived data that most methods leave empty (`@return`
+    /// descriptions, links, deprecation, method-level templates, `@throws`,
+    /// assertions, conditional and `$this`-narrowing types).
+    ///
+    /// `None` whenever every field would be empty, which holds for about
+    /// three methods in four: inline, these fields cost close to 300 bytes
+    /// per method even when unset. Read through the accessors
+    /// ([`Self::throws`], [`Self::template_params`], ...) and write through
+    /// [`Self::extras_mut`] or [`MethodExtras::into_option`].
+    pub extras: Option<Box<MethodExtras>>,
+}
+
+/// The rarely-set part of a [`MethodInfo`], boxed behind
+/// [`MethodInfo::extras`] so that methods without any of it pay one
+/// pointer instead of the inline fields.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct MethodExtras {
     /// Human-readable description extracted from the `@return` tag.
     ///
     /// For `@return list<User> The active users`, this would be
@@ -500,10 +584,6 @@ pub struct MethodInfo {
     /// (e.g. `"https://example.com/docs"`).  Rendered in hover below
     /// `@link` entries.
     pub see_refs: Vec<String>,
-    /// Whether the method is static.
-    pub is_static: bool,
-    /// Visibility of the method (public, protected, or private).
-    pub visibility: Visibility,
     /// Optional PHPStan conditional return type parsed from the docblock.
     ///
     /// When present, the resolver should use this instead of `return_type`
@@ -557,49 +637,6 @@ pub struct MethodInfo {
     /// bindings to infer concrete types for each template parameter
     /// from the actual argument expressions.
     pub template_bindings: Vec<(Atom, Atom)>,
-    /// Whether this method has the `#[Scope]` attribute (Laravel 11+).
-    ///
-    /// Methods decorated with `#[\Illuminate\Database\Eloquent\Attributes\Scope]`
-    /// are treated as Eloquent scope methods without needing the `scopeX`
-    /// naming convention.  The method's own name is used directly as the
-    /// public-facing scope name (e.g. `#[Scope] protected function active()`
-    /// becomes `User::active()`).
-    pub has_scope_attribute: bool,
-    /// Whether this method is declared `abstract`.
-    ///
-    /// Abstract methods have no body (`MethodBody::Abstract`) and must be
-    /// implemented by concrete subclasses.  Interface methods are
-    /// implicitly abstract.  Used by the "Implement missing methods"
-    /// code action to detect which inherited methods still need stubs.
-    pub is_abstract: bool,
-    /// Whether this method is declared `final`.
-    ///
-    /// A `final` method cannot be redeclared by a subclass, so override
-    /// completion must not offer one as a candidate.  Note that `final` on
-    /// a *trait* method only binds subclasses of the class using the trait:
-    /// the using class itself may still declare its own version.
-    pub is_final: bool,
-    /// Whether this method is a virtual (synthesized) member.
-    ///
-    /// Virtual methods come from `@method` docblock tags, `@mixin` classes,
-    /// or framework-specific providers (e.g. Laravel model scopes).  They
-    /// have no real declaration in source code.
-    ///
-    /// Set to `true` by [`MethodInfo::virtual_method`] and by providers;
-    /// set to `false` by the parser for real declared methods.
-    pub is_virtual: bool,
-    /// Whether this method originates from a `::macro()` registration.
-    ///
-    /// Used by hover to show a "macro" indicator instead of the generic
-    /// "virtual" label, so the user can distinguish macros from `@method`
-    /// or `@mixin` synthesized members.
-    pub is_macro: bool,
-    /// Whether the return type was inferred from closure body analysis
-    /// rather than explicitly declared via a type hint or docblock.
-    ///
-    /// When `true`, hover appends "(inferred)" to the return type line
-    /// so the user knows the type is best-effort, not authoritative.
-    pub is_inferred_return: bool,
     /// Type assertions declared via `@phpstan-assert` / `@psalm-assert` tags
     /// in the method's docblock.
     ///
@@ -629,26 +666,35 @@ pub struct MethodInfo {
     /// arguments) are substituted into this type before it replaces the
     /// receiver's tracked type.
     pub self_out: Option<PhpType>,
-    /// Whether the method is declared side-effect free via `@pure`,
-    /// `@phpstan-pure` or `@psalm-pure`.
-    ///
-    /// A call that changes state behind its receiver invalidates the
-    /// checks the forward walker recorded about that receiver, and this is
-    /// the author's promise that it does not.  See [`Self::is_impure`] for
-    /// the other half of the signal.
-    pub is_pure: bool,
-    /// Whether the method is declared to have side effects via `@impure`,
-    /// `@phpstan-impure` or `@psalm-impure`.
-    ///
-    /// Without either tag, whether a call changes state is inferred from
-    /// its return type: a method that returns nothing was called for its
-    /// effect, and one that returns a value is assumed to compute it.  The
-    /// tag is how an author overrides that for the value-returning case
-    /// (`$stmt->execute(): bool`), which the return type cannot express.
-    pub is_impure: bool,
-    /// Whether the body calls `func_get_args()` (or a sibling), so the
-    /// callable accepts arguments beyond its declared parameters.
-    pub reads_func_args: bool,
+}
+
+impl MethodExtras {
+    /// Whether every field is empty, i.e. the method needs no extras box.
+    pub fn is_empty(&self) -> bool {
+        self.return_description.is_none()
+            && self.links.is_empty()
+            && self.see_refs.is_empty()
+            && self.conditional_return.is_none()
+            && self.deprecation_message.is_none()
+            && self.deprecated_replacement.is_none()
+            && self.template_params.is_empty()
+            && self.template_param_bounds.is_empty()
+            && self.template_param_defaults.is_empty()
+            && self.template_bindings.is_empty()
+            && self.type_assertions.is_empty()
+            && self.throws.is_empty()
+            && self.if_this_is.is_none()
+            && self.self_out.is_none()
+    }
+
+    /// Box `self` for [`MethodInfo::extras`], or `None` when it is empty.
+    pub fn into_option(self) -> Option<Box<Self>> {
+        if self.is_empty() {
+            None
+        } else {
+            Some(Box::new(self))
+        }
+    }
 }
 
 impl MethodInfo {
@@ -667,26 +713,14 @@ impl MethodInfo {
             && self.visibility == other.visibility
             && self.return_type == other.return_type
             && self.native_return_type == other.native_return_type
-            && self.conditional_return == other.conditional_return
             && self.description == other.description
-            && self.return_description == other.return_description
-            && self.links == other.links
-            && self.see_refs == other.see_refs
-            && self.deprecation_message == other.deprecation_message
-            && self.deprecated_replacement == other.deprecated_replacement
-            && self.template_params == other.template_params
-            && self.template_param_bounds == other.template_param_bounds
-            && self.template_param_defaults == other.template_param_defaults
-            && self.template_bindings == other.template_bindings
+            && self.extras_eq(other)
             && self.has_scope_attribute == other.has_scope_attribute
             && self.is_abstract == other.is_abstract
             && self.is_final == other.is_final
             && self.is_virtual == other.is_virtual
             && self.is_macro == other.is_macro
             && self.is_inferred_return == other.is_inferred_return
-            && self.throws == other.throws
-            && self.if_this_is == other.if_this_is
-            && self.self_out == other.self_out
             && self.is_pure == other.is_pure
             && self.is_impure == other.is_impure
             && self.parameters.len() == other.parameters.len()
@@ -695,6 +729,100 @@ impl MethodInfo {
                 .iter()
                 .zip(other.parameters.iter())
                 .all(|(a, b)| a.signature_eq(b))
+    }
+
+    /// Whether both methods carry the same extras, treating an empty box
+    /// as equal to none.
+    pub fn extras_eq(&self, other: &MethodInfo) -> bool {
+        match (self.extras.as_deref(), other.extras.as_deref()) {
+            (Some(a), Some(b)) => a == b,
+            (Some(e), None) | (None, Some(e)) => e.is_empty(),
+            (None, None) => true,
+        }
+    }
+
+    /// Mutable access to the extras, allocating them on first use.
+    ///
+    /// Only call this when about to store something: a box left empty
+    /// costs an allocation that [`MethodExtras::into_option`] would have
+    /// avoided.
+    pub fn extras_mut(&mut self) -> &mut MethodExtras {
+        self.extras.get_or_insert_with(Default::default)
+    }
+
+    /// The `@return` tag's description text.
+    pub fn return_description(&self) -> Option<&str> {
+        self.extras.as_ref()?.return_description.as_deref()
+    }
+
+    /// URLs from `@link` and `@see` tags.
+    pub fn links(&self) -> &[String] {
+        self.extras.as_ref().map_or(&[], |e| &e.links)
+    }
+
+    /// Raw `@see` references.
+    pub fn see_refs(&self) -> &[String] {
+        self.extras.as_ref().map_or(&[], |e| &e.see_refs)
+    }
+
+    /// The PHPStan conditional return type, if declared.
+    pub fn conditional_return(&self) -> Option<&PhpType> {
+        self.extras.as_ref()?.conditional_return.as_ref()
+    }
+
+    /// The `@deprecated` message (`Some("")` when deprecated without one).
+    pub fn deprecation_message(&self) -> Option<&str> {
+        self.extras.as_ref()?.deprecation_message.as_deref()
+    }
+
+    /// The `#[Deprecated(replacement: ...)]` code template.
+    pub fn deprecated_replacement(&self) -> Option<&str> {
+        self.extras.as_ref()?.deprecated_replacement.as_deref()
+    }
+
+    /// Method-level `@template` parameter names.
+    pub fn template_params(&self) -> &[Atom] {
+        self.extras.as_ref().map_or(&[], |e| &e.template_params)
+    }
+
+    /// Upper bounds of the method-level template parameters.
+    pub fn template_param_bounds(&self) -> &AtomMap<PhpType> {
+        static EMPTY: AtomMap<PhpType> = HashMap::with_hasher(std::hash::BuildHasherDefault::new());
+        self.extras
+            .as_ref()
+            .map_or(&EMPTY, |e| &e.template_param_bounds)
+    }
+
+    /// Defaults of the method-level template parameters.
+    pub fn template_param_defaults(&self) -> &[(Atom, PhpType)] {
+        self.extras
+            .as_ref()
+            .map_or(&[], |e| &e.template_param_defaults)
+    }
+
+    /// Template parameter to `$parameter` bindings from `@param` tags.
+    pub fn template_bindings(&self) -> &[(Atom, Atom)] {
+        self.extras.as_ref().map_or(&[], |e| &e.template_bindings)
+    }
+
+    /// `@phpstan-assert` / `@psalm-assert` type assertions.
+    pub fn type_assertions(&self) -> &[TypeAssertion] {
+        self.extras.as_ref().map_or(&[], |e| &e.type_assertions)
+    }
+
+    /// Exception types from `@throws` tags.
+    pub fn throws(&self) -> &[PhpType] {
+        self.extras.as_ref().map_or(&[], |e| &e.throws)
+    }
+
+    /// The `@phpstan-if-this-is` receiver constraint.
+    pub fn if_this_is(&self) -> Option<&PhpType> {
+        self.extras.as_ref()?.if_this_is.as_ref()
+    }
+
+    /// The `@phpstan-self-out` receiver mutation.
+    pub fn self_out(&self) -> Option<&PhpType> {
+        self.extras.as_ref()?.self_out.as_ref()
     }
 
     /// Return the return type as a string, if present.
@@ -735,31 +863,18 @@ impl MethodInfo {
             return_type: return_type.cloned(),
             native_return_type: None,
             description: None,
-            return_description: None,
-            links: Vec::new(),
-            see_refs: Vec::new(),
             is_static: false,
             visibility: Visibility::Public,
-            conditional_return: None,
-            deprecation_message: None,
-            deprecated_replacement: None,
-            template_params: Vec::new(),
-            template_param_bounds: AtomMap::default(),
-            template_bindings: Vec::new(),
-            template_param_defaults: Default::default(),
             has_scope_attribute: false,
             is_abstract: false,
             is_final: false,
             is_virtual: true,
             is_macro: false,
             is_inferred_return: false,
-            type_assertions: Vec::new(),
-            throws: Vec::new(),
-            if_this_is: None,
-            self_out: None,
             is_pure: false,
             is_impure: false,
             reads_func_args: false,
+            extras: None,
         }
     }
 }

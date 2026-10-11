@@ -155,10 +155,10 @@ fn bind_constructor_template_args(
 ) -> HashMap<String, PhpType> {
     // A constructor rarely declares templates of its own, but when it does
     // their bounds sit beside the class's.
-    let bounds = if ctor.template_param_bounds.is_empty() {
+    let bounds = if ctor.template_param_bounds().is_empty() {
         Cow::Borrowed(&class.template_param_bounds)
     } else {
-        let mut merged = ctor.template_param_bounds.clone();
+        let mut merged = ctor.template_param_bounds().clone();
         merged.extend(
             class
                 .template_param_bounds
@@ -169,7 +169,7 @@ fn bind_constructor_template_args(
     };
     let callee = TemplateCallee {
         parameters: &ctor.parameters,
-        template_bindings: &ctor.template_bindings,
+        template_bindings: ctor.template_bindings(),
         template_param_bounds: &bounds,
     };
     let mut subs = bind_template_args(&callee, arg_texts, None, ctx);
@@ -497,7 +497,7 @@ fn wrapper_constructor_template(
             .cloned()
     })?;
     let wrapper_ctor = wrapper_cls.get_method("__construct")?;
-    if wrapper_ctor.template_bindings.is_empty() {
+    if wrapper_ctor.template_bindings().is_empty() {
         return None;
     }
     let paren_start = rest.find('(')?;
@@ -583,7 +583,7 @@ fn constructor_class_subs(
     let Some(ctor) = owner.get_method("__construct") else {
         return HashMap::new();
     };
-    if ctor.template_bindings.is_empty() {
+    if ctor.template_bindings().is_empty() {
         return HashMap::new();
     }
 

@@ -288,8 +288,8 @@ fn build_method_docblock(
     }
 
     // @template tags for method-level templates.
-    for tmpl in &method.template_params {
-        if let Some(bound) = method.template_param_bounds.get(tmpl) {
+    for tmpl in method.template_params() {
+        if let Some(bound) = method.template_param_bounds().get(tmpl) {
             let bound_str = shorten_single_type(&bound.to_string(), use_map, file_namespace);
             lines.push(format!(" * @template {} of {}", tmpl, bound_str));
         } else {
@@ -460,31 +460,18 @@ mod tests {
             return_type: None,
             native_return_type: None,
             description: None,
-            return_description: None,
-            links: vec![],
-            see_refs: vec![],
             is_static,
             visibility: Visibility::Public,
-            conditional_return: None,
-            deprecation_message: None,
-            deprecated_replacement: None,
-            template_params: vec![],
-            template_param_bounds: Default::default(),
-            template_bindings: vec![],
-            template_param_defaults: Default::default(),
             has_scope_attribute: false,
             is_abstract: false,
             is_final: false,
             is_virtual: false,
             is_macro: false,
             is_inferred_return: false,
-            type_assertions: vec![],
-            throws: vec![],
-            if_this_is: None,
-            self_out: None,
             is_pure: false,
             is_impure: false,
             reads_func_args: false,
+            extras: None,
         })
     }
 

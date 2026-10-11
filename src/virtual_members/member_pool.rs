@@ -273,31 +273,18 @@ fn method_eq(a: &MethodInfo, b: &MethodInfo) -> bool {
         return_type,
         native_return_type,
         description,
-        return_description,
-        links,
-        see_refs,
         is_static,
         visibility,
-        conditional_return,
-        deprecation_message,
-        deprecated_replacement,
-        template_params,
-        template_param_bounds,
-        template_param_defaults,
-        template_bindings,
         has_scope_attribute,
         is_abstract,
         is_final,
         is_virtual,
         is_macro,
         is_inferred_return,
-        type_assertions,
-        throws,
-        if_this_is,
-        self_out,
         is_pure,
         is_impure,
         reads_func_args,
+        extras: _,
     } = a;
     *name == b.name
         && *name_offset == b.name_offset
@@ -306,7 +293,6 @@ fn method_eq(a: &MethodInfo, b: &MethodInfo) -> bool {
         && *visibility == b.visibility
         && *is_virtual == b.is_virtual
         && *native_return_type == b.native_return_type
-        && *conditional_return == b.conditional_return
         && *has_scope_attribute == b.has_scope_attribute
         && *is_abstract == b.is_abstract
         && *is_final == b.is_final
@@ -315,20 +301,8 @@ fn method_eq(a: &MethodInfo, b: &MethodInfo) -> bool {
         && *is_pure == b.is_pure
         && *is_impure == b.is_impure
         && *reads_func_args == b.reads_func_args
-        && *if_this_is == b.if_this_is
-        && *self_out == b.self_out
-        && *template_params == b.template_params
-        && *template_param_bounds == b.template_param_bounds
-        && *template_param_defaults == b.template_param_defaults
-        && *template_bindings == b.template_bindings
-        && *throws == b.throws
-        && *type_assertions == b.type_assertions
         && *description == b.description
-        && *return_description == b.return_description
-        && *links == b.links
-        && *see_refs == b.see_refs
-        && *deprecation_message == b.deprecation_message
-        && *deprecated_replacement == b.deprecated_replacement
+        && a.extras_eq(b)
         && parameters_eq(parameters, &b.parameters)
 }
 

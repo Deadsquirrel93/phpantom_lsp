@@ -5,7 +5,7 @@ use super::catch::*;
 use super::*;
 use crate::atom::atom;
 use crate::php_type::PhpType;
-use crate::types::{ClassInfo, ClassLikeKind, FunctionInfo, MethodInfo, Visibility};
+use crate::types::{ClassInfo, ClassLikeKind, FunctionInfo, MethodExtras, MethodInfo, Visibility};
 use tower_lsp::lsp_types::Position;
 
 // ── Low-level scanning tests ────────────────────────────────────────
@@ -800,31 +800,22 @@ fn make_class_with_throws(name: &str, methods: Vec<(&str, Vec<&str>)>) -> Arc<Cl
             return_type: None,
             native_return_type: None,
             description: None,
-            return_description: None,
-            links: Vec::new(),
-            see_refs: Vec::new(),
             is_static: false,
             visibility: Visibility::Public,
-            conditional_return: None,
-            deprecation_message: None,
-            deprecated_replacement: None,
-            template_params: Vec::new(),
-            template_param_bounds: Default::default(),
-            template_bindings: Vec::new(),
-            template_param_defaults: Default::default(),
             has_scope_attribute: false,
             is_abstract: false,
             is_final: false,
             is_virtual: false,
             is_macro: false,
             is_inferred_return: false,
-            type_assertions: Vec::new(),
-            throws: throws.into_iter().map(PhpType::parse).collect(),
-            if_this_is: None,
-            self_out: None,
             is_pure: false,
             is_impure: false,
             reads_func_args: false,
+            extras: MethodExtras {
+                throws: throws.into_iter().map(PhpType::parse).collect(),
+                ..Default::default()
+            }
+            .into_option(),
         })
         .collect();
 

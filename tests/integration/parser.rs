@@ -1880,7 +1880,7 @@ async fn test_deprecated_attribute_on_method_with_reason() {
         .iter()
         .find(|m| m.name == "sendLegacy")
         .unwrap();
-    let msg = method.deprecation_message.as_deref().unwrap();
+    let msg = method.deprecation_message().unwrap();
     assert!(
         msg.contains("Use sendAsync() instead"),
         "Expected reason in method deprecation, got: {msg}"
@@ -1908,7 +1908,7 @@ async fn test_deprecated_attribute_on_method_bare() {
         .find(|m| m.name == "sendLegacy")
         .unwrap();
     assert!(
-        method.deprecation_message.is_some(),
+        method.deprecation_message().is_some(),
         "Bare #[Deprecated] on method should set deprecation_message"
     );
 }
@@ -2059,7 +2059,7 @@ async fn test_docblock_deprecated_takes_priority_over_attribute() {
         .iter()
         .find(|m| m.name == "sendLegacy")
         .unwrap();
-    let msg = method.deprecation_message.as_deref().unwrap();
+    let msg = method.deprecation_message().unwrap();
     assert!(
         msg.contains("Use sendModern() instead"),
         "Docblock @deprecated should take priority, got: {msg}"
@@ -2146,7 +2146,7 @@ async fn test_non_deprecated_elements_unaffected() {
         .iter()
         .find(|m| m.name == "handle")
         .unwrap();
-    assert!(method.deprecation_message.is_none());
+    assert!(method.deprecation_message().is_none());
     let prop = classes[0]
         .properties
         .iter()
@@ -2201,7 +2201,7 @@ async fn test_deprecated_attribute_native_php84_fqn_on_method() {
         .iter()
         .find(|m| m.name == "process")
         .unwrap();
-    let msg = method.deprecation_message.as_deref().unwrap();
+    let msg = method.deprecation_message().unwrap();
     assert!(
         msg.contains("Use processV2() instead"),
         "Expected message in method deprecation, got: {msg}"
@@ -2255,8 +2255,7 @@ async fn test_deprecated_attribute_fqn_without_backslash_prefix() {
         .find(|m| m.name == "jetbrainsStyle")
         .unwrap();
     assert!(
-        jb.deprecation_message
-            .as_deref()
+        jb.deprecation_message()
             .unwrap()
             .contains("JetBrains style"),
         "JetBrains-style #[Deprecated(reason:)] should work"
@@ -2268,8 +2267,7 @@ async fn test_deprecated_attribute_fqn_without_backslash_prefix() {
         .unwrap();
     assert!(
         native
-            .deprecation_message
-            .as_deref()
+            .deprecation_message()
             .unwrap()
             .contains("Native PHP style"),
         "Native-style #[\\Deprecated(message:)] should work"
@@ -2312,9 +2310,9 @@ async fn test_custom_namespaced_deprecated_attribute_on_method_does_not_trigger(
         .find(|m| m.name == "process")
         .unwrap();
     assert!(
-        method.deprecation_message.is_none(),
+        method.deprecation_message().is_none(),
         "#[\\App\\Attributes\\Deprecated] should NOT trigger deprecation, got: {:?}",
-        method.deprecation_message
+        method.deprecation_message()
     );
 }
 
@@ -2355,7 +2353,7 @@ async fn test_legitimate_deprecated_attributes_still_work() {
         .find(|m| m.name == "nativeAttr")
         .unwrap();
     assert!(
-        native.deprecation_message.is_some(),
+        native.deprecation_message().is_some(),
         "#[\\Deprecated] should trigger deprecation"
     );
     let jb = classes[0]
@@ -2364,7 +2362,7 @@ async fn test_legitimate_deprecated_attributes_still_work() {
         .find(|m| m.name == "jbAttr")
         .unwrap();
     assert!(
-        jb.deprecation_message.is_some(),
+        jb.deprecation_message().is_some(),
         "#[\\JetBrains\\PhpStorm\\Deprecated] should trigger deprecation"
     );
 }

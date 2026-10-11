@@ -141,7 +141,11 @@ pub(super) fn build_builder_forwarded_methods(
                 if let Some(ref mut ret) = forwarded.return_type {
                     *ret = ret.substitute(&subs);
                 }
-                if let Some(ref mut cond) = forwarded.conditional_return {
+                if let Some(cond) = forwarded
+                    .extras
+                    .as_deref_mut()
+                    .and_then(|e| e.conditional_return.as_mut())
+                {
                     apply_substitution_to_conditional(cond, &subs);
                 }
                 for param in forwarded.parameters.make_mut() {

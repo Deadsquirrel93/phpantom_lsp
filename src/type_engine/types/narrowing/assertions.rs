@@ -207,13 +207,14 @@ fn build_method_assertion_info<'a>(
 ) -> Option<CallAssertionInfo<'a>> {
     let (method, _) =
         find_assertion_method_in_chain(class, method_name, ctx.class_loader, &mut Vec::new(), 0)?;
+    let extras = method.extras.map(|e| *e).unwrap_or_default();
     Some(CallAssertionInfo {
-        assertions: method.type_assertions,
+        assertions: extras.type_assertions,
         parameters: method.parameters,
         argument_list,
         receiver_key,
-        template_params: method.template_params,
-        template_bindings: method.template_bindings,
+        template_params: extras.template_params,
+        template_bindings: extras.template_bindings,
     })
 }
 
@@ -238,7 +239,7 @@ pub(in crate::type_engine) fn find_assertion_method_in_chain(
         class,
         method_name,
         class_loader,
-        &|m| !m.type_assertions.is_empty(),
+        &|m| !m.type_assertions().is_empty(),
         visited,
         depth,
     )
@@ -993,16 +994,12 @@ fn conditional_return_from_chain<'a>(
         class,
         method_name,
         ctx.class_loader,
-        &|m| {
-            m.conditional_return
-                .as_ref()
-                .is_some_and(names_a_conditional)
-        },
+        &|m| m.conditional_return().is_some_and(names_a_conditional),
         &mut Vec::new(),
         0,
     )?;
     Some(CallReturnInfo {
-        return_type: method.conditional_return?,
+        return_type: method.extras?.conditional_return?,
         parameters: method.parameters,
         argument_list,
     })

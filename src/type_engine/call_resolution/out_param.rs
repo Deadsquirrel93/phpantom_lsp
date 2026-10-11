@@ -67,7 +67,7 @@ impl OutParamCallee {
         match self {
             Self::Function(fi) => &fi.template_params,
             Self::Method(cls, name) => match cls.get_method(name) {
-                Some(m) => &m.template_params,
+                Some(m) => m.template_params(),
                 None => &[],
             },
         }
