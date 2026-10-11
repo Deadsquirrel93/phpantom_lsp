@@ -19,15 +19,15 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # tokio is declared per-target below: "full" on native, a slim feature set on
 # wasm (which has no sockets, so "net" would pull in mio and fail to build).
-mago-syntax = "=1.51.0"
-mago-allocator = "=1.51.0"
-mago-database = "=1.51.0"
-mago-names = "=1.51.0"
-mago-phpdoc-syntax = "=1.51.0"
-mago-span = "=1.51.0"
-mago-formatter = { version = "=1.51.0", features = ["serde"] }
-mago-php-version = "=1.51.0"
-mago-composer = "=1.51.0"
+mago-syntax = "=1.56.1"
+mago-allocator = "=1.56.1"
+mago-database = "=1.56.1"
+mago-names = "=1.56.1"
+mago-phpdoc-syntax = "=1.56.1"
+mago-span = "=1.56.1"
+mago-formatter = { version = "=1.56.1", features = ["serde"] }
+mago-php-version = "=1.56.1"
+mago-composer = "=1.56.1"
 ignore = "0.4"
 globset = "0.4"
 regex = "1"
@@ -65,7 +65,7 @@ ureq = "3"
 tar = "0.4"
 flate2 = "1"
 self-replace = "1"
-zip = "9"
+zip = { version = "9", default-features = false, features = ["deflate"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 tokio = { version = "1.39", features = ["sync", "macros", "rt", "time"] }
