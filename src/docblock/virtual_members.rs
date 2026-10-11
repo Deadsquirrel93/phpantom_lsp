@@ -156,18 +156,20 @@ pub fn extract_method_tags_from_info(info: &DocblockInfo) -> Vec<MethodInfo> {
             .iter()
             .map(|param| {
                 let type_hint = param.type_text.as_deref().map(PhpType::parse);
-                ParameterInfo {
+                let mut info = ParameterInfo {
                     name: atom(&param.name),
                     is_required: !param.optional && !param.variadic,
                     type_hint: type_hint.clone(),
                     native_type_hint: type_hint,
                     description: None,
-                    default_value: None,
+                    default_value: param.default_text.clone(),
                     is_variadic: param.variadic,
                     is_reference: false,
                     closure_this_type: None,
                     param_out_type: None,
-                }
+                };
+                info.apply_null_default(|name| method.templates.iter().any(|t| t.name == name));
+                info
             })
             .collect();
 
@@ -525,6 +527,14 @@ mod tests {
         assert_eq!(methods[0].parameters.len(), 2);
         assert!(!methods[0].parameters[0].is_required);
         assert!(!methods[0].parameters[1].is_required);
+    }
+
+    #[test]
+    fn null_default_makes_param_nullable() {
+        let doc = make_docblock(&["@method static void tag(string $disk = null)"]);
+        let methods = extract_method_tags(&doc);
+        let hint = methods[0].parameters[0].type_hint.as_ref().unwrap();
+        assert_eq!(hint.to_string(), "?string");
     }
 
     #[test]

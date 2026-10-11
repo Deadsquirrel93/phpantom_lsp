@@ -631,22 +631,3 @@ global `\ArrayObject`. PHPantom resolves it through the file's own import
 of the same short name. The real-world shape is
 `use Illuminate\Support\Facades\Redis; use Redis as PhpRedis;`, where every
 `PhpRedis::OPT_*` constant and `PhpRedis` parameter lands on the facade.
-
-### B612. A `@method` parameter defaulting to `null` is not implicitly nullable
-
-**Impact: Low · Complexity: Low**
-
-```php
-/** @method static void tag(string $disk = null) */
-final class S {
-    public static function native(string $disk = null): void {}
-}
-
-S::tag(null);    // Argument 1 ($disk) expects string, got null
-S::native(null); // fine
-```
-
-PHP makes a parameter with a `null` default implicitly nullable, and
-docblock signatures follow the same convention (PHPStan treats them so).
-Generated facade tags use it widely, e.g. Laravel Excel's
-`toCollection(..., string $disk = null, ...)`.

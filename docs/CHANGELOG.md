@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`@method` parameters defaulting to `null`.** A `@method` tag such as `tag(string $disk = null)` now accepts `null`, as the equivalent native signature does.
 - **`$this` in a Pest test is the configured test case.** Inside `it()`, `test()`, `beforeEach()`, and `afterEach()` closures, `$this` is now the test case and traits bound to the file with `pest()->extends()` or `uses()`, whether in the test directory's `Pest.php` or in the test file itself, falling back to PHPUnit's `TestCase`. Helpers defined on them now resolve, and so do their return types.
 - **Saving a method body refreshes the files whose types depend on it.** When another open file's types are worked out from a method's body, such as the element type of a collection the method returns, editing only that body and saving now re-checks that file too.
 - **`keyBy()` and `groupBy()` on an Eloquent collection keep the model type.** `Member::all()->keyBy('id')` now reads as a collection of `Member` instead of `mixed`. This also holds for any generic class that names its parent or interface by a fully qualified name in `@extends`, `@implements`, or `@use`.

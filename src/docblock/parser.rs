@@ -147,6 +147,8 @@ pub struct MethodParamTagInfo {
     pub variadic: bool,
     /// Whether the parameter has a `= default`.
     pub optional: bool,
+    /// The source text of the `= default` value.
+    pub default_text: Option<String>,
 }
 
 /// An `@assert` declaration: `@assert !Type $subject`.
@@ -686,6 +688,9 @@ fn method_tag_info(value: &MethodTagValue<'_>, docblock: &str, base_offset: u32)
                     .map(|t| type_text(docblock, base_offset, t.span())),
                 variadic: param.is_variadic(),
                 optional: param.is_optional(),
+                default_text: param
+                    .default
+                    .map(|d| source_text(docblock, base_offset, d.value.span())),
             })
             .collect(),
         description: value
