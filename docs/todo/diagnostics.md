@@ -386,29 +386,6 @@ Found running the php-typing-conformance suite
 missing arms is [H16](phpstan-actions.md#h16-matchunhandled--add-missing-match-arms) (`match.unhandled`), which could
 then attach to this diagnostic instead of only PHPStan's.
 
-## D25. Two traits declaring the same property with different types is not reported
-
-**Impact: Low · Complexity: Low-Medium**
-
-```php
-trait Left  { public string $prop; }
-trait Right { public int $prop; }
-final class Composed { use Left; use Right; } // fatal: Left and Right define the same property ($prop) in the composition of Composed
-```
-
-PHP only allows the same property from two traits (or from a trait and
-the class) when the declarations are compatible: same visibility, same
-type, same `readonly`ness, and same default. Anything else is a
-compile-time fatal. The inheritance merge already sees both declarations;
-it keeps one and discards the other without comparing them.
-
-Found running the php-typing-conformance suite
-(`regressions_trait_property_type_conflict.php`). mago and Phan report it.
-
-**Where to look:** the trait merge in `src/inheritance/traits.rs`. The
-report could sit beside the missing-method check in
-`src/diagnostics/implementation_errors.rs`.
-
 ## D26. Reading a typed property that nothing initialises is not reported
 
 **Impact: Low-Medium · Complexity: Medium-High**

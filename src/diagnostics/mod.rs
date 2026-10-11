@@ -97,6 +97,9 @@
 //!   fail to implement all required methods from their interfaces or
 //!   abstract parents.  Reuses the same missing-method detection as the
 //!   "Implement missing methods" code action.
+//! - **Incompatible trait property diagnostics** — report a class or
+//!   trait that picks up the same property from two traits (or a trait
+//!   and its own body) with declarations PHP rejects as incompatible.
 //! - **`@deprecated` usage diagnostics** — report references to symbols
 //!   marked `@deprecated` with `DiagnosticTag::Deprecated` (renders as
 //!   strikethrough in most editors).  Requires resolving the reference
@@ -269,6 +272,7 @@ pub(crate) mod state;
 mod subject_cache;
 pub(crate) mod suppression;
 mod syntax_errors;
+mod trait_property_conflicts;
 mod type_errors;
 pub(crate) mod undefined_variables;
 pub(crate) mod unknown_classes;
@@ -582,6 +586,12 @@ impl Backend {
             step!(
                 "missing_implementation",
                 self.collect_implementation_error_diagnostics_with_context(
+                    ctx, uri_str, content, out
+                )
+            );
+            step!(
+                "incompatible_trait_property",
+                self.collect_trait_property_conflict_diagnostics_with_context(
                     ctx, uri_str, content, out
                 )
             );

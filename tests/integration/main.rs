@@ -158,6 +158,7 @@ mod diagnostics_reachability;
 mod diagnostics_readonly_writes;
 mod diagnostics_return_type_errors;
 mod diagnostics_syntax_errors;
+mod diagnostics_trait_property_conflicts;
 mod diagnostics_type_errors;
 mod diagnostics_undefined_variables;
 mod diagnostics_unknown_classes;
