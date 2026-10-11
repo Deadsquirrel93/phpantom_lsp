@@ -1352,6 +1352,19 @@ impl PhpType {
         matches!(self.kind(), TypeKind::Named(s) if s.eq_ignore_ascii_case("null"))
     }
 
+    /// Whether `null` is spelled out in this type: `null` itself, `?T`, or
+    /// a union with a `null` member. Unlike [`accepts_null`], `mixed` does
+    /// not count.
+    ///
+    /// [`accepts_null`]: PhpType::accepts_null
+    pub fn has_null_member(&self) -> bool {
+        match self.kind() {
+            TypeKind::Nullable(_) => true,
+            TypeKind::Union(members) => members.iter().any(|m| m.has_null_member()),
+            _ => self.is_null(),
+        }
+    }
+
     /// Whether a [`TypeKind::Conditional`] appears anywhere in this type tree.
     ///
     /// Used as a cheap guard before running the (cloning) nested-conditional

@@ -37,43 +37,7 @@ No outstanding items.
 
 ## Narrowing
 
-### B582. A union of two or more non-null values counts as nullable
-
-**Impact: Medium · Complexity: Low**
-
-```php
-class Node {}
-class A extends Node {}
-class B extends Node {}
-function takesAorB(A|B $x): void {}
-function f(Node $node): void {
-    if ($node instanceof A) {
-        $kind = 'a';
-    } elseif ($node instanceof B) {
-        $kind = 'b';
-    } else {
-        $kind = null;
-    }
-    if ($kind !== null) {
-        takesAorB($node); // expects A|B, got Node
-    }
-}
-```
-
-The join after the chain records that `$kind` holding a value means
-`$node` is `A|B`, but the `!== null` test never applies it. With one arm,
-or with every arm assigning the same literal, it does.
-
-`scope_value_is_nullable` (`cond_narrowing/null_identity.rs`) asks
-`non_null_type().is_some()`, and `PhpType::non_null_type()` returns
-`Some` for any union with at least two members besides `null`, whether
-or not `null` is one of them. So `'a'|'b'` reads as nullable, and every
-`NonNull` trigger and non-null implication on such a holder stays unmet.
-All four callers in `cond_narrowing` go through it.
-
-**Fix:** Ask whether the type has a `null` member instead. `accepts_null()`
-is not a drop-in replacement, since it also counts `mixed`, which the
-current check does not.
+No outstanding items.
 
 ## Array types
 

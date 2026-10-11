@@ -6,7 +6,8 @@
 //! Each case hovers the variable at the `$x; // here` line and compares
 //! the type the hover reports.
 
-use crate::common::{create_test_backend, hover_at, hover_text};
+use crate::common::{collect_diagnostics_with, create_test_backend, hover_at, hover_text};
+use phpantom_lsp::Backend;
 
 /// The type hover reports for the variable on the line marked `// here`.
 fn type_at_marker(php: &str) -> String {
@@ -266,4 +267,34 @@ function f($h): void {
 }
 "#;
     assert_eq!(type_at_marker(php), "Child");
+}
+
+// ─── null tests on unions of non-null values ────────────────────────────────
+
+#[test]
+fn a_not_null_test_on_a_union_of_values_applies_what_the_join_recorded() {
+    let php = r#"<?php
+class Node {}
+class A extends Node {}
+class B extends Node {}
+function takesAorB(A|B $x): void {}
+function f(Node $node): void {
+    if ($node instanceof A) {
+        $kind = 'a';
+    } elseif ($node instanceof B) {
+        $kind = 'b';
+    } else {
+        $kind = null;
+    }
+    if ($kind !== null) {
+        takesAorB($node);
+    }
+}
+"#;
+    let diagnostics = collect_diagnostics_with(
+        &create_test_backend(),
+        php,
+        Backend::collect_argument_type_diagnostics,
+    );
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
 }

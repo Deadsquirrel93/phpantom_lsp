@@ -326,10 +326,7 @@ fn recorded_narrows_current(
 /// an unknown value is not a proof.
 pub(super) fn scope_value_is_nullable(key: &str, scope: &ScopeState) -> bool {
     let types = scope.get(key);
-    types.is_empty()
-        || types
-            .iter()
-            .any(|rt| rt.type_string.non_null_type().is_some() || rt.type_string == PhpType::null())
+    types.is_empty() || types.iter().any(|rt| rt.type_string.has_null_member())
 }
 
 /// Collect the expressions `condition` proves are not `null` under the
