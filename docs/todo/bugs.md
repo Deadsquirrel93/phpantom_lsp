@@ -29,34 +29,7 @@ No outstanding items.
 
 ## Standard-library return types
 
-### B592. `class_implements()` keeps `false` for a class known to exist
-
-**Impact: Low · Complexity: Low**
-
-```php
-if (is_string($c) && class_exists($c) && in_array(Foo::class, class_implements($c), true)) {}
-// Argument 2 ($haystack) expects array, got array<string>|false
-```
-
-`class_implements()`, `class_parents()` and `class_uses()` only return
-`false` when the class cannot be loaded. After a `class_exists()` check
-(or on a literal `Foo::class`) the `false` cannot happen. PHPStan returns a
-benevolent `array|false` here, which is why it stays quiet.
-
-### B593. `filter_var()` returns `mixed` whatever the filter
-
-**Impact: Low · Complexity: Low**
-
-```php
-$id = filter_var($v, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
-// PHPantom: mixed. PHPStan: int<1, max>|false
-```
-
-`FILTER_VALIDATE_INT`, `FILTER_VALIDATE_FLOAT`, `FILTER_VALIDATE_BOOL` and
-friends decide the result type (plus `false`, or `null` with
-`FILTER_NULL_ON_FAILURE`). With `mixed`, `$texts[$id] = …` widens a
-documented `array<int, string>` to `int|string` keys, which then fails the
-array's own `@var`.
+No outstanding items.
 
 ## Reachability
 
@@ -164,6 +137,26 @@ PHPUnit extension narrows it (and `assertSame`, `assertNotNull`,
 Mirroring that table would cover the common assertions.
 
 ## Array types
+
+### B614. An array literal written inside a call's arguments is typed as bare `array`
+
+**Impact: Low · Complexity: Medium**
+
+```php
+takesInt(filter_var($v, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]));
+// Argument 1 expects int, got mixed (should be int<1, max>|false)
+$id = filter_var($v, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+// int<1, max>|false, as expected
+```
+
+A call nested inside another call's arguments is resolved from its argument
+text, and that resolver reads any `[…]` or `array(…)` literal as `array`
+without looking inside. Anything keyed on an array argument's shape (the
+`filter_var()` options, a template bound from a literal array, a
+conditional return type on an `array{…}` parameter) loses it there, while
+the same call as an assignment's right-hand side goes through the forward
+walker and sees the shape. Typing the literal through the shared expression
+resolver would make both paths agree.
 
 ### B591. `array_map` reads a parenthesised `new` receiver as the element type
 

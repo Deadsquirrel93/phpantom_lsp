@@ -550,7 +550,7 @@ impl Backend {
             && let Some(func_info) = fl(func_name, 0)
         {
             if func_info.conditional_return.is_some()
-                || crate::type_engine::types::flag_returns::has_flag_dependent_return(func_name)
+                || crate::type_engine::types::call_site_returns::has_call_site_return(func_name)
             {
                 let var_resolver = build_var_resolver(ctx);
                 // `is <Type>` conditions on an argument that isn't a
@@ -582,12 +582,13 @@ impl Backend {
                             &tpl,
                         )
                     })
-                    // A branch the flags argument rules out
+                    // A builtin whose arguments decide its result
                     // (`json_encode(…, JSON_THROW_ON_ERROR)` never
-                    // returning `false`) is decided the same way: at
-                    // the call site, from the declared return type.
+                    // returning `false`, `filter_var()` returning what
+                    // its filter produces) is decided the same way: at
+                    // the call site.
                     .or_else(|| {
-                        crate::type_engine::types::flag_returns::flag_narrowed_return_type(
+                        crate::type_engine::types::call_site_returns::call_site_return_type(
                             func_name,
                             &func_info.parameters,
                             text_args,

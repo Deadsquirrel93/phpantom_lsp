@@ -33,6 +33,9 @@ pub fn apply_function_stub_patches(func: &mut FunctionInfo) {
         "microtime" => patch_microtime(func),
         "getenv" => patch_getenv(func),
         "func_get_args" => func.return_type = Some(PhpType::list(PhpType::mixed())),
+        "class_implements" => patch_class_relation(func, "interface-string"),
+        "class_parents" => patch_class_relation(func, "class-string"),
+        "class_uses" => patch_class_relation(func, "trait-string"),
         "mb_convert_encoding" => patch_mb_convert_encoding(func),
         "abs" => patch_abs(func),
         "var_export" => patch_var_export(func),
@@ -604,6 +607,16 @@ fn patch_print_r(func: &mut FunctionInfo) {
         PhpType::string(),
         PhpType::parse("true"),
     );
+}
+
+/// Patch `class_implements()`, `class_parents()` and `class_uses()` to say
+/// what their arrays hold.
+///
+/// The stubs declare `string[]|false`; each entry is the name of a class-like
+/// keyed by that same name. Whether the `false` can happen is decided at the
+/// call site (see `type_engine::types::call_site_returns`).
+fn patch_class_relation(func: &mut FunctionInfo, name_type: &str) {
+    func.return_type = Some(PhpType::parse(&format!("array<string, {name_type}>|false")));
 }
 
 /// Patch `hrtime()` to have a conditional return type keyed on `$as_number`.

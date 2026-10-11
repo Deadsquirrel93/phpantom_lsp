@@ -11996,6 +11996,49 @@ class Encoder {
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
+/// `class_implements()` only returns `false` for a class that cannot be
+/// loaded, so a class-string checked with `class_exists()` is not reported for
+/// the `false` branch.
+#[test]
+fn class_implements_on_an_existing_class_satisfies_an_array_parameter() {
+    let php = r#"<?php
+interface Marker {}
+
+function test(mixed $class, object $instance): void {
+    if (is_string($class) && class_exists($class) && in_array(Marker::class, class_implements($class), true)) {}
+    if (in_array(Marker::class, class_implements(Marker::class), true)) {}
+    if (in_array(Marker::class, class_implements($instance), true)) {}
+}
+"#;
+    let messages = messages_with_code(&collect_with_full_stubs(php), "type_mismatch_argument");
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// A `filter_var()` result checked against `false` is an `int`, so writing
+/// through it keeps an `array<int, string>` keyed by `int`.
+#[test]
+fn filter_var_int_key_keeps_the_array_key_type() {
+    let php = r#"<?php
+/**
+ * @param array<int, string> $texts
+ * @return array<int, string>
+ */
+function test(array $texts, mixed $raw): array {
+    $id = filter_var($raw, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+    if ($id !== false) {
+        $texts[$id] = 'x';
+    }
+    return $texts;
+}
+"#;
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///test.php";
+    backend.update_ast(uri, php);
+    let mut out = Vec::new();
+    backend.collect_return_type_diagnostics(uri, php, &mut out);
+    assert!(out.is_empty(), "got {out:?}");
+}
+
 /// The shape the typed-constant report was filed against: a declared `string`
 /// says the constant may hold any string, while the initialiser says which one
 /// it does hold. A parameter that accepts only some of them tells the two

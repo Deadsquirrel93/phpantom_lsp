@@ -819,3 +819,63 @@ function probe(bool $flag): void {
         ],
     );
 }
+
+/// `filter_var()` is declared `mixed`, but the filter decides what a
+/// successful call returns and the flags decide what a failed one does.
+#[test]
+fn filter_var_returns_what_its_filter_produces() {
+    let content = r#"<?php
+function probe(mixed $v, int $filter): void {
+    $raw = filter_var($v);
+    $int = filter_var($v, FILTER_VALIDATE_INT);
+    $positive = filter_var($v, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+    $bounded = filter_var($v, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1, 'max_range' => 10]]);
+    $float = filter_var($v, FILTER_VALIDATE_FLOAT, ['flags' => FILTER_NULL_ON_FAILURE]);
+    $bool = filter_var($v, FILTER_VALIDATE_BOOL);
+    $nullableBool = filter_var($v, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+    $email = filter_var($v, FILTER_VALIDATE_EMAIL);
+    $input = filter_input(INPUT_GET, 'id', FILTER_VALIDATE_INT);
+    $unknown = filter_var($v, $filter);
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$raw", "string|false"),
+            ("$int", "int|false"),
+            ("$positive", "int<1, max>|false"),
+            ("$bounded", "int<1, 10>|false"),
+            ("$float", "float|null"),
+            ("$bool", "bool"),
+            ("$nullableBool", "bool|null"),
+            ("$email", "non-falsy-string|false"),
+            ("$input", "int|false|null"),
+            ("$unknown", "mixed"),
+        ],
+    );
+}
+
+/// `class_implements()` and its siblings only return `false` for a class
+/// that cannot be loaded. An object's class always is, and a class-string's
+/// failure is kept but not enforced.
+#[test]
+fn class_implements_drops_false_for_an_object() {
+    let content = r#"<?php
+class Widget {}
+function probe(Widget $widget, string $name): void {
+    $interfaces = class_implements($widget);
+    $parents = class_parents($widget);
+    $traits = class_uses($widget);
+    $byName = class_implements($name);
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$interfaces", "array<string, interface-string>"),
+            ("$parents", "array<string, class-string>"),
+            ("$traits", "array<string, trait-string>"),
+            ("$byName", "array<string, interface-string>|false"),
+        ],
+    );
+}

@@ -979,10 +979,10 @@ pub(super) fn resolve_rhs_function_call<'b>(
         && let Some(func_info) = fl(name, func_name_offset)
     {
         // A return type the call site decides (a conditional keyed on an
-        // argument, or a branch the flags argument rules out) is
+        // argument, or a builtin whose arguments decide its result) is
         // authoritative, so it is tried before the declared type.
         if func_info.conditional_return.is_some()
-            || crate::type_engine::types::flag_returns::has_flag_dependent_return(name)
+            || crate::type_engine::types::call_site_returns::has_call_site_return(name)
         {
             let var_resolver = build_var_resolver_from_ctx(ctx);
             let rctx = ctx.as_resolution_ctx();
@@ -1018,11 +1018,16 @@ pub(super) fn resolve_rhs_function_call<'b>(
                     &tpl,
                 )
             })
-            // A branch the flags argument rules out (`json_encode(…,
-            // JSON_THROW_ON_ERROR)` never returning `false`) is decided the
-            // same way: at the call site, from the declared return type.
+            // A builtin whose arguments decide its result (`json_encode(…,
+            // JSON_THROW_ON_ERROR)` never returning `false`, `filter_var()`
+            // returning what its filter produces) is decided the same way:
+            // at the call site. The arguments are read through the walker
+            // first, which types an inline options array as its shape where
+            // the text resolver only sees `array`.
             .or_else(|| {
-                crate::type_engine::types::flag_returns::flag_narrowed_return_type(
+                let walker_types = walker_arg_types(&func_call.argument_list, ctx);
+                let arg_ty_resolver = |t: &str| walker_types(t).or_else(|| arg_ty_resolver(t));
+                crate::type_engine::types::call_site_returns::call_site_return_type(
                     name,
                     &func_info.parameters,
                     &text_args,
