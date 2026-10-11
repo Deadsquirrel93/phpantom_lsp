@@ -827,8 +827,12 @@ pub(crate) fn split_call_subject_raw(subject: &str) -> Option<(&str, &str)> {
 /// Parse a `new ClassName` or `(new ClassName(…))` expression and extract
 /// the class name.
 pub(crate) fn parse_new_expression_class(s: &str) -> Option<String> {
-    // Strip balanced outer parentheses.
-    let inner = if s.starts_with('(') && s.ends_with(')') {
+    // Strip outer parentheses, when the opening one is closed by the last
+    // character: `(new R())->all()` starts and ends with one, but it is a
+    // call on the parenthesised `new`, not the `new` itself.
+    let inner = if s.starts_with('(')
+        && crate::text_scan::find_matching_forward(s, 0, b'(', b')') == Some(s.len() - 1)
+    {
         &s[1..s.len() - 1]
     } else {
         s

@@ -14241,3 +14241,85 @@ function test(Coll $banners): void
         "the closure returns `Coll<int, Item>`, not a bare `Coll`: {messages:?}"
     );
 }
+
+// ─── Array arguments bind templates through their shape ─────────────────────
+
+/// The type `takesInt()` reports for each `takesInt(…)` line of `body`, in
+/// order, with `id()`, `pairs()` and `first()` declared as generic helpers.
+fn shape_binding_messages(body: &str) -> Vec<String> {
+    let php = format!(
+        r#"<?php
+function takesInt(int $i): void {{}}
+/**
+ * @template T
+ * @param T $a
+ * @return T
+ */
+function id(mixed $a): mixed {{ return $a; }}
+/**
+ * @template K of array-key
+ * @template V
+ * @param array<K, V> $a
+ * @return list<V>
+ */
+function pairs(array $a): array {{ return []; }}
+/**
+ * @template T
+ * @param array{{k: T}} $a
+ * @return T
+ */
+function first(array $a): mixed {{ return $a['k']; }}
+final class R {{
+    /** @return list<\stdClass> */
+    public function all(): array {{ return []; }}
+    public function c(): void {{
+        $t = ['k' => 'str'];
+        {body}
+    }}
+}}
+"#
+    );
+    messages_with_code(
+        &collect_slow_with_full_stubs(&php),
+        "type_mismatch_argument",
+    )
+}
+
+#[test]
+fn an_array_literal_inside_a_nested_call_keeps_its_shape() {
+    let msgs = shape_binding_messages("takesInt(array_values(id(['k' => 'str'])));");
+    assert_eq!(msgs, ["Argument 1 ($i) expects int, got list<'str'>"]);
+}
+
+#[test]
+fn a_key_value_template_binds_from_a_shape() {
+    let msgs = shape_binding_messages("takesInt(pairs($t));\n        takesInt(array_values($t));");
+    assert_eq!(
+        msgs,
+        [
+            "Argument 1 ($i) expects int, got list<'str'>",
+            "Argument 1 ($i) expects int, got list<'str'>",
+        ]
+    );
+}
+
+#[test]
+fn a_template_inside_a_shape_param_binds_from_the_matching_entry() {
+    let msgs =
+        shape_binding_messages("takesInt(first($t));\n        takesInt(first(['k' => 'str']));");
+    assert_eq!(
+        msgs,
+        [
+            "Argument 1 ($i) expects int, got 'str'",
+            "Argument 1 ($i) expects int, got 'str'",
+        ]
+    );
+}
+
+#[test]
+fn array_map_reads_the_element_type_of_a_call_on_a_parenthesised_new() {
+    let msgs = shape_binding_messages(
+        "array_map(fn(\\stdClass $s) => $s->name, (new R())->all());\n        takesInt(pairs((new R())->all()));",
+    );
+    assert_eq!(msgs, ["Argument 1 ($i) expects int, got list<stdClass>"]);
+}

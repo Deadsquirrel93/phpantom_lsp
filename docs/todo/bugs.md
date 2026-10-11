@@ -41,69 +41,7 @@ No outstanding items.
 
 ## Array types
 
-### B614. An array literal written inside a call's arguments is typed as bare `array`
-
-**Impact: Low · Complexity: Medium**
-
-```php
-takesInt(filter_var($v, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]));
-// Argument 1 expects int, got mixed (should be int<1, max>|false)
-$id = filter_var($v, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
-// int<1, max>|false, as expected
-```
-
-A call nested inside another call's arguments is resolved from its argument
-text, and that resolver reads any `[…]` or `array(…)` literal as `array`
-without looking inside. Anything keyed on an array argument's shape (the
-`filter_var()` options, a template bound from a literal array, a
-conditional return type on an `array{…}` parameter) loses it there, while
-the same call as an assignment's right-hand side goes through the forward
-walker and sees the shape. Typing the literal through the shared expression
-resolver would make both paths agree.
-
-### B591. `array_map` reads a parenthesised `new` receiver as the element type
-
-**Impact: Low · Complexity: Low**
-
-```php
-final class R {
-    /** @return list<stdClass> */
-    public function all(): array { return []; }
-    public function c(): void {
-        array_map(fn(stdClass $s) => $s->name, (new R())->all());
-        // expects callable(R): mixed, got Closure(stdClass)
-    }
-}
-```
-
-The array argument itself resolves to `list<stdClass>` (passing it to an
-`int` parameter says so), and the same call through a variable
-(`$x = (new R())->all(); array_map(…, $x)`) is clean, as is `array_filter`
-with the same argument. Only the element type `array_map` derives for its
-callback's expected parameter lands on `R`, so that derivation appears to
-resolve the receiver `(new R())` instead of the whole call.
-
-### B605. Iterating a class constant of enum cases gives `mixed`
-
-**Impact: Low · Complexity: Low**
-
-```php
-enum Country: string { case DK = 'dk'; case SE = 'se'; }
-
-final class C {
-    private const array TYPED = [Country::DK, Country::SE];
-    private const UNTYPED = [Country::DK, Country::SE];
-
-    public function a(): void {
-        foreach (self::TYPED as $m) { echo $m->value; }   // $m is mixed
-        foreach (self::UNTYPED as $m) { echo $m->value; } // $m is mixed
-    }
-}
-```
-
-The constant's value is a literal list of enum cases, so the element type
-is `Country::DK|Country::SE` (or `Country`). Both the typed and the
-untyped constant come out as `mixed`.
+No outstanding items.
 
 ## Laravel
 

@@ -310,14 +310,14 @@ fn bind_direct(
     }
     let resolved_type = Backend::resolve_arg_text_to_type(arg_text, ctx).or_else(from_walker)?;
 
-    // `resolve_arg_text_to_type` collapses any `[...]` literal to the bare
-    // `array` keyword, which loses the argument's own keys. When the
-    // template binds directly (e.g. `@template T of array<array-key,
-    // mixed>` with `@param T $items`), that erased shape is the only
-    // source of type information — there is no wrapping hint to unify
-    // against — so build the literal's real key/value shape here instead,
-    // letting `key-of<T>`/`value-of<T>` on the bound template project the
-    // caller's actual keys.
+    // `resolve_arg_text_to_type` leaves a `[...]` literal with an element
+    // it cannot type as the bare `array` keyword, which loses the
+    // argument's own keys. When the template binds directly (e.g.
+    // `@template T of array<array-key, mixed>` with `@param T $items`),
+    // that erased shape is the only source of type information — there is
+    // no wrapping hint to unify against — so build the literal's key/value
+    // shape here instead, letting `key-of<T>`/`value-of<T>` on the bound
+    // template project the caller's actual keys.
     let literal_shape = resolved_type
         .is_bare_array()
         .then(|| array_literal_shape_type(arg_text, ctx))
@@ -329,12 +329,12 @@ fn bind_direct(
         // A union hint that offers an array-like alternative alongside the
         // bare template name (`iterable<array-key, T>|T`) still classifies
         // as `Direct`, because the bare alternative matches any argument.
-        // An array *literal* argument resolves to a bare `array` with no
-        // element type though, so unifying against it falls through to
-        // `mixed` — unwrap the literal's elements the way `GenericWrapper`
-        // binding does and retry before that fallback.  The elements are
-        // widened the way a scalar argument through such a hint is.
-        if resolved_type.is_bare_array()
+        // An array *literal* argument resolves to its exact shape though,
+        // which unifying against falls through to `mixed` — unwrap the
+        // literal's elements the way `GenericWrapper` binding does and
+        // retry before that fallback.  The elements are widened the way a
+        // scalar argument through such a hint is.
+        if is_array_literal(arg_text)
             && let Some(elem) = array_literal_element_type(arg_text, ctx)
             && let Some(unified) = unify_template(
                 h,
@@ -347,6 +347,13 @@ fn bind_direct(
         unify_template(h, &resolved_type, tpl_name)
     });
     Some(unified.or(literal_shape).unwrap_or(resolved_type))
+}
+
+/// Whether `arg_text` is an array literal, `[…]` or `array(…)`.
+fn is_array_literal(arg_text: &str) -> bool {
+    let text = arg_text.trim();
+    (text.starts_with('[') && text.ends_with(']'))
+        || (text.starts_with("array(") && text.ends_with(')'))
 }
 
 /// `@param T[] $items` or `@param array<T> $items`: `T` is one element.
@@ -404,8 +411,8 @@ fn bind_generic_wrapper(
 
     if is_array_like_wrapper(wrapper_name) {
         if arg_text.starts_with('[') && arg_text.ends_with(']') {
-            // `resolve_arg_text_to_type("[1, 2, 3]")` returns a bare `array`,
-            // so the literal is unwrapped and its entries resolved directly.
+            // The literal's entries are resolved directly, which still
+            // answers when one of them leaves the whole literal untyped.
             return if arity >= 2 && tpl_position == 0 {
                 resolve_array_literal_generic(0, arg_text, ctx)
             } else {
@@ -432,6 +439,7 @@ fn bind_generic_wrapper(
         if resolved.is_empty_array_shape() {
             return Some(PhpType::never());
         }
+        let resolved = resolved.generalized_array();
         return match (arity, tpl_position) {
             (0 | 1, _) | (_, 1) => resolved.extract_value_type(false).cloned(),
             // `array<V>`, `V[]` and a bare `array` name no key type, so

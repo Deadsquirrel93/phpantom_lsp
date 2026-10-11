@@ -232,6 +232,15 @@ impl Backend {
         }
 
         // ── Literal values ──────────────────────────────────────
+        // An array literal carries the shape of what it holds, so a
+        // template or conditional return keyed on that shape sees it the
+        // same way it would through an assignment.
+        if let Some(ty) = crate::type_engine::variable::rhs_resolution::infer_array_literal_type(
+            trimmed,
+            &|element| Self::resolve_arg_text_to_type(element, ctx),
+        ) {
+            return Some(ty);
+        }
         if let Some(ty) = resolve_literal_type(trimmed) {
             return Some(ty);
         }
@@ -901,10 +910,10 @@ fn exclusively_bound_templates(
 /// Resolve the elements of an array literal argument to the type a template
 /// bound through them takes.
 ///
-/// `resolve_arg_text_to_type("[1, 2, 3]")` collapses the whole literal to
-/// a bare `array` with no element type, so callers that need the element
-/// type itself (binding a template through an array-like wrapper) must
-/// unwrap the literal and resolve its elements directly instead.  A scalar
+/// `resolve_arg_text_to_type("[1, 2, 3]")` types the whole literal (as a
+/// shape, or a bare `array` when an element cannot be typed), so callers
+/// that need the element type itself (binding a template through an
+/// array-like wrapper) unwrap the literal and resolve its elements.  A scalar
 /// literal element stays a literal, as a scalar argument bound directly
 /// does (`[1, 2]` binds `1|2`), and an empty literal has no element at all,
 /// so it binds `never`.
@@ -954,12 +963,12 @@ pub(crate) fn array_literal_element_type(
 /// Build an `array{key: type, ...}` shape from an array literal argument's
 /// own keys and values.
 ///
-/// `resolve_arg_text_to_type("['debug' => false]")` collapses the whole
-/// literal to the bare `array` keyword, which is enough for most callers
-/// but erases the literal's own keys. A template bound directly to the
-/// whole argument (no wrapping hint to unify against) needs those keys
-/// preserved so `key-of<T>`/`value-of<T>` on the bound template can still
-/// project them out.
+/// `resolve_arg_text_to_type("['debug' => $x]")` collapses a literal with
+/// an element it cannot type to the bare `array` keyword, which erases the
+/// literal's own keys. A template bound directly to the whole argument (no
+/// wrapping hint to unify against) needs those keys preserved so
+/// `key-of<T>`/`value-of<T>` on the bound template can still project them
+/// out, so an element nothing can type is recorded as `mixed` here.
 ///
 /// Only keyed entries are recorded — a mixed literal's positional elements
 /// are dropped, matching the AST-based array literal inference in
@@ -1716,6 +1725,18 @@ pub(super) fn unify_template(
             has_bare.then(|| bare_template_remainder(members, arg_type, tpl_name))
         }
         TypeKind::Generic(hint) => {
+            // A shape spells its entries out one by one; against a container
+            // hint it stands for the container it describes, whose key and
+            // value are what its entries have in common.
+            let generalized;
+            let arg_type = if !arg_type.is_empty_array_shape()
+                && crate::type_engine::variable::rhs_resolution::is_array_like_wrapper(&hint.name)
+            {
+                generalized = arg_type.generalized_array();
+                &generalized
+            } else {
+                arg_type
+            };
             if let TypeKind::Generic(arg) = arg_type.kind()
                 && arg.args.len() == hint.args.len()
             {
@@ -1761,6 +1782,21 @@ pub(super) fn unify_template(
                 .extract_value_type(false)
                 .and_then(|v| unify_template(inner, v, tpl_name)),
         },
+        // `array{k: T}` against a shape: `T` is what the argument holds under
+        // the same key.
+        TypeKind::ArrayShape(entries) => {
+            let mut position = 0usize;
+            entries.iter().find_map(|entry| {
+                let value = match &entry.key {
+                    Some(key) => arg_type.shape_value_type(key),
+                    None => {
+                        position += 1;
+                        arg_type.shape_value_type(&(position - 1).to_string())
+                    }
+                }?;
+                unify_template(&entry.value_type, value, tpl_name)
+            })
+        }
         TypeKind::Nullable(inner) => unify_template(inner, arg_type.unwrap_nullable(), tpl_name),
         _ => None,
     }

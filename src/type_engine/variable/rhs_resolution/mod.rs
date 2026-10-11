@@ -1843,13 +1843,13 @@ fn is_object_cast_scalar_type(ty: &PhpType) -> bool {
 pub(crate) type TextResolver<'a> = &'a dyn Fn(&str) -> Option<PhpType>;
 
 /// The literal an array element that names something resolves to: `'Foo'`
-/// for `Foo::class`, or the value a constant or an enum case's `->value`
-/// holds.
+/// for `Foo::class`, the value a constant or an enum case's `->value`
+/// holds, or the enum an enum case belongs to.
 ///
-/// A shape entry has to be a [`TypeKind::Literal`] to mean anything (a
-/// non-literal element falls back to plain `array`, see
-/// [`literal_array_shape`]), so a resolved `class-string<Foo>` is unwrapped
-/// down to the class name it names, matching how PHPStan reads a `::class`
+/// A shape entry has to be exact to mean anything (any other element falls
+/// back to plain `array`, see [`literal_array_shape`]), so a resolved
+/// `class-string<Foo>` is unwrapped down to the class name it names,
+/// matching how PHPStan reads a `::class`
 /// array element: as the literal string, not the wrapper type a bare
 /// `Foo::class` expression resolves to on its own.
 fn resolved_element_literal(value: &str, resolve: TextResolver<'_>) -> Option<PhpType> {
@@ -1862,6 +1862,9 @@ fn resolved_element_literal(value: &str, resolve: TextResolver<'_>) -> Option<Ph
             _ => None,
         },
         TypeKind::Literal(_) => Some(ty),
+        // An object a constant expression names (an enum case, or a `new`
+        // in a global constant) is an instance of exactly that class.
+        TypeKind::Named(_) if !ty.is_keyword() => Some(ty),
         _ => None,
     }
 }
@@ -1890,16 +1893,50 @@ fn strip_array_literal(value: &str) -> Option<&str> {
     rest.strip_suffix(')')
 }
 
-/// The shape an array literal describes, when every element of it is
-/// itself a literal.
+/// Which elements of an array literal [`literal_array_shape`] may type.
+#[derive(Clone, Copy)]
+enum ArrayElements<'a> {
+    /// A constant's initialiser: literals, plus the names the resolver pins
+    /// down to one exact value (see [`resolved_element_literal`]).
+    Exact(Option<TextResolver<'a>>),
+    /// A call argument, written inline: any element the resolver can type.
+    Any(TextResolver<'a>),
+}
+
+impl<'a> ArrayElements<'a> {
+    fn resolver(self) -> Option<TextResolver<'a>> {
+        match self {
+            ArrayElements::Exact(resolve) => resolve,
+            ArrayElements::Any(resolve) => Some(resolve),
+        }
+    }
+
+    fn value_type(self, value: &str) -> Option<PhpType> {
+        match self {
+            // A constant expression cannot interpolate, but an argument can,
+            // and an interpolated string is not the literal it is spelled as.
+            ArrayElements::Any(resolve) if value.starts_with('"') && value.contains('$') => {
+                resolve(value)
+            }
+            ArrayElements::Any(resolve) => {
+                infer_type_from_constant_value_inner(value, self).or_else(|| resolve(value))
+            }
+            ArrayElements::Exact(resolve) => infer_type_from_constant_value_inner(value, self)
+                .or_else(|| resolved_element_literal(value, resolve?)),
+        }
+    }
+}
+
+/// The shape an array literal describes, when every element of it can be
+/// typed (see [`ArrayElements`]).
 ///
-/// Returns `None` as soon as an element is something that would have to
-/// be resolved (a constant, a call, a concatenation), because a shape
-/// missing one of its slots would claim the array is smaller than it is.
-/// The caller then falls back to an unconstrained `array`.
-fn literal_array_shape(inner: &str, resolve: Option<TextResolver<'_>>) -> Option<PhpType> {
+/// Returns `None` as soon as an element cannot, because a shape missing
+/// one of its slots would claim the array is smaller than it is. The
+/// caller then falls back to an unconstrained `array`.
+fn literal_array_shape(inner: &str, elements: ArrayElements<'_>) -> Option<PhpType> {
     use crate::php_type::ShapeEntry;
 
+    let resolve = elements.resolver();
     if inner.trim().is_empty() {
         return Some(PhpType::list_shape(Vec::new()));
     }
@@ -1937,8 +1974,7 @@ fn literal_array_shape(inner: &str, resolve: Option<TextResolver<'_>>) -> Option
             }
             None => (None, item),
         };
-        let value_type = infer_type_from_constant_value_inner(value, resolve)
-            .or_else(|| resolve.and_then(|resolve| resolved_element_literal(value, resolve)))?;
+        let value_type = elements.value_type(value.trim())?;
         put_shape_entry(&mut entries, key, value_type);
     }
     Some(if keyed {
@@ -1998,7 +2034,7 @@ fn split_top_level_arrow(item: &str) -> Option<(&str, &str)> {
 /// assignment resolves.  Returns `None` for expressions that cannot be
 /// trivially classified (e.g. concatenation, function calls).
 pub(crate) fn infer_type_from_constant_value(value: &str) -> Option<PhpType> {
-    infer_type_from_constant_value_inner(value, None)
+    infer_type_from_constant_value_inner(value, ArrayElements::Exact(None))
 }
 
 /// [`infer_type_from_constant_value`], but an array element that the fixed
@@ -2012,12 +2048,23 @@ pub(crate) fn infer_type_from_constant_value_resolved(
     value: &str,
     resolve: TextResolver<'_>,
 ) -> Option<PhpType> {
-    infer_type_from_constant_value_inner(value, Some(resolve))
+    infer_type_from_constant_value_inner(value, ArrayElements::Exact(Some(resolve)))
+}
+
+/// The type of an array literal written as a call argument (`f(['a' =>
+/// $b])`), with each element typed through `resolve`, or `None` when `text`
+/// is not an array literal.
+///
+/// An element `resolve` cannot type leaves the whole literal a plain
+/// `array`.
+pub(crate) fn infer_array_literal_type(text: &str, resolve: TextResolver<'_>) -> Option<PhpType> {
+    let inner = strip_array_literal(text.trim())?;
+    Some(literal_array_shape(inner, ArrayElements::Any(resolve)).unwrap_or_else(PhpType::array))
 }
 
 fn infer_type_from_constant_value_inner(
     value: &str,
-    resolve: Option<TextResolver<'_>>,
+    elements: ArrayElements<'_>,
 ) -> Option<PhpType> {
     let v = value.trim();
     if v.is_empty() {
@@ -2044,7 +2091,7 @@ fn infer_type_from_constant_value_inner(
     // `foreach (self::APPROVED as $entry)` see the values the constant
     // names rather than an unconstrained `array`.
     if let Some(inner) = strip_array_literal(v) {
-        return Some(literal_array_shape(inner, resolve).unwrap_or_else(PhpType::array));
+        return Some(literal_array_shape(inner, elements).unwrap_or_else(PhpType::array));
     }
 
     let lower = v.to_lowercase();

@@ -1105,3 +1105,19 @@ fn collect_local_vars_nested_call_args() {
     parsed.collect_local_variables(&mut vars);
     assert_eq!(vars, vec!["$stmt".to_string()]);
 }
+
+#[test]
+fn parse_call_on_parenthesized_new() {
+    assert_eq!(
+        SubjectExpr::parse("(new R())->all()"),
+        SubjectExpr::CallExpr {
+            callee: Box::new(SubjectExpr::MethodCall {
+                base: Box::new(SubjectExpr::NewExpr {
+                    class_name: "R".to_string(),
+                }),
+                method: "all".to_string(),
+            }),
+            args_text: String::new(),
+        }
+    );
+}
