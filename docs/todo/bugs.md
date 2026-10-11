@@ -37,20 +37,7 @@ No outstanding items.
 
 ## Narrowing
 
-### B615. PHPUnit's `assertCount()` and `assertArrayHasKey()` do not narrow
-
-**Impact: Low · Complexity: Medium**
-
-```php
-self::assertArrayHasKey('id', $row);   // $row: array{id?: int}
-takesInt($row['id']);                  // got int|null
-```
-
-PHPUnit declares no `@phpstan-assert` on either. PHPStan's PHPUnit
-extension reads them as `count($actual) === $expected` and
-`array_key_exists($key, $array)`. `assertSame()`/`assertNotSame()` are
-already read this way; these two need the call they stand for built as a
-condition, which the existing mapping does not do yet.
+No outstanding items.
 
 ## Array types
 

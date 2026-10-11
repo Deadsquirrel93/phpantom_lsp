@@ -30,30 +30,58 @@ pub(crate) fn apply_array_key_exists_narrowing<'b>(
         let Some((base_key, key_expr, negated)) = array_key_exists_target(operand) else {
             continue;
         };
-        let present = negated == inverted;
-        // A property or static-property subject (`$this->excludePaths`)
-        // is not a tracked local, so its type has to be brought into the
-        // scope before it can be refined.
-        seed_synthetic_key_if_needed(&base_key, scope, ctx);
-        let Some(key_name) = constant_array_key(key_expr, scope) else {
-            // Whatever the key is, an array holding it is not empty: the
-            // `[]` a loop's first pass carries cannot reach this branch,
-            // so a read of the key does not see the `null` it would give.
-            if present {
-                refine_non_empty_in_scope(&base_key, EmptyValue::Array, scope);
-            }
-            continue;
-        };
-        if !present {
-            mark_array_shape_key_absent(&base_key, &key_name, scope);
-            continue;
-        }
-        mark_array_shape_key_present(&base_key, &key_name, scope);
-        // Seed the element key after the shape is refined, so an offset
-        // read consulting it sees the present-key type rather than the
-        // optional one it would have resolved a moment earlier.
-        seed_synthetic_key_if_needed(&format!("{base_key}[\"{key_name}\"]"), scope, ctx);
+        narrow_key_existence(&base_key, key_expr, negated == inverted, scope, ctx);
     }
+}
+
+/// Narrow the way PHPUnit's `assertArrayHasKey($key, $array)` (`present`)
+/// or `assertArrayNotHasKey()` proves it, which is the
+/// `array_key_exists($key, $array)` the assertion stands for.
+pub(crate) fn apply_array_key_assertion(
+    key_expr: &Expression<'_>,
+    array_expr: &Expression<'_>,
+    present: bool,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    if let Some(base_key) = narrowing::expr_to_subject_key(array_expr) {
+        narrow_key_existence(&base_key, key_expr, present, scope, ctx);
+    }
+    if present {
+        narrow_key(array_expr, key_expr, false, scope, ctx);
+    }
+}
+
+/// Refine `base_key`'s shape by whether it holds the key `key_expr` names.
+fn narrow_key_existence(
+    base_key: &str,
+    key_expr: &Expression<'_>,
+    present: bool,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    // A property or static-property subject (`$this->excludePaths`)
+    // is not a tracked local, so its type has to be brought into the
+    // scope before it can be refined.
+    seed_synthetic_key_if_needed(base_key, scope, ctx);
+    let Some(key_name) = constant_array_key(key_expr, scope) else {
+        // Whatever the key is, an array holding it is not empty: the
+        // `[]` a loop's first pass carries cannot reach this branch,
+        // so a read of the key does not see the `null` it would give.
+        if present {
+            refine_non_empty_in_scope(base_key, EmptyValue::Array, scope);
+        }
+        return;
+    };
+    if !present {
+        mark_array_shape_key_absent(base_key, &key_name, scope);
+        return;
+    }
+    mark_array_shape_key_present(base_key, &key_name, scope);
+    // Seed the element key after the shape is refined, so an offset
+    // read consulting it sees the present-key type rather than the
+    // optional one it would have resolved a moment earlier.
+    seed_synthetic_key_if_needed(&format!("{base_key}[\"{key_name}\"]"), scope, ctx);
 }
 
 /// Apply `in_array($var, $haystack, true)` narrowing.

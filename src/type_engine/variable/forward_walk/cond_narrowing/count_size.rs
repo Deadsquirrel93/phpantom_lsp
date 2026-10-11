@@ -41,69 +41,96 @@ pub(super) fn apply_count_size_narrowing(
         let Some((subject, recursive)) = count_call(counted) else {
             continue;
         };
-        let Some(size) = known_size(other, scope) else {
-            continue;
-        };
-        // `count()` never returns a negative number.
-        if size < 0 {
-            if equal {
-                seed_synthetic_key_if_needed(&subject, scope, ctx);
-                if !scope.get(&subject).is_empty() {
-                    mark_exhausted(&subject, scope);
-                }
-            }
-            continue;
-        }
-        if !(0..SHAPE_SIZE_LIMIT).contains(&size) {
-            continue;
-        }
-        seed_synthetic_key_if_needed(&subject, scope, ctx);
-        let types = scope.get(&subject);
-        if types.is_empty() {
-            continue;
-        }
-        let mut changed = false;
-        let mut narrowed: Vec<ResolvedType> = Vec::with_capacity(types.len());
-        for rt in types {
-            // A class-backed entry is no array to size, and a recursive
-            // count adds the entries of nested arrays, so it is the list's
-            // length only when no element is one.
-            if rt.class_info.is_some()
-                || recursive
-                    && !rt
-                        .type_string
-                        .iterable_element_type()
-                        .is_some_and(|element| is_never_an_array(&element))
-            {
-                narrowed.push(rt.clone());
-                continue;
-            }
-            let sized = if equal {
-                of_size(&rt.type_string, size as usize)
-            } else {
-                not_of_size(&rt.type_string, size as usize)
-            };
-            match sized {
-                // Each alternative stays its own entry, so the join after
-                // the branch can fold a sized shape back together with
-                // the one the other branch sized.
-                Some(members) => {
-                    changed = true;
-                    narrowed.extend(members.into_iter().map(ResolvedType::from_type_string));
-                }
-                None => narrowed.push(rt.clone()),
+        narrow_to_size(&subject, recursive, other, equal, scope, ctx);
+    }
+}
+
+/// Narrow `haystack` the way PHPUnit's `assertCount($expected, $haystack)`
+/// (`equal`) or `assertNotCount()` proves it, which is the
+/// `count($haystack) === $expected` the assertion stands for.
+pub(crate) fn apply_count_assertion(
+    haystack: &Expression<'_>,
+    expected: &Expression<'_>,
+    equal: bool,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    if let Some(subject) = expr_to_subject(haystack) {
+        narrow_to_size(&subject, false, expected, equal, scope, ctx);
+    }
+}
+
+/// Narrow `subject`, whose count `size` is (`equal`) or is not.
+fn narrow_to_size(
+    subject: &str,
+    recursive: bool,
+    size: &Expression<'_>,
+    equal: bool,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    let Some(size) = known_size(size, scope) else {
+        return;
+    };
+    // `count()` never returns a negative number.
+    if size < 0 {
+        if equal {
+            seed_synthetic_key_if_needed(subject, scope, ctx);
+            if !scope.get(subject).is_empty() {
+                mark_exhausted(subject, scope);
             }
         }
-        if !changed {
+        return;
+    }
+    if !(0..SHAPE_SIZE_LIMIT).contains(&size) {
+        return;
+    }
+    seed_synthetic_key_if_needed(subject, scope, ctx);
+    let types = scope.get(subject);
+    if types.is_empty() {
+        return;
+    }
+    let mut changed = false;
+    let mut narrowed: Vec<ResolvedType> = Vec::with_capacity(types.len());
+    for rt in types {
+        // A class-backed entry is no array to size, and a recursive
+        // count adds the entries of nested arrays, so it is the list's
+        // length only when no element is one.
+        if rt.class_info.is_some()
+            || recursive
+                && !rt
+                    .type_string
+                    .iterable_element_type()
+                    .is_some_and(|element| is_never_an_array(&element))
+        {
+            narrowed.push(rt.clone());
             continue;
         }
-        // Sizing two alternatives can leave the same shape twice.
-        ResolvedType::drop_subsumed_entries(&mut narrowed, false);
-        if narrowed.is_empty() {
-            mark_exhausted(&subject, scope);
+        let sized = if equal {
+            of_size(&rt.type_string, size as usize)
         } else {
-            scope.set(&subject, narrowed);
+            not_of_size(&rt.type_string, size as usize)
+        };
+        match sized {
+            // Each alternative stays its own entry, so the join after
+            // the branch can fold a sized shape back together with
+            // the one the other branch sized.
+            Some(members) => {
+                changed = true;
+                narrowed.extend(members.into_iter().map(ResolvedType::from_type_string));
+            }
+            None => narrowed.push(rt.clone()),
         }
+    }
+    if !changed {
+        return;
+    }
+    // Sizing two alternatives can leave the same shape twice.
+    ResolvedType::drop_subsumed_entries(&mut narrowed, false);
+    if narrowed.is_empty() {
+        mark_exhausted(subject, scope);
+    } else {
+        scope.set(subject, narrowed);
     }
 }
 

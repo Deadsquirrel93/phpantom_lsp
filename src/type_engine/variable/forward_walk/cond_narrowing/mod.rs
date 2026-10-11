@@ -38,6 +38,7 @@ mod type_guards;
 
 use assertions::*;
 use bool_comparisons::*;
+pub(crate) use count_size::apply_count_assertion;
 use count_size::*;
 use emptiness::*;
 use instanceof::*;

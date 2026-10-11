@@ -549,18 +549,42 @@ pub(in crate::type_engine) fn collect_assert_reexport_conditions<'a>(
 /// The class PHPUnit declares its assertions on.
 const PHPUNIT_ASSERT_FQN: &str = "PHPUnit\\Framework\\Assert";
 
-/// The two operands of the comparison a PHPUnit `assertSame()` /
-/// `assertNotSame()` call proves, `(expected, actual)`, and whether it
-/// proves them identical.
+/// The check a PHPUnit assertion without `@phpstan-assert` proves.
 ///
 /// PHPUnit declares no `@phpstan-assert` on these, so the name of a method
 /// declared on `PHPUnit\Framework\Assert` is the only signal.  PHPStan's
-/// PHPUnit extension reads them the same way, as the `===` / `!==` check
-/// the assertion stands for.
-pub(in crate::type_engine) fn phpunit_comparison_assertion<'a>(
+/// PHPUnit extension reads them the same way, as the check each assertion
+/// stands for.
+pub(in crate::type_engine) enum PhpunitAssertion<'a> {
+    /// `assertSame()` / `assertNotSame()`: `$expected === $actual`, or
+    /// `!==` when not `identical`.
+    Same {
+        expected: &'a Expression<'a>,
+        actual: &'a Expression<'a>,
+        identical: bool,
+    },
+    /// `assertCount()` / `assertNotCount()`:
+    /// `count($haystack) === $expected`, or `!==` when not `equal`.
+    Count {
+        expected: &'a Expression<'a>,
+        haystack: &'a Expression<'a>,
+        equal: bool,
+    },
+    /// `assertArrayHasKey()` / `assertArrayNotHasKey()`:
+    /// `array_key_exists($key, $array)`, negated when not `present`.
+    HasKey {
+        key: &'a Expression<'a>,
+        array: &'a Expression<'a>,
+        present: bool,
+    },
+}
+
+/// Recognise a call to one of the PHPUnit assertions in
+/// [`PhpunitAssertion`].
+pub(in crate::type_engine) fn phpunit_assertion<'a>(
     call: &'a Call<'a>,
     ctx: &VarResolutionCtx<'_>,
-) -> Option<(&'a Expression<'a>, &'a Expression<'a>, bool)> {
+) -> Option<PhpunitAssertion<'a>> {
     let (class_info, selector, argument_list) = match call {
         Call::StaticMethod(static_call) => (
             resolve_static_receiver_class(static_call.class, ctx)?,
@@ -583,13 +607,18 @@ pub(in crate::type_engine) fn phpunit_comparison_assertion<'a>(
         return None;
     };
     let method_name = bytes_to_str(ident.value);
-    let identical = if method_name.eq_ignore_ascii_case("assertSame") {
-        true
-    } else if method_name.eq_ignore_ascii_case("assertNotSame") {
-        false
-    } else {
+    let lower = method_name.to_ascii_lowercase();
+    if !matches!(
+        lower.as_str(),
+        "assertsame"
+            | "assertnotsame"
+            | "assertcount"
+            | "assertnotcount"
+            | "assertarrayhaskey"
+            | "assertarraynothaskey"
+    ) {
         return None;
-    };
+    }
     let (method, declaring) = find_method_in_chain_where(
         &class_info,
         method_name,
@@ -601,9 +630,24 @@ pub(in crate::type_engine) fn phpunit_comparison_assertion<'a>(
     if declaring != PHPUNIT_ASSERT_FQN {
         return None;
     }
-    let expected = assertion_arg_expression(argument_list, "$expected", &method.parameters)?;
-    let actual = assertion_arg_expression(argument_list, "$actual", &method.parameters)?;
-    Some((expected, actual, identical))
+    let arg = |name: &str| assertion_arg_expression(argument_list, name, &method.parameters);
+    Some(match lower.as_str() {
+        "assertsame" | "assertnotsame" => PhpunitAssertion::Same {
+            expected: arg("$expected")?,
+            actual: arg("$actual")?,
+            identical: lower == "assertsame",
+        },
+        "assertcount" | "assertnotcount" => PhpunitAssertion::Count {
+            expected: arg("$expectedCount")?,
+            haystack: arg("$haystack")?,
+            equal: lower == "assertcount",
+        },
+        _ => PhpunitAssertion::HasKey {
+            key: arg("$key")?,
+            array: arg("$array")?,
+            present: lower == "assertarrayhaskey",
+        },
+    })
 }
 
 /// Return the call-site argument expression bound to `param_name`.

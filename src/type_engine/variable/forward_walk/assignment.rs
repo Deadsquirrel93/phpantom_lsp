@@ -1610,30 +1610,48 @@ pub(crate) fn process_assert_narrowing<'b>(
         }
     }
 
-    // PHPUnit's `assertSame()` / `assertNotSame()` prove the `===` / `!==`
-    // they stand for, so the comparison is narrowed as if it were written
-    // out in an `assert()`.
+    // PHPUnit's `assertSame()`, `assertCount()` and `assertArrayHasKey()`
+    // (and their negations) prove the `===`, `count()` and
+    // `array_key_exists()` checks they stand for, so those are narrowed as
+    // if they were written out in an `assert()`.
     if let Expression::Call(call) = unwrapped {
-        let phpunit_comparison = {
+        let phpunit_assertion = {
             let snapshot = scope.locals.clone();
             let resolver = |vn: &str| -> Vec<ResolvedType> {
                 snapshot.get(&atom(vn)).cloned().unwrap_or_default()
             };
             let var_ctx = build_var_ctx("", ctx, &resolver);
-            narrowing::phpunit_comparison_assertion(call, &var_ctx)
+            narrowing::phpunit_assertion(call, &var_ctx)
         };
-        if let Some((expected, actual, identical)) = phpunit_comparison {
-            let span = call.span();
-            let comparison = Expression::Binary(Binary {
-                lhs: expected,
-                operator: if identical {
-                    BinaryOperator::Identical(span)
-                } else {
-                    BinaryOperator::NotIdentical(span)
-                },
-                rhs: actual,
-            });
-            apply_condition_narrowing(&comparison, scope, ctx);
+        match phpunit_assertion {
+            Some(narrowing::PhpunitAssertion::Same {
+                expected,
+                actual,
+                identical,
+            }) => {
+                let span = call.span();
+                let comparison = Expression::Binary(Binary {
+                    lhs: expected,
+                    operator: if identical {
+                        BinaryOperator::Identical(span)
+                    } else {
+                        BinaryOperator::NotIdentical(span)
+                    },
+                    rhs: actual,
+                });
+                apply_condition_narrowing(&comparison, scope, ctx);
+            }
+            Some(narrowing::PhpunitAssertion::Count {
+                expected,
+                haystack,
+                equal,
+            }) => apply_count_assertion(haystack, expected, equal, scope, ctx),
+            Some(narrowing::PhpunitAssertion::HasKey {
+                key,
+                array,
+                present,
+            }) => apply_array_key_assertion(key, array, present, scope, ctx),
+            None => {}
         }
     }
 

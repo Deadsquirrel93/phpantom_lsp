@@ -59,7 +59,7 @@ pub(super) fn apply_key_domain_narrowing<'b>(
 }
 
 /// Narrow `key_expr` to the keys of the array `array_expr` evaluates to.
-fn narrow_key(
+pub(super) fn narrow_key(
     array_expr: &Expression<'_>,
     key_expr: &Expression<'_>,
     through_cast: bool,

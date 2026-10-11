@@ -101,7 +101,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A value set by a ternary on an `instanceof` check.** After `$problems = $x instanceof Sheet ? $x->problems() : [];`, testing `$problems !== []` now narrows `$x` to `Sheet`, as the `if`/`else` form already did.
 - **Checking a union of classes, scalars and arrays against a subclass.** An `instanceof` or an asserted class on a value such as `DateTimeInterface|array|int|null` now leaves only the class, instead of keeping `array` and `int`.
 - **The fallback of `??` knows the left side was `null`.** Inside `if ($a || $b)`, the `$b` of `$a ?? $b` is no longer nullable.
-- **PHPUnit's `assertSame()` and `assertNotSame()` narrow.** `self::assertNotSame([], $matches)` and `$this->assertNotSame(null, $x)` now narrow the way the `!==` they stand for does.
+- **PHPUnit's `assertSame()`, `assertCount()` and `assertArrayHasKey()` narrow.** These and their negated forms now narrow the way the check they stand for does, so `self::assertArrayHasKey('id', $row)` makes `$row['id']` no longer possibly `null`, and `self::assertNotSame(null, $x)` removes `null` from `$x`.
 
 ## [0.11.1] - 2026-10-07
 
