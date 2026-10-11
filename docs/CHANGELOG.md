@@ -25,7 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Faster analysis of arrays given a different shape under each of many `if`s.** Once the shapes an array can hold spell out more than 256 values between them, they are shown as one general array type such as `non-empty-array<string, int>`, the way PHPStan does. A function with 2,000 such writes is checked in about a tenth of a second instead of over a second.
 - **Faster analysis of long method chains.** A fluent chain hundreds of calls long, as generated query builders and API clients produce, no longer slows down out of proportion to its length. A 600-call chain is checked in a fifth of a second instead of nearly seven, using a twentieth of the memory.
 - **Faster startup.** Hiding the standard library functions, classes, and constants that the project's PHP version no longer has takes a few milliseconds instead of about 50.
-- **Lower memory use on large projects.** Classes that inherit the same method or property now share one copy of it, and each method takes far less memory. On a large Laravel project this cuts peak memory by about 17%.
+- **Lower memory use on large projects.** Classes that inherit the same method or property now share one copy of it, and each method takes far less memory. On a large Laravel project this cuts peak memory by about 17%. What PHPantom keeps about each call in the project's files also takes much less memory, cutting a further 4%.
 - **Faster go-to-implementation on library classes.** Finding the implementations of a class or interface from a Composer package now reads only the files that could hold one, instead of loading every class the project depends on.
 
 ### Fixed

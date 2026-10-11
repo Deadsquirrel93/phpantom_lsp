@@ -198,10 +198,10 @@ pub(crate) fn bind_text_args_to_params(
 /// arguments fill the parameter whose bare name matches. A required
 /// parameter is satisfied when it is filled either way. The result is empty
 /// when every required parameter is supplied.
-pub(crate) fn missing_required_params(
+pub(crate) fn missing_required_params<'a>(
     params: &[ParameterInfo],
     positional_count: u32,
-    named_arg_names: &[String],
+    named_arg_names: impl Iterator<Item = &'a str> + Clone,
 ) -> Vec<String> {
     params
         .iter()
@@ -211,9 +211,7 @@ pub(crate) fn missing_required_params(
                 return false;
             }
             let filled_positionally = (*idx as u32) < positional_count;
-            let filled_by_name = named_arg_names
-                .iter()
-                .any(|n| n.as_str() == param_name_bare(p));
+            let filled_by_name = named_arg_names.clone().any(|n| n == param_name_bare(p));
             !filled_positionally && !filled_by_name
         })
         .map(|(_, p)| p.name.to_string())
@@ -260,14 +258,14 @@ mod tests {
     fn named_arg_filling_optional_leaves_required_missing() {
         // function f(int $a, int $b = 0, int $c = 0) called as f(c: 3).
         let params = [param("$a", true), param("$b", false), param("$c", false)];
-        let missing = missing_required_params(&params, 0, &["c".to_string()]);
+        let missing = missing_required_params(&params, 0, ["c"].into_iter());
         assert_eq!(missing, vec!["$a".to_string()]);
     }
 
     #[test]
     fn required_filled_by_name_is_satisfied() {
         let params = [param("$a", true), param("$b", false)];
-        let missing = missing_required_params(&params, 0, &["a".to_string()]);
+        let missing = missing_required_params(&params, 0, ["a"].into_iter());
         assert!(missing.is_empty());
     }
 
@@ -275,21 +273,21 @@ mod tests {
     fn required_split_positional_and_named() {
         // f(int $a, int $b, int $c = 0) called as f(1, b: 2).
         let params = [param("$a", true), param("$b", true), param("$c", false)];
-        let missing = missing_required_params(&params, 1, &["b".to_string()]);
+        let missing = missing_required_params(&params, 1, ["b"].into_iter());
         assert!(missing.is_empty());
     }
 
     #[test]
     fn multiple_required_reported_missing() {
         let params = [param("$a", true), param("$b", true), param("$c", false)];
-        let missing = missing_required_params(&params, 0, &["c".to_string()]);
+        let missing = missing_required_params(&params, 0, ["c"].into_iter());
         assert_eq!(missing, vec!["$a".to_string(), "$b".to_string()]);
     }
 
     #[test]
     fn all_positional_satisfies_required() {
         let params = [param("$a", true), param("$b", true)];
-        let missing = missing_required_params(&params, 2, &[]);
+        let missing = missing_required_params(&params, 2, std::iter::empty());
         assert!(missing.is_empty());
     }
 }

@@ -20,28 +20,6 @@ against that bar.
 
 ---
 
-## P81. Call sites are 160-byte records with up to six side allocations
-
-**Impact: Medium · Complexity: Medium**
-
-Every workspace file keeps its symbol map for the whole session
-(references, CodeLens and the Laravel string-key scanners read them), so
-`SymbolMap::call_sites` never goes away. On the large Laravel app it holds
-192k `CallSite`s at 160 B each (31 MB) plus 8 MB of heap in 380k separate
-allocations: `call_expression` is an owned `String`, and
-`comma_offsets`, `arg_offsets`, `named_arg_indices`, `named_arg_names`
-and `spread_arg_indices` are each their own `Vec`. With allocator overhead
-that is about 57 MB, 7% of the LSP's RSS.
-
-**Fix:** move the per-site strings and offset lists into one arena per
-map (a `String` and a `Vec<u32>`) that each record indexes with
-offset/length pairs. That brings the record to roughly 40 B and the
-allocations to two per file. Interning `call_expression` as an `Atom`
-would be shorter to write but wrong here: `ustr` never frees, and call
-expression text changes with every edit.
-
----
-
 ## P82. Trivial memory fixes
 
 **Impact: Low-Medium · Complexity: Low**

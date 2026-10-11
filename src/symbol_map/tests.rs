@@ -3676,6 +3676,33 @@ fn arrow_fn_body_scope_suppresses_outer_call_site() {
     );
 }
 
+#[test]
+fn nested_call_sites_keep_their_own_arguments() {
+    let src = "<?php\nouter(inner($x, ...$rest), first: 1, second: 2);\n";
+    let sm = parse_and_extract(src);
+    let sites: Vec<_> = sm.call_sites.iter().collect();
+    assert_eq!(sites.len(), 2);
+    let (outer, inner) = (sites[0], sites[1]);
+
+    assert_eq!(outer.call_expression, "outer");
+    assert_eq!(outer.arg_count, 3);
+    assert_eq!(outer.comma_offsets.len(), 2);
+    assert_eq!(outer.arg_offsets[0], src.find("inner").unwrap() as u32);
+    assert_eq!(outer.named_arg_indices, [1, 2]);
+    assert_eq!(
+        outer.named_arg_names.iter().collect::<Vec<_>>(),
+        ["first", "second"]
+    );
+    assert_eq!(outer.named_arg_names.get(1), Some("second"));
+    assert!(!outer.has_unpacking);
+
+    assert_eq!(inner.call_expression, "inner");
+    assert_eq!(inner.arg_offsets[1], src.find("...").unwrap() as u32);
+    assert_eq!(inner.spread_arg_indices, [1]);
+    assert!(inner.named_arg_names.iter().next().is_none());
+    assert!(inner.has_unpacking);
+}
+
 // ── @see tag symbol extraction tests ────────────────────────────────────────
 
 #[test]

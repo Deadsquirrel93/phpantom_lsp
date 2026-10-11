@@ -58,7 +58,7 @@ fn detect_call_site_from_map(
         .filter(|&&comma| comma < cursor_byte_offset)
         .count() as u32;
     Some(CallSiteContext {
-        call_expression: cs.call_expression.clone(),
+        call_expression: cs.call_expression.to_string(),
         active_parameter: active,
     })
 }

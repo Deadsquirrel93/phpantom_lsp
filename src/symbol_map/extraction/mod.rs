@@ -12,9 +12,9 @@ use super::docblock::{
     extract_docblock_symbols_covering, get_docblock_text_with_offset, is_navigable_type,
 };
 use super::{
-    CallSite, ClassRefContext, DocblockMemberRef, NestedRanges, SelfStaticParentKind, SubjectText,
-    SymbolKind, SymbolMap, SymbolSpan, TemplateParamDef, UntypedClosureSite, VarDefKind,
-    VarDefSite, ViewReceiverClass, ViewReceiverSite,
+    CallArg, CallArgKind, CallSites, ClassRefContext, DocblockMemberRef, NestedRanges,
+    SelfStaticParentKind, SubjectText, SymbolKind, SymbolMap, SymbolSpan, TemplateParamDef,
+    UntypedClosureSite, VarDefKind, VarDefSite, ViewReceiverClass, ViewReceiverSite,
 };
 use crate::atom::{bytes_to_str, literal_bytes_to_str};
 use crate::names::OwnedResolvedNames;
@@ -55,7 +55,7 @@ struct ExtractionCtx<'a> {
     /// `@template` parameter definitions with their scoping ranges.
     template_defs: Vec<TemplateParamDef>,
     /// Call-site records for signature help and conditional return types.
-    call_sites: Vec<CallSite>,
+    call_sites: CallSites,
     /// Ranges where `break` is valid (loops and `switch`).
     breakable_scopes: Vec<(u32, u32)>,
     /// Ranges where `continue` is valid (loops only).
@@ -220,7 +220,7 @@ fn extract_symbol_map_inner(
         narrowing_blocks: Vec::new(),
         assert_narrowing_offsets: Vec::new(),
         template_defs: Vec::new(),
-        call_sites: Vec::new(),
+        call_sites: CallSites::default(),
         breakable_scopes: Vec::new(),
         loop_scopes: Vec::new(),
         switch_scopes: Vec::new(),
@@ -327,7 +327,7 @@ fn extract_symbol_map_inner(
     ctx.template_defs.sort_by_key(|d| d.name_offset);
 
     // Sort call_sites by args_start for reverse-scan lookup.
-    ctx.call_sites.sort_by_key(|cs| cs.args_start);
+    ctx.call_sites.finish();
     ctx.breakable_scopes.sort_by_key(|s| s.0);
     ctx.loop_scopes.sort_by_key(|s| s.0);
     ctx.switch_scopes.sort_by_key(|s| s.0);

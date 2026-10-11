@@ -141,7 +141,7 @@ impl Backend {
         let (existing_named, positional_count) = parse_existing_args(args_text);
 
         Some(NamedArgContext {
-            call_expression: cs.call_expression.clone(),
+            call_expression: cs.call_expression.to_string(),
             existing_named_args: existing_named,
             positional_count,
             prefix,

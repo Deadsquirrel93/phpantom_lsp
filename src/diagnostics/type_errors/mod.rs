@@ -485,7 +485,7 @@ impl Backend {
                 continue;
             }
 
-            let expr = &call_site.call_expression;
+            let expr = call_site.call_expression;
             let class_loader = class_loaders.at(call_site.args_start);
 
             // Look up or populate the call expression cache.
@@ -537,7 +537,7 @@ impl Backend {
                 call_caches
                     .at(call_site.args_start)
                     .borrow_mut()
-                    .entry(expr.clone())
+                    .entry(expr.to_string())
                     .or_insert_with(|| {
                         self.resolve_callable_target_at_offset(
                             expr,
@@ -594,10 +594,10 @@ impl Backend {
                         .position(|&i| i == arg_idx as u32);
                     match name_pos {
                         Some(idx) => {
-                            let param_name = &call_site.named_arg_names[idx];
+                            let param_name = call_site.named_arg_names.get(idx);
                             params
                                 .iter()
-                                .find(|p| p.name.trim_start_matches('$') == param_name.as_str())
+                                .find(|p| Some(p.name.trim_start_matches('$')) == param_name)
                         }
                         None => continue,
                     }

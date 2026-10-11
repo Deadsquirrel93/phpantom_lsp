@@ -17,7 +17,7 @@ use tower_lsp::jsonrpc;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::symbol_map::{CallSite, UntypedClosureSite};
+use crate::symbol_map::{CallSite, CallSites, UntypedClosureSite};
 use crate::text_position::{LineIndex, position_to_offset};
 use crate::types::FileContext;
 
@@ -129,7 +129,7 @@ impl Backend {
     /// compared against the symbol map's argument offsets.
     fn emit_parameter_hints(
         &self,
-        call_site: &CallSite,
+        call_site: CallSite<'_>,
         index: &LineIndex,
         range: (u32, u32),
         ctx: &FileContext,
@@ -139,7 +139,7 @@ impl Backend {
 
         // The call site's start offset gives the resolver its cursor context.
         let resolved = match self.resolve_callable_target_at_offset(
-            &call_site.call_expression,
+            call_site.call_expression,
             content,
             call_site.args_start,
             ctx,
@@ -157,11 +157,8 @@ impl Backend {
 
         // Build a set of parameter names consumed by named arguments so
         // positional arguments can be mapped to the remaining parameters.
-        let named_consumed: std::collections::HashSet<&str> = call_site
-            .named_arg_names
-            .iter()
-            .map(|n| n.as_str())
-            .collect();
+        let named_consumed: std::collections::HashSet<&str> =
+            call_site.named_arg_names.iter().collect();
 
         // Parameters not consumed by named args, in declaration order.
         // Each positional argument is assigned to the next entry in this
@@ -240,7 +237,7 @@ impl Backend {
             // makes the parameter obvious, skip the hint.
             if !param.is_reference
                 && call_site.arg_count == 1
-                && is_obvious_single_param(&call_site.call_expression, param_display_name)
+                && is_obvious_single_param(call_site.call_expression, param_display_name)
             {
                 continue;
             }
@@ -276,7 +273,7 @@ impl Backend {
         &self,
         index: &LineIndex,
         sites: &[UntypedClosureSite],
-        call_sites: &[CallSite],
+        call_sites: &CallSites,
         range: (u32, u32),
         ctx: &FileContext,
         hints: &mut Vec<InlayHint>,

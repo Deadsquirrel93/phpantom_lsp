@@ -267,14 +267,14 @@ impl Backend {
                 continue;
             }
 
-            let expr = &call_site.call_expression;
+            let expr = call_site.call_expression;
 
             // Look up or populate the call expression cache.
             let resolved = if is_position_independent_call_expression(expr) {
                 call_caches
                     .at(call_site.args_start)
                     .borrow_mut()
-                    .entry(expr.clone())
+                    .entry(expr.to_string())
                     .or_insert_with(|| {
                         self.resolve_callable_target_at_offset(
                             expr,
@@ -345,7 +345,7 @@ impl Backend {
                 let missing = crate::call_args::missing_required_params(
                     params,
                     positional_count,
-                    &call_site.named_arg_names,
+                    call_site.named_arg_names.iter(),
                 );
                 if missing.is_empty() {
                     None

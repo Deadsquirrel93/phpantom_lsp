@@ -23,7 +23,7 @@ pub(super) fn export_calls(
                 backend,
                 context,
                 &source.source,
-                &call.call_expression,
+                call.call_expression,
                 call.args_start,
                 member_targets,
             );
@@ -46,7 +46,7 @@ pub(super) fn export_calls(
                 .collect();
             ExportCall {
                 kind,
-                expression: call.call_expression.clone(),
+                expression: call.call_expression.to_string(),
                 resolved_symbol,
                 arguments_range: ByteRange {
                     start: call.args_start,

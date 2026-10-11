@@ -8,60 +8,40 @@ use super::*;
 pub(super) fn emit_call_site(
     call_expression: String,
     argument_list: &ArgumentList<'_>,
-    call_sites: &mut Vec<CallSite>,
+    call_sites: &mut CallSites,
     untyped_closure_sites: &mut Vec<UntypedClosureSite>,
 ) {
     if call_expression.is_empty() {
         return;
     }
-    let args_start = argument_list.left_parenthesis.end.offset;
-    let args_end = argument_list.right_parenthesis.start.offset;
-    let comma_offsets: Vec<u32> = argument_list
-        .arguments
-        .tokens
-        .iter()
-        .map(|t| t.start.offset)
-        .collect();
-
-    let arg_count = argument_list.arguments.len() as u32;
-
-    // Collect the byte offset of each argument's start token and
-    // track which arguments use named syntax (`name: value`).
-    let mut arg_offsets = Vec::with_capacity(arg_count as usize);
-    let mut named_arg_indices = Vec::new();
-    let mut named_arg_names = Vec::new();
-    let mut spread_arg_indices = Vec::new();
-    for (i, arg) in argument_list.arguments.iter().enumerate() {
-        match arg {
-            Argument::Positional(pos) => {
-                // If unpacking is used, the `...` token comes before the
-                // value expression.  Use the ellipsis offset when present
-                // so the hint appears before `...`.
-                let offset = pos
-                    .ellipsis
-                    .as_ref()
-                    .map(|e| e.start.offset)
-                    .unwrap_or_else(|| pos.value.span().start.offset);
-                arg_offsets.push(offset);
-                if pos.ellipsis.is_some() {
-                    spread_arg_indices.push(i as u32);
-                }
-            }
-            Argument::Named(named) => {
-                arg_offsets.push(named.name.span.start.offset);
-                named_arg_indices.push(i as u32);
-                named_arg_names.push(bytes_to_str(named.name.value).to_string());
-            }
-        }
-    }
-
-    // Detect argument unpacking (`...$args`).  Only positional
-    // arguments can use the spread operator; the AST stores it as
-    // `ellipsis: Some(Span)` on `PositionalArgument`.
-    let has_unpacking = argument_list
-        .arguments
-        .iter()
-        .any(|arg| matches!(arg, Argument::Positional(pos) if pos.ellipsis.is_some()));
+    let args = argument_list.arguments.iter().map(|arg| match arg {
+        // The hint for a spread goes before its `...`.
+        Argument::Positional(pos) => match &pos.ellipsis {
+            Some(ellipsis) => CallArg {
+                offset: ellipsis.start.offset,
+                kind: CallArgKind::Spread,
+            },
+            None => CallArg {
+                offset: pos.value.span().start.offset,
+                kind: CallArgKind::Positional,
+            },
+        },
+        Argument::Named(named) => CallArg {
+            offset: named.name.span.start.offset,
+            kind: CallArgKind::Named(bytes_to_str(named.name.value)),
+        },
+    });
+    call_sites.push(
+        argument_list.left_parenthesis.end.offset,
+        argument_list.right_parenthesis.start.offset,
+        &call_expression,
+        argument_list
+            .arguments
+            .tokens
+            .iter()
+            .map(|t| t.start.offset),
+        args,
+    );
 
     // Check arguments for closures/arrows with untyped parameters or
     // missing return types.
@@ -72,94 +52,66 @@ pub(super) fn emit_call_site(
         };
         collect_untyped_closure_site(expr, &call_expression, arg_idx, untyped_closure_sites);
     }
-
-    call_sites.push(CallSite {
-        args_start,
-        args_end,
-        call_expression,
-        comma_offsets,
-        arg_offsets,
-        arg_count,
-        has_unpacking,
-        named_arg_indices,
-        named_arg_names,
-        spread_arg_indices,
-    });
 }
 
 /// Build and push a [`CallSite`] from a partial argument list and its call expression string.
 pub(in crate::symbol_map::extraction) fn emit_partial_call_site(
     call_expression: String,
     argument_list: &PartialArgumentList<'_>,
-    call_sites: &mut Vec<CallSite>,
+    call_sites: &mut CallSites,
     untyped_closure_sites: &mut Vec<UntypedClosureSite>,
 ) {
-    let args_start = argument_list.left_parenthesis.end.offset;
-    let args_end = argument_list.right_parenthesis.start.offset;
-    let comma_offsets = argument_list
+    let args = argument_list
         .arguments
-        .tokens
         .iter()
-        .map(|token| token.start.offset)
-        .collect();
-    let mut arg_offsets = Vec::with_capacity(argument_list.arguments.len());
-    let mut named_arg_indices = Vec::new();
-    let mut named_arg_names = Vec::new();
-    let mut spread_arg_indices = Vec::new();
+        .map(|argument| match argument {
+            PartialArgument::Positional(argument) => match argument.ellipsis {
+                Some(ellipsis) => CallArg {
+                    offset: ellipsis.start.offset,
+                    kind: CallArgKind::Spread,
+                },
+                None => CallArg {
+                    offset: argument.value.span().start.offset,
+                    kind: CallArgKind::Positional,
+                },
+            },
+            PartialArgument::Named(argument) => CallArg {
+                offset: argument.name.span.start.offset,
+                kind: CallArgKind::Named(bytes_to_str(argument.name.value)),
+            },
+            PartialArgument::NamedPlaceholder(argument) => CallArg {
+                offset: argument.name.span.start.offset,
+                kind: CallArgKind::Named(bytes_to_str(argument.name.value)),
+            },
+            PartialArgument::Placeholder(argument) => CallArg {
+                offset: argument.span.start.offset,
+                kind: CallArgKind::Positional,
+            },
+            PartialArgument::VariadicPlaceholder(argument) => CallArg {
+                offset: argument.span.start.offset,
+                kind: CallArgKind::Positional,
+            },
+        });
+    call_sites.push(
+        argument_list.left_parenthesis.end.offset,
+        argument_list.right_parenthesis.start.offset,
+        &call_expression,
+        argument_list
+            .arguments
+            .tokens
+            .iter()
+            .map(|token| token.start.offset),
+        args,
+    );
 
     for (index, argument) in argument_list.arguments.iter().enumerate() {
-        match argument {
-            PartialArgument::Positional(argument) => {
-                let offset = argument
-                    .ellipsis
-                    .map(|span| span.start.offset)
-                    .unwrap_or_else(|| argument.value.span().start.offset);
-                arg_offsets.push(offset);
-                if argument.ellipsis.is_some() {
-                    spread_arg_indices.push(index as u32);
-                }
-                collect_untyped_closure_site(
-                    argument.value,
-                    &call_expression,
-                    index,
-                    untyped_closure_sites,
-                );
-            }
-            PartialArgument::Named(argument) => {
-                arg_offsets.push(argument.name.span.start.offset);
-                named_arg_indices.push(index as u32);
-                named_arg_names.push(bytes_to_str(argument.name.value).to_string());
-                collect_untyped_closure_site(
-                    argument.value,
-                    &call_expression,
-                    index,
-                    untyped_closure_sites,
-                );
-            }
-            PartialArgument::NamedPlaceholder(argument) => {
-                arg_offsets.push(argument.name.span.start.offset);
-                named_arg_indices.push(index as u32);
-                named_arg_names.push(bytes_to_str(argument.name.value).to_string());
-            }
-            PartialArgument::Placeholder(argument) => arg_offsets.push(argument.span.start.offset),
-            PartialArgument::VariadicPlaceholder(argument) => {
-                arg_offsets.push(argument.span.start.offset)
-            }
-        }
+        let value = match argument {
+            PartialArgument::Positional(argument) => argument.value,
+            PartialArgument::Named(argument) => argument.value,
+            _ => continue,
+        };
+        collect_untyped_closure_site(value, &call_expression, index, untyped_closure_sites);
     }
-
-    call_sites.push(CallSite {
-        args_start,
-        args_end,
-        call_expression,
-        comma_offsets,
-        arg_count: argument_list.arguments.len() as u32,
-        has_unpacking: !spread_arg_indices.is_empty(),
-        arg_offsets,
-        named_arg_indices,
-        named_arg_names,
-        spread_arg_indices,
-    });
 }
 
 /// If `expr` is a closure or arrow function, collect an [`UntypedClosureSite`]

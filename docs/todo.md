@@ -159,7 +159,6 @@ unlikely to move the needle for most users.
 |     | **[External Stubs](todo/external-stubs.md)**                                                                                                                                |             |             |
 | E7  | [Stub-based framework patches](todo/external-stubs.md#e7-stub-based-framework-patches)                                                                                      | Medium      | Medium-High |
 |     | **[Performance](todo/performance.md)**                                                                                       |             |             |
-| P81 | [Call sites are 160-byte records with up to six side allocations](todo/performance.md#p81-call-sites-are-160-byte-records-with-up-to-six-side-allocations) | Medium      | Medium      |
 | P82 | [Trivial memory fixes](todo/performance.md#p82-trivial-memory-fixes)                                                                                                       | Low-Medium  | Low         |
 |     | **[Indexing](todo/indexing.md)**                                                                                                                                            |             |             |
 | X7  | [Recency tracking](todo/indexing.md#x7-recency-tracking)                                                                                                                    | Medium      | Medium-High |
