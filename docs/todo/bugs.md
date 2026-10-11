@@ -564,25 +564,3 @@ gets the interface's deprecation back, so inheritance enrichment seems to
 re-propagate `deprecation_message` from the interface rather than taking
 the inherited method as `AV` resolved it. PHPStan's `@not-deprecated`
 stops the inheritance for every descendant.
-
-### B588. A method that reads `func_get_args()` is not treated as variadic
-
-**Impact: Medium · Complexity: Low**
-
-```php
-Socialite::shouldReceive('driver');   // Expected 0 arguments, got 1
-$query->select('id', DB::raw('...')); // Expected at most 1 argument, got 2
-$request->only('a', 'b');             // Expected at most 1 argument, got 2
-$model->load('a', 'b');
-```
-
-Laravel declares these with no parameters, or one, and reads the rest
-through `func_get_args()` (`Facade::shouldReceive`, `Builder::select`,
-`Request::only`, `Model::load`/`with`/`isDirty`/`wasChanged`,
-`ResponseTrait::cookie`, …). With `extra-arguments = true` every such call
-is reported: 251 sites in one large Laravel project. PHPStan marks a
-function or method whose body calls `func_get_args()` as variadic.
-
-**Fix:** Record during parsing whether a function or method body calls
-`func_get_args()` (outside nested closures and classes) and treat it as
-variadic in the argument-count check and in signature help.

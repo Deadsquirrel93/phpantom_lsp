@@ -30,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Functions that read `func_get_args()`.** Calls such as `$query->select('id', 'name')` or `$request->only('a', 'b')` no longer report extra arguments when the method collects its arguments with `func_get_args()`.
 - **`object|null` return types.** A call documented as returning `object|null` no longer gets a "could not be resolved" hint on member access, matching a native `?object`.
 - **`use X as Y` next to another import of the same short name.** With `use App\Facades\Redis; use Redis as PhpRedis;`, `PhpRedis` is now the global `Redis` instead of the facade.
 - **`@method` parameters defaulting to `null`.** A `@method` tag such as `tag(string $disk = null)` now accepts `null`, as the equivalent native signature does.

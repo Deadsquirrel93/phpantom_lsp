@@ -323,7 +323,7 @@ impl Backend {
             }
 
             // Unlimited if variadic, otherwise the declared parameter count.
-            let has_variadic = params.iter().any(|p| p.is_variadic);
+            let has_variadic = resolved.reads_func_args || params.iter().any(|p| p.is_variadic);
             let max_count = if has_variadic {
                 None // unlimited trailing args
             } else {

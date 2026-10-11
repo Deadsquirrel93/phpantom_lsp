@@ -484,6 +484,7 @@ mod tests {
             self_out: None,
             is_pure: false,
             is_impure: false,
+            reads_func_args: false,
         })
     }
 

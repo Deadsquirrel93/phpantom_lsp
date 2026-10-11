@@ -824,6 +824,7 @@ fn make_class_with_throws(name: &str, methods: Vec<(&str, Vec<&str>)>) -> Arc<Cl
             self_out: None,
             is_pure: false,
             is_impure: false,
+            reads_func_args: false,
         })
         .collect();
 
@@ -1171,6 +1172,7 @@ fn test_find_cross_file_propagated_throws_function_call() {
         overloads: vec![],
         is_pure: false,
         is_impure: false,
+        reads_func_args: false,
     };
 
     let class_loader = |_name: &str| -> Option<Arc<ClassInfo>> { None };
@@ -1308,6 +1310,7 @@ fn test_find_cross_file_propagated_throws_mixed_patterns() {
         overloads: vec![],
         is_pure: false,
         is_impure: false,
+        reads_func_args: false,
     };
 
     let function_loader = move |name: &str, _offset: u32| -> Option<FunctionInfo> {

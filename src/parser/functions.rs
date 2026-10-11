@@ -16,6 +16,39 @@ use super::{
     is_removed_for_version, merge_deprecation_info,
 };
 
+/// Whether a function or method body calls `func_get_args()`,
+/// `func_get_arg()` or `func_num_args()`, which makes it accept more
+/// arguments than it declares.
+///
+/// Nested closures, arrow functions, classes and named functions have their
+/// own argument list, so their calls do not count.
+pub(super) fn body_reads_func_args<'a>(
+    statements: impl Iterator<Item = &'a Statement<'a>>,
+) -> bool {
+    struct Walker;
+    impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, bool> for Walker {
+        fn walk_in_function_call(&self, call: &'ast FunctionCall<'arena>, found: &mut bool) {
+            if let Expression::Identifier(ident) = call.function {
+                let name = bytes_to_str(ident.value());
+                let name = name.strip_prefix('\\').unwrap_or(name);
+                *found |= ["func_get_args", "func_get_arg", "func_num_args"]
+                    .iter()
+                    .any(|f| name.eq_ignore_ascii_case(f));
+            }
+        }
+        fn walk_closure(&self, _: &'ast Closure<'arena>, _: &mut bool) {}
+        fn walk_arrow_function(&self, _: &'ast ArrowFunction<'arena>, _: &mut bool) {}
+        fn walk_anonymous_class(&self, _: &'ast AnonymousClass<'arena>, _: &mut bool) {}
+        fn walk_function(&self, _: &'ast Function<'arena>, _: &mut bool) {}
+        fn walk_class(&self, _: &'ast Class<'arena>, _: &mut bool) {}
+    }
+    let mut found = false;
+    for stmt in statements {
+        mago_syntax::walker::Walker::walk_statement(&Walker, stmt, &mut found);
+    }
+    found
+}
+
 /// Try to extract the guarded function name from a
 /// `if (! function_exists('name'))` condition.
 ///
@@ -351,6 +384,8 @@ impl Backend {
                     let is_pure = info.as_ref().is_some_and(docblock::declares_pure);
                     let is_impure = info.as_ref().is_some_and(docblock::declares_impure);
 
+                    let reads_func_args = body_reads_func_args(func.body.statements.iter());
+
                     let func_tpl_atoms: Vec<crate::atom::Atom> =
                         func_template_params.iter().map(|s| atom(s)).collect();
                     // Merge overloaded function declarations: when a
@@ -394,6 +429,7 @@ impl Backend {
                             overloads: Vec::new(),
                             is_pure,
                             is_impure,
+                            reads_func_args,
                         });
                     }
                 }

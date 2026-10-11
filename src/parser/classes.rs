@@ -1350,6 +1350,13 @@ impl Backend {
                         .as_ref()
                         .is_some_and(docblock::declares_impure);
 
+                    let reads_func_args = match &method.body {
+                        MethodBody::Concrete(block) => {
+                            super::functions::body_reads_func_args(block.statements.iter())
+                        }
+                        MethodBody::Abstract(_) => false,
+                    };
+
                     methods.push(MethodInfo {
                         name,
                         name_offset,
@@ -1382,6 +1389,7 @@ impl Backend {
                         self_out,
                         is_pure,
                         is_impure,
+                        reads_func_args,
                     });
                     method_bodies.push((methods.len() - 1, &method.body));
                 }

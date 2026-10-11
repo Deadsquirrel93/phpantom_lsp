@@ -2478,6 +2478,7 @@ async fn test_use_import_excludes_constants_and_functions() {
                     overloads: vec![],
                     is_pure: false,
                     is_impure: false,
+                    reads_func_args: false,
                 },
             ),
         );
@@ -2615,6 +2616,7 @@ async fn test_use_function_shows_only_functions() {
                     overloads: vec![],
                     is_pure: false,
                     is_impure: false,
+                    reads_func_args: false,
                 },
             ),
         );

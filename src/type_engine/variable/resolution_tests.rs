@@ -2378,6 +2378,7 @@ fn stub_function_info(name: &str, return_type: Option<PhpType>) -> crate::types:
         overloads: vec![],
         is_pure: false,
         is_impure: false,
+        reads_func_args: false,
     }
 }
 

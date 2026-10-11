@@ -58,6 +58,7 @@ fn register_namespaced_function(
                     overloads: vec![],
                     is_pure: false,
                     is_impure: false,
+                    reads_func_args: false,
                 },
             ),
         );
@@ -96,6 +97,7 @@ fn register_global_function(backend: &phpantom_lsp::Backend, name: &str, uri: &s
                     overloads: vec![],
                     is_pure: false,
                     is_impure: false,
+                    reads_func_args: false,
                 },
             ),
         );
@@ -851,6 +853,7 @@ async fn test_use_function_namespaced_detail_shows_signature() {
                     overloads: vec![],
                     is_pure: false,
                     is_impure: false,
+                    reads_func_args: false,
                 },
             ),
         );
@@ -955,6 +958,7 @@ async fn test_deprecated_namespaced_function() {
                     overloads: vec![],
                     is_pure: false,
                     is_impure: false,
+                    reads_func_args: false,
                 },
             ),
         );

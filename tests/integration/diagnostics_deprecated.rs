@@ -2298,6 +2298,7 @@ fn replace_deprecated_function_call_action_offered() {
                     overloads: vec![],
                     is_pure: false,
                     is_impure: false,
+                    reads_func_args: false,
                 },
             ),
         );

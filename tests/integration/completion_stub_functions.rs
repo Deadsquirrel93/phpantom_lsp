@@ -362,6 +362,7 @@ async fn test_user_function_takes_precedence_over_stub() {
         overloads: vec![],
         is_pure: false,
         is_impure: false,
+        reads_func_args: false,
     };
 
     {

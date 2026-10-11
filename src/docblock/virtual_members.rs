@@ -223,6 +223,7 @@ pub fn extract_method_tags_from_info(info: &DocblockInfo) -> Vec<MethodInfo> {
             self_out: None,
             is_pure: false,
             is_impure: false,
+            reads_func_args: false,
         });
     }
 

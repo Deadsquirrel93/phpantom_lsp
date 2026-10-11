@@ -646,6 +646,9 @@ pub struct MethodInfo {
     /// tag is how an author overrides that for the value-returning case
     /// (`$stmt->execute(): bool`), which the return type cannot express.
     pub is_impure: bool,
+    /// Whether the body calls `func_get_args()` (or a sibling), so the
+    /// callable accepts arguments beyond its declared parameters.
+    pub reads_func_args: bool,
 }
 
 impl MethodInfo {
@@ -756,6 +759,7 @@ impl MethodInfo {
             self_out: None,
             is_pure: false,
             is_impure: false,
+            reads_func_args: false,
         }
     }
 }
@@ -1147,6 +1151,9 @@ pub(crate) struct ResolvedCallableTarget {
     /// the argument-count diagnostic must not flag extra arguments, while
     /// signature help still shows the (empty) signature.
     pub accepts_any_args: bool,
+    /// Whether the body calls `func_get_args()` (or a sibling), so the
+    /// callable accepts arguments beyond its declared parameters.
+    pub reads_func_args: bool,
     /// Alternate parameter lists from overloaded function declarations.
     ///
     /// Populated from `FunctionInfo::overloads` when resolving standalone
@@ -1340,6 +1347,9 @@ pub struct FunctionInfo {
     /// `@impure`, `@phpstan-impure` or `@psalm-impure`.  See
     /// [`MethodInfo::is_impure`].
     pub is_impure: bool,
+    /// Whether the body calls `func_get_args()` (or a sibling), so the
+    /// callable accepts arguments beyond its declared parameters.
+    pub reads_func_args: bool,
 }
 
 impl FunctionInfo {

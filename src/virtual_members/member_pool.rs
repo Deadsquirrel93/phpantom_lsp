@@ -297,6 +297,7 @@ fn method_eq(a: &MethodInfo, b: &MethodInfo) -> bool {
         self_out,
         is_pure,
         is_impure,
+        reads_func_args,
     } = a;
     *name == b.name
         && *name_offset == b.name_offset
@@ -313,6 +314,7 @@ fn method_eq(a: &MethodInfo, b: &MethodInfo) -> bool {
         && *is_inferred_return == b.is_inferred_return
         && *is_pure == b.is_pure
         && *is_impure == b.is_impure
+        && *reads_func_args == b.reads_func_args
         && *if_this_is == b.if_this_is
         && *self_out == b.self_out
         && *template_params == b.template_params

@@ -247,6 +247,31 @@ function test(): void {
     }
 
     #[test]
+    fn func_get_args_makes_callable_accept_extra_args() {
+        let php = r#"<?php
+class Query {
+    public function select($columns = ['*']) {
+        $columns = is_array($columns) ? $columns : func_get_args();
+        return $this;
+    }
+    public function strict($a) {
+        $f = function () { return func_get_args(); };
+        return $f;
+    }
+}
+function gathers() { return \func_get_args(); }
+function test(Query $q): void {
+    $q->select('id', 'name');
+    gathers(1, 2, 3);
+    $q->strict(1, 2);
+}
+"#;
+        let diags = collect_extra(php);
+        assert_eq!(diags.len(), 1, "only `strict` should be flagged: {diags:?}");
+        assert!(diags[0].message.contains("Expected 1 argument"));
+    }
+
+    #[test]
     fn no_diagnostic_for_extra_args_to_constructorless_class() {
         // PHP silently ignores arguments passed to a class with no
         // constructor, so even with the extra-arguments check enabled the

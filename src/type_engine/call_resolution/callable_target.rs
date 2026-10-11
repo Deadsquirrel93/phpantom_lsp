@@ -243,6 +243,7 @@ impl Backend {
                 let target = ResolvedCallableTarget {
                     parameters: result_method.parameters.clone(),
                     return_type: result_method.return_type.clone(),
+                    reads_func_args: result_method.reads_func_args,
                     owner_class: Some(owner.fqn()),
                     self_bound_params,
                     ..Default::default()
@@ -269,6 +270,7 @@ impl Backend {
                 let target = ResolvedCallableTarget {
                     parameters: m.parameters.clone(),
                     return_type: m.return_type.clone(),
+                    reads_func_args: m.reads_func_args,
                     owner_class: Some(owner.fqn()),
                     ..Default::default()
                 };
@@ -346,6 +348,7 @@ impl Backend {
         Some(ResolvedCallableTarget {
             parameters: result_method.parameters.clone(),
             return_type: result_method.return_type.clone(),
+            reads_func_args: result_method.reads_func_args,
             owner_class: Some(owner.fqn()),
             self_bound_params,
             ..Default::default()
@@ -357,6 +360,7 @@ impl Backend {
         ResolvedCallableTarget {
             parameters: func.parameters.clone(),
             return_type: func.return_type.clone(),
+            reads_func_args: func.reads_func_args,
             overloads: func.overloads.clone(),
             ..Default::default()
         }
@@ -491,6 +495,7 @@ impl Backend {
         Some(ResolvedCallableTarget {
             parameters: ctor.parameters.clone(),
             return_type: ctor.return_type.clone(),
+            reads_func_args: ctor.reads_func_args,
             owner_class: Some(ci.fqn()),
             ..Default::default()
         })

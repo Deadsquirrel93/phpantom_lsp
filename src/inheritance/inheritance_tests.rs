@@ -339,6 +339,7 @@ fn test_apply_substitution_to_method_modifies_return_and_params() {
         self_out: None,
         is_pure: false,
         is_impure: false,
+        reads_func_args: false,
     };
 
     apply_substitution_to_method(&mut method, &subs);
@@ -407,6 +408,7 @@ fn test_extends_generics_propagate_through_parent_use_generics() {
             self_out: None,
             is_pure: false,
             is_impure: false,
+            reads_func_args: false,
         })]
         .into(),
         ..ClassInfo::default()

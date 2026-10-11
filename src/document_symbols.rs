@@ -730,6 +730,7 @@ mod tests {
             self_out: None,
             is_pure: false,
             is_impure: false,
+            reads_func_args: false,
         };
         let detail = build_method_detail(&method);
         assert_eq!(detail, Some("(): void".to_string()));
@@ -794,6 +795,7 @@ mod tests {
             self_out: None,
             is_pure: false,
             is_impure: false,
+            reads_func_args: false,
         };
         let detail = build_method_detail(&method);
         assert_eq!(
@@ -926,6 +928,7 @@ mod tests {
             overloads: vec![],
             is_pure: false,
             is_impure: false,
+            reads_func_args: false,
         };
         let detail = build_function_detail(&func);
         assert_eq!(detail, Some("()".to_string()));

@@ -35,6 +35,7 @@ fn empty_function(name: &str) -> FunctionInfo {
         overloads: Vec::new(),
         is_pure: false,
         is_impure: false,
+        reads_func_args: false,
     }
 }
 
