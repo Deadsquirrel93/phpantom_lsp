@@ -30,6 +30,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A class named like a template parameter.** A class such as `trait T {}` anywhere in the project no longer takes the place of every `@template T`, including the one on `RecursiveIteratorIterator`.
+- **Literal constructor arguments bind literal templates.** `new TreeBuilder('name', 'array')` on a class declaring `@template T of 'array'|'string'` now keeps `'array'`, so Symfony 8 config tree builders get the array node from `getRootNode()`.
+- **`Closure(): T` conditional return types.** A callback that never returns `null` now takes the true branch of `($callback is Closure(): T ? T : null|T)`, whether it is a closure, an arrow function, or a first-class callable such as `$this->build(...)`.
+- **Generic objects passed through a function keep their template defaults.** Passing a plain `PendingRequest` through a function that re-binds its `TAsync` template keeps the default `false`, so `get()` still returns a `Response`. A template known only to be a `bool` now gives both branches of a conditional return type instead of the second one.
+- **Callbacks with a declared return type bind templates from their body.** In a chain such as `$banners->flatMap(fn ($b): Collection => $b->items)->filter(...)`, the callback now sees the items' type instead of a bare `Collection`.
+- **`groupBy()` followed by a callback.** `$items->groupBy('id')->map(fn ($group) => ...)` now gives `$group` the grouped collection's type instead of unevaluated conditional types.
 - **`@not-deprecated` on an inherited method.** Subclasses that inherit a method tagged `@not-deprecated` no longer get the interface's deprecation back.
 - **Functions that read `func_get_args()`.** Calls such as `$query->select('id', 'name')` or `$request->only('a', 'b')` no longer report extra arguments when the method collects its arguments with `func_get_args()`.
 - **`object|null` return types.** A call documented as returning `object|null` no longer gets a "could not be resolved" hint on member access, matching a native `?object`.

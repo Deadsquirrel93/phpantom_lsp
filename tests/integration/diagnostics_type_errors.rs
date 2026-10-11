@@ -13817,3 +13817,252 @@ final class Holder
         "property_exists() should prove $this->obj->bar exists: {diags:?}"
     );
 }
+
+#[test]
+fn a_class_named_like_a_template_does_not_shadow_the_template() {
+    let php = r#"<?php
+namespace {
+    trait T {}
+}
+
+namespace App {
+    interface Node { public function getId(): string; }
+
+    /** @template T of Node */
+    final class Items {
+        /** @param T[] $items */
+        public function __construct(array $items) {
+            foreach ($items as $item) {
+                $item->getId();
+            }
+        }
+    }
+
+    final class D {
+        public function run(string $dir): void {
+            new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($dir));
+        }
+    }
+}
+"#;
+    let diags = collect_slow_with_full_stubs(php);
+    assert!(
+        diags.is_empty(),
+        "a template should win over the global trait `T`: {diags:?}"
+    );
+}
+
+#[test]
+fn a_stub_constructor_template_still_checks_its_bound() {
+    let php = r#"<?php
+function f(\ArrayIterator $it): void {
+    new \RecursiveIteratorIterator($it);
+}
+"#;
+    let diags = collect_with_full_stubs(php);
+    assert!(
+        has_type_error(&diags),
+        "an ArrayIterator is neither a RecursiveIterator nor an IteratorAggregate: {diags:?}"
+    );
+}
+
+const BARE_GENERIC_DEFAULT_PRELUDE: &str = r#"<?php
+final class Resp {}
+final class Prom {}
+
+/** @template TAsync of bool = false */
+final class P {
+    /** @return (TAsync is false ? Resp : Prom) */
+    public function get(): Resp|Prom { return new Resp(); }
+}
+
+/**
+ * @template TAsync of bool
+ * @param P<TAsync> $p
+ * @return P<TAsync>
+ */
+function configure(P $p): P { return $p; }
+
+function takesResp(Resp $r): void {}
+"#;
+
+#[test]
+fn a_bare_generic_argument_binds_a_method_template_to_its_default() {
+    let php = format!(
+        "{BARE_GENERIC_DEFAULT_PRELUDE}
+function run(P $p): void {{
+    takesResp($p->get());
+    takesResp(configure($p)->get());
+}}
+"
+    );
+    let diags = collect(&php);
+    assert!(
+        !has_type_error(&diags),
+        "a bare `P` is `P<false>`, so `get()` returns `Resp`: {diags:?}"
+    );
+}
+
+#[test]
+fn a_conditional_on_a_template_bound_to_bool_takes_both_branches() {
+    let php = format!(
+        "{BARE_GENERIC_DEFAULT_PRELUDE}
+/** @param P<bool> $p */
+function run(P $p): void {{
+    takesResp($p->get());
+}}
+"
+    );
+    let diags = collect(&php);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("got Resp|Prom") || d.message.contains("got Prom|Resp")),
+        "`bool is false` may go either way: {diags:?}"
+    );
+}
+
+#[test]
+fn a_chained_callback_sees_the_decided_conditional_type_arguments() {
+    let php = r#"<?php
+final class Item { public int $id = 1; }
+
+/**
+ * @template TKey of array-key
+ * @template TValue
+ */
+class Coll
+{
+    /**
+     * @template TGroupKey of array-key
+     *
+     * @param  (callable(TValue, TKey): TGroupKey)|array|string  $groupBy
+     * @param  bool  $preserveKeys
+     * @return static<
+     *  ($groupBy is (array|string) ? array-key : TGroupKey),
+     *  static<($preserveKeys is true ? TKey : int), ($groupBy is array ? mixed : TValue)>
+     * >
+     */
+    public function groupBy($groupBy, $preserveKeys = false) {}
+
+    /**
+     * @template TMapValue
+     * @param  callable(TValue, TKey): TMapValue  $callback
+     * @return static<TKey, TMapValue>
+     */
+    public function map(callable $callback) {}
+}
+
+function takesInt(int $i): void {}
+
+/** @param Coll<int, Item> $items */
+function test(Coll $items): void
+{
+    $items->groupBy('id')->map(fn ($group) => takesInt($group));
+    $g = $items->groupBy('id');
+    $g->map(fn ($group) => takesInt($group));
+}
+"#;
+    let diags = collect_slow(php);
+    let messages = messages_with_code(&diags, "type_mismatch_argument");
+    assert_eq!(messages.len(), 2, "got: {messages:?}");
+    assert!(
+        messages.iter().all(|m| m.contains("got Coll<int, Item>")),
+        "each group is a `Coll<int, Item>`, got: {messages:?}"
+    );
+}
+
+#[test]
+fn a_literal_constructor_argument_binds_a_literal_bounded_class_template() {
+    let php = r#"<?php
+final class ArrNode { public function children(): void {} }
+final class StrNode {}
+
+/** @template T of 'array'|'string' = 'array' */
+final class TB {
+    /** @param T $type */
+    public function __construct(string $name, string $type = 'array') {}
+
+    /** @return (T is 'array' ? ArrNode : StrNode) */
+    public function root(): object { return new ArrNode(); }
+}
+
+function takesInt(int $i): void {}
+
+function test(string $s): void
+{
+    $t = new TB('x', 'array');
+    $t->root()->children();
+    takesInt((new TB('x', 'string'))->root());
+    takesInt((new TB('x', $s))->root());
+}
+"#;
+    let diags = collect_slow(php);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("'children'")),
+        "`'array'` binds `T` to the literal, so `root()` is an `ArrNode`: {diags:?}"
+    );
+    let messages = messages_with_code(&diags, "type_mismatch_argument");
+    assert!(
+        messages.iter().any(|m| m.contains("got StrNode")),
+        "`'string'` takes the else branch: {messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("got ArrNode|StrNode") || m.contains("got StrNode|ArrNode")),
+        "a plain `string` may be either: {messages:?}"
+    );
+}
+
+#[test]
+fn an_annotated_closure_binds_a_chained_template_from_its_body() {
+    let php = r#"<?php
+final class Item {}
+final class Banner {
+    /** @var Coll<int, Item> */
+    public Coll $items;
+}
+
+/**
+ * @template TKey of array-key
+ * @template TValue
+ */
+class Coll
+{
+    /**
+     * @template TFlatMapKey of array-key
+     * @template TFlatMapValue
+     * @param  callable(TValue, TKey): (Coll<TFlatMapKey, TFlatMapValue>|array<TFlatMapKey, TFlatMapValue>)  $callback
+     * @return static<TFlatMapKey, TFlatMapValue>
+     */
+    public function flatMap(callable $callback) {}
+
+    /**
+     * @param  (callable(TValue, TKey): bool)|null  $callback
+     * @return static
+     */
+    public function filter(?callable $callback = null) {}
+}
+
+/** @param Coll<int, Banner> $banners */
+function test(Coll $banners): void
+{
+    $banners->flatMap(fn (Banner $b): Coll => $b->items)
+        ->filter(fn (Item $i): bool => true);
+    $banners->flatMap(fn (Banner $b): Coll => $b->items)
+        ->filter(fn (Banner $i): bool => true);
+}
+"#;
+    let diags = collect_slow(php);
+    let messages = messages_with_code(&diags, "type_mismatch_argument");
+    assert_eq!(
+        messages.len(),
+        1,
+        "only the `Banner` callback is wrong: {messages:?}"
+    );
+    assert!(
+        messages[0].contains("callable(Item, int): bool"),
+        "the closure returns `Coll<int, Item>`, not a bare `Coll`: {messages:?}"
+    );
+}

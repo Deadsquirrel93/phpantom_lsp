@@ -202,6 +202,32 @@ impl Backend {
     ) -> Option<PhpType> {
         let trimmed = arg_text.trim();
 
+        // A closure literal or a first-class callable (`$this->build(...)`)
+        // is a `Closure` with the signature it was written with, the same
+        // type the AST resolver gives it, not the result of calling it.
+        if let Some(params) =
+            crate::completion::source::helpers::extract_closure_params_from_text(trimmed)
+        {
+            let params = params
+                .into_iter()
+                .map(|(_, hint)| crate::php_type::CallableParam {
+                    type_hint: hint
+                        .map(|h| crate::util::resolve_php_type_names(&h, ctx.class_loader))
+                        .unwrap_or_else(PhpType::mixed),
+                    optional: false,
+                    variadic: false,
+                })
+                .collect();
+            let ret = Self::infer_closure_return_type(trimmed, ctx);
+            return Some(PhpType::callable_spec("Closure", params, ret));
+        }
+        if trimmed.ends_with("(...)") {
+            let ret = crate::completion::source::helpers::resolve_first_class_callable_return_type(
+                trimmed, ctx,
+            );
+            return Some(PhpType::callable_spec("Closure", Vec::new(), ret));
+        }
+
         // ── Literal values ──────────────────────────────────────
         if let Some(ty) = resolve_literal_type(trimmed) {
             return Some(ty);
@@ -1590,8 +1616,31 @@ pub(crate) fn bind_callable_return_template(
             .callable_return_type()?
             .clone()
     };
-    let bound = declared_ret.and_then(|declared| unify_template(declared, &ret_type, tpl_name));
-    Some(bound.unwrap_or(ret_type))
+    // A `null` the declared return takes in its own right (`Closure(): ?T`)
+    // says nothing about `T`.
+    if ret_type.is_null()
+        && declared_ret.is_some_and(|declared| {
+            matches!(declared.kind(), TypeKind::Nullable(_))
+                || declared.union_members().iter().any(|m| m.is_null())
+        })
+    {
+        return None;
+    }
+    let Some(declared) = declared_ret else {
+        return Some(ret_type);
+    };
+    if let Some(bound) = unify_template(declared, &ret_type, tpl_name) {
+        return Some(bound);
+    }
+    // Only a return declared as the template itself is the whole value;
+    // one that wraps it (`Collection<TKey, TValue>`) handed a return the
+    // wrapper's arguments cannot be read off (a bare `Collection`) binds
+    // nothing, rather than the whole return at every position.
+    declared
+        .union_members()
+        .iter()
+        .any(|m| m.is_named(tpl_name))
+        .then_some(ret_type)
 }
 
 /// The types a callable hint promises each of its parameters, with the

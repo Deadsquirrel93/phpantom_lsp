@@ -1,6 +1,6 @@
 //! Patches for the classes phpstorm-stubs declares incompletely.
 
-use crate::atom::atom;
+use crate::atom::{Atom, atom};
 use crate::php_type::PhpType;
 use crate::types::ClassInfo;
 
@@ -250,14 +250,12 @@ fn patch_iterator_iterator(class: &mut ClassInfo) {
         .position(|m| m.name.as_str() == "__construct")
     {
         let mut ctor = (*class.methods[ctor_idx]).clone();
-        let binding = (atom("TIterator"), atom("$iterator"));
-        if !ctor
-            .template_bindings()
-            .iter()
-            .any(|(t, _)| t == &binding.0)
-        {
-            ctor.extras_mut().template_bindings.push(binding);
-        }
+        bind_ctor_template(
+            &mut ctor,
+            &class.template_params,
+            atom("TIterator"),
+            atom("$iterator"),
+        );
         // Update the parameter type hint from Traversable to TIterator
         // so that classify_template_binding recognises a Direct binding.
         if let Some(param) = ctor
@@ -307,10 +305,7 @@ fn patch_recursive_iterator_iterator(class: &mut ClassInfo) {
         .position(|m| m.name.as_str() == "__construct")
     {
         let mut ctor = (*class.methods[ctor_idx]).clone();
-        let binding = (t, atom("$iterator"));
-        if !ctor.template_bindings().iter().any(|(n, _)| *n == t) {
-            ctor.extras_mut().template_bindings.push(binding);
-        }
+        bind_ctor_template(&mut ctor, &class.template_params, t, atom("$iterator"));
         // A `T` hint (rather than the stub's `Traversable`) is what makes
         // `classify_template_binding` read the argument as a direct bind.
         if let Some(param) = ctor
@@ -418,14 +413,12 @@ fn patch_array_iterator(class: &mut ClassInfo) {
         let mut ctor = (*class.methods[ctor_idx]).clone();
 
         for tpl_name in ["TKey", "TValue"] {
-            let binding = (atom(tpl_name), atom("$array"));
-            if !ctor
-                .template_bindings()
-                .iter()
-                .any(|(t, _)| t == &binding.0)
-            {
-                ctor.extras_mut().template_bindings.push(binding);
-            }
+            bind_ctor_template(
+                &mut ctor,
+                &class.template_params,
+                atom(tpl_name),
+                atom("$array"),
+            );
         }
 
         // Set the parameter type hint to array<TKey, TValue> so that
@@ -666,14 +659,12 @@ fn patch_reflection_object(class: &mut ClassInfo) {
         return;
     };
     let mut ctor = (*class.methods[ctor_idx]).clone();
-    let binding = (atom("T"), atom("$object"));
-    if !ctor
-        .template_bindings()
-        .iter()
-        .any(|(t, _)| t == &binding.0)
-    {
-        ctor.extras_mut().template_bindings.push(binding);
-    }
+    bind_ctor_template(
+        &mut ctor,
+        &class.template_params,
+        atom("T"),
+        atom("$object"),
+    );
     if let Some(param) = ctor
         .parameters
         .make_mut()
@@ -747,6 +738,27 @@ fn patch_iterator_iterator_subclass(class: &mut ClassInfo, parent: &str) {
     }
 }
 
+/// Bind the class template `template` from the constructor's `param`.
+///
+/// Like a parsed constructor whose `@param` names a class template, the
+/// constructor takes on the class's template list, which is what lets a
+/// call site bind it from the argument rather than leave the parameter
+/// typed with the bare template name.
+fn bind_ctor_template(
+    ctor: &mut crate::types::MethodInfo,
+    class_template_params: &[Atom],
+    template: Atom,
+    param: Atom,
+) {
+    let extras = ctor.extras_mut();
+    if extras.template_params.is_empty() {
+        extras.template_params = class_template_params.to_vec();
+    }
+    if !extras.template_bindings.iter().any(|(t, _)| *t == template) {
+        extras.template_bindings.push((template, param));
+    }
+}
+
 /// Shared helper: patch the constructor to bind `TIterator` from the
 /// `$iterator` parameter.
 fn patch_constructor_iterator_binding(class: &mut ClassInfo) {
@@ -756,14 +768,12 @@ fn patch_constructor_iterator_binding(class: &mut ClassInfo) {
         .position(|m| m.name.as_str() == "__construct")
     {
         let mut ctor = (*class.methods[ctor_idx]).clone();
-        let binding = (atom("TIterator"), atom("$iterator"));
-        if !ctor
-            .template_bindings()
-            .iter()
-            .any(|(t, _)| t == &binding.0)
-        {
-            ctor.extras_mut().template_bindings.push(binding);
-        }
+        bind_ctor_template(
+            &mut ctor,
+            &class.template_params,
+            atom("TIterator"),
+            atom("$iterator"),
+        );
         if let Some(param) = ctor
             .parameters
             .make_mut()

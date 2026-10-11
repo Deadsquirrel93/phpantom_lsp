@@ -2005,6 +2005,11 @@ pub(super) fn resolve_conditional_return_for_call(
 ) -> Option<PhpType> {
     let method = method_ref?;
     let cond = method.conditional_return()?;
+    let bound_cond = crate::type_engine::conditional_resolution::bind_callable_condition_templates(
+        cond,
+        template_subs,
+    );
+    let cond = bound_cond.as_ref().unwrap_or(cond);
     let params = method.parameters.as_slice();
     let declaring_fqn = owner.fqn();
     let class_ctx = crate::type_engine::conditional_resolution::ConditionalClassContext {

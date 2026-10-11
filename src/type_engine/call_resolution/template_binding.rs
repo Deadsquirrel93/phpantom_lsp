@@ -473,9 +473,43 @@ fn bind_generic_wrapper(
         return arg.cloned();
     }
 
+    // The bare wrapper class (`P` for `P<TAsync>`) stands for its declared
+    // defaults, the same as a member call on it does.
+    if let Some(default) = resolved
+        .as_ref()
+        .and_then(|ty| bare_wrapper_default(ty, wrapper_name, tpl_position, arity, ctx))
+    {
+        return Some(default);
+    }
+
     // `new Wrapper(new X())` binds the wrapper's own templates from its
     // constructor arguments.
     wrapper_constructor_template(wrapper_name, tpl_position, arg_text, ctx)
+}
+
+/// The `@template` default the class `ty` names declares for the type
+/// argument `tpl_position` of a wrapper hint written with `arity`
+/// arguments, when `ty` is that wrapper class itself without arguments.
+///
+/// Only a declared default binds: a template with just a bound leaves the
+/// callee's own bound to stand in for it.
+fn bare_wrapper_default(
+    ty: &PhpType,
+    wrapper_name: &str,
+    tpl_position: usize,
+    arity: usize,
+    ctx: &ResolutionCtx<'_>,
+) -> Option<PhpType> {
+    let TypeKind::Named(name) = ty.kind() else {
+        return None;
+    };
+    if !crate::util::short_name(name).eq_ignore_ascii_case(crate::util::short_name(wrapper_name)) {
+        return None;
+    }
+    let cls = (ctx.class_loader)(name)?;
+    let offset = crate::inheritance::generic_arg_offset(&cls, arity.max(1));
+    let param = cls.template_params.get(offset + tpl_position)?;
+    cls.template_param_defaults.get(param).cloned()
 }
 
 /// What `new Wrapper(…)` binds the wrapper's template at `tpl_position`

@@ -163,6 +163,11 @@ fn resolve_conditional_return_hint(
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<PhpType> {
     let cond = method.conditional_return()?;
+    let bound_cond = crate::type_engine::conditional_resolution::bind_callable_condition_templates(
+        cond,
+        template_subs,
+    );
+    let cond = bound_cond.as_ref().unwrap_or(cond);
     let declaring_fqn = owner.fqn();
     let class_values =
         crate::inheritance::class_scoped_template_values(template_subs, method.template_params());
@@ -383,6 +388,34 @@ impl Backend {
             crate::inheritance::template_values_with_defaults(class_info, mr_ctx.template_subs);
         let template_subs = template_values.as_ref();
         let var_resolver = mr_ctx.var_resolver;
+        // A conditional nested in the return type (`groupBy()`'s
+        // `static<($groupBy is array|string ? array-key : …), …>`) is decided
+        // by this call's arguments before the classes are resolved from it,
+        // or the type arguments the classes are built with stay raw.
+        let decide_nested = |method: &MethodInfo, ty: PhpType| -> PhpType {
+            if !ty.contains_conditional() {
+                return ty;
+            }
+            let tpl = TemplateContext {
+                defaults: Some(template_subs),
+                params: method.template_params(),
+                bindings: method.template_bindings(),
+                arg_type_resolver: None,
+                this_type: None,
+            };
+            crate::type_engine::conditional_resolution::evaluate_nested_conditionals_text(
+                &ty,
+                &method.parameters,
+                text_args,
+                var_resolver,
+                crate::type_engine::conditional_resolution::ConditionalClassContext {
+                    calling: mr_ctx.calling_class_name,
+                    declaring: Some(class_info.fqn().as_str()),
+                },
+                class_loader,
+                &tpl,
+            )
+        };
         // Helper: try to resolve a method's conditional return type, falling
         // back to template-substituted return type, then plain return type.
         let resolve_method = |method: &MethodInfo| -> Vec<Arc<ClassInfo>> {
@@ -417,6 +450,7 @@ impl Backend {
             {
                 let substituted = ret.substitute(template_subs);
                 if &substituted != ret {
+                    let substituted = decide_nested(method, substituted);
                     let classes: Vec<Arc<ClassInfo>> =
                         crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
                             &substituted,
@@ -468,7 +502,7 @@ impl Backend {
                     return vec![Arc::new(class_info.clone())];
                 }
                 return crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
-                    ret,
+                    &decide_nested(method, ret.clone()),
                     &class_info.fqn(),
                     all_classes,
                     class_loader,

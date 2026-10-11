@@ -1111,6 +1111,9 @@ fn type_condition_result(
     if arg_ty.is_mixed() || arg_ty.is_untyped() {
         return None;
     }
+    if let (TypeKind::Callable(arg), TypeKind::Callable(cond)) = (arg_ty.kind(), condition.kind()) {
+        return callable_condition_result(arg, cond, class_loader);
+    }
     // A condition naming a literal value (`$invalidBehavior is 0|1`) compares
     // values, not types, so it is settled by the argument's own value.
     if matches!(condition.kind(), TypeKind::Literal(_)) {
@@ -1186,6 +1189,74 @@ fn type_condition_result(
         (Some(arg_cat), None) => class_condition_result(arg_ty, arg_cat, condition, class_loader),
         _ => None,
     }
+}
+
+/// `conditional` with the call's own template bindings substituted into
+/// every condition that is a callable signature (`$callback is Closure():
+/// T`), so the argument's signature is compared against what `T` was bound
+/// to.  Subjects, branches, and every other condition are left as written:
+/// a `class-string<T>` condition relies on `T` still naming the template.
+pub(crate) fn bind_callable_condition_templates(
+    conditional: &PhpType,
+    subs: &HashMap<String, PhpType>,
+) -> Option<PhpType> {
+    let TypeKind::Conditional(c) = conditional.kind() else {
+        return None;
+    };
+    let condition = matches!(c.condition.kind(), TypeKind::Callable(_))
+        .then(|| c.condition.substitute(subs))
+        .filter(|bound| *bound != c.condition);
+    let then_type = bind_callable_condition_templates(&c.then_type, subs);
+    let else_type = bind_callable_condition_templates(&c.else_type, subs);
+    if condition.is_none() && then_type.is_none() && else_type.is_none() {
+        return None;
+    }
+    Some(PhpType::conditional_type(
+        crate::php_type::ConditionalType {
+            param: c.param,
+            negated: c.negated,
+            condition: condition.unwrap_or_else(|| c.condition.clone()),
+            then_type: then_type.unwrap_or_else(|| c.then_type.clone()),
+            else_type: else_type.unwrap_or_else(|| c.else_type.clone()),
+            else_when_undecided: c.else_when_undecided,
+        },
+    ))
+}
+
+/// Decide an `is Closure(…): R` condition against a callable argument's own
+/// signature (`fn (): Item => …` against `Closure(): Item`).
+///
+/// Holds when the argument accepts every parameter the condition passes
+/// and returns a subtype of what it promises. An argument that needs more
+/// parameters than the condition passes refutes it; anything short of a
+/// proven fit is left undecided, since the signatures may still overlap.
+fn callable_condition_result(
+    arg: &crate::php_type::CallableType,
+    cond: &crate::php_type::CallableType,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Option<bool> {
+    let is_closure = |kind: &str| kind.eq_ignore_ascii_case("Closure");
+    if is_closure(&cond.kind) && !is_closure(&arg.kind) {
+        return None;
+    }
+    let required = arg
+        .params
+        .iter()
+        .filter(|p| !p.optional && !p.variadic)
+        .count();
+    if required > cond.params.len() {
+        return Some(false);
+    }
+    let params_fit = cond.params.iter().zip(arg.params.iter()).all(|(c, a)| {
+        a.type_hint.is_mixed()
+            || crate::class_lookup::is_subtype_of_typed(&c.type_hint, &a.type_hint, class_loader)
+    });
+    let returns_fit = match (&cond.return_type, &arg.return_type) {
+        (None, _) => true,
+        (Some(_), None) => false,
+        (Some(c), Some(a)) => crate::class_lookup::is_subtype_of_typed(a, c, class_loader),
+    };
+    (params_fit && returns_fit).then_some(true)
 }
 
 /// Decide an `is <ClassName>` condition (`$id is Arrayable`, `$items is
@@ -1696,6 +1767,28 @@ fn try_resolve_with_template_default(
 ) -> Option<PhpType> {
     let defaults = template_defaults?;
     let default_value = defaults.get(template_name)?;
+
+    // A condition naming one value (`is false`, `is null`, `is 'array'`) is
+    // only settled by a value narrowed to one; `bool`, `string`, a union, or
+    // `mixed` may be it or not, so both branches stay possible.
+    let names_one_value = condition.is_true()
+        || condition.is_false()
+        || condition.is_null()
+        || matches!(condition.kind(), TypeKind::Literal(_));
+    let holds_one_value = default_value.is_true()
+        || default_value.is_false()
+        || default_value.is_null()
+        || default_value.as_literal().is_some();
+    if names_one_value && !holds_one_value {
+        let branch = match type_condition_result(default_value, condition, &|_| None) {
+            Some(satisfied) if satisfied ^ negated => then_type,
+            Some(_) => else_type,
+            None => {
+                return union_branch_types(Some(then_type.clone()), Some(else_type.clone()));
+            }
+        };
+        return (!branch.is_void()).then(|| branch.clone());
+    }
 
     // Determine whether the default value matches the condition.
     let condition_matches = if condition.is_false() {

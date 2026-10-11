@@ -86,6 +86,25 @@ struct ClassDocblockInfo {
     doc_members: Option<Arc<DocblockMembers>>,
 }
 
+/// The `@template` bounds a method signature sees: the class's, with the
+/// method's own templates shadowing any of the same name, bounded or not.
+fn template_bounds_in_scope<'b>(
+    class_bounds: &'b AtomMap<PhpType>,
+    method_params: &[Atom],
+    method_bounds: &'b AtomMap<PhpType>,
+) -> std::borrow::Cow<'b, AtomMap<PhpType>> {
+    if class_bounds.is_empty() {
+        return std::borrow::Cow::Borrowed(method_bounds);
+    }
+    if method_params.is_empty() {
+        return std::borrow::Cow::Borrowed(class_bounds);
+    }
+    let mut merged = class_bounds.clone();
+    merged.retain(|name, _| !method_params.contains(name));
+    merged.extend(method_bounds.iter().map(|(n, b)| (*n, b.clone())));
+    std::borrow::Cow::Owned(merged)
+}
+
 /// Carry a promoted constructor parameter's inline `@var` over to the
 /// parameter itself, and record the class template params it names as
 /// constructor template bindings.
@@ -315,6 +334,7 @@ impl Backend {
                         class.members.iter(),
                         doc_ctx,
                         &doc_info.template_params,
+                        &doc_info.template_param_bounds,
                     );
                     add_implicit_stringable(&mut interfaces, &methods);
 
@@ -442,6 +462,7 @@ impl Backend {
                         iface.members.iter(),
                         doc_ctx,
                         &doc_info.template_params,
+                        &doc_info.template_param_bounds,
                     );
                     add_implicit_stringable(&mut all_parents, &methods);
 
@@ -534,6 +555,7 @@ impl Backend {
                         trait_def.members.iter(),
                         doc_ctx,
                         &doc_info.template_params,
+                        &doc_info.template_param_bounds,
                     );
 
                     let keyword_offset = trait_def.r#trait.span.start.offset;
@@ -613,7 +635,12 @@ impl Backend {
                         constants,
                         mut used_traits,
                         ..
-                    } = Self::extract_class_like_members(enum_def.members.iter(), doc_ctx, &[]);
+                    } = Self::extract_class_like_members(
+                        enum_def.members.iter(),
+                        doc_ctx,
+                        &[],
+                        &AtomMap::default(),
+                    );
 
                     // Every enum case exposes a readonly `name` property, and
                     // backed enums additionally expose a `value` property.
@@ -876,6 +903,7 @@ impl Backend {
         members: impl Iterator<Item = &'a ClassLikeMember<'a>>,
         doc_ctx: Option<&DocblockCtx<'a>>,
         class_template_params: &[Atom],
+        class_template_param_bounds: &AtomMap<PhpType>,
     ) -> ExtractedMembers {
         /// Resolve a short class name to its FQN using the file's use-map
         /// and namespace from [`DocblockCtx`].  When no context is
@@ -1210,9 +1238,10 @@ impl Backend {
                                 } else if let Some(ref info) = method_docblock_info {
                                     let parsed =
                                         docblock::extract_param_raw_type_from_info(info, &raw_name);
-                                    docblock::resolve_effective_type_typed(
+                                    docblock::resolve_effective_type_with_template_bounds(
                                         saved_native_hint.as_ref(),
                                         parsed.as_ref(),
+                                        class_template_param_bounds,
                                     )
                                 } else {
                                     saved_native_hint.clone()
@@ -1268,7 +1297,17 @@ impl Backend {
                         docblock::merge_param_docblock_into_parameters(
                             info,
                             &mut parameters,
-                            &method_template_param_bounds,
+                            &template_bounds_in_scope(
+                                class_template_param_bounds,
+                                // A constructor binding the class's templates
+                                // takes on their list; that is not shadowing.
+                                if method_template_params.as_slice() == class_template_params {
+                                    &[]
+                                } else {
+                                    &method_template_params
+                                },
+                                &method_template_param_bounds,
+                            ),
                         );
                     }
 

@@ -5167,3 +5167,44 @@ final readonly class EntitiesLister {
          return type, not the input element type, got: {diags:?}"
     );
 }
+
+#[test]
+fn a_callback_returning_no_null_takes_the_closure_condition_true_branch() {
+    let php = r#"<?php
+class Entry {}
+final class Item extends Entry {}
+
+final class C {
+    /**
+     * @template T of Entry
+     * @param (Closure(): ?T) $callback
+     * @return ($callback is Closure(): T ? T : null|T)
+     */
+    public static function flexible(Closure $callback): ?Entry { return $callback(); }
+}
+
+final class U {
+    public function build(): Item { return new Item(); }
+
+    public function a(): Item {
+        return C::flexible(function (): Item { return new Item(); });
+    }
+    public function b(): Item {
+        return C::flexible(fn (): Item => new Item());
+    }
+    public function c(): Item {
+        return C::flexible($this->build(...));
+    }
+    public function d(): Item {
+        return C::flexible(fn (): ?Item => null);
+    }
+}
+"#;
+    let diags = collect(php);
+    let lines: Vec<u32> = diags.iter().map(|d| d.range.start.line).collect();
+    assert_eq!(
+        lines,
+        vec![26],
+        "only the callback that may return null leaves `null` possible: {diags:?}"
+    );
+}

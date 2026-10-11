@@ -354,9 +354,8 @@ pub(super) fn format_all_call_args(args: &TokenSeparatedSequence<'_, Argument<'_
 
 /// Longest closure body kept verbatim in an argument's subject text.
 ///
-/// A callback with no return-type annotation can only bind a
-/// `callable(): T` template through its body, so the body has to survive
-/// into the text.  Real callbacks are short (`fn ($p) => $p->slug`); this
+/// A callback binds a `callable(): T` template through its body, so the
+/// body has to survive into the text.  Real callbacks are short (`fn ($p) => $p->slug`); this
 /// bound keeps a pathological one from bloating the symbol map, at the
 /// cost of losing the binding for that call.
 const MAX_INLINE_CLOSURE_BODY: usize = 160;
@@ -364,10 +363,10 @@ const MAX_INLINE_CLOSURE_BODY: usize = 160;
 /// Format a single argument expression to text.
 ///
 /// For closures and arrow functions the parameter list and return type
-/// annotation are always preserved, since template inference reads them.
-/// The body is replaced with a placeholder (`=> ...` or `{ ... }`) unless
-/// the callback has no return-type annotation, in which case the body is
-/// the only thing left that can bind the callback's return template.
+/// annotation are always preserved, since template inference reads them,
+/// and so is a short body: a callback really returns what its body
+/// produces narrowed by what it declares, so the body is what binds the
+/// callback's return template even under an annotation.
 pub(super) fn format_arg_expr(expr: &Expression<'_>) -> String {
     match expr {
         // Foo::class
@@ -408,36 +407,33 @@ pub(super) fn format_arg_expr(expr: &Expression<'_>) -> String {
         // parameter types and the return type annotation.
         Expression::ArrowFunction(arrow) => {
             let params = format_callable_params(&arrow.parameter_list);
+            let body = inline_closure_body(format_arg_expr(arrow.expression));
             match &arrow.return_type_hint {
                 Some(rth) => format!(
-                    "fn({}): {} => ...",
+                    "fn({}): {} => {}",
                     params,
-                    crate::parser::extract_hint_type(&rth.hint)
+                    crate::parser::extract_hint_type(&rth.hint),
+                    body
                 ),
-                None => format!(
-                    "fn({}) => {}",
-                    params,
-                    inline_closure_body(format_arg_expr(arrow.expression))
-                ),
+                None => format!("fn({}) => {}", params, body),
             }
         }
         // Closure: function(Type $a, Type $b): ReturnType { … }
         Expression::Closure(closure) => {
             let params = format_callable_params(&closure.parameter_list);
-            match &closure.return_type_hint {
-                Some(rth) => format!(
-                    "function({}): {} {{ ... }}",
+            let ret = closure
+                .return_type_hint
+                .as_ref()
+                .map(|rth| format!(": {}", crate::parser::extract_hint_type(&rth.hint)))
+                .unwrap_or_default();
+            match first_return_expr(closure.body.statements.as_slice()) {
+                Some(value) => format!(
+                    "function({}){} {{ return {}; }}",
                     params,
-                    crate::parser::extract_hint_type(&rth.hint)
+                    ret,
+                    inline_closure_body(format_arg_expr(value))
                 ),
-                None => match first_return_expr(closure.body.statements.as_slice()) {
-                    Some(value) => format!(
-                        "function({}) {{ return {}; }}",
-                        params,
-                        inline_closure_body(format_arg_expr(value))
-                    ),
-                    None => format!("function({}) {{ ... }}", params),
-                },
+                None => format!("function({}){} {{ ... }}", params, ret),
             }
         }
         // Any other expression — delegate to the general subject text

@@ -64,7 +64,12 @@ impl Backend {
             trait_precedences,
             trait_aliases,
             ..
-        } = Self::extract_class_like_members(anon.members.iter(), doc_ctx, &[]);
+        } = Self::extract_class_like_members(
+            anon.members.iter(),
+            doc_ctx,
+            &[],
+            &crate::atom::AtomMap::default(),
+        );
         super::classes::add_implicit_stringable(&mut interfaces, &methods);
 
         let start_offset = anon.left_brace.start.offset;

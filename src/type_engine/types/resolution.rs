@@ -490,6 +490,40 @@ fn resolve_named_type(
         generic_args
     };
 
+    let owner_cell: std::cell::OnceCell<Option<Arc<ClassInfo>>> = std::cell::OnceCell::new();
+    let owner = || {
+        owner_cell
+            .get_or_init(|| {
+                find_class_by_name(all_classes, owning_class_name)
+                    .cloned()
+                    .or_else(|| class_loader(owning_class_name))
+            })
+            .as_deref()
+    };
+
+    // ── Template parameter of the owning class ─────────────────────
+    // A template in scope shadows a class of the same name (`@template T`
+    // beside a global `trait T`), so it is consulted before the lookup.
+    // Its bound stands in for it; an unbounded one names no class.
+    if generic_args.is_empty()
+        && !name.contains('\\')
+        && !owning_class_name.is_empty()
+        && let Some(owner) = owner()
+        && owner.template_params.iter().any(|p| p.as_str() == name)
+    {
+        return match owner.template_param_bounds.get(&atom(name)) {
+            Some(bound) => type_hint_to_classes_typed_depth(
+                bound,
+                owning_class_name,
+                all_classes,
+                class_loader,
+                depth + 1,
+                produced,
+            ),
+            None => vec![],
+        };
+    }
+
     match lookup_class_declaration(name, owning_class_name, all_classes, class_loader) {
         Some(cls) => {
             // ── Eloquent custom collection swapping ────────────────
@@ -618,17 +652,9 @@ fn resolve_named_type(
         }
         None => {
             // ── Template parameter bound fallback ──────────────────
+            // For a template name that got namespace-qualified on the way.
             let short = short_name(name);
-            let loaded;
-            let owning = match find_class_by_name(all_classes, owning_class_name) {
-                Some(c) => Some(c.as_ref()),
-                None => {
-                    loaded = class_loader(owning_class_name);
-                    loaded.as_deref()
-                }
-            };
-
-            if let Some(owner) = owning
+            if let Some(owner) = owner()
                 && owner.template_params.iter().any(|p| p.as_str() == short)
                 && let Some(bound) = owner.template_param_bounds.get(&atom(short))
             {
