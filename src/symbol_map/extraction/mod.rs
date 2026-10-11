@@ -307,6 +307,10 @@ fn extract_symbol_map_inner(
     // Deduplicate overlapping spans (keep the first / most specific).
     ctx.spans
         .dedup_by(|b, a| a.start == b.start && a.end == b.end);
+    // Every workspace file keeps its map for the whole session, so drop
+    // the growth slack and the room the dedup freed.
+    ctx.spans.shrink_to_fit();
+    ctx.var_defs.shrink_to_fit();
 
     // Sort var_defs by (scope_start, offset) for efficient lookup.
     ctx.var_defs.sort_by(|a, b| {

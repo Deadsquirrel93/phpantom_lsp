@@ -1691,10 +1691,10 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
         );
     };
     probe("blade_source_maps", &mut || {
-        backend.blade_source_maps.write().clear()
+        *backend.blade_source_maps.write() = Default::default()
     });
     probe("blade_virtual_content", &mut || {
-        backend.blade_virtual_content.write().clear()
+        *backend.blade_virtual_content.write() = Default::default()
     });
     probe("schema_index", &mut || {
         *backend.schema_index.write() = Default::default()
@@ -1712,26 +1712,32 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
         *backend.laravel_string_key_cache.write() = Default::default()
     });
     probe("member_completion_cache", &mut || {
-        backend.member_completion_cache.lock().clear()
+        *backend.member_completion_cache.lock() = Default::default()
     });
     probe("member_reference_cache", &mut || {
         backend.member_ref_counts.clear_cached()
     });
     probe("auth_user_type_cache", &mut || {
-        backend.auth_user_type_cache.write().clear()
+        *backend.auth_user_type_cache.write() = Default::default()
     });
     probe("storage_disk_type_cache", &mut || {
         *backend.storage_disk_type_cache.write() = None
     });
-    probe("parse_errors", &mut || backend.parse_errors.write().clear());
+    probe("parse_errors", &mut || {
+        *backend.parse_errors.write() = Default::default()
+    });
     probe("file_namespaces", &mut || {
-        backend.file_namespaces.write().clear()
+        *backend.file_namespaces.write() = Default::default()
     });
     probe("resolved_names", &mut || {
-        backend.resolved_names.write().clear()
+        *backend.resolved_names.write() = Default::default()
     });
-    probe("file_imports", &mut || backend.file_imports.write().clear());
-    probe("symbol_maps", &mut || backend.symbol_maps.write().clear());
+    probe("file_imports", &mut || {
+        *backend.file_imports.write() = Default::default()
+    });
+    probe("symbol_maps", &mut || {
+        *backend.symbol_maps.write() = Default::default()
+    });
     probe("reference_index", &mut || {
         let uris: Vec<Arc<str>> = backend
             .reference_index
@@ -1746,96 +1752,90 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
         }
     });
     probe("method_store", &mut || {
-        backend.symbols.method_store.write().clear()
+        *backend.symbols.method_store.write() = Default::default()
     });
     probe("resolved_class_cache", &mut || {
-        backend.resolved_class_cache.write().clear()
+        *backend.resolved_class_cache.write() = Default::default()
     });
     probe("fqn_class_index", &mut || {
-        backend.symbols.fqn_class_index.write().clear()
+        *backend.symbols.fqn_class_index.write() = Default::default()
     });
     probe("uri_classes_index", &mut || {
-        backend.symbols.uri_classes_index.write().clear()
+        *backend.symbols.uri_classes_index.write() = Default::default()
     });
     probe("global_functions", &mut || {
-        backend.symbols.global_functions.write().clear()
+        *backend.symbols.global_functions.write() = crate::ci_map::CiMap::new()
     });
     probe("global_defines", &mut || {
-        backend.symbols.global_defines.write().clear()
+        *backend.symbols.global_defines.write() = Default::default()
     });
     probe("gti_index", &mut || {
-        backend.symbols.gti_index.write().clear();
-        backend.symbols.gti_parents_index.write().clear();
+        *backend.symbols.gti_index.write() = Default::default();
+        *backend.symbols.gti_parents_index.write() = Default::default();
     });
     probe("uri_globals_index", &mut || {
-        backend.symbols.uri_globals_index.write().clear()
+        *backend.symbols.uri_globals_index.write() = Default::default()
     });
     probe("fqn_uri + fqn_origin index", &mut || {
-        backend.symbols.fqn_uri_index.write().clear();
-        backend.symbols.fqn_origin_index.write().clear();
+        *backend.symbols.fqn_uri_index.write() = Default::default();
+        *backend.symbols.fqn_origin_index.write() = Default::default();
     });
     probe("autoload indexes", &mut || {
-        backend.symbols.autoload_function_index.write().clear();
-        backend
-            .symbols
-            .autoload_function_origin_index
-            .write()
-            .clear();
-        backend.symbols.autoload_constant_index.write().clear();
-        backend
-            .symbols
-            .autoload_constant_origin_index
-            .write()
-            .clear();
-        backend.symbols.autoload_file_paths.write().clear();
+        *backend.symbols.autoload_function_index.write() = Default::default();
+        *backend.symbols.autoload_function_origin_index.write() = Default::default();
+        *backend.symbols.autoload_constant_index.write() = Default::default();
+        *backend.symbols.autoload_constant_origin_index.write() = Default::default();
+        *backend.symbols.autoload_file_paths.write() = Default::default();
     });
     probe("class_not_found_cache", &mut || {
-        backend.symbols.class_not_found_cache.write().clear()
+        *backend.symbols.class_not_found_cache.write() = Default::default()
     });
     probe("stub indexes", &mut || {
-        backend.stub_index.write().clear();
-        backend.stub_function_index.write().clear();
-        backend.stub_constant_index.write().clear();
+        *backend.stub_index.write() = Default::default();
+        *backend.stub_function_index.write() = Default::default();
+        *backend.stub_constant_index.write() = Default::default();
     });
-    probe("parsed_uris", &mut || backend.parsed_uris.write().clear());
+    probe("parsed_uris", &mut || {
+        *backend.parsed_uris.write() = Default::default()
+    });
     probe("laravel_aliases", &mut || {
         backend.laravel_aliases.invalidate()
     });
     probe("laravel seed/mixin/pivot/command sets", &mut || {
-        backend.laravel_macro_seeds.write().clear();
-        backend.laravel_macro_mixin_uris.write().clear();
-        backend.laravel_date_seed_uris.write().clear();
+        *backend.laravel_macro_seeds.write() = Default::default();
+        *backend.laravel_macro_mixin_uris.write() = Default::default();
+        *backend.laravel_date_seed_uris.write() = Default::default();
         *backend.laravel_pivots.write() = Default::default();
         *backend.laravel_commands.write() = Default::default();
         *backend.laravel_gates.write() = Default::default();
-        backend.laravel_runtime_config_keys.write().clear();
+        *backend.laravel_runtime_config_keys.write() = Default::default();
     });
-    probe("blade_uris", &mut || backend.blade_uris.write().clear());
+    probe("blade_uris", &mut || {
+        *backend.blade_uris.write() = Default::default()
+    });
     probe("phar_archives", &mut || {
-        backend.phar_archives.write().clear()
+        *backend.phar_archives.write() = Default::default()
     });
-    probe("open_files", &mut || backend.open_files.write().clear());
+    probe("open_files", &mut || {
+        *backend.open_files.write() = Default::default()
+    });
     probe("did_change_parse_locks", &mut || {
-        backend.did_change_parse_locks.lock().clear()
+        *backend.did_change_parse_locks.lock() = Default::default()
     });
     probe("workspace psr4 + vendor paths", &mut || {
-        backend.workspace.psr4_mappings.write().clear();
-        backend.workspace.vendor_uri_prefixes.lock().clear();
-        backend.workspace.vendor_dir_paths.lock().clear();
-        backend
-            .workspace
-            .vendor_package_origin_roots
-            .write()
-            .clear();
+        *backend.workspace.psr4_mappings.write() = Default::default();
+        *backend.workspace.vendor_uri_prefixes.lock() = Default::default();
+        *backend.workspace.vendor_dir_paths.lock() = Default::default();
+        *backend.workspace.vendor_package_origin_roots.write() = Default::default();
     });
     probe("diagnostic state", &mut || {
-        backend.diag.pending_uris.lock().clear();
-        backend.diag.last_slow.lock().clear();
-        backend.diag.last_fast.lock().clear();
-        backend.diag.last_full.lock().clear();
-        backend.diag.result_ids.lock().clear();
-        backend.diag.suppressed.lock().clear();
-        backend.diag.assemble_locks.lock().clear();
+        *backend.diag.pending_uris.lock() = Default::default();
+        *backend.diag.last_slow.lock() = Default::default();
+        *backend.diag.last_fast.lock() = Default::default();
+        *backend.diag.last_full.lock() = Default::default();
+        *backend.diag.result_ids.lock() = Default::default();
+        *backend.diag.suppressed.lock() = Default::default();
+        *backend.diag.assemble_locks.lock() = Default::default();
         *backend.diag.workspace_diags.lock() = Default::default();
     });
 

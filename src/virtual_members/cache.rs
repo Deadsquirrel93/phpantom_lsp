@@ -151,6 +151,12 @@ pub struct ResolvedCacheInner {
     /// produces value-identical transformed properties, which interning
     /// collapses to one allocation shared across all of them.
     substituted_properties: HashMap<(usize, u128), SubstitutedPropertyEntry>,
+    /// Length of [`substituted_methods`](Self::substituted_methods) after
+    /// its last dead-witness sweep.  See [`sweep_dead_witnesses`].
+    substituted_methods_swept_len: usize,
+    /// Same as [`substituted_methods_swept_len`](Self::substituted_methods_swept_len),
+    /// for [`substituted_properties`](Self::substituted_properties).
+    substituted_properties_swept_len: usize,
     /// Loaded classes with their `@phpstan-import-type` aliases linked into
     /// their members, keyed by the identity of the class as loaded.
     ///
@@ -209,12 +215,38 @@ struct SubstitutedPropertyEntry {
     value: Arc<PropertyInfo>,
 }
 
-/// Ceiling on each interned-member map (methods and properties).
-/// Reaching it clears the map (the merge simply stops sharing until it
-/// refills); it exists only as a backstop against unbounded growth
-/// across many edit/evict cycles, far above what a full workspace
-/// resolution produces.
+/// Ceiling on the live entries of each interned-member map (methods and
+/// properties).  A sweep that leaves this many clears the map (the merge
+/// simply stops sharing until it refills), so a map never grows past
+/// twice the cap.  It exists only as a backstop, far above what a full
+/// workspace resolution produces.
 const SUBSTITUTED_METHODS_CAP: usize = 1 << 20;
+
+/// Smallest interned-member map that is swept for dead witnesses, so a
+/// small map is not rescanned on every few inserts.
+const SUBSTITUTED_SWEEP_FLOOR: usize = 1 << 12;
+
+/// Drop the entries of an interned-member map whose origin has died,
+/// once the map has doubled since its last sweep.
+///
+/// An edit that re-parses a file kills the origins of its members, but
+/// their entries stay in the map: the transformed value is held strongly,
+/// and the `Weak` witness keeps the dead origin's allocation.  Sweeping
+/// at each doubling keeps the cost amortised O(1) per insert.
+fn sweep_dead_witnesses<V>(
+    map: &mut HashMap<(usize, u128), V>,
+    swept_len: &mut usize,
+    alive: impl Fn(&V) -> bool,
+) {
+    if map.len() < (*swept_len * 2).max(SUBSTITUTED_SWEEP_FLOOR) {
+        return;
+    }
+    map.retain(|_, entry| alive(entry));
+    if map.len() >= SUBSTITUTED_METHODS_CAP {
+        map.clear();
+    }
+    *swept_len = map.len();
+}
 
 impl Default for ResolvedCacheInner {
     fn default() -> Self {
@@ -229,6 +261,8 @@ impl Default for ResolvedCacheInner {
             pending: HashMap::new(),
             substituted_methods: HashMap::new(),
             substituted_properties: HashMap::new(),
+            substituted_methods_swept_len: 0,
+            substituted_properties_swept_len: 0,
             linked_aliases: HashMap::new(),
             member_pool: parking_lot::Mutex::default(),
         }
@@ -404,6 +438,8 @@ impl ResolvedCacheInner {
         self.reverse_deps.clear();
         self.substituted_methods.clear();
         self.substituted_properties.clear();
+        self.substituted_methods_swept_len = 0;
+        self.substituted_properties_swept_len = 0;
         self.linked_aliases.clear();
         self.member_pool.get_mut().clear();
     }
@@ -499,9 +535,11 @@ impl ResolvedCacheInner {
         fp: u128,
         value: Arc<MethodInfo>,
     ) {
-        if self.substituted_methods.len() >= SUBSTITUTED_METHODS_CAP {
-            self.substituted_methods.clear();
-        }
+        sweep_dead_witnesses(
+            &mut self.substituted_methods,
+            &mut self.substituted_methods_swept_len,
+            |e| e.witness.strong_count() > 0,
+        );
         self.substituted_methods.insert(
             (Arc::as_ptr(origin) as usize, fp),
             SubstitutedEntry {
@@ -540,9 +578,11 @@ impl ResolvedCacheInner {
         fp: u128,
         value: Arc<PropertyInfo>,
     ) {
-        if self.substituted_properties.len() >= SUBSTITUTED_METHODS_CAP {
-            self.substituted_properties.clear();
-        }
+        sweep_dead_witnesses(
+            &mut self.substituted_properties,
+            &mut self.substituted_properties_swept_len,
+            |e| e.witness.strong_count() > 0,
+        );
         self.substituted_properties.insert(
             (Arc::as_ptr(origin) as usize, fp),
             SubstitutedPropertyEntry {
@@ -922,4 +962,34 @@ fn dependency_keys(cls: &ClassInfo) -> Vec<String> {
     }
 
     keys
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sweep_drops_dead_origins_once_the_map_doubles() {
+        let mut map: HashMap<(usize, u128), Weak<u32>> = HashMap::new();
+        let mut swept_len = 0;
+        let live: Vec<Arc<u32>> = (0..SUBSTITUTED_SWEEP_FLOOR as u32).map(Arc::new).collect();
+        for (i, origin) in live.iter().enumerate() {
+            map.insert((i, 0), Arc::downgrade(origin));
+        }
+        for i in 0..SUBSTITUTED_SWEEP_FLOOR {
+            let dead = Arc::new(0u32);
+            map.insert((SUBSTITUTED_SWEEP_FLOOR + i, 0), Arc::downgrade(&dead));
+        }
+
+        sweep_dead_witnesses(&mut map, &mut swept_len, |w| w.strong_count() > 0);
+        assert_eq!(map.len(), SUBSTITUTED_SWEEP_FLOOR);
+        assert_eq!(swept_len, SUBSTITUTED_SWEEP_FLOOR);
+
+        // Below twice the swept length nothing is rescanned.
+        let dead = Arc::new(0u32);
+        map.insert((usize::MAX, 0), Arc::downgrade(&dead));
+        drop(dead);
+        sweep_dead_witnesses(&mut map, &mut swept_len, |w| w.strong_count() > 0);
+        assert_eq!(map.len(), SUBSTITUTED_SWEEP_FLOOR + 1);
+    }
 }

@@ -20,32 +20,7 @@ against that bar.
 
 ---
 
-## P82. Trivial memory fixes
-
-**Impact: Low-Medium · Complexity: Low**
-
-Measured on the same app. Each is small; together they are about 5% of
-the LSP's RSS, and the intern store sweep also bounds growth over a long
-session.
-
-- **Symbol map capacity slack.** `spans` carry 17.7 MB of unused capacity
-  and `call_sites` about 11 MB. A `shrink_to_fit` when the map is built
-  reclaims about 29 MB (3.5%).
-- **Member intern store never sweeps.** `substituted_methods` and
-  `substituted_properties` in `virtual_members/cache.rs` hold the
-  transformed member strongly and are only cleared at 1M entries. An
-  edit that re-parses a file leaves its old transformed members alive,
-  and each entry's `Weak` witness keeps the dead origin's allocation
-  too. Sweep dead-witness entries when the map has doubled since the last
-  sweep, as `linked_aliases` already does at its cap. The method table
-  alone is 24.5 MB after a full `analyze`.
-- **Interner buckets.** `php_type/intern.rs` gives every hash its own
-  `Vec<Weak<TypeKind>>`, though almost every bucket holds one entry.
-  That is about 114k allocations and 5 MB. Store a single entry inline.
-- **Audit drop probes keep table capacity.** `mem_audit.rs` releases
-  each store with `clear()`, which keeps the hash table allocated, so
-  about 40 MB of table capacity is reported as "residual" instead of
-  under its store. Use `std::mem::take`.
+No outstanding items.
 
 ---
 

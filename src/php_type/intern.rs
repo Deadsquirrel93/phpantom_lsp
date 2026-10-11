@@ -24,6 +24,7 @@
 //! has reached zero, at which point no handle to the old allocation exists.
 
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::hash::{BuildHasherDefault, Hash, Hasher};
 use std::sync::{Arc, Weak};
 
@@ -108,7 +109,54 @@ impl Hasher for FxHasher {
     }
 }
 
-type Buckets = HashMap<u64, Vec<Weak<TypeKind>>, BuildHasherDefault<PassThroughHasher>>;
+type Buckets = HashMap<u64, Bucket, BuildHasherDefault<PassThroughHasher>>;
+
+/// The forms sharing one content hash.  Almost every hash has exactly one,
+/// so that case is stored inline rather than as its own heap allocation.
+enum Bucket {
+    One(Weak<TypeKind>),
+    Many(Vec<Weak<TypeKind>>),
+}
+
+impl Bucket {
+    fn as_slice(&self) -> &[Weak<TypeKind>] {
+        match self {
+            Bucket::One(weak) => std::slice::from_ref(weak),
+            Bucket::Many(weaks) => weaks,
+        }
+    }
+
+    /// Store `weak`, reusing the slot of an entry whose handles are gone:
+    /// such entries hash to this same bucket forever, so the bucket would
+    /// otherwise keep growing.
+    fn insert(&mut self, weak: Weak<TypeKind>) {
+        match self {
+            Bucket::One(slot) if slot.strong_count() == 0 => *slot = weak,
+            Bucket::One(slot) => {
+                let first = std::mem::replace(slot, Weak::new());
+                *self = Bucket::Many(vec![first, weak]);
+            }
+            Bucket::Many(weaks) => match weaks.iter_mut().find(|w| w.strong_count() == 0) {
+                Some(slot) => *slot = weak,
+                None => weaks.push(weak),
+            },
+        }
+    }
+
+    /// Drop dead entries, returning whether any live one remains.
+    fn retain_live(&mut self) -> bool {
+        match self {
+            Bucket::One(weak) => weak.strong_count() > 0,
+            Bucket::Many(weaks) => {
+                weaks.retain(|weak| weak.strong_count() > 0);
+                if weaks.len() == 1 {
+                    *self = Bucket::One(weaks.pop().expect("length checked"));
+                }
+                !self.as_slice().is_empty()
+            }
+        }
+    }
+}
 
 #[derive(Default)]
 struct Shard {
@@ -144,25 +192,29 @@ pub(super) fn intern(kind: TypeKind) -> PhpType {
         .read()
         .buckets
         .get(&hash)
-        .and_then(|bucket| lookup(bucket, &kind))
+        .and_then(|bucket| lookup(bucket.as_slice(), &kind))
     {
         return PhpType(existing);
     }
 
     let mut shard = shard.write();
-    // Another thread may have interned the same form between the two locks.
-    let bucket = shard.buckets.entry(hash).or_default();
-    if let Some(existing) = lookup(bucket, &kind) {
-        return PhpType(existing);
-    }
-
-    let interned = Arc::new(kind);
-    // Entries whose handles are gone hash to this same bucket forever, so
-    // reuse the slot rather than letting the bucket grow.
-    match bucket.iter_mut().find(|weak| weak.strong_count() == 0) {
-        Some(slot) => *slot = Arc::downgrade(&interned),
-        None => bucket.push(Arc::downgrade(&interned)),
-    }
+    let interned = match shard.buckets.entry(hash) {
+        Entry::Occupied(mut bucket) => {
+            // Another thread may have interned the same form between the
+            // two locks.
+            if let Some(existing) = lookup(bucket.get().as_slice(), &kind) {
+                return PhpType(existing);
+            }
+            let interned = Arc::new(kind);
+            bucket.get_mut().insert(Arc::downgrade(&interned));
+            interned
+        }
+        Entry::Vacant(slot) => {
+            let interned = Arc::new(kind);
+            slot.insert(Bucket::One(Arc::downgrade(&interned)));
+            interned
+        }
+    };
 
     shard.since_sweep += 1;
     if shard.since_sweep >= SWEEP_INTERVAL.max(shard.buckets.len()) {
@@ -184,10 +236,7 @@ fn lookup(bucket: &[Weak<TypeKind>], kind: &TypeKind) -> Option<Arc<TypeKind>> {
 /// weak slot and the `Arc` allocation header it was keeping alive.
 fn sweep(shard: &mut Shard) {
     shard.since_sweep = 0;
-    shard.buckets.retain(|_, bucket| {
-        bucket.retain(|weak| weak.strong_count() > 0);
-        !bucket.is_empty()
-    });
+    shard.buckets.retain(|_, bucket| bucket.retain_live());
 }
 
 /// Number of distinct type forms the interner currently holds a live
@@ -201,7 +250,7 @@ pub(crate) fn interned_len() -> usize {
                 .read()
                 .buckets
                 .values()
-                .flatten()
+                .flat_map(Bucket::as_slice)
                 .filter(|weak| weak.strong_count() > 0)
                 .count()
         })
