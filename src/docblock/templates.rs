@@ -317,11 +317,16 @@ pub fn extract_generics_tag_from_info(
 /// Split a generics tag type (e.g. `"Collection<int, Language>"`) into a
 /// `(base_name, generic_args)` tuple.  Types without arguments are not
 /// generic bindings and yield `None`.
+///
+/// The base name is kept as written, leading `\` included, like the type
+/// arguments and a class's `extends` name.  Name resolution needs that `\`
+/// to tell `\Foo\Bar` (fully qualified) from `Foo\Bar` (relative to the
+/// file's namespace).
 fn parse_generics_type(type_text: &str) -> Option<(String, Vec<PhpType>)> {
     match PhpType::parse(type_text).kind() {
         TypeKind::Generic(g) if !g.args.is_empty() => {
-            let base_name = strip_fqn_prefix(&g.name).to_string();
-            (!base_name.is_empty()).then(|| (base_name, g.args.clone()))
+            let base_name = g.name.to_string();
+            (!strip_fqn_prefix(&base_name).is_empty()).then(|| (base_name, g.args.clone()))
         }
         _ => None,
     }

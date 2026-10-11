@@ -16063,3 +16063,86 @@ namespace B {
         "`Foo` in block B is `B\\Foo`, got: {text}"
     );
 }
+
+/// A fully-qualified `@implements \Ns\Iface<…>` inside namespace `Ns`
+/// names `Ns\Iface`, not `Ns\Ns\Iface`.  Laravel's `Support\Collection`
+/// binds `Enumerable` this way, and its `keyBy()` / `groupBy()` take their
+/// signature from it through `{@inheritDoc}`; on `Eloquent\Collection` the
+/// element type was lost because the binding never matched.
+#[test]
+fn hover_inherit_doc_static_return_through_fully_qualified_implements() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+namespace Support {
+    /**
+     * @template TKey of array-key
+     * @template-covariant TValue
+     */
+    interface Enumerable {
+        /**
+         * @template TNewKey of array-key
+         *
+         * @param (callable(TValue, TKey): TNewKey)|array|string $keyBy
+         * @return static<($keyBy is (array|string) ? array-key : TNewKey), TValue>
+         */
+        public function keyBy($keyBy);
+
+        /**
+         * @template TGroupKey of array-key
+         *
+         * @param (callable(TValue, TKey): TGroupKey)|array|string $groupBy
+         * @return static<($groupBy is (array|string) ? array-key : TGroupKey), static<int, TValue>>
+         */
+        public function groupBy($groupBy);
+    }
+
+    /**
+     * @template TKey of array-key
+     * @template-covariant TValue
+     * @implements \Support\Enumerable<TKey, TValue>
+     */
+    class Collection implements Enumerable {
+        /** {@inheritDoc} */
+        public function keyBy($keyBy) {}
+
+        /** {@inheritDoc} */
+        public function groupBy($groupBy) {}
+    }
+}
+
+namespace Eloquent {
+    class Model {}
+    class Member extends Model {}
+
+    /**
+     * @template TKey of array-key
+     * @template TModel of Model
+     * @extends \Support\Collection<TKey, TModel>
+     */
+    class Collection extends \Support\Collection {}
+
+    function test(): void {
+        /** @var Collection<int, Member> $c */
+        $c = new Collection();
+        $keyed = $c->keyBy('id');
+        $grouped = $c->groupBy('id');
+        $keyed;
+        $grouped;
+    }
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 54, 10).expect("hover on $keyed");
+    let keyed = hover_text(&hover);
+    assert!(
+        keyed.contains("Collection<array-key, Member>"),
+        "keyBy should keep the element type: {keyed}"
+    );
+    let hover = hover_at(&backend, uri, content, 55, 10).expect("hover on $grouped");
+    let grouped = hover_text(&hover);
+    assert!(
+        grouped.contains("Collection<array-key, Collection<int, Member>>"),
+        "groupBy should keep the element type: {grouped}"
+    );
+}

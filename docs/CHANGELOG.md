@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`keyBy()` and `groupBy()` on an Eloquent collection keep the model type.** `Member::all()->keyBy('id')` now reads as a collection of `Member` instead of `mixed`. This also holds for any generic class that names its parent or interface by a fully qualified name in `@extends`, `@implements`, or `@use`.
 - **`!== null` on a value that is one of several literals.** After an `if`/`elseif` chain that assigns a different literal in each arm and `null` in the `else`, testing the variable against `null` now narrows the types the arms tested, so passing `$node` to a parameter typed `A|B` no longer reports a mismatch.
 - **Organize imports on save.** "Remove all unused imports" and "Sort use statements" now run through `editor.codeActionsOnSave`, and applying both in one go leaves a correctly sorted import block. "Import all missing classes" no longer runs as part of organizing imports, since it may have to pick between candidates.
 - **An array filled under repeated checks keeps every key.** After `if ($flag) { $data['a'] = 1; }` followed by more `if ($flag)` blocks that each add a key, `$data` keeps all of the keys instead of losing the ones added in between. The same holds for writes under a key only known at runtime (`$data[$id]`) and for `array_push()`.

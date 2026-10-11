@@ -1396,7 +1396,7 @@ fn test_extract_generics_tag_with_fqn() {
     let docblock = "/**\n * @extends \\Illuminate\\Support\\Collection<int, \\App\\Model>\n */";
     let result = extract_generics_tag(docblock, "@extends");
     assert_eq!(result.len(), 1);
-    assert_eq!(result[0].0, "Illuminate\\Support\\Collection");
+    assert_eq!(result[0].0, "\\Illuminate\\Support\\Collection");
     assert_eq!(
         result[0].1,
         vec![PhpType::parse("int"), PhpType::parse("\\App\\Model")]
@@ -4125,7 +4125,7 @@ fn test_extract_generics_tag_use_fqn() {
     let docblock = "/**\n * @use \\App\\Concerns\\HasFactory<\\App\\Factories\\UserFactory>\n */";
     let result = extract_generics_tag(docblock, "@use");
     assert_eq!(result.len(), 1);
-    assert_eq!(result[0].0, "App\\Concerns\\HasFactory");
+    assert_eq!(result[0].0, "\\App\\Concerns\\HasFactory");
     assert_eq!(
         result[0].1,
         vec![PhpType::parse("\\App\\Factories\\UserFactory")]
