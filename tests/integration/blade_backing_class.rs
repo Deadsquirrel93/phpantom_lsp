@@ -8,6 +8,7 @@ mod tests {
     use crate::common::{
         BLADE_COMPONENT_COMPOSER, ILLUMINATE_COMPONENT_STUB, LIVEWIRE_COMPONENT_STUB,
         blade_undefined_variables, create_psr4_workspace, markup_hover_at, open_blade_template,
+        open_php_at,
     };
     use tower_lsp::LanguageServer;
     use tower_lsp::lsp_types::*;
@@ -606,6 +607,103 @@ mod tests {
         assert!(
             type_errors.is_empty(),
             "the truthy arm proves $countryName is a string: {type_errors:?}"
+        );
+    }
+
+    /// Laravel links a component to its template through the view its
+    /// `render()` returns, so a class outside `App\View\Components` still
+    /// puts its members in the template's scope.
+    #[tokio::test]
+    async fn a_component_outside_the_default_namespace_backs_the_view_it_renders() {
+        let (backend, dir) = create_psr4_workspace(
+            BLADE_COMPONENT_COMPOSER,
+            &[
+                (
+                    "stubs/Illuminate/View/Component.php",
+                    ILLUMINATE_COMPONENT_STUB,
+                ),
+                (
+                    "stubs/Illuminate/View/InvokableComponentVariable.php",
+                    INVOKABLE_STUB,
+                ),
+                (
+                    "app/Contexts/Webshop/View/Components/Products/Slider.php",
+                    "<?php\nnamespace App\\Contexts\\Webshop\\View\\Components\\Products;\n\
+                     use Illuminate\\View\\Component;\n\
+                     final class Slider extends Component {\n\
+                         public readonly string $declared;\n\
+                         public function __construct(public readonly int $promoted, public bool $flag = false) {\n\
+                             $this->declared = 'x';\n\
+                         }\n\
+                         public function modifier(): string { return ''; }\n\
+                         public function render() { return view('components.products.slider'); }\n\
+                     }\n",
+                ),
+                (
+                    "resources/views/components/products/slider.blade.php",
+                    "<div class=\"{{ $declared }} {{ $promoted }} {{ $flag }} {{ $modifier() }}\"></div>\n",
+                ),
+            ],
+        );
+        let class = "app/Contexts/Webshop/View/Components/Products/Slider.php";
+        let source = std::fs::read_to_string(dir.path().join(class)).unwrap();
+        open_php_at(&backend, &dir, class, &source).await;
+        let uri = open_blade_template(
+            &backend,
+            "resources/views/components/products/slider.blade.php",
+        )
+        .await;
+
+        let undefined = blade_undefined_variables(&backend, &uri);
+        assert!(
+            undefined.is_empty(),
+            "the class rendering the view backs it: {undefined:?}"
+        );
+    }
+
+    /// The same holds for a Livewire component whose view sits outside
+    /// `livewire/`: the instance its `render()` returns the view from is
+    /// what `$this` is bound to.
+    #[tokio::test]
+    async fn a_livewire_component_backs_the_view_its_render_returns() {
+        let (backend, dir) = create_psr4_workspace(
+            BLADE_COMPONENT_COMPOSER,
+            &[
+                ("stubs/Livewire/Component.php", LIVEWIRE_COMPONENT_STUB),
+                (
+                    "app/Http/Livewire/AddTestOrder.php",
+                    "<?php\nnamespace App\\Http\\Livewire;\n\
+                     use Livewire\\Component;\n\
+                     class AddTestOrder extends Component {\n\
+                         public int $quantity = 1;\n\
+                         public function total(): int { return 0; }\n\
+                         public function render() { return view('components.customers.add-test-order'); }\n\
+                     }\n",
+                ),
+                (
+                    "resources/views/components/customers/add-test-order.blade.php",
+                    "{{ $quantity }} {{ $this->total() }}\n",
+                ),
+            ],
+        );
+        let class = "app/Http/Livewire/AddTestOrder.php";
+        let source = std::fs::read_to_string(dir.path().join(class)).unwrap();
+        open_php_at(&backend, &dir, class, &source).await;
+        let uri = open_blade_template(
+            &backend,
+            "resources/views/components/customers/add-test-order.blade.php",
+        )
+        .await;
+
+        let undefined = blade_undefined_variables(&backend, &uri);
+        assert!(
+            undefined.is_empty(),
+            "the Livewire class rendering the view backs it: {undefined:?}"
+        );
+        let hover = markup_hover_at(&backend, &uri, 0, 26).await;
+        assert!(
+            hover.contains("total"),
+            "$this is the Livewire component, got: {hover}"
         );
     }
 }

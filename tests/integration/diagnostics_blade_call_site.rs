@@ -401,6 +401,31 @@ class ViewServiceProvider
         assert!(diags.is_empty(), "expected no report, got {diags:?}");
     }
 
+    /// Laravel adds the attribute bag, the default slot, and the component's
+    /// name to the data of the view a class component renders, so a template
+    /// declaring them is not short of anything the `render()` leaves out.
+    #[tokio::test]
+    async fn a_components_render_supplies_the_attribute_bag_and_slot() {
+        let (backend, dir) = workspace(&[
+            (
+                "resources/views/components/products/ean-code.blade.php",
+                "@php\n/**\n * @bladestan-signature\n * @var \\Illuminate\\View\\ComponentAttributeBag $attributes\n * @var mixed $slot\n * @var string $componentName\n * @var string $value\n */\n@endphp\n<span {{ $attributes }}>{{ $value }}{{ $slot }}{{ $componentName }}</span>\n",
+            ),
+            (
+                "app/Contexts/Webshop/View/Components/Products/EanCode.php",
+                "<?php\nnamespace App\\Contexts\\Webshop\\View\\Components\\Products;\nuse Illuminate\\View\\Component;\nclass EanCode extends Component {\n    private string $raw = '';\n    public function render(): mixed {\n        return view('components.products.ean-code', ['value' => $this->raw]);\n    }\n}\n",
+            ),
+        ]);
+        let diags = call_site_diagnostics(
+            &backend,
+            &dir,
+            "app/Contexts/Webshop/View/Components/Products/EanCode.php",
+            "php",
+        )
+        .await;
+        assert!(diags.is_empty(), "expected no report, got {diags:?}");
+    }
+
     /// A plain controller's properties never reach the view, so they excuse
     /// nothing.
     #[tokio::test]

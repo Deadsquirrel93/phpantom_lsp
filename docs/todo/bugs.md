@@ -280,81 +280,24 @@ three of its view namespaces this way, which leaves every
 
 ## Blade
 
-### B608. A class component outside `App\View\Components` is not linked to its template
-
-**Impact: High · Complexity: Medium**
-
-```php
-namespace App\Contexts\Webshop\View\Components\Products;
-
-final class Slider extends Component {
-    public readonly string $declared;
-    public function __construct(public readonly int $promoted, public bool $flag = false) {
-        $this->declared = 'x';
-    }
-    public function modifier(): string { return ''; }
-    public function render(): View { return view('components.products.slider'); }
-}
-```
-
-```blade
-{{-- resources/webshop/views/components/products/slider.blade.php --}}
-<div class="{{ $declared }} {{ $promoted }} {{ $flag }} {{ $modifier() }}"></div>
-{{-- Undefined variable for all four --}}
-```
-
-The same class under `App\View\Components\Slider` with the template at
-`resources/views/components/slider.blade.php` is clean, so the template is
-only linked to its class by Laravel's default naming convention, not by
-the view the class's `render()` returns or by `Blade::componentNamespace()`.
-When the component is used as a tag, call-site attribute inference covers
-the variables passed as attributes, so only defaults, computed properties
-and public methods show up as undefined. One large Laravel project has 55
-of these across its webshop components. A Livewire component's view
-(`$this->method()` inside `components.customers.add-test-order`) shows the
-same symptom and is likely the same gap.
-
-### B609. A class component's `render()` view is reported as missing `$attributes`
+### B611. `@component` is treated as handing the child the parent's scope
 
 **Impact: Low · Complexity: Low**
 
-```php
-public function render(): View {
-    return view('components.products.ean-code', ['value' => $this->raw]);
-}
-```
-
 ```blade
-@php /** @var \Illuminate\View\ComponentAttributeBag $attributes */ @endphp
-{{-- View 'components.products.ean-code' expects $attributes … which is not passed --}}
+@php /** @bladestan-signature @var string $title */ @endphp
+@component('alert') @endcomponent {{-- alert declares $title: not reported --}}
 ```
 
-Laravel adds `attributes`, `slot` and `componentName` (plus the public
-properties and methods) to the data of a view a class component renders,
-so the template can always rely on them.
-
-### B610. A Blade `@include` does not count as reading the parent's variables
-
-**Impact: Medium · Complexity: Low**
-
-```blade
-@if ($flag)
-    @php $spanClass = 'a'; @endphp
-@else
-    @php $spanClass = ''; @endphp
-@endif
-
-@include('child') {{-- child.blade.php reads $spanClass --}}
-{{-- Unused variable '$spanClass' --}}
-```
-
-Laravel compiles `@include` (and `@includeIf`, `@includeWhen`,
-`@includeUnless`, `@includeFirst`, and `@extends`) to pass
-`get_defined_vars()` to the child, so every variable in scope is read. A
-plain PHP `include` already exempts its frame in `unused_variables.rs`
-(`frame_owns_import`); the Blade directives produce neither an `include`
-nor a `get_defined_vars()` call, so the variable counts as unused. Only the
-first write is reported, which is why one branch looks fine.
+Laravel compiles `@component` to `$__env->startComponent(...)`, which
+renders the view from the array it is passed (plus shared data) alone,
+unlike the `@include` family. `contract.rs` still lists `component` and
+`componentFirst` in `RENDER_DIRECTIVES`, and `ViewCallWalker` records the
+site with `forwards_scope: true`, so a name the parent holds counts as
+supplied to the component's view and a name only the component's view
+reads counts as accepted from the parent's callers. The unused-variable
+check already tells them apart (the preprocessor lowers `@component` to
+`blade_component_directive`).
 
 ## Templates
 

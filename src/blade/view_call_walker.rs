@@ -537,13 +537,15 @@ fn arrayable_shape_entries(
 /// arguments.
 ///
 /// `blade_view_directive` is what the preprocessor compiles Blade's own
-/// `@include` family, `@extends`, and `@component` into, so a template
-/// rendering another template is judged by the same rules a controller
-/// is.  `@each` compiles to [`is_each_render_function`]'s marker instead,
-/// because its arguments do not describe a data array.
+/// `@include` family and `@extends` into, and `blade_component_directive`
+/// is `@component`, so a template rendering another template is judged by
+/// the same rules a controller is.  `@each` compiles to
+/// [`is_each_render_function`]'s marker instead, because its arguments do
+/// not describe a data array.
 fn is_view_render_function(name: &str) -> bool {
     name.eq_ignore_ascii_case("view")
         || name.eq_ignore_ascii_case("blade_view_directive")
+        || name.eq_ignore_ascii_case("blade_component_directive")
         || is_each_render_function(name)
 }
 

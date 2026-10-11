@@ -311,7 +311,9 @@ fn extract_call<'a>(
                     // `@extendsFirst` siblings put their candidates in an
                     // array literal, so the compiled directive names several
                     // templates at once.
-                    if name_clean.eq_ignore_ascii_case("blade_view_directive") {
+                    if name_clean.eq_ignore_ascii_case("blade_view_directive")
+                        || name_clean.eq_ignore_ascii_case("blade_component_directive")
+                    {
                         try_emit_laravel_view_span_at(
                             0,
                             &func_call.argument_list,

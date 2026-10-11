@@ -207,6 +207,11 @@ pub(crate) fn has_get_defined_vars(body: ScopeBody<'_, '_>) -> bool {
 /// tell which names it reads, so the whole scope's variables have to count
 /// as used.
 ///
+/// A Blade template's `@include` family and `@extends` count too: Laravel
+/// compiles them to a render that is handed `get_defined_vars()`, so the
+/// child template can read any variable the parent has in scope. The
+/// preprocessor lowers exactly those directives to `blade_view_directive`.
+///
 /// Offsets are collected rather than a single flag because the caller
 /// needs to know which frame's scope each import sits in, and unlike the
 /// other detectors here that means walking into nested scopes.
@@ -221,6 +226,12 @@ struct ImportWalker;
 impl<'ast, 'arena> Walker<'ast, 'arena, Vec<u32>> for ImportWalker {
     fn walk_in_construct(&self, node: &'ast Construct<'arena>, context: &mut Vec<u32>) {
         if node.is_import() {
+            context.push(node.span().start.offset);
+        }
+    }
+
+    fn walk_in_function_call(&self, node: &'ast FunctionCall<'arena>, context: &mut Vec<u32>) {
+        if is_named_call(node, b"blade_view_directive") {
             context.push(node.span().start.offset);
         }
     }

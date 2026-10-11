@@ -85,6 +85,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Imports and `namespace` statements go ahead of code written on the `<?php` line.** In a file with no `namespace` whose code starts on the same line as the opening tag, or a `declare` after it, a new import or `namespace` statement is now written right after the tag or the `declare` instead of on the next line, below the code it was meant to cover.
 - **Diagnostics appear in editors that do not answer a file-watcher registration.** An editor that never replied to the server's request to watch files, such as CodeLite, showed no diagnostics at all. The request is now only sent to editors that support it, and a missing reply no longer holds anything up.
 - **APCu functions return only the form the call selects.** `apcu_store()`, `apcu_add()`, `apcu_delete()`, and `apcu_exists()` called with a single key return a `bool`, so returning one from a function declared `: bool` is no longer reported.
+- **A Blade component's template sees its class wherever the class lives.** The template a class component or Livewire component returns from `render()` now has the class's public properties and methods in scope, even when the class sits outside `App\View\Components` or the view name doesn't follow Laravel's naming convention.
+- **A component's `render()` view is no longer short of `$attributes`.** A template that declares `$attributes` or `$componentName` is no longer reported as missing them when a class component renders it, since Laravel passes them itself.
+- **A variable set for a Blade `@include` is no longer reported as unused.** The `@include` family and `@extends` hand the child template every variable in scope, so a variable only the child reads now counts as used.
 
 ## [0.11.1] - 2026-10-07
 

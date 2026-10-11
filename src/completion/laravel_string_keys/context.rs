@@ -1191,7 +1191,7 @@ pub(super) fn detect_laravel_string_key_context_inner<'a>(
         // inside an array literal rather than as a plain first argument.
         let accepts_array = matches!(
             fn_lower.as_str(),
-            "blade_view_directive" | "blade_can_directive"
+            "blade_view_directive" | "blade_component_directive" | "blade_can_directive"
         );
         if argument.shape != StringArgumentShape::Scalar
             && (!accepts_array || !before_quote.trim_end().ends_with('['))
@@ -1223,9 +1223,10 @@ pub(super) fn detect_laravel_string_key_context_inner<'a>(
             match fn_lower.as_str() {
                 "route" | "to_route" => Some(LaravelStringKind::Route),
                 "config" => Some(LaravelStringKind::Config),
-                "view" | "blade_view_directive" | "blade_each_directive" => {
-                    Some(LaravelStringKind::View)
-                }
+                "view"
+                | "blade_view_directive"
+                | "blade_component_directive"
+                | "blade_each_directive" => Some(LaravelStringKind::View),
                 "__" | "trans" | "trans_choice" => Some(LaravelStringKind::Trans),
                 "env" => Some(LaravelStringKind::Env),
                 // The Blade preprocessor lowers `@can`/`@cannot`/`@canany` to

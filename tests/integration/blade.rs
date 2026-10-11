@@ -684,6 +684,43 @@ mod tests {
         );
     }
 
+    /// The `@include` family hands the child template the parent's whole
+    /// scope, so a variable set only for the partial to read is used.
+    /// `@component` renders from the data it is passed alone, so it is not.
+    #[tokio::test]
+    async fn test_a_variable_an_include_can_read_is_not_unused() {
+        let unused = |body: &'static str| async move {
+            let (backend, _dir, uri) =
+                component_workspace("resources/views/profile.blade.php", body);
+            open_document(&backend, &uri, "blade", body).await;
+            let virtual_php = backend
+                .blade_virtual_php(uri.as_str())
+                .expect("blade virtual content");
+            let mut diags = Vec::new();
+            backend.collect_unused_variable_diagnostics(uri.as_str(), &virtual_php, &mut diags);
+            diags.into_iter().map(|d| d.message).collect::<Vec<_>>()
+        };
+
+        for body in [
+            "@if ($flag)\n    @php $spanClass = 'a'; @endphp\n@else\n    @php $spanClass = ''; @endphp\n@endif\n\n@include('child')\n",
+            "@php $spanClass = 'a'; @endphp\n@includeWhen(true, 'child')\n",
+            "@php $spanClass = 'a'; @endphp\n@extends('layouts.app')\n",
+        ] {
+            let messages = unused(body).await;
+            assert!(
+                messages.is_empty(),
+                "the rendered child can read $spanClass in {body:?}: {messages:?}"
+            );
+        }
+
+        let messages =
+            unused("@php $spanClass = 'a'; @endphp\n@component('alert')\n@endcomponent\n").await;
+        assert!(
+            messages.iter().any(|m| m.contains("$spanClass")),
+            "a component does not see the parent's scope: {messages:?}"
+        );
+    }
+
     /// `@unless (!$user)` is how Blade spells a doubly negated truthiness
     /// guard, since `@unless` compiles to `if(!…)` and the condition adds a
     /// `!` of its own.  The pair cancels, so the body sees what

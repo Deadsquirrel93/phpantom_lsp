@@ -46,6 +46,7 @@ const MARKER_FUNCTIONS: &[(&str, Option<&str>)] = &[
     ("blade_directive", None),
     ("blade_bound_attr_directive", None),
     ("blade_view_directive", None),
+    ("blade_component_directive", None),
     ("blade_each_directive", None),
     ("blade_can_directive", Some("bool")),
     ("blade_section_directive", Some("bool")),

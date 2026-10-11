@@ -14,7 +14,8 @@
 //! `App\View\Components` convention (`components.alert` →
 //! `App\View\Components\Alert`), and, for Livewire, the configured
 //! `livewire.class_namespace` (`livewire.create-refund` →
-//! `App\Livewire\CreateRefund`).
+//! `App\Livewire\CreateRefund`).  When no convention names a class, the
+//! component whose `render()` returns the view is the one it belongs to.
 //!
 //! What counts as view data is narrower than the class's public surface,
 //! and each framework draws the line differently: see [`Exposure`] for the
@@ -129,7 +130,89 @@ impl Backend {
                 return (self.component_scope_vars(&class), None);
             }
         }
-        (Vec::new(), None)
+        match self.render_backing_class(view_names) {
+            Some(class) if self.is_component_of(&class, LIVEWIRE_BASE) => {
+                let fqn = class.fqn().to_string();
+                (self.livewire_scope_vars(&class), Some(fqn))
+            }
+            Some(class) => (self.component_scope_vars(&class), None),
+            None => (Vec::new(), None),
+        }
+    }
+
+    /// The component class whose `render()` returns one of `view_names`.
+    ///
+    /// The naming conventions are only what Laravel predicts; what links a
+    /// component to its template at runtime is the view `render()` hands
+    /// back.  A class outside every registered namespace, or one rendering
+    /// a template its name does not map to, is only found this way.
+    ///
+    /// Read from the render sites the symbol maps already record, so this
+    /// resolves no types: a site counts when it sits in the `render()`
+    /// method of a class extending one of the component bases.  When more
+    /// than one class renders the template, the first by name wins, so the
+    /// answer does not depend on the order the files were parsed in.
+    fn render_backing_class(&self, view_names: &[String]) -> Option<Arc<ClassInfo>> {
+        use crate::symbol_map::{LaravelStringKind, SymbolKind};
+
+        let keys: Vec<crate::reference_index::ReferenceIndexKey> = view_names
+            .iter()
+            .map(
+                |name| crate::reference_index::ReferenceIndexKey::LaravelString {
+                    kind: LaravelStringKind::View,
+                    key: name.clone(),
+                },
+            )
+            .collect();
+        let mut found: Option<Arc<ClassInfo>> = None;
+        for (uri, map) in self.user_file_symbol_maps_for_reference_keys_nonblocking(&keys) {
+            if self.is_blade_file(&uri) {
+                continue;
+            }
+            let mut offsets = map.spans.iter().filter_map(|span| match &span.kind {
+                SymbolKind::LaravelStringKey {
+                    kind: LaravelStringKind::View,
+                    key,
+                    ..
+                } if view_names.contains(key) => Some(span.start),
+                _ => None,
+            });
+            let Some(first) = offsets.next() else {
+                continue;
+            };
+            let Some(classes) = self.shared_classes_for_uri(&uri) else {
+                continue;
+            };
+            for offset in std::iter::once(first).chain(offsets) {
+                let Some(class) = crate::class_lookup::find_class_at_offset(&classes, offset)
+                else {
+                    continue;
+                };
+                if !is_in_render_method(class, offset) {
+                    continue;
+                }
+                if found
+                    .as_ref()
+                    .is_some_and(|known| *known.fqn() <= *class.fqn())
+                {
+                    continue;
+                }
+                let fqn = class.fqn();
+                let component = self
+                    .component_class_named(&fqn, COMPONENT_BASE)
+                    .or_else(|| self.component_class_named(&fqn, LIVEWIRE_BASE));
+                if component.is_some() {
+                    found = component;
+                }
+            }
+        }
+        found
+    }
+
+    /// Whether `class` extends the framework base `base`.
+    fn is_component_of(&self, class: &ClassInfo, base: &str) -> bool {
+        let loader = |name: &str| self.find_or_load_class(name);
+        crate::class_lookup::is_subclass_of(&class.fqn(), base, &loader)
     }
 
     /// The Blade component class a view name is the view of, over the
@@ -293,24 +376,30 @@ impl Backend {
         // Livewire renders the view with the component bound, so `$this` is
         // the component inside the template.  `livewire_scope_vars` covers
         // the other names the instance arrives under.
-        let (vars, extra) = if extends(LIVEWIRE_BASE) {
-            (self.livewire_scope_vars(class), Some("this"))
+        let (vars, extra): (_, &[&str]) = if extends(LIVEWIRE_BASE) {
+            (self.livewire_scope_vars(class), &["this"])
         } else if extends(COMPONENT_BASE) {
-            (self.component_scope_vars(class), Some("slot"))
+            // `Component::data()` merges the attribute bag and the
+            // component's name with the public members, and the rendering
+            // engine adds the default slot on top.
+            (
+                self.component_scope_vars(class),
+                &["attributes", "componentName", "slot"],
+            )
         } else if extends(MAILABLE_BASE) {
             // A mailable's view renders from the data alone, plus the
             // `$message` handle `Mailer::send()` writes into every mail
             // view's data before rendering.
             (
                 self.class_member_vars(class, Exposure::Mailable),
-                Some("message"),
+                &["message"],
             )
         } else {
             return None;
         };
 
         let mut names: Vec<String> = vars.into_iter().map(|(name, _)| name).collect();
-        names.extend(extra.map(str::to_string));
+        names.extend(extra.iter().map(|name| name.to_string()));
         Some(names)
     }
 
@@ -413,6 +502,19 @@ impl Backend {
         })
         .to_string()
     }
+}
+
+/// Whether `offset` sits in the body of `class`'s own `render()` method.
+///
+/// A method records only where its name is, so the method an offset falls
+/// in is the last one whose name precedes it.
+fn is_in_render_method(class: &ClassInfo, offset: u32) -> bool {
+    class
+        .methods
+        .iter()
+        .filter(|method| method.name_offset != 0 && method.name_offset <= offset)
+        .max_by_key(|method| method.name_offset)
+        .is_some_and(|method| method.name.eq_ignore_ascii_case("render"))
 }
 
 /// The class-name tail a dotted view name maps to: `forms.date-picker`

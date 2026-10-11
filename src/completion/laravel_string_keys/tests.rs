@@ -221,7 +221,11 @@ fn detects_the_redirect_to_route_attribute() {
 /// view index through those names.
 #[test]
 fn detects_the_blade_render_directive_markers() {
-    for marker in ["blade_view_directive", "blade_each_directive"] {
+    for marker in [
+        "blade_view_directive",
+        "blade_component_directive",
+        "blade_each_directive",
+    ] {
         let content = format!("<?php\n{marker} ('partials.');\n");
         let line_text = content.lines().nth(1).unwrap();
         let col = line_text.find("partials.").unwrap() as u32 + 9;
@@ -240,6 +244,11 @@ fn detects_the_blade_render_directive_markers() {
 fn detects_the_blade_markers_that_list_their_names_in_an_array() {
     for (marker, value, kind) in [
         ("blade_view_directive", "partials.", LaravelStringKind::View),
+        (
+            "blade_component_directive",
+            "partials.",
+            LaravelStringKind::View,
+        ),
         ("blade_can_directive", "upd", LaravelStringKind::GateAbility),
     ] {
         let content = format!("<?php\n{marker}(['{value}']);\n");

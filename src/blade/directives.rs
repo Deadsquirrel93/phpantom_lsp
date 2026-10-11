@@ -1142,7 +1142,11 @@ pub fn translate_directive(directive: &str) -> String {
         "break" => "break;".to_string(),
         "default" => "default:".to_string(),
         "extends" | "extendsFirst" | "include" | "includeIf" | "includeWhen" | "includeUnless"
-        | "includeFirst" | "component" | "componentFirst" => "blade_view_directive".to_string(),
+        | "includeFirst" => "blade_view_directive".to_string(),
+        // `@component` renders its view from the data it is passed alone,
+        // where the `@include` family hands the child `get_defined_vars()`,
+        // so the unused-variable check must be able to tell them apart.
+        "component" | "componentFirst" => "blade_component_directive".to_string(),
         // `@each` renders its partial once per entry of a collection, with
         // only the item and the key in scope.  The arguments after the view
         // name therefore mean something entirely different from every other
