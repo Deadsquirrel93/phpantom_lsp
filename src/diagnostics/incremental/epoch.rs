@@ -73,7 +73,6 @@ impl Drop for PublicationGuard<'_> {
     }
 }
 
-
 fn debug_trace(label: &str) {
     if std::env::var_os("PHPANTOM_EPOCH_TRACE").is_none() {
         return;

@@ -755,15 +755,19 @@ impl Backend {
             })
             .await
         };
-        let (slow_diagnostics, new_baseline) = match slow_pass {
-            Some(pass) => (pass.diagnostics, pass.baseline),
+        let (slow_diagnostics, new_baseline, bodies_read) = match slow_pass {
+            Some(pass) => (
+                pass.diagnostics,
+                pass.baseline,
+                Some((pass.kind, pass.bodies_read_from)),
+            ),
             None => {
                 // The full pass a save asked for did not happen; the next
                 // pass still owes it.
                 if full_pass_requested {
                     self.request_full_slow_pass(&[uri_str]);
                 }
-                (Vec::new(), None)
+                (Vec::new(), None, None)
             }
         };
 
@@ -785,6 +789,17 @@ impl Backend {
                 .slow_baselines
                 .lock()
                 .insert(uri_str.to_string(), baseline);
+        }
+        // A pass that diagnosed only part of the file saw only that part's
+        // reads; the rest of the file still reads what it read before.
+        if let Some((kind, reads)) = bodies_read {
+            let mut map = self.diag.bodies_read_from.lock();
+            match kind {
+                incremental::SlowPassKind::Full(_) => {
+                    map.insert(uri_str.to_string(), reads);
+                }
+                _ => map.entry(uri_str.to_string()).or_default().extend(reads),
+            }
         }
 
         // Update again with fresh slow results merged in.
@@ -1357,6 +1372,7 @@ impl Backend {
         self.diag.last_fast.lock().remove(uri_str);
         self.diag.last_slow.lock().remove(uri_str);
         self.diag.slow_baselines.lock().remove(uri_str);
+        self.diag.bodies_read_from.lock().remove(uri_str);
         self.diag.full_slow_pass_requested.lock().remove(uri_str);
         self.diag.epoch.forget(uri_str);
         // Remove cached PHPStan, PHPCS, PHPMD, and Mago diagnostics too.

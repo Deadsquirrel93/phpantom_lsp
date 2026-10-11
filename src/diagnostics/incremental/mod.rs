@@ -50,6 +50,7 @@ mod units;
 #[cfg(test)]
 mod tests;
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use tower_lsp::lsp_types::Diagnostic;
@@ -83,6 +84,10 @@ pub(crate) struct SlowPass {
     /// be trusted to describe a single state of the index.
     pub(crate) baseline: Option<Arc<SlowBaseline>>,
     pub(crate) kind: SlowPassKind,
+    /// The other files whose function or method bodies this pass read.
+    /// A pass that was not [`SlowPassKind::Full`] saw only the reads of
+    /// what it diagnosed again.
+    pub(crate) bodies_read_from: HashSet<String>,
 }
 
 /// How a slow pass arrived at its diagnostics.
@@ -248,6 +253,8 @@ impl Backend {
         content: &Arc<String>,
         baseline: Option<&SlowBaseline>,
     ) -> SlowPass {
+        let reads = crate::type_engine::body_reads::record_body_reads();
+
         // A template is diagnosed as the PHP it lowers to, through a source
         // map; neither the lowering nor the map is tracked here.
         if let Some(virtual_php) = self.blade_virtual_php_arc(uri) {
@@ -257,6 +264,7 @@ impl Backend {
                 diagnostics,
                 baseline: None,
                 kind: SlowPassKind::Full(FullPassReason::Template),
+                bodies_read_from: reads.files_other_than(uri),
             };
         }
 
@@ -287,7 +295,6 @@ impl Backend {
             _ => Err(FullPassReason::NoBaseline),
         };
 
-        let reads = crate::type_engine::body_reads::record_body_reads();
         let (diagnostics, kind) = match plan {
             Ok(Plan::Reuse(diagnostics)) => (diagnostics, SlowPassKind::Reused),
             Ok(Plan::Partial {
@@ -325,6 +332,7 @@ impl Backend {
             }
         }
         units::mark_observed(&mut units, &reads.offsets_in(uri));
+        let bodies_read_from = reads.files_other_than(uri);
         drop(reads);
 
         let baseline = epoch
@@ -343,6 +351,7 @@ impl Backend {
             diagnostics,
             baseline,
             kind,
+            bodies_read_from,
         }
     }
 

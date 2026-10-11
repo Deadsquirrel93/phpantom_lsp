@@ -672,38 +672,3 @@ becomes `TestCall`. `pest-plugin-phpstan` resolves `$this` to the class
 `pest()->extends()`/`uses()` binds for the test file's directory (falling
 back to `PHPUnit\Framework\TestCase`). Reading those bindings from
 `tests/Pest.php` would do the same.
-
-### B584. A save misses the files that read a typed method's body
-
-**Impact: Low · Complexity: Medium**
-
-```php
-// Service.php: the body is edited and saved
-class Service {
-    public function wrap(array $items): Collection { return collect($items); }
-}
-
-// Consumer.php: open in another tab
-class Consumer {
-    public function build(Service $s) { return $s->wrap([1, 2]); }
-    public function run(Service $s): void { $this->build($s)->first(); }
-}
-```
-
-While an untyped body such as `build()` is being inferred,
-`refine_declared_return` (`rhs_resolution/calls.rs`) reads the body of a
-method that declares a bare class and takes parameters, to add the type
-arguments the declaration leaves out (`Collection<int, int>`). So
-`Consumer`'s diagnostics depend on `wrap()`'s body. On save,
-`open_files_affected_by_save` (`diagnostics/cross_file.rs`) only counts
-untyped and `mixed` methods as readable from their callers
-(`push_body_inferred_member_keys`), so `Consumer.php` keeps the
-diagnostics it had before the save until it is edited itself.
-
-**Fix:** Count the methods `refine_declared_return` can read in
-`push_body_inferred_member_keys` too. Every method declaring a bare class
-with parameters would then fan a body edit out to all files naming it, so
-it likely wants narrowing first. The incremental slow pass answers the same
-question for its own file by recording the bodies inference reads
-(`type_engine::body_reads`), and a per-file record of those reads would
-narrow it to the methods some open file's pass actually read.

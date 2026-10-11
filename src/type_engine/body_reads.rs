@@ -5,7 +5,8 @@
 //! makes every diagnostic that used the answer depend on that body.  The
 //! incremental diagnostic pass records the reads each slow pass makes, so
 //! that an edit to a body something else read re-checks the whole file
-//! instead of only the edited function.
+//! instead of only the edited function, and so that saving the file a
+//! body lives in re-checks the other open files that read it.
 //!
 //! Every inference that reads a body it is not walking has to report it
 //! through [`record`].  A recording collects the reads made on its thread
@@ -60,6 +61,18 @@ impl BodyReads {
                 .collect()
         })
     }
+
+    /// The files other than `uri` with a body read so far.
+    pub(crate) fn files_other_than(&self, uri: &str) -> HashSet<String> {
+        READS.with(|cell| {
+            cell.borrow()
+                .iter()
+                .flatten()
+                .filter(|(read_uri, _)| read_uri != uri)
+                .map(|(read_uri, _)| read_uri.clone())
+                .collect()
+        })
+    }
 }
 
 impl Drop for BodyReads {
@@ -88,6 +101,10 @@ mod tests {
         record("file:///b.php", 20);
         record("file:///a.php", 10);
         assert_eq!(recording.offsets_in("file:///a.php"), vec![10]);
+        assert_eq!(
+            recording.files_other_than("file:///a.php"),
+            HashSet::from(["file:///b.php".to_string()])
+        );
         drop(recording);
         let recording = record_body_reads();
         assert!(recording.offsets_in("file:///a.php").is_empty());

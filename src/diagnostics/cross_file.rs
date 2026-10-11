@@ -13,6 +13,8 @@
 //!    and constant names, and individual member names.
 //! 2. Ask the reference index which files mention any of those names.
 //!    Only those files are queued.
+//! 3. Add the open files whose last slow pass read a body declared in the
+//!    saved file, which a declaration diff cannot see.
 //!
 //! Anything the diff cannot answer falls back to "every open file", which
 //! is what the server did unconditionally before: a file with no baseline
@@ -81,7 +83,7 @@ impl Backend {
     /// The open files whose diagnostics can be affected by the save of
     /// `saved_uri` (which is itself excluded — the caller schedules it).
     pub(crate) fn open_files_affected_by_save(&self, saved_uri: &str) -> Vec<String> {
-        let mut uris: Vec<String> = self
+        let uris: Vec<String> = self
             .open_files
             .read()
             .keys()
@@ -111,15 +113,40 @@ impl Backend {
             return uris;
         }
 
+        // A file that read a body declared here depends on it whether or
+        // not it names anything the diff turned up.
+        let readers = self.open_files_that_read_bodies_in(saved_uri);
+        let (mut affected, mut others): (Vec<String>, Vec<String>) = uris
+            .into_iter()
+            .partition(|uri| readers.contains(uri.as_str()));
+
         let mut keys = affected_reference_keys(&baseline, &current);
         if keys.is_empty() {
-            uris.clear();
-            return uris;
+            return affected;
         }
         self.push_descendant_class_keys(&baseline, &current, &mut keys);
 
-        self.retain_reference_candidates(&keys, &mut uris);
-        uris
+        self.retain_reference_candidates(&keys, &mut others);
+        affected.extend(others);
+        affected
+    }
+
+    /// The open files whose last slow passes read a function or method
+    /// body declared in `uri`.
+    ///
+    /// The declaration diff cannot see these: a method that declares a
+    /// bare class and takes parameters has its body read for the type
+    /// arguments the declaration leaves out, and what a by-reference
+    /// parameter is left holding comes from the body too, so a body-only
+    /// edit to a fully typed method can still change their callers.
+    fn open_files_that_read_bodies_in(&self, uri: &str) -> HashSet<String> {
+        self.diag
+            .bodies_read_from
+            .lock()
+            .iter()
+            .filter(|(_, read)| read.contains(uri))
+            .map(|(reader, _)| reader.clone())
+            .collect()
     }
 
     /// Add the class keys of every transitive descendant of a changed
@@ -511,6 +538,38 @@ mod tests {
             &backend,
             SERVICE,
             &service("  public function handle($n) { return 'one'; }\n"),
+        );
+
+        assert_eq!(affected, vec![CONSUMER.to_string()]);
+    }
+
+    #[tokio::test]
+    async fn body_only_edit_of_a_typed_method_reaches_the_files_that_read_it() {
+        // `wrap()` declares a bare `Collection`, so while `build()` is
+        // inferred its body is read for the type arguments.
+        let service_with = |ret: &str| {
+            format!(
+                "<?php\nnamespace App;\n/** @template T */\nclass Collection {{}}\nclass Service {{\n  public function wrap(array $items): Collection {{ return {ret}; }}\n}}\n"
+            )
+        };
+        let consumer = "<?php\nnamespace App;\nclass Consumer {\n  public function build(Service $s) { return $s->wrap([1, 2]); }\n  public function run(Service $s): void { $this->build($s)->first(); }\n}\n";
+        let bystander =
+            "<?php\nnamespace App;\nclass Bystander {\n  public function wrap(): void {}\n}\n";
+        let backend = backend_with_open_files(&[
+            (SERVICE, &service_with("new Collection()")),
+            (CONSUMER, consumer),
+            (BYSTANDER, bystander),
+        ]);
+        for (uri, content) in [(CONSUMER, consumer), (BYSTANDER, bystander)] {
+            backend
+                .publish_diagnostics_for_file(uri, &Arc::new(content.to_string()))
+                .await;
+        }
+
+        let affected = save(
+            &backend,
+            SERVICE,
+            &service_with("/** @var Collection<int> */ new Collection()"),
         );
 
         assert_eq!(affected, vec![CONSUMER.to_string()]);

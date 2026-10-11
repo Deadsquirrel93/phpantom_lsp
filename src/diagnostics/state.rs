@@ -82,6 +82,10 @@ pub(crate) struct DiagnosticState {
     /// to work out which other open files a save can affect.  See
     /// [`crate::diagnostics::cross_file`].
     pub(crate) decl_baselines: Arc<Mutex<crate::diagnostics::cross_file::DeclarationBaselines>>,
+    /// For each open file, the other files whose function or method
+    /// bodies its slow passes read, so saving one of those re-diagnoses
+    /// it.  See [`crate::type_engine::body_reads`].
+    pub(crate) bodies_read_from: Arc<Mutex<HashMap<String, HashSet<String>>>>,
     /// Per-URI locks serializing `assemble_and_push`'s read-merge-write
     /// across the six per-source diagnostic caches.
     ///
@@ -116,6 +120,7 @@ impl DiagnosticState {
             workspace_pull_seen: Arc::new(AtomicBool::new(false)),
             workspace_pull_notify: Arc::new(Notify::new()),
             decl_baselines: Arc::new(Mutex::new(HashMap::new())),
+            bodies_read_from: Arc::new(Mutex::new(HashMap::new())),
             assemble_locks: Arc::new(Mutex::new(HashMap::new())),
         }
     }

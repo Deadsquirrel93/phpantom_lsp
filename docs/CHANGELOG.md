@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Saving a method body refreshes the files whose types depend on it.** When another open file's types are worked out from a method's body, such as the element type of a collection the method returns, editing only that body and saving now re-checks that file too.
 - **`keyBy()` and `groupBy()` on an Eloquent collection keep the model type.** `Member::all()->keyBy('id')` now reads as a collection of `Member` instead of `mixed`. This also holds for any generic class that names its parent or interface by a fully qualified name in `@extends`, `@implements`, or `@use`.
 - **`!== null` on a value that is one of several literals.** After an `if`/`elseif` chain that assigns a different literal in each arm and `null` in the `else`, testing the variable against `null` now narrows the types the arms tested, so passing `$node` to a parameter typed `A|B` no longer reports a mismatch.
 - **A method's `@param` no longer describes the method below it.** When a documented method fits on one line, a parameter of the same name in the next method kept the type documented for the first one, which produced false type errors. It now keeps its own declared type.
