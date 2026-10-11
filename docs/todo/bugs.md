@@ -650,26 +650,3 @@ PHP makes a parameter with a `null` default implicitly nullable, and
 docblock signatures follow the same convention (PHPStan treats them so).
 Generated facade tags use it widely, e.g. Laravel Excel's
 `toCollection(..., string $disk = null, ...)`.
-
-### B614. Pest bindings outside `tests/Pest.php`'s `->in()` are ignored
-
-**Impact: Low · Complexity: Medium**
-
-```php
-// tests/Feature/GiftTest.php
-uses(FeatureTestCase::class, CreatesProducts::class);
-
-it('gives a gift', function (): void {
-    $this->createProductCollection(5); // not found on PHPUnit\Framework\TestCase
-});
-```
-
-`$this` in a Pest test closure is read from the `pest()->extends()` and
-`uses()` chains `tests/Pest.php` binds with `->in()`. Three cases are not:
-
-- A `uses()` or `pest()->extends()` written in the test file itself, with no
-  `->in()`, which binds that file.
-- Traits in the binding. Pest builds the test class from the bound test case
-  plus every bound trait, but only the class is used for `$this`, so a
-  helper that lives on a trait is not found.
-- A test directory other than `tests/` (Pest's `--test-directory`).

@@ -74,6 +74,8 @@ pub(crate) struct AstIndexUpdate {
     classes: Vec<ClassInfo>,
     use_map: HashMap<String, String>,
     resolved_names: Arc<OwnedResolvedNames>,
+    /// What a Pest test file binds to itself (see [`crate::pest::file_uses`]).
+    pest_uses: Option<Arc<[String]>>,
     namespace_spans: Vec<NamespaceSpan>,
     functions: Vec<FunctionInfo>,
     defines: Vec<(String, DefineInfo)>,
@@ -985,6 +987,7 @@ impl Backend {
                 symbol_map.source_hash = Some(SymbolMap::hash_source(content));
             }
             let symbol_map = Arc::new(symbol_map);
+            let pest_uses = crate::pest::file_uses(program.statements.iter(), &owned_resolved);
 
             // For files without any explicit namespace blocks, synthesize a
             // single span covering the entire file with the detected namespace
@@ -1004,6 +1007,7 @@ impl Backend {
                 classes,
                 use_map,
                 resolved_names: Arc::new(owned_resolved),
+                pest_uses,
                 namespace_spans,
                 functions,
                 defines,
@@ -1041,6 +1045,7 @@ impl Backend {
             classes: Vec<Arc<ClassInfo>>,
             use_map: HashMap<String, String>,
             resolved_names: Arc<OwnedResolvedNames>,
+            pest_uses: Option<Arc<[String]>>,
             namespace_spans: Vec<NamespaceSpan>,
             functions: Vec<FunctionInfo>,
             defines: Vec<(String, DefineInfo)>,
@@ -1125,6 +1130,7 @@ impl Backend {
                 classes,
                 use_map: update.use_map,
                 resolved_names: update.resolved_names,
+                pest_uses: update.pest_uses,
                 namespace_spans: update.namespace_spans,
                 functions: update.functions,
                 defines: update.defines,
@@ -1522,10 +1528,15 @@ impl Backend {
         {
             let mut imports = self.file_imports.write();
             let mut resolved_names = self.resolved_names.write();
+            let mut pest_uses = self.file_pest_uses.write();
             let mut namespaces = self.file_namespaces.write();
             for update in &mut prepared {
                 imports.insert(update.uri.clone(), std::mem::take(&mut update.use_map));
                 resolved_names.insert(update.uri.clone(), Arc::clone(&update.resolved_names));
+                match update.pest_uses.take() {
+                    Some(uses) => pest_uses.insert(update.uri.clone(), uses),
+                    None => pest_uses.remove(&update.uri),
+                };
                 namespaces.insert(
                     update.uri.clone(),
                     std::mem::take(&mut update.namespace_spans),

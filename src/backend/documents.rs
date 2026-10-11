@@ -302,7 +302,7 @@ impl Backend {
             return;
         }
 
-        if uri.ends_with("/tests/Pest.php") {
+        if uri.ends_with("/Pest.php") {
             self.invalidate_pest_config();
         }
 

@@ -467,6 +467,7 @@ impl Backend {
         self.evict_reference_index_uri(uri);
         self.file_imports.write().remove(uri);
         self.resolved_names.write().remove(uri);
+        self.file_pest_uses.write().remove(uri);
         self.file_namespaces.write().remove(uri);
         // Parse errors are stored per file during update_ast and consumed
         // by the syntax-error diagnostic. Without this removal the last

@@ -54,6 +54,14 @@ abstract class FeatureTestCase extends TestCase {
 }
 "#;
 
+const CREATES_PRODUCTS: &str = r#"<?php
+namespace Tests\Concerns;
+
+trait CreatesProducts {
+    public function createProducts(int $count): \Tests\Page { return new \Tests\Page(); }
+}
+"#;
+
 const PAGE: &str = r#"<?php
 namespace Tests;
 
@@ -65,10 +73,14 @@ class Page {
 const PEST_CONFIG: &str = r#"<?php
 
 use Tests\BrowserTestCase;
+use Tests\Concerns\CreatesProducts;
 use Tests\FeatureTestCase;
 
 pest()->extends(BrowserTestCase::class)
     ->in('Browser', 'Modules/*/Browser');
+
+pest()->extends(FeatureTestCase::class)->use(CreatesProducts::class)
+    ->in('Shop');
 
 uses(FeatureTestCase::class)->in(__DIR__ . '/Feature');
 "#;
@@ -83,6 +95,7 @@ fn pest_workspace() -> (Backend, tempfile::TempDir) {
         ("tests/BrowserTestCase.php", BROWSER_TEST_CASE),
         ("tests/FeatureTestCase.php", FEATURE_TEST_CASE),
         ("tests/Page.php", PAGE),
+        ("tests/Concerns/CreatesProducts.php", CREATES_PRODUCTS),
         ("tests/Pest.php", PEST_CONFIG),
     ];
     let (backend, dir) = create_psr4_workspace(COMPOSER_JSON, &files);
@@ -197,5 +210,120 @@ it('adds up', function (): void {
     assert!(
         messages[0].contains("visitPage") && messages[0].contains("PHPUnit\\Framework\\TestCase"),
         "Expected `visitPage()` reported on the PHPUnit test case, got: {messages:?}"
+    );
+}
+
+/// A trait bound alongside the test case is part of `$this` too, since
+/// Pest's generated test class uses it.
+#[test]
+fn a_bound_trait_is_part_of_this() {
+    let (backend, _dir) = pest_workspace();
+    let text = r#"<?php
+it('lists products', function (): void {
+    $this->createProducts(5)->click('#first');
+    $this->featureOnly();
+    $this->missing();
+});
+"#;
+
+    let messages = unknown_members_in(&backend, "tests/Shop/ListTest.php", text);
+    assert_eq!(
+        messages.len(),
+        1,
+        "Only `missing()` should be unknown, got: {messages:?}"
+    );
+    assert!(
+        messages[0].contains("missing"),
+        "Expected `missing()` to be reported, got: {messages:?}"
+    );
+}
+
+/// A `uses()` in the test file itself, without `->in()`, binds that file.
+#[test]
+fn uses_in_the_test_file_binds_the_file() {
+    let (backend, _dir) = pest_workspace();
+    let text = r#"<?php
+use Tests\Concerns\CreatesProducts;
+use Tests\FeatureTestCase;
+
+uses(FeatureTestCase::class, CreatesProducts::class);
+
+it('gives a gift', function (): void {
+    $this->createProducts(5)->click('#gift');
+    $this->featureOnly();
+    $this->visitPage('/');
+});
+"#;
+
+    let uri = workspace_uri(&backend, "tests/Unit/GiftTest.php");
+    backend.update_ast(uri.as_str(), text);
+    let messages = unknown_members_in(&backend, "tests/Unit/GiftTest.php", text);
+    assert_eq!(
+        messages.len(),
+        1,
+        "Only `visitPage()` should be unknown, got: {messages:?}"
+    );
+    assert!(
+        messages[0].contains("visitPage"),
+        "Expected `visitPage()` to be reported, got: {messages:?}"
+    );
+}
+
+/// `pest()->extends()->use()` in the test file binds it the same way.
+#[tokio::test]
+async fn pest_extends_in_the_test_file_binds_the_file() {
+    let (backend, _dir) = pest_workspace();
+    let uri = workspace_uri(&backend, "tests/Unit/BasketTest.php");
+    let text = concat!(
+        "<?php\n",
+        "pest()->extends(Tests\\BrowserTestCase::class)->use(Tests\\Concerns\\CreatesProducts::class);\n",
+        "test('fills the basket', function () {\n",
+        "    $this->\n",
+        "});\n",
+    );
+    backend.update_ast(uri.as_str(), text);
+
+    let items = complete_at(&backend, &uri, text, 3, 11).await;
+    let names = method_names(&items);
+    assert!(
+        names.contains(&"visitPage") && names.contains(&"createProducts"),
+        "Expected members of BrowserTestCase and CreatesProducts, got: {names:?}"
+    );
+}
+
+/// The `Pest.php` of a test directory other than `tests/` binds the tests
+/// under it.
+#[test]
+fn a_test_directory_other_than_tests_is_read() {
+    let files = [
+        ("vendor/pest/Functions.php", PEST_FUNCTIONS),
+        ("vendor/pest/TestCall.php", TEST_CALL),
+        ("vendor/phpunit/TestCase.php", PHPUNIT_TEST_CASE),
+        ("tests/BrowserTestCase.php", BROWSER_TEST_CASE),
+        ("tests/Page.php", PAGE),
+        (
+            "spec/Pest.php",
+            "<?php\npest()->extends(Tests\\BrowserTestCase::class)->in('Browser');\n",
+        ),
+    ];
+    let (backend, _dir) = create_psr4_workspace(COMPOSER_JSON, &files);
+    for (path, content) in files {
+        backend.update_ast(workspace_uri(&backend, path).as_str(), content);
+    }
+    let text = r#"<?php
+it('opens the basket', function (): void {
+    $this->visitPage('/basket')->missing();
+});
+"#;
+
+    let messages = unknown_members_in(&backend, "spec/Browser/BasketTest.php", text);
+    assert_eq!(
+        messages.len(),
+        1,
+        "Only `missing()` on the page should be unknown, got: {messages:?}"
+    );
+    assert!(
+        messages[0].contains("Tests\\Page"),
+        "Expected spec/Pest.php to bind BrowserTestCase, got: {messages:?}"
     );
 }

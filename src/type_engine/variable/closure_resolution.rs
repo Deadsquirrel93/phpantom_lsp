@@ -472,7 +472,7 @@ pub(crate) fn closure_this_for_argument(
             _ => None,
         }
     }
-    let bound = match call {
+    match call {
         Call::Function(fc) => {
             let Expression::Identifier(ident) = fc.function else {
                 return None;
@@ -496,8 +496,7 @@ pub(crate) fn closure_this_for_argument(
         Call::StaticMethod(sc) => {
             closure_this_from_static_receiver(sc.class, method_name(&sc.method)?, arg_idx, ctx)
         }
-    }?;
-    Some(bound_this(bound))
+    }
 }
 
 /// `(function () { … })->call($obj)` runs the closure with `$this` bound
@@ -537,10 +536,6 @@ fn cursor_inside_closure_body(expr: &Expression<'_>, ctx: &ResolutionCtx<'_>) ->
         }
         _ => false,
     }
-}
-
-fn bound_this(cls: ClassInfo) -> Vec<ResolvedType> {
-    vec![ResolvedType::from_class(cls)]
 }
 
 fn is_closure_like(expr: &Expression<'_>) -> bool {
@@ -609,7 +604,7 @@ fn closure_this_from_function_params(
     fi: &FunctionInfo,
     arg_idx: usize,
     ctx: &ResolutionCtx<'_>,
-) -> Option<ClassInfo> {
+) -> Option<Vec<ResolvedType>> {
     let param = fi.parameters.get(arg_idx)?;
     let php_type = param.closure_this_type.as_ref()?;
     resolve_closure_this_type(php_type, None, ctx)
@@ -688,7 +683,7 @@ fn closure_this_from_receiver(
     method_name: &str,
     arg_idx: usize,
     ctx: &ResolutionCtx<'_>,
-) -> Option<ClassInfo> {
+) -> Option<Vec<ResolvedType>> {
     let receiver_classes =
         ResolvedType::into_arced_classes(resolve_receiver_types(obj_start, obj_end, ctx));
     for cls in &receiver_classes {
@@ -714,7 +709,7 @@ fn closure_this_from_static_receiver(
     method_name: &str,
     arg_idx: usize,
     ctx: &ResolutionCtx<'_>,
-) -> Option<ClassInfo> {
+) -> Option<Vec<ResolvedType>> {
     let class_name = static_receiver_class_name(class_expr, ctx.current_class)?;
 
     if method_name.eq_ignore_ascii_case("macro")
@@ -722,13 +717,13 @@ fn closure_this_from_static_receiver(
         && let Some(resolve_macro_this) = ctx.laravel_macro_this_resolver
         && let Some(owner) = resolve_macro_this(&class_name)
     {
-        return Some(Arc::unwrap_or_clone(
+        return Some(vec![ResolvedType::from_class(Arc::unwrap_or_clone(
             crate::virtual_members::resolve_class_fully_maybe_cached(
                 &owner,
                 ctx.class_loader,
                 ctx.resolved_class_cache,
             ),
-        ));
+        ))]);
     }
 
     let owner = find_owner_by_name(&class_name, ctx.all_classes, ctx.class_loader)?;
@@ -743,24 +738,43 @@ fn closure_this_from_static_receiver(
 }
 
 /// Extract `closure_this_type` from a method's parameter at `arg_idx`
-/// and resolve it to a `ClassInfo`.
+/// and resolve it to the classes it names.
 fn closure_this_from_method_params(
     method: &MethodInfo,
     arg_idx: usize,
     owner: Option<&ClassInfo>,
     ctx: &ResolutionCtx<'_>,
-) -> Option<ClassInfo> {
+) -> Option<Vec<ResolvedType>> {
     let param = method.parameters.get(arg_idx)?;
     let php_type = param.closure_this_type.as_ref()?;
     resolve_closure_this_type(php_type, owner, ctx)
 }
 
-/// Resolve a raw `@param-closure-this` type string to a `ClassInfo`.
+/// Resolve a `@param-closure-this` type to the classes it names: one,
+/// or every member of an intersection (`TestCase&CreatesProducts`).
 ///
 /// Handles `$this`, `static`, and `self` by mapping them to the
 /// declaring class (owner), and resolves fully-qualified class names
 /// through the class loader.
 fn resolve_closure_this_type(
+    php_type: &PhpType,
+    owner: Option<&ClassInfo>,
+    ctx: &ResolutionCtx<'_>,
+) -> Option<Vec<ResolvedType>> {
+    let resolved: Vec<ResolvedType> = match php_type.kind() {
+        TypeKind::Intersection(members) => members
+            .iter()
+            .filter_map(|member| resolve_closure_this_class(member, owner, ctx))
+            .map(ResolvedType::from_class)
+            .collect(),
+        _ => vec![ResolvedType::from_class(resolve_closure_this_class(
+            php_type, owner, ctx,
+        )?)],
+    };
+    (!resolved.is_empty()).then_some(resolved)
+}
+
+fn resolve_closure_this_class(
     php_type: &PhpType,
     owner: Option<&ClassInfo>,
     ctx: &ResolutionCtx<'_>,

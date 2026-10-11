@@ -1,10 +1,13 @@
 //! The test case a Pest test closure is bound to.
 //!
 //! Pest runs every `it()`/`test()`/`beforeEach()`/`afterEach()` closure
-//! bound to an instance of a PHPUnit test case: `PHPUnit\Framework\TestCase`
-//! unless `tests/Pest.php` binds another class to the test file's
-//! directory with `pest()->extends(…)->in(…)` (or the older
-//! `uses(…)->in(…)`).  Pest's own functions cannot know which, so their
+//! bound to an instance of a class it generates per test file, which
+//! extends a PHPUnit test case and uses the traits bound to the file:
+//! `PHPUnit\Framework\TestCase` and nothing else unless the `Pest.php` of
+//! the test directory binds more to the file's directory with
+//! `pest()->extends(…)->use(…)->in(…)` (or the older `uses(…)->in(…)`), or
+//! the test file binds them to itself with the same chain without
+//! `->in(…)`.  Pest's own functions cannot know which, so their
 //! `@param-closure-this` names the base class, or `Pest\PendingCalls\TestCall`
 //! in newer releases, which is what the call returns rather than what the
 //! closure is bound to.
@@ -14,6 +17,7 @@
 //! test case (see [`Backend::bind_pest_closure_this`]), so every consumer
 //! that reads the tag sees the class the closure actually runs as.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -28,6 +32,7 @@ use tower_lsp::lsp_types::Url;
 use crate::Backend;
 use crate::atom::{atom, bytes_to_str, literal_bytes_to_str};
 use crate::names::OwnedResolvedNames;
+use crate::php_type::PhpType;
 use crate::types::{ClassLikeKind, FunctionInfo};
 
 /// The test case Pest binds a closure to when nothing else is configured.
@@ -39,12 +44,19 @@ const PEST_TEST_CALL: &str = "Pest\\PendingCalls\\TestCall";
 /// The Pest functions whose closure runs bound to the test case.
 const PEST_TEST_FUNCTIONS: [&str; 4] = ["it", "test", "beforeEach", "afterEach"];
 
-/// The `->in(…)` bindings declared in a project's `tests/Pest.php`.
-#[derive(Default)]
+/// The `Pest.php` files of a workspace, found by walking up from the
+/// test files that ask for them.
+pub(crate) struct PestConfigs {
+    /// URI of the workspace root, with a trailing `/`.  The walk stops
+    /// there, and files outside it have no config.
+    root_uri: String,
+    /// Every directory looked at so far, keyed by its URI with a trailing
+    /// `/`: its parsed `Pest.php`, or `None` when it has none.
+    dirs: HashMap<String, Option<Arc<PestConfig>>>,
+}
+
+/// The `->in(…)` bindings declared in a test directory's `Pest.php`.
 pub(crate) struct PestConfig {
-    /// URI of the tests directory, with a trailing `/`.  Only files under
-    /// it can be bound, which lets every other file skip the path checks.
-    tests_dir_uri: String,
     bindings: Vec<Binding>,
 }
 
@@ -83,66 +95,116 @@ impl Target {
     }
 }
 
-impl PestConfig {
-    /// Read `tests/Pest.php` under `root`.  A project without one gets an
-    /// empty config, which binds nothing.
-    fn load(backend: &Backend, root: &Path) -> Self {
-        let tests_dir = root.join("tests");
-        let config_uri = crate::util::path_to_uri(&tests_dir.join("Pest.php"));
-        let Some(content) = backend.get_file_content(&config_uri) else {
-            return Self::default();
-        };
-        let mut tests_dir_uri = crate::util::path_to_uri(&tests_dir);
-        tests_dir_uri.push('/');
-        Self {
-            tests_dir_uri,
-            bindings: parse_bindings(&content, &tests_dir),
+impl PestConfigs {
+    /// The config of the nearest directory above `uri` with a `Pest.php`,
+    /// `Ok(None)` when none has one, or `Err(dir)` with the URI of the
+    /// nearest directory not looked at yet.
+    fn lookup<'a>(&self, uri: &'a str) -> Result<Option<Arc<PestConfig>>, &'a str> {
+        if !uri.starts_with(&self.root_uri) {
+            return Ok(None);
         }
+        let mut end = uri.len();
+        while let Some(slash) = uri[..end].rfind('/') {
+            let dir = &uri[..=slash];
+            if dir.len() < self.root_uri.len() {
+                break;
+            }
+            match self.dirs.get(dir) {
+                Some(Some(config)) => return Ok(Some(Arc::clone(config))),
+                Some(None) => {}
+                None => return Err(dir),
+            }
+            end = slash;
+        }
+        Ok(None)
+    }
+}
+
+impl PestConfig {
+    /// Read the `Pest.php` in the directory at `dir_uri`, or `None` when
+    /// there is none.  Pest only reads the one in its test directory
+    /// (`tests/` unless `--test-directory` names another), and test files
+    /// live under it, so the nearest one above a test file is it.
+    fn load(backend: &Backend, dir_uri: &str) -> Option<Self> {
+        let content = backend.get_file_content(&format!("{dir_uri}Pest.php"))?;
+        let tests_dir = Url::parse(dir_uri).ok()?.to_file_path().ok()?;
+        Some(Self {
+            bindings: parse_bindings(&content, &tests_dir),
+        })
     }
 
     /// The classes and traits bound to the file at `uri`, in the order
     /// Pest applies them.
-    fn uses_for(&self, uri: &str) -> Option<Arc<[String]>> {
-        if self.bindings.is_empty() || !uri.starts_with(&self.tests_dir_uri) {
-            return None;
+    fn uses_for(&self, uri: &str, out: &mut Vec<String>) {
+        if self.bindings.is_empty() {
+            return;
         }
-        let path = Url::parse(uri).ok()?.to_file_path().ok()?;
-        let uses: Vec<String> = self
-            .bindings
-            .iter()
-            .filter(|binding| binding.targets.iter().any(|t| t.contains(&path)))
-            .flat_map(|binding| binding.uses.iter().cloned())
-            .collect();
-        (!uses.is_empty()).then(|| uses.into())
+        let Some(path) = Url::parse(uri).ok().and_then(|url| url.to_file_path().ok()) else {
+            return;
+        };
+        out.extend(
+            self.bindings
+                .iter()
+                .filter(|binding| binding.targets.iter().any(|t| t.contains(&path)))
+                .flat_map(|binding| binding.uses.iter().cloned()),
+        );
     }
 }
 
 impl Backend {
-    /// The classes and traits `tests/Pest.php` binds to the test file at
-    /// `uri`, or `None` when it binds none.
+    /// The classes and traits bound to the test file at `uri`, by its own
+    /// `uses()` and by its test directory's `Pest.php`, or `None` when
+    /// nothing is.
     pub(crate) fn pest_uses_for(&self, uri: &str) -> Option<Arc<[String]>> {
-        let cached = self.pest_config.read().clone();
-        let config = match cached {
-            Some(config) => config,
-            None => {
-                let root = self.workspace.workspace_root.read().clone()?;
-                let config = Arc::new(PestConfig::load(self, &root));
-                *self.pest_config.write() = Some(Arc::clone(&config));
-                config
-            }
+        let own = self.file_pest_uses.read().get(uri).cloned();
+        let Some(config) = self.pest_config_for(uri) else {
+            return own;
         };
-        config.uses_for(uri)
+        let mut uses: Vec<String> = own.as_deref().map(<[String]>::to_vec).unwrap_or_default();
+        config.uses_for(uri, &mut uses);
+        (!uses.is_empty()).then(|| uses.into())
     }
 
-    /// Forget the parsed `tests/Pest.php` so the next lookup re-reads it.
+    /// The `Pest.php` of the test directory `uri` is in.
+    fn pest_config_for(&self, uri: &str) -> Option<Arc<PestConfig>> {
+        loop {
+            let unchecked = {
+                let configs = self.pest_configs.read();
+                match configs.as_ref().map(|configs| configs.lookup(uri)) {
+                    Some(Ok(config)) => return config,
+                    Some(Err(dir)) => Some(dir),
+                    None => None,
+                }
+            };
+            let Some(dir) = unchecked else {
+                let root = self.workspace.workspace_root.read().clone()?;
+                let mut root_uri = crate::util::path_to_uri(&root);
+                root_uri.push('/');
+                self.pest_configs
+                    .write()
+                    .get_or_insert_with(|| PestConfigs {
+                        root_uri,
+                        dirs: HashMap::new(),
+                    });
+                continue;
+            };
+            let config = PestConfig::load(self, dir).map(Arc::new);
+            if let Some(configs) = self.pest_configs.write().as_mut() {
+                configs.dirs.insert(dir.to_string(), config);
+            }
+        }
+    }
+
+    /// Forget every `Pest.php` read so far, and which directories had
+    /// none, so the next lookup reads them again.
     pub(crate) fn invalidate_pest_config(&self) {
-        *self.pest_config.write() = None;
+        *self.pest_configs.write() = None;
     }
 
     /// Point the `@param-closure-this` of Pest's test functions at the
     /// test case the closure is bound to in this file: the class among
-    /// `uses` (what `tests/Pest.php` binds here), or PHPUnit's base test
-    /// case when it binds none.
+    /// `uses` (what is bound here), or PHPUnit's base test case when none
+    /// is, intersected with the traits among `uses`.
     ///
     /// Only Pest's own declarations are rewritten, recognised by the
     /// global name and the class their tag names, so a project's own
@@ -164,17 +226,42 @@ impl Backend {
         }) else {
             return;
         };
-        let bound = uses
-            .into_iter()
-            .flatten()
-            .find(|name| {
-                self.find_or_load_class(name)
-                    .is_some_and(|class| class.kind == ClassLikeKind::Class)
-            })
-            .map_or(PHPUNIT_TEST_CASE, String::as_str);
-        fi.parameters.make_mut()[index].closure_this_type =
-            Some(crate::php_type::PhpType::named(atom(bound)));
+        let mut test_case = None;
+        let mut traits = Vec::new();
+        for name in uses.into_iter().flatten() {
+            match self.find_or_load_class(name).map(|class| class.kind) {
+                Some(ClassLikeKind::Class) if test_case.is_none() => {
+                    test_case = Some(name.as_str())
+                }
+                Some(ClassLikeKind::Trait) => traits.push(PhpType::named(atom(name))),
+                _ => {}
+            }
+        }
+        let test_case = PhpType::named(atom(test_case.unwrap_or(PHPUNIT_TEST_CASE)));
+        let this = if traits.is_empty() {
+            test_case
+        } else {
+            traits.insert(0, test_case);
+            PhpType::intersection(traits)
+        };
+        fi.parameters.make_mut()[index].closure_this_type = Some(this);
     }
+}
+
+/// The classes and traits a test file binds to itself: every
+/// `pest()->extends(…)` or `uses(…)` chain written as a statement of it
+/// without `->in(…)`.
+pub(crate) fn file_uses<'a>(
+    statements: impl Iterator<Item = &'a Statement<'a>>,
+    names: &OwnedResolvedNames,
+) -> Option<Arc<[String]>> {
+    let mut uses = Vec::new();
+    collect_chains(statements, names, &mut |chain| {
+        if !chain.has_in {
+            uses.extend(chain.uses);
+        }
+    });
+    (!uses.is_empty()).then(|| uses.into())
 }
 
 /// The bindings of every `pest()->…->in(…)` and `uses(…)->in(…)` chain
@@ -186,25 +273,48 @@ fn parse_bindings(content: &str, tests_dir: &Path) -> Vec<Binding> {
     let resolved = NameResolver::new(&arena).resolve(program);
     let names = OwnedResolvedNames::from_resolved(&resolved);
     let mut bindings = Vec::new();
-    collect_bindings(program.statements.iter(), &names, tests_dir, &mut bindings);
+    // A chain without `->in(…)` configures the file it is written in,
+    // which for `Pest.php` is no test at all.
+    collect_chains(program.statements.iter(), &names, &mut |chain| {
+        let targets: Vec<Target> = chain
+            .targets
+            .iter()
+            .filter_map(|arg| target(arg, tests_dir))
+            .collect();
+        if !targets.is_empty() {
+            bindings.push(Binding {
+                uses: chain.uses,
+                targets,
+            });
+        }
+    });
     bindings
 }
 
-fn collect_bindings<'a>(
+/// One `pest()->…` or `uses(…)->…` call chain that binds something.
+struct Chain<'e, 'a> {
+    /// The classes and traits, as FQNs, in the order they were written.
+    uses: Vec<String>,
+    /// The arguments of its `->in(…)` calls.
+    targets: Vec<&'e Expression<'a>>,
+    /// Whether it calls `->in(…)` at all.
+    has_in: bool,
+}
+
+fn collect_chains<'a>(
     statements: impl Iterator<Item = &'a Statement<'a>>,
     names: &OwnedResolvedNames,
-    tests_dir: &Path,
-    out: &mut Vec<Binding>,
+    on_chain: &mut impl FnMut(Chain<'a, 'a>),
 ) {
     for statement in statements {
         match statement {
             Statement::Expression(expr) => {
-                if let Some(binding) = binding_from_chain(expr.expression, names, tests_dir) {
-                    out.push(binding);
+                if let Some(chain) = read_chain(expr.expression, names) {
+                    on_chain(chain);
                 }
             }
             Statement::Namespace(ns) => {
-                collect_bindings(ns.statements().iter(), names, tests_dir, out);
+                collect_chains(ns.statements().iter(), names, on_chain);
             }
             _ => {}
         }
@@ -212,16 +322,14 @@ fn collect_bindings<'a>(
 }
 
 /// Read one call chain rooted at `pest()` or `uses()`.  `None` when the
-/// chain has another root or binds nothing to any path; a chain without
-/// `->in(…)` configures the file it is written in, which for `Pest.php`
-/// is no test at all.
-fn binding_from_chain(
-    expr: &Expression<'_>,
+/// chain has another root or binds no class or trait.
+fn read_chain<'e, 'a>(
+    expr: &'e Expression<'a>,
     names: &OwnedResolvedNames,
-    tests_dir: &Path,
-) -> Option<Binding> {
+) -> Option<Chain<'e, 'a>> {
     let mut uses = Vec::new();
     let mut targets = Vec::new();
+    let mut has_in = false;
     let mut current = expr;
     loop {
         match current {
@@ -232,7 +340,8 @@ fn binding_from_chain(
                 let method = bytes_to_str(method.value);
                 let args = call.argument_list.arguments.iter().map(|arg| arg.value());
                 if method.eq_ignore_ascii_case("in") {
-                    targets.extend(args.filter_map(|arg| target(arg, tests_dir)));
+                    has_in = true;
+                    targets.extend(args);
                 } else if ["extends", "extend", "uses", "use"]
                     .iter()
                     .any(|name| method.eq_ignore_ascii_case(name))
@@ -268,11 +377,15 @@ fn binding_from_chain(
             _ => return None,
         }
     }
-    if uses.is_empty() || targets.is_empty() {
+    if uses.is_empty() {
         return None;
     }
     uses.reverse();
-    Some(Binding { uses, targets })
+    Some(Chain {
+        uses,
+        targets,
+        has_in,
+    })
 }
 
 /// The FQN a `Foo::class` or `'Foo'` argument names.
