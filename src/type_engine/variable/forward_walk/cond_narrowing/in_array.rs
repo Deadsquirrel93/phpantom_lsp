@@ -134,14 +134,44 @@ pub(crate) fn apply_in_array_narrowing<'b>(
                             || !narrowing::resolve_narrowing_target(member, &var_ctx).is_empty()
                     });
                 if every_object_element_loads {
-                    ResolvedType::apply_narrowing(&mut results, |classes| {
-                        narrowing::apply_instanceof_inclusion(
-                            &element_type,
-                            false,
-                            &var_ctx,
-                            classes,
-                        )
-                    });
+                    // The class layer concludes the needle is one of the
+                    // element's classes, which would rule out a `string`
+                    // alternative an element type of `Foo|string` admits.
+                    // The entries with no class are narrowed by value
+                    // below instead.
+                    let (mut classless, mut classed): (Vec<_>, Vec<_>) =
+                        results.into_iter().partition(|rt| rt.class_info.is_none());
+                    // A `mixed` needle could have been any of the elements:
+                    // the class layer brings in the ones that name a class,
+                    // and the rest are added back below.
+                    let had_mixed = classless.iter().any(|rt| rt.type_string.is_mixed());
+                    classless.retain(|rt| !rt.type_string.is_mixed());
+                    if !classed.is_empty() || had_mixed {
+                        ResolvedType::apply_narrowing(&mut classed, |classes| {
+                            narrowing::apply_instanceof_inclusion(
+                                &element_type,
+                                false,
+                                &var_ctx,
+                                classes,
+                            )
+                        });
+                    }
+                    results = classed;
+                    results.extend(classless);
+                    if had_mixed {
+                        let values: Vec<PhpType> = element_type
+                            .union_members()
+                            .into_iter()
+                            .filter(|member| !member.is_object_like())
+                            .cloned()
+                            .collect();
+                        if !values.is_empty() {
+                            ResolvedType::extend_unique(
+                                &mut results,
+                                vec![ResolvedType::from_type_string(PhpType::union(values))],
+                            );
+                        }
+                    }
                 }
                 // `apply_narrowing` works on the class layer, so a needle
                 // with no class behind it (`?string`, `int|string`) comes
@@ -155,6 +185,14 @@ pub(crate) fn apply_in_array_narrowing<'b>(
                     {
                         rt.type_string = narrowed;
                     }
+                }
+                // A `null` the needle carries as an entry of its own is
+                // ruled out by an element type that holds no `null`, the
+                // same as one inside a `?string` entry is.
+                if !element_type.accepts_null()
+                    && results.iter().any(|rt| !rt.type_string.is_null())
+                {
+                    results.retain(|rt| !rt.type_string.is_null());
                 }
             }
 

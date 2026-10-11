@@ -39,6 +39,105 @@ pub(super) fn apply_identity_comparison_null_narrowing<'b>(
     }
 }
 
+/// Strip `null` from a subject an ordering comparison could not have
+/// given this outcome while it held `null`.
+///
+/// PHP orders `null` against anything but a string by casting both sides
+/// to `bool`, so `null > $x` is never true, `null < $x` holds exactly when
+/// `$x` is truthy, and an object (always truthy) is always greater than
+/// `null`:
+///
+/// ```php
+/// $t = $ts !== null ? new DateTimeImmutable($ts) : null;
+/// $last = $last > $t ? $last : $t; // the else arm never sees a null `$t`
+/// ```
+///
+/// A comparand that may be a string is left alone: `null` is ordered
+/// against a string as `''`, which compares lexically.
+pub(super) fn apply_null_order_narrowing<'b>(
+    condition: &'b Expression<'b>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+    truthy: bool,
+) {
+    let (inner, negated) = narrowing::unwrap_condition_negation(condition);
+    let Expression::Binary(bin) = inner else {
+        return;
+    };
+    // The outcome of `null OP $x` when `$x` is truthy (`.0`) or falsy
+    // (`.1`), with `null` on the left.
+    let null_on_left = match bin.operator {
+        BinaryOperator::GreaterThan(_) => (false, false),
+        BinaryOperator::GreaterThanOrEqual(_) => (false, true),
+        BinaryOperator::LessThan(_) => (true, false),
+        BinaryOperator::LessThanOrEqual(_) => (true, true),
+        _ => return,
+    };
+    // `$x OP null` is `null OP' $x` with the comparison mirrored.
+    let null_on_right = match bin.operator {
+        BinaryOperator::GreaterThan(_) => (true, false),
+        BinaryOperator::GreaterThanOrEqual(_) => (true, true),
+        BinaryOperator::LessThan(_) => (false, false),
+        _ => (false, true),
+    };
+    let holds = truthy != negated;
+    for (subject, comparand, outcomes) in [
+        (bin.lhs, bin.rhs, null_on_left),
+        (bin.rhs, bin.lhs, null_on_right),
+    ] {
+        let Some(key) = expr_to_subject(subject) else {
+            continue;
+        };
+        // The cheap half first, as for identity: resolving the comparand
+        // costs a full type resolution.
+        if !scope
+            .get(&key)
+            .iter()
+            .any(|rt| rt.type_string.has_null_member())
+        {
+            continue;
+        }
+        let outcome = if outcomes.0 == outcomes.1 {
+            outcomes.0
+        } else {
+            match comparand_truthiness(comparand, scope, ctx) {
+                Some(true) => outcomes.0,
+                Some(false) => outcomes.1,
+                None => continue,
+            }
+        };
+        if outcome != holds {
+            strip_null_from_scope(&key, scope);
+        }
+    }
+}
+
+/// Whether every value `expr` can evaluate to is truthy (`Some(true)`) or
+/// every one is falsy (`Some(false)`), for a comparand `null` is ordered
+/// against by casting to `bool`.  `None` when that is undecided, unknown,
+/// or the comparand may be a string (which orders `null` as `''`).
+fn comparand_truthiness(
+    expr: &Expression<'_>,
+    scope: &ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> Option<bool> {
+    let scope_resolver = scope.snapshot_resolver();
+    let var_ctx = build_var_ctx("", ctx, &scope_resolver);
+    let ty = crate::type_engine::variable::resolution::resolve_arg_raw_type(expr, &var_ctx)?;
+    let mut truthiness = None;
+    for member in ty.union_members() {
+        if member.is_mixed() || member.is_subtype_of(&PhpType::string()) {
+            return None;
+        }
+        let member_truthiness = member.truthiness()?;
+        if truthiness.is_some_and(|t| t != member_truthiness) {
+            return None;
+        }
+        truthiness = Some(member_truthiness);
+    }
+    truthiness
+}
+
 /// Whether the value `expr` evaluates to could be `null`.
 ///
 /// An expression that resolves to nothing counts as nullable: an unknown

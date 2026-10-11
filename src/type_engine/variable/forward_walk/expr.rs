@@ -497,11 +497,27 @@ impl<'b> ExprWalk<'b> {
     ) -> ExprResult {
         let mut result = self.expr(bin.lhs, scope, ctx);
         let mut ran = scope.clone();
+        // A plain variable that was `null` is falsy, which may prove
+        // something about the variables tested alongside it.  An offset or
+        // a property may be missing instead, which its falsy narrowing
+        // does not describe.
+        // A variable that may be unset is `null` whatever its type says, so
+        // a narrowing that finds no falsy value to keep proves nothing.
+        if matches!(bin.lhs, Expression::Variable(Variable::Direct(_))) {
+            let mut narrowed = ran.clone();
+            narrow_leaf_falsey(bin.lhs, &mut narrowed, ctx);
+            if !narrowed.unreachable {
+                ran = narrowed;
+            }
+        }
         if self.fork(bin.rhs, &mut ran, ctx).wrote {
             result.wrote = true;
             self.flush(scope, ctx);
             scope.merge_branch(&ran);
         }
+        // The right operand's scope was recorded inside it; what follows
+        // the `??` reads the scope it left behind, not that fork.
+        record_node_scope(bin.span().end.offset, scope);
         result
     }
 

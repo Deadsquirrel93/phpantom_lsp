@@ -546,6 +546,66 @@ pub(in crate::type_engine) fn collect_assert_reexport_conditions<'a>(
     out
 }
 
+/// The class PHPUnit declares its assertions on.
+const PHPUNIT_ASSERT_FQN: &str = "PHPUnit\\Framework\\Assert";
+
+/// The two operands of the comparison a PHPUnit `assertSame()` /
+/// `assertNotSame()` call proves, `(expected, actual)`, and whether it
+/// proves them identical.
+///
+/// PHPUnit declares no `@phpstan-assert` on these, so the name of a method
+/// declared on `PHPUnit\Framework\Assert` is the only signal.  PHPStan's
+/// PHPUnit extension reads them the same way, as the `===` / `!==` check
+/// the assertion stands for.
+pub(in crate::type_engine) fn phpunit_comparison_assertion<'a>(
+    call: &'a Call<'a>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<(&'a Expression<'a>, &'a Expression<'a>, bool)> {
+    let (class_info, selector, argument_list) = match call {
+        Call::StaticMethod(static_call) => (
+            resolve_static_receiver_class(static_call.class, ctx)?,
+            &static_call.method,
+            &static_call.argument_list,
+        ),
+        Call::Method(MethodCall {
+            object,
+            method,
+            argument_list,
+            ..
+        }) => (
+            resolve_instance_receiver_class(object, ctx)?,
+            method,
+            argument_list,
+        ),
+        _ => return None,
+    };
+    let ClassLikeMemberSelector::Identifier(ident) = selector else {
+        return None;
+    };
+    let method_name = bytes_to_str(ident.value);
+    let identical = if method_name.eq_ignore_ascii_case("assertSame") {
+        true
+    } else if method_name.eq_ignore_ascii_case("assertNotSame") {
+        false
+    } else {
+        return None;
+    };
+    let (method, declaring) = find_method_in_chain_where(
+        &class_info,
+        method_name,
+        ctx.class_loader,
+        &|_| true,
+        &mut Vec::new(),
+        0,
+    )?;
+    if declaring != PHPUNIT_ASSERT_FQN {
+        return None;
+    }
+    let expected = assertion_arg_expression(argument_list, "$expected", &method.parameters)?;
+    let actual = assertion_arg_expression(argument_list, "$actual", &method.parameters)?;
+    Some((expected, actual, identical))
+}
+
 /// Return the call-site argument expression bound to `param_name`.
 ///
 /// Unlike [`find_assertion_arg_variable`], which reduces the argument to a

@@ -299,6 +299,20 @@ function t(?int $x): void {
 }
 
 #[test]
+fn what_the_coalesce_fallback_learned_ends_with_the_coalesce() {
+    // The fallback runs where `$a` was null, but a call on the whole
+    // coalesce reads the scope after it, where `$a` is still nullable.
+    let php = format!("{FOO}function t(?Foo $a): bool {{ return ($a ?? new Foo())->bar(); }}\n");
+    let diagnostics = slow_diagnostic_messages(
+        &create_test_backend(),
+        "file:///evaluation_order.php",
+        &php,
+        "scalar_member_access",
+    );
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+}
+
+#[test]
 fn a_do_while_condition_writes_before_the_loop_exits() {
     let php = r#"<?php
 class Foo {}

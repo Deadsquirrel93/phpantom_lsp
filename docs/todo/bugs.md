@@ -37,104 +37,20 @@ No outstanding items.
 
 ## Narrowing
 
-### B594. `is_subclass_of()` does not narrow a string to `class-string<X>`
-
-**Impact: Medium · Complexity: Low**
-
-```php
-function f(string $cls): void {
-    if (is_subclass_of($cls, \Countable::class)) {
-        takesCountableClass($cls); // got string|class-string
-    }
-}
-```
-
-The narrowed type should be `class-string<Countable>`, as with
-`is_a($cls, X::class, true)`. Early-return form
-(`if (!is_subclass_of(...)) return;`) and the ternary form
-(`return is_subclass_of($c, self::class) ? $c : self::class;`) are
-affected the same way.
-
-### B595. A strict `in_array()` narrows the needle to `null`
-
-**Impact: Medium · Complexity: Low**
-
-```php
-$in = $parameter['in'] ?? null;
-if (in_array($in, ['path', 'query'], true)) {
-    takesString($in); // got null
-}
-```
-
-The needle should become `'path'|'query'`. It comes out as `null`, which
-is the one member the haystack rules out. The negated early-`continue`
-form gives the same result.
-
-### B596. A comparison with `null` inside a loop leaves the `null` in
+### B615. PHPUnit's `assertCount()` and `assertArrayHasKey()` do not narrow
 
 **Impact: Low · Complexity: Medium**
 
 ```php
-/** @param list<array{ts?: string}> $rows */
-function f(array $rows, DateTimeImmutable $last): DateTimeImmutable {
-    foreach ($rows as $row) {
-        $t = isset($row['ts']) ? new DateTimeImmutable($row['ts']) : null;
-        $last = $last > $t ? $last : $t;
-    }
-    return $last; // DateTimeImmutable|null
-}
+self::assertArrayHasKey('id', $row);   // $row: array{id?: int}
+takesInt($row['id']);                  // got int|null
 ```
 
-An object is always greater than `null`, so the `else` arm never sees a
-`null` `$t`. Straight-line code gets this right; only inside the loop does
-the result keep `null`.
-
-### B597. A ternary that pairs a value with an instance check is not remembered
-
-**Impact: Low · Complexity: Medium**
-
-```php
-$problems = $importer instanceof BrandBibleSheet ? $importer->getProblems() : [];
-if ($problems !== []) {
-    $this->logProblems($importer, $problems); // expects BrandBibleSheet, got BaseExcelImport
-}
-```
-
-A non-empty `$problems` implies the `instanceof` arm ran. The stored
-conditions already record this kind of implication for `if`/`else`
-assignments; the ternary form does not record it.
-
-### B598. `@phpstan-assert` on a property narrows only the object members
-
-**Impact: Low · Complexity: Low**
-
-```php
-final class Job { /** @var DateTimeInterface|DateInterval|array|int|null */ public $delay; }
-
-self::assertInstanceOf(DateTimeImmutable::class, $job->delay);
-takesInt($job->delay); // got array|int|DateTimeImmutable
-self::assertInstanceOf(DateTimeImmutable::class, $local);
-takesInt($local);      // got DateTimeImmutable (correct)
-```
-
-PHPUnit's `assertInstanceOf()` carries `@phpstan-assert =ExpectedType
-$actual`. On a local variable the whole type is replaced; on a property
-fetch the `array` and `int` members survive.
-
-### B599. PHPUnit's `assertNotSame([], $x)` does not narrow
-
-**Impact: Low · Complexity: Medium**
-
-```php
-preg_match('/…/', $html, $matches);
-self::assertNotSame([], $matches);
-self::assertStringNotContainsString('x', $matches[0]); // got string|null
-```
-
-PHPUnit declares no `@phpstan-assert` on `assertNotSame()`; PHPStan's
-PHPUnit extension narrows it (and `assertSame`, `assertNotNull`,
-`assertNotEmpty` and others) as if it were the matching `!==`/`===` check.
-Mirroring that table would cover the common assertions.
+PHPUnit declares no `@phpstan-assert` on either. PHPStan's PHPUnit
+extension reads them as `count($actual) === $expected` and
+`array_key_exists($key, $array)`. `assertSame()`/`assertNotSame()` are
+already read this way; these two need the call they stand for built as a
+condition, which the existing mapping does not do yet.
 
 ## Array types
 

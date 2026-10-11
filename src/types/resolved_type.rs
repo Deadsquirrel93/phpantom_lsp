@@ -147,7 +147,15 @@ impl ResolvedType {
             // The entry that stays speaks for the one that was dropped,
             // so it may only keep a factory count both agreed on.
             Some(existing) => {
-                existing.factory_count = existing.factory_count.join(rt.factory_count)
+                existing.factory_count = existing.factory_count.join(rt.factory_count);
+                // `Foo` and `?Foo` share a class, but the merged entry has
+                // to admit the `null` the dropped one carried.
+                if existing.class_info.is_some()
+                    && rt.type_string.has_null_member()
+                    && !existing.type_string.accepts_null()
+                {
+                    existing.type_string = existing.type_string.clone().or_null();
+                }
             }
             None => results.push(rt),
         }
@@ -482,10 +490,13 @@ impl ResolvedType {
             for rt in results.iter_mut() {
                 rt.restrict_type_string_to_classes(&survives);
             }
-            // The same proof about a `null` that sits in an entry of its
-            // own: `A|B|null` resolves to one entry per class and one for
-            // the `null`, which no class-level narrowing ever sees.
-            results.retain(|rt| rt.class_info.is_some() || !rt.type_string.is_null());
+            // The same proof about the alternatives that sit in entries of
+            // their own: `A|B|array|null` resolves to one entry per class
+            // and one each for the `array` and the `null`, which no
+            // class-level narrowing ever sees.  Only an entry that can
+            // never hold an object is ruled out; `mixed`, a template, or an
+            // unloaded class name might be the surviving class.
+            results.retain(|rt| rt.class_info.is_some() || !never_an_object(&rt.type_string));
         }
 
         // Add entries that narrowing introduced (e.g. instanceof
@@ -911,4 +922,19 @@ fn intersection_covered_by(covered: &PhpType, cover: &PhpType) -> bool {
 /// Whether `ty` is the bare `self` keyword.
 fn is_bare_self(ty: &PhpType) -> bool {
     matches!(ty.kind(), TypeKind::Named(name) if name.eq_ignore_ascii_case("self"))
+}
+
+/// Whether no value of `ty` can be an object: every alternative is `null`,
+/// a scalar, or an array.
+fn never_an_object(ty: &PhpType) -> bool {
+    ty.union_members().iter().all(|member| {
+        member.is_null()
+            || member.is_bool()
+            || member.is_true()
+            || member.is_false()
+            || member.is_int()
+            || member.is_float()
+            || member.is_subtype_of(&PhpType::string())
+            || member.is_array_like()
+    })
 }

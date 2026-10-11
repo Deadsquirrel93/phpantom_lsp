@@ -94,6 +94,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A Blade component's template sees its class wherever the class lives.** The template a class component or Livewire component returns from `render()` now has the class's public properties and methods in scope, even when the class sits outside `App\View\Components` or the view name doesn't follow Laravel's naming convention.
 - **A component's `render()` view is no longer short of `$attributes`.** A template that declares `$attributes` or `$componentName` is no longer reported as missing them when a class component renders it, since Laravel passes them itself.
 - **A variable set for a Blade `@include` is no longer reported as unused.** The `@include` family and `@extends` hand the child template every variable in scope, so a variable only the child reads now counts as used.
+- **`is_subclass_of()` narrows a class name.** A string that passes `is_subclass_of($class, Foo::class)` is now `class-string<Foo>`, as with `is_a($class, Foo::class, true)`.
+- **A strict `in_array()` on an unknown or nullable value.** `in_array($in, ['path', 'query'], true)` now narrows a `mixed` needle to `'path'|'query'` and rules out its `null`, instead of leaving only the `null`.
+- **Comparing an object with a value that may be `null`.** An object is always greater than `null`, so the branch where `$obj > $maybeNull` fails no longer sees a `null` there, inside loops as well.
+- **A ternary whose arms are a class and that class or `null`.** `$c ? new Foo() : $maybeFoo` now keeps the `null` instead of reading as a plain `Foo`.
+- **A value set by a ternary on an `instanceof` check.** After `$problems = $x instanceof Sheet ? $x->problems() : [];`, testing `$problems !== []` now narrows `$x` to `Sheet`, as the `if`/`else` form already did.
+- **Checking a union of classes, scalars and arrays against a subclass.** An `instanceof` or an asserted class on a value such as `DateTimeInterface|array|int|null` now leaves only the class, instead of keeping `array` and `int`.
+- **The fallback of `??` knows the left side was `null`.** Inside `if ($a || $b)`, the `$b` of `$a ?? $b` is no longer nullable.
+- **PHPUnit's `assertSame()` and `assertNotSame()` narrow.** `self::assertNotSame([], $matches)` and `$this->assertNotSame(null, $x)` now narrow the way the `!==` they stand for does.
 
 ## [0.11.1] - 2026-10-07
 

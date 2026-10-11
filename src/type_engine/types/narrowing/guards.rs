@@ -25,6 +25,9 @@ use super::*;
 ///     argument lets `$var` be a class-string as well as an object, so
 ///     a string-typed `$var` narrows to `class-string<ClassName>`
 ///     rather than an instance of `ClassName`.
+///   - `is_subclass_of($var, ClassName::class)` — the same, except that
+///     `allow_string` defaults to `true` and only an explicit `false`
+///     turns the class-string reading off.
 ///   - `class_exists($var)`, `interface_exists($var)`, `enum_exists($var)`,
 ///     `trait_exists($var)` — confirms `$var` names *some* declared
 ///     class-like, narrowing a string to the generic `class-string`
@@ -66,6 +69,19 @@ pub(in crate::type_engine) fn try_extract_class_string_guard(
                     }
                     let target = extract_class_string_from_expr(argument_value(args[1]));
                     Some((target, false))
+                }
+                "is_subclass_of" => {
+                    if args.len() < 2 {
+                        return None;
+                    }
+                    if expr_to_subject_key(argument_value(args[0])).as_deref() != Some(var_name) {
+                        return None;
+                    }
+                    if args.get(2).is_some_and(|a| !argument_value(a).is_true()) {
+                        return None;
+                    }
+                    let target = extract_class_string_from_expr(argument_value(args[1]))?;
+                    Some((Some(target), false))
                 }
                 "class_exists" | "interface_exists" | "enum_exists" | "trait_exists" => {
                     if args.is_empty() {
@@ -670,6 +686,7 @@ pub(crate) fn narrows_first_argument(name: &str) -> bool {
         || matches!(
             name.as_ref(),
             "is_a"
+                | "is_subclass_of"
                 | "class_exists"
                 | "interface_exists"
                 | "enum_exists"

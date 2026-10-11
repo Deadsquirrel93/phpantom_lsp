@@ -751,7 +751,11 @@ fn resolve_null_coalesce_chain<'b>(
 ) -> Vec<ResolvedType> {
     let mut combined: Vec<ResolvedType> = Vec::new();
     let mut current = binary;
+    let base_ctx = ctx;
+    let mut operand_ctx: Option<VarResolutionCtx<'_>> = None;
+    let mut carried: Option<HashMap<String, Vec<ResolvedType>>> = None;
     loop {
+        let ctx = operand_ctx.as_ref().unwrap_or(base_ctx);
         // Syntactically non-nullable operands: `new Foo()`, a non-null
         // literal, an array literal, `clone $x`.
         let non_nullable = match peel_type_transparent(current.lhs) {
@@ -789,6 +793,31 @@ fn resolve_null_coalesce_chain<'b>(
         // Always union with the next operand.  Even when the type string
         // looks non-nullable, the user wrote `??` defensively and both
         // branches are valid candidates.
+        // An operand after a plain variable runs where that variable was
+        // `null`, which the forward walker records at the operand's start
+        // (inside `if ($a || $b)`, the `$b` of `$a ?? $b` is truthy).
+        if matches!(
+            peel_type_transparent(current.lhs),
+            Expression::Variable(Variable::Direct(_))
+        ) {
+            let (own, impossible) =
+                crate::type_engine::variable::forward_walk::condition_arm_narrowing(
+                    current.lhs,
+                    false,
+                    ctx,
+                );
+            let mut next = base_ctx.with_cursor_offset(current.rhs.span().start.offset);
+            if !impossible && !own.is_empty() {
+                carried
+                    .get_or_insert_with(|| base_ctx.match_arm_narrowing.clone())
+                    .extend(own);
+            }
+            if let Some(overrides) = &carried {
+                next = next.with_match_arm_narrowing(overrides.clone());
+            }
+            operand_ctx = Some(next);
+        }
+        let ctx = operand_ctx.as_ref().unwrap_or(base_ctx);
         match peel_type_transparent(current.rhs) {
             Expression::Binary(next) if next.operator.is_null_coalesce() => current = next,
             last => {

@@ -3,7 +3,7 @@ use super::*;
 use mago_span::HasSpan;
 use mago_syntax::cst::argument::Argument;
 
-use crate::atom::{atom, bytes_to_str};
+use crate::atom::{Atom, atom, bytes_to_str};
 use crate::php_type::{LiteralValue, PhpType, TypeKind};
 use crate::type_engine::types::narrowing;
 use crate::types::{ClassInfo, ResolvedType};
@@ -658,6 +658,7 @@ pub(crate) fn process_assignment_expr<'b>(
         // expression proves, read off the scope the value was computed in.
         let condition_proofs =
             condition_implications(&lhs_name, assignment.rhs, &rhs_types, scope, ctx);
+        let ternary_proofs = ternary_arm_implications(&lhs_name, assignment.rhs, scope, ctx);
         // Reassigning the variable replaces its object identity, so any
         // property/array-access key rooted at it (seeded by an earlier
         // assignment or condition narrowing) is now stale.  Drop them
@@ -707,6 +708,18 @@ pub(crate) fn process_assignment_expr<'b>(
                 .implied_narrowings
                 .update(atom(&lhs_name), |proofs| proofs.extend(condition_proofs));
         }
+        if let Some((implied, non_null)) = ternary_proofs {
+            if !implied.is_empty() {
+                scope
+                    .implied_narrowings
+                    .update(atom(&lhs_name), |proofs| proofs.extend(implied));
+            }
+            if !non_null.is_empty() {
+                scope
+                    .non_null_implications
+                    .update(atom(&lhs_name), |keys| keys.extend(non_null));
+            }
+        }
         // `$period = $agreement?->latestPeriod()` makes `$period`'s null
         // stand for `$agreement`'s, so ruling out one rules out the other.
         record_nullsafe_origin(&lhs_name, assignment.rhs, scope);
@@ -718,6 +731,64 @@ pub(crate) fn process_assignment_expr<'b>(
         // inside itself: `return ($x = $map[$key])->truthy();`.
         process_expr(expr, scope, ctx);
     }
+}
+
+/// What `$x = C ? A : B` proves about the condition's subjects once `$x`
+/// is later shown to hold one arm's value.
+///
+/// Only one arm runs, so the assignment is the same as writing `$x` in
+/// each branch of an `if`/`else` on `C`, and the join of those two
+/// branches is what learns the proofs:
+///
+/// ```php
+/// $problems = $importer instanceof Sheet ? $importer->getProblems() : [];
+/// if ($problems !== []) { /* $importer is a Sheet here */ }
+/// ```
+///
+/// Returns the implied narrowings and non-null implications the join
+/// recorded for `lhs_name`, or `None` when `rhs` is not a full ternary or
+/// either arm is unreachable or untyped.
+fn ternary_arm_implications<'b>(
+    lhs_name: &str,
+    rhs: &'b Expression<'b>,
+    scope: &ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> Option<(Vec<ImpliedNarrowing>, Vec<Atom>)> {
+    let Expression::Conditional(conditional) = crate::parser::unwrap_parens(rhs) else {
+        return None;
+    };
+    let then_expr = conditional.then?;
+    let mut before = scope.clone();
+    let condition = process_condition(conditional.condition, &mut before, ctx);
+    let arm = |arm_scope: &ScopeState, expr: &'b Expression<'b>| {
+        if arm_scope.unreachable {
+            return None;
+        }
+        let types = resolve_rhs_with_types(expr, arm_scope, ctx, None);
+        if types.is_empty() {
+            return None;
+        }
+        let mut arm_scope = arm_scope.clone();
+        arm_scope.invalidate_dependent_keys(lhs_name);
+        arm_scope.invalidate_proofs(lhs_name);
+        arm_scope.set(lhs_name, types);
+        Some(arm_scope)
+    };
+    let mut joined = arm(condition.truthy(ctx), then_expr)?;
+    let else_scope = arm(condition.falsey(ctx), conditional.r#else)?;
+    joined.merge_branch(&else_scope);
+    let key = atom(lhs_name);
+    let implied = joined
+        .implied_narrowings
+        .get(&key)
+        .cloned()
+        .unwrap_or_default();
+    let non_null = joined
+        .non_null_implications
+        .get(&key)
+        .cloned()
+        .unwrap_or_default();
+    Some((implied, non_null))
 }
 
 /// Give a `new X()` stored in a property the template arguments the
@@ -1536,6 +1607,33 @@ pub(crate) fn process_assert_narrowing<'b>(
             apply_condition_narrowing(condition, scope, ctx);
         } else {
             apply_condition_narrowing_inverse(condition, scope, ctx);
+        }
+    }
+
+    // PHPUnit's `assertSame()` / `assertNotSame()` prove the `===` / `!==`
+    // they stand for, so the comparison is narrowed as if it were written
+    // out in an `assert()`.
+    if let Expression::Call(call) = unwrapped {
+        let phpunit_comparison = {
+            let snapshot = scope.locals.clone();
+            let resolver = |vn: &str| -> Vec<ResolvedType> {
+                snapshot.get(&atom(vn)).cloned().unwrap_or_default()
+            };
+            let var_ctx = build_var_ctx("", ctx, &resolver);
+            narrowing::phpunit_comparison_assertion(call, &var_ctx)
+        };
+        if let Some((expected, actual, identical)) = phpunit_comparison {
+            let span = call.span();
+            let comparison = Expression::Binary(Binary {
+                lhs: expected,
+                operator: if identical {
+                    BinaryOperator::Identical(span)
+                } else {
+                    BinaryOperator::NotIdentical(span)
+                },
+                rhs: actual,
+            });
+            apply_condition_narrowing(&comparison, scope, ctx);
         }
     }
 

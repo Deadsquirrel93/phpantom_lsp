@@ -532,6 +532,7 @@ pub(crate) fn collect_condition_var_names_inner(expr: &Expression<'_>, names: &m
             if matches!(
                 crate::ci_map::fold(crate::util::strip_fqn_prefix(func_name)).as_ref(),
                 "is_a"
+                    | "is_subclass_of"
                     | "get_class"
                     | "class_exists"
                     | "interface_exists"
