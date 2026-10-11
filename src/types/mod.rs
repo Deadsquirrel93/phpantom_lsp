@@ -605,6 +605,10 @@ pub struct MethodExtras {
     /// `%class%` that are expanded at call sites to offer a "replace
     /// deprecated call" code action.  `None` when no replacement is specified.
     pub deprecated_replacement: Option<String>,
+    /// Whether the docblock carries `@not-deprecated`, which stops an
+    /// ancestor's `@deprecated` from reaching this method and everything
+    /// that inherits it.
+    pub not_deprecated: bool,
     /// Template parameter names declared via `@template` tags in the
     /// method-level docblock.
     ///
@@ -677,6 +681,7 @@ impl MethodExtras {
             && self.conditional_return.is_none()
             && self.deprecation_message.is_none()
             && self.deprecated_replacement.is_none()
+            && !self.not_deprecated
             && self.template_params.is_empty()
             && self.template_param_bounds.is_empty()
             && self.template_param_defaults.is_empty()
@@ -773,6 +778,11 @@ impl MethodInfo {
     /// The `@deprecated` message (`Some("")` when deprecated without one).
     pub fn deprecation_message(&self) -> Option<&str> {
         self.extras.as_ref()?.deprecation_message.as_deref()
+    }
+
+    /// Whether the method is tagged `@not-deprecated`.
+    pub fn not_deprecated(&self) -> bool {
+        self.extras.as_ref().is_some_and(|e| e.not_deprecated)
     }
 
     /// The `#[Deprecated(replacement: ...)]` code template.

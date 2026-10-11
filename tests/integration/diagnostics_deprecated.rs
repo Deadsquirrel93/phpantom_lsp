@@ -3684,3 +3684,33 @@ class LateType implements Ty {
         deprecated
     );
 }
+
+#[test]
+fn not_deprecated_tag_stops_inheritance_for_descendants() {
+    let backend = create_test_backend();
+    let uri = "file:///test_not_deprecated_descendant.php";
+    let text = r#"<?php
+interface V {
+    /** @deprecated Gone in 4.0. */
+    public function visit(): void;
+}
+
+abstract class AV implements V {
+    /** @not-deprecated Only the interface declaration is deprecated. */
+    public function visit(): void {}
+}
+
+class Child extends AV {
+    public function go(): void { $this->visit(); }
+}
+"#;
+
+    let diags = deprecated_diagnostics(&backend, uri, text);
+    let deprecated: Vec<_> = diags.iter().filter(|d| has_deprecated_tag(d)).collect();
+
+    assert!(
+        deprecated.is_empty(),
+        "@not-deprecated should apply to descendants, got: {:?}",
+        deprecated
+    );
+}

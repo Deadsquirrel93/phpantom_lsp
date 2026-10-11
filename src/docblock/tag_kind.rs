@@ -76,6 +76,8 @@ pub enum TagKind {
     TypeAliasImport,
     /// `@deprecated`
     Deprecated,
+    /// `@not-deprecated`
+    NotDeprecated,
     /// `@see`
     See,
     /// `@link`
@@ -130,6 +132,7 @@ pub(crate) fn tag_kind(tag: &Tag<'_>) -> TagKind {
         TagValue::TypeAlias(_) => TagKind::TypeAlias,
         TagValue::TypeAliasImport(_) => TagKind::TypeAliasImport,
         TagValue::Deprecated(_) => TagKind::Deprecated,
+        TagValue::NotDeprecated(_) => TagKind::NotDeprecated,
         // `Generic` is a tag the parser does not model, and `Invalid` is one
         // whose value it could not make sense of.  Both keep their value as
         // raw text, which is what the extractors work with anyway, so fall
@@ -197,6 +200,7 @@ fn tag_kind_from_name(name: &[u8]) -> TagKind {
         b"type" => TagKind::TypeAlias,
         b"importtype" => TagKind::TypeAliasImport,
         b"deprecated" => TagKind::Deprecated,
+        b"notdeprecated" => TagKind::NotDeprecated,
         b"see" => TagKind::See,
         b"link" => TagKind::Link,
         b"covers" => TagKind::Covers,

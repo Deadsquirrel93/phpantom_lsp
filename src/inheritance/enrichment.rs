@@ -209,7 +209,10 @@ fn method_enrichment_would_change(
     // Deprecation (an override with no docblock of its own inherits the
     // ancestor's `@deprecated` tag, matching PHPStan's phpDoc-inheritance
     // resolver).
-    if existing.deprecation_message().is_none() && ancestor.deprecation_message().is_some() {
+    if !existing.not_deprecated()
+        && existing.deprecation_message().is_none()
+        && ancestor.deprecation_message().is_some()
+    {
         return true;
     }
 
@@ -367,7 +370,10 @@ pub(crate) fn enrich_method_from_ancestor(
     }
 
     // ── Deprecation ─────────────────────────────────────────────
-    if existing.deprecation_message().is_none() && ancestor.deprecation_message().is_some() {
+    if !existing.not_deprecated()
+        && existing.deprecation_message().is_none()
+        && ancestor.deprecation_message().is_some()
+    {
         let extras = existing.extras_mut();
         extras.deprecation_message = ancestor.deprecation_message().map(str::to_owned);
         extras.deprecated_replacement = ancestor.deprecated_replacement().map(str::to_owned);

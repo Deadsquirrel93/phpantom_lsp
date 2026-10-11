@@ -538,29 +538,3 @@ the `$preserveKeys is …` / `$groupBy is …` conditionals still unresolved.
 
 ## Miscellaneous
 
-### B586. `@not-deprecated` is lost on a subclass that inherits the method
-
-**Impact: Low · Complexity: Low**
-
-```php
-interface V {
-    /** @deprecated Gone in 4.0. */
-    public function visit(): void;
-}
-
-abstract class AV implements V {
-    /** @not-deprecated Only the interface declaration is deprecated. */
-    public function visit(): void {}
-}
-
-class Child extends AV {
-    public function go(): void { $this->visit(); } // 'Child::visit' is deprecated
-}
-```
-
-`$this->visit()` inside `AV` itself is clean, so the tag is honoured where
-it is written. A subclass that inherits `visit()` without overriding it
-gets the interface's deprecation back, so inheritance enrichment seems to
-re-propagate `deprecation_message` from the interface rather than taking
-the inherited method as `AV` resolved it. PHPStan's `@not-deprecated`
-stops the inheritance for every descendant.

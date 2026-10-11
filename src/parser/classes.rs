@@ -1382,6 +1382,10 @@ impl Backend {
                             conditional_return,
                             deprecation_message,
                             deprecated_replacement: method_deprecated_replacement,
+                            not_deprecated: method_docblock_info.as_ref().is_some_and(|i| {
+                                i.first_tag_by_kind(docblock::TagKind::NotDeprecated)
+                                    .is_some()
+                            }),
                             template_params: method_template_params,
                             template_param_bounds: method_template_param_bounds,
                             template_bindings: method_template_bindings,
