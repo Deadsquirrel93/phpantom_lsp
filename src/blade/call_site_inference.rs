@@ -81,7 +81,8 @@ pub(crate) struct ResolvedViewCall {
     /// Whether the render hands the template the scope it is written in on
     /// top of [`Self::vars`], as `@include` does. False for `@each`, whose
     /// partial sees only the item and the key however much the surrounding
-    /// template holds.
+    /// template holds, and for `@component`, whose view sees only the data
+    /// it is passed.
     pub(crate) forwards_scope: bool,
 }
 

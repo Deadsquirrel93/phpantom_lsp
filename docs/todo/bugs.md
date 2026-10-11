@@ -273,24 +273,7 @@ three of its view namespaces this way, which leaves every
 
 ## Blade
 
-### B611. `@component` is treated as handing the child the parent's scope
-
-**Impact: Low · Complexity: Low**
-
-```blade
-@php /** @bladestan-signature @var string $title */ @endphp
-@component('alert') @endcomponent {{-- alert declares $title: not reported --}}
-```
-
-Laravel compiles `@component` to `$__env->startComponent(...)`, which
-renders the view from the array it is passed (plus shared data) alone,
-unlike the `@include` family. `contract.rs` still lists `component` and
-`componentFirst` in `RENDER_DIRECTIVES`, and `ViewCallWalker` records the
-site with `forwards_scope: true`, so a name the parent holds counts as
-supplied to the component's view and a name only the component's view
-reads counts as accepted from the parent's callers. The unused-variable
-check already tells them apart (the preprocessor lowers `@component` to
-`blade_component_directive`).
+No outstanding items.
 
 ## Templates
 

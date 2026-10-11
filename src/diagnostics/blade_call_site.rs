@@ -159,8 +159,9 @@ impl Backend {
             }
 
             // ── Missing ──────────────────────────────────────────────
-            // An `@each` partial sees only the item and the key, so what
-            // the surrounding template holds does not reach it.
+            // An `@each` partial sees only the item and the key, and a
+            // `@component` view only the data it is passed, so what the
+            // surrounding template holds does not reach either.
             let site_inherited = match site.forwards_scope {
                 true => inherited.as_ref(),
                 false => Some(&no_inherited),

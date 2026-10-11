@@ -72,18 +72,17 @@ enum ViewArg {
 /// reachable and all are collected.
 ///
 /// `@each` is not: its partial is rendered with the item and the key alone,
-/// so a name only that partial reads never arrives through here.
-const RENDER_DIRECTIVES: [(&str, usize, ViewArg); 10] = [
+/// so a name only that partial reads never arrives through here. Nor are
+/// `@component` and `@includeIsolated`, which render their view from the
+/// array they are passed alone.
+const RENDER_DIRECTIVES: [(&str, usize, ViewArg); 7] = [
     ("extends", 0, ViewArg::Name),
     ("extendsFirst", 0, ViewArg::Candidates),
     ("include", 0, ViewArg::Name),
     ("includeIf", 0, ViewArg::Name),
-    ("includeIsolated", 0, ViewArg::Name),
     ("includeFirst", 0, ViewArg::Candidates),
     ("includeWhen", 1, ViewArg::Name),
     ("includeUnless", 1, ViewArg::Name),
-    ("component", 0, ViewArg::Name),
-    ("componentFirst", 0, ViewArg::Candidates),
 ];
 
 /// What a template promises its callers.
@@ -520,13 +519,23 @@ mod tests {
     }
 
     #[test]
-    fn the_first_family_names_every_candidate_layout_and_component() {
+    fn extends_first_names_every_candidate_layout() {
+        let (names, closed) = rendered("@extendsFirst(['themes.dark', 'layouts.app'])\n");
+        assert_eq!(names, vec!["themes.dark", "layouts.app"]);
+        assert!(closed);
+    }
+
+    /// `@component` and `@includeIsolated` render their view from the array
+    /// they are passed alone, so the view's names are not the surrounding
+    /// template's to accept.
+    #[test]
+    fn isolated_renders_do_not_pass_the_templates_own_data_on() {
         let (names, closed) = rendered(
-            "@extendsFirst(['themes.dark', 'layouts.app'])\n@componentFirst(['custom.alert', 'alert'], ['level' => 'warn'])\n",
+            "@component('alert')\n@endcomponent\n@componentFirst(['custom.alert', 'alert'], ['level' => 'warn'])\n@endcomponentFirst\n@includeIsolated('partials.flash')\n",
         );
-        assert_eq!(
-            names,
-            vec!["themes.dark", "layouts.app", "custom.alert", "alert"]
+        assert!(
+            names.is_empty(),
+            "expected no rendered views, got {names:?}"
         );
         assert!(closed);
     }

@@ -804,6 +804,28 @@ class ViewServiceProvider
         );
     }
 
+    /// A `@component` view is rendered from the array it is passed alone, so
+    /// a variable the surrounding template holds does not excuse the call
+    /// from passing it.
+    #[tokio::test]
+    async fn component_does_not_forward_the_surrounding_templates_scope() {
+        let (backend, dir) = workspace(&[
+            (
+                "resources/views/alert.blade.php",
+                "@php\n/**\n * @bladestan-signature\n * @var string $title\n */\n@endphp\n<b>{{ $title }}</b>\n",
+            ),
+            (
+                "resources/views/page.blade.php",
+                "@php\n/**\n * @bladestan-signature\n * @var string $title\n */\n@endphp\n@component('alert')\n@endcomponent\n",
+            ),
+        ]);
+        let diags =
+            call_site_diagnostics(&backend, &dir, "resources/views/page.blade.php", "blade").await;
+        assert_eq!(diags.len(), 1, "got {diags:?}");
+        assert_eq!(diags[0].0, "missing_view_variable");
+        assert!(diags[0].1.contains("$title"), "got {:?}", diags[0].1);
+    }
+
     /// A data argument that writes no names down still passes the ones its
     /// type spells out, so a site built from a variable is checked on them.
     #[tokio::test]

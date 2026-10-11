@@ -269,7 +269,7 @@ impl<'ast, 'arena, 'w> mago_syntax::walker::Walker<'ast, 'arena, CollectCtx<'w, 
             &name_ranges,
             entries,
             complete,
-            !is_each_render_function(name),
+            forwards_scope(name),
         );
     }
 
@@ -547,6 +547,15 @@ fn is_view_render_function(name: &str) -> bool {
         || name.eq_ignore_ascii_case("blade_view_directive")
         || name.eq_ignore_ascii_case("blade_component_directive")
         || is_each_render_function(name)
+}
+
+/// Whether a render helper hands the view the scope it is written in on
+/// top of the data it passes.
+///
+/// The `@include` family compiles to a render with `get_defined_vars()`;
+/// `@component` and `@each` render from their arguments alone.
+fn forwards_scope(name: &str) -> bool {
+    !is_each_render_function(name) && !name.eq_ignore_ascii_case("blade_component_directive")
 }
 
 /// Whether the call is the preprocessor's compilation of `@each`.
