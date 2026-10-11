@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`object|null` return types.** A call documented as returning `object|null` no longer gets a "could not be resolved" hint on member access, matching a native `?object`.
 - **`use X as Y` next to another import of the same short name.** With `use App\Facades\Redis; use Redis as PhpRedis;`, `PhpRedis` is now the global `Redis` instead of the facade.
 - **`@method` parameters defaulting to `null`.** A `@method` tag such as `tag(string $disk = null)` now accepts `null`, as the equivalent native signature does.
 - **`$this` in a Pest test is the configured test case.** Inside `it()`, `test()`, `beforeEach()`, and `afterEach()` closures, `$this` is now the test case and traits bound to the file with `pest()->extends()` or `uses()`, whether in the test directory's `Pest.php` or in the test file itself, falling back to PHPUnit's `TestCase`. Helpers defined on them now resolve, and so do their return types.

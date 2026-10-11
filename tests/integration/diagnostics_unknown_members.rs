@@ -14610,3 +14610,29 @@ final class Svc {
     let diags = unknown_member_diagnostics(&backend, uri, text);
     assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
 }
+
+/// A docblock `object|null` subject is the same type as a native `?object`
+/// one, so it is not reported as unresolved.
+#[test]
+fn docblock_object_or_null_subject_is_not_unresolved() {
+    let backend = create_test_backend();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///object_or_null.php";
+    let text = r#"<?php
+final class R {
+    /** @return object|null */
+    public function obj() { return null; }
+
+    public function a(?object $n): void {
+        $n->projects ?? [];
+        $this->obj()->projects ?? [];
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(diags.is_empty(), "got: {diags:?}");
+}

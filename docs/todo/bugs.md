@@ -586,25 +586,3 @@ function or method whose body calls `func_get_args()` as variadic.
 **Fix:** Record during parsing whether a function or method body calls
 `func_get_args()` (outside nested closures and classes) and treat it as
 variadic in the argument-count check and in signature help.
-
-### B589. A docblock `object|null` subject is reported as unresolved
-
-**Impact: Low · Complexity: Low**
-
-```php
-final class R {
-    /** @return object|null */
-    public function obj() { return null; }
-
-    public function a(?object $n): void {
-        $n->projects ?? [];           // clean
-        $this->obj()->projects ?? []; // type of '$this->obj()' could not be resolved
-    }
-}
-```
-
-With `unresolved-member-access` on, a native `?object` subject is accepted
-but the same type written as a docblock `object|null` reports the subject
-as "could not be resolved", which is the message reserved for a gap in
-PHPantom's own inference. Laravel's `Http\Client\Response::object()`
-returns exactly this.

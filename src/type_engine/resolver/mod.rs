@@ -1350,10 +1350,14 @@ pub(crate) fn resolve_subject_outcome(
         if call_returns_mixed(callee, access_kind, ctx) {
             return SubjectOutcome::Mixed;
         }
-        // Note: a call returning `object`/`?object` is already caught by
-        // the "stdClass / object" check above — `resolve_target_classes`
-        // surfaces it as a type-string-only candidate instead of an empty
-        // result, so `resolved` would not have been empty in that case.
+        // A call declared `object|null` resolves to no candidate at all,
+        // unlike the native `?object` which is caught above.
+        if declared_call_return_type(callee, access_kind, ctx, &is_nullable_object).is_some() {
+            return SubjectOutcome::Resolved(vec![Arc::new(ClassInfo {
+                name: crate::atom::atom("stdClass"),
+                ..ClassInfo::default()
+            })]);
+        }
         // Try unresolvable class detection for function calls.
         if let SubjectExpr::FunctionCall(fn_name) = callee.as_ref()
             && let Some(fl) = ctx.function_loader
@@ -1419,6 +1423,11 @@ fn resolve_call_scalar_return(
         hint.all_members_primitive_scalar()
     })?;
     Some(hint.non_null_type().unwrap_or(hint))
+}
+
+/// Whether a type is `object`, alone or with `null`.
+fn is_nullable_object(ty: &PhpType) -> bool {
+    ty.non_null_type().as_ref().unwrap_or(ty).is_object()
 }
 
 /// Whether the method or function a call names declares `mixed`.
