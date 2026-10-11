@@ -85,6 +85,9 @@ impl Backend {
             method.return_type.as_ref(),
             ctx,
         );
+        crate::virtual_members::laravel::patches::narrow_conditionable_value_binding(
+            &method, &mut subs,
+        );
 
         subs
     }

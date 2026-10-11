@@ -12,7 +12,10 @@ use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
 use super::const_eval::{ClassContext, Scope, const_string};
-use super::view_data::{SharedViewVar, ViewComposer, ViewDataRegistration, view_data_registration};
+use super::view_data::{
+    SharedViewVar, ViewComposer, ViewDataRegistration, is_view_facade, is_view_factory_expr,
+    view_data_registration,
+};
 use crate::atom::bytes_to_str;
 use crate::ci_map::CiSet;
 use crate::names::OwnedResolvedNames;
@@ -493,6 +496,40 @@ pub(crate) fn extract_provider_resources(
                 )
             }
         {
+            return ControlFlow::Continue(());
+        }
+
+        // `View::addNamespace('webshop', base_path(…))` and the same call
+        // written against the container's view factory register a view
+        // namespace directly, without `loadViewsFrom()`'s published-copy check.
+        if let Some((method, argument_list)) = view_factory_call(expr)
+            && (method.eq_ignore_ascii_case(b"addnamespace")
+                || method.eq_ignore_ascii_case(b"prependnamespace"))
+        {
+            let mut args = argument_list.arguments.iter();
+            if let Some(ns_arg) = args.next()
+                && let Some(namespace) = const_string(ns_arg.value(), content, &scope)
+                && let Some(hints_arg) = args.next()
+            {
+                let paths = PathContext {
+                    file_dir,
+                    workspace_root,
+                    program,
+                };
+                let registered = view_hint_paths(hints_arg.value(), content, &paths)
+                    .into_iter()
+                    .map(|path| ProviderResource {
+                        path,
+                        namespace: namespace.clone(),
+                    });
+                // `FileViewFinder::prependNamespace()` puts its hints ahead of
+                // the ones already registered, and the first hint wins.
+                if method.eq_ignore_ascii_case(b"prependnamespace") {
+                    resources.view_dirs.splice(0..0, registered);
+                } else {
+                    resources.view_dirs.extend(registered);
+                }
+            }
             return ControlFlow::Continue(());
         }
 
@@ -1074,6 +1111,61 @@ fn component_namespace_args(
         return None;
     }
     Some((prefix, namespace))
+}
+
+/// The method name and arguments of a call on Laravel's view factory,
+/// reached through either the `View` facade or the container.
+fn view_factory_call<'ast, 'arena>(
+    expr: &'ast Expression<'arena>,
+) -> Option<(&'arena [u8], &'ast ArgumentList<'arena>)> {
+    match expr {
+        Expression::Call(Call::StaticMethod(sc)) if is_view_facade(sc.class) => match &sc.method {
+            ClassLikeMemberSelector::Identifier(method) => Some((method.value, &sc.argument_list)),
+            _ => None,
+        },
+        Expression::Call(Call::Method(mc)) if is_view_factory_expr(mc.object) => match &mc.method {
+            ClassLikeMemberSelector::Identifier(method) => Some((method.value, &mc.argument_list)),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// The directories an `addNamespace()` hint argument names: a single path,
+/// or an array of them.
+fn view_hint_paths(
+    expr: &Expression<'_>,
+    content: &str,
+    paths: &PathContext<'_, '_>,
+) -> Vec<PathBuf> {
+    let resolve = |expr: &Expression<'_>| {
+        resolve_path_arg(
+            expr,
+            content,
+            paths.file_dir,
+            paths.workspace_root,
+            paths.program,
+        )
+    };
+    match expr {
+        Expression::Array(array) => array
+            .elements
+            .iter()
+            .filter_map(|element| match element {
+                ArrayElement::Value(value) => resolve(value.value),
+                _ => None,
+            })
+            .collect(),
+        Expression::LegacyArray(array) => array
+            .elements
+            .iter()
+            .filter_map(|element| match element {
+                ArrayElement::Value(value) => resolve(value.value),
+                _ => None,
+            })
+            .collect(),
+        _ => resolve(expr).into_iter().collect(),
+    }
 }
 
 fn is_this_expr(expr: &Expression<'_>) -> bool {
@@ -1988,6 +2080,42 @@ mod tests {
             Default::default(),
         );
         assert!(!resources.custom_translation_loader);
+    }
+
+    #[test]
+    fn records_view_namespaces_added_on_the_view_factory() {
+        let content = "<?php\n\
+            class ViewServiceProvider {\n\
+                public function boot(): void {\n\
+                    View::addNamespace('webshop', base_path('resources/webshop/views'));\n\
+                    $this->app['view']->addNamespace('backoffice', [base_path('resources/backoffice/views')]);\n\
+                    View::prependNamespace('mail', base_path('resources/mail'));\n\
+                    $this->schedule->addNamespace('nope', base_path('x'));\n\
+                }\n\
+            }\n";
+        let resources = extract_provider_resources(
+            content,
+            Path::new("/ws/app/Providers/ViewServiceProvider.php"),
+            Path::new("/ws"),
+            ClassContext::default(),
+            Default::default(),
+        );
+        let registered: Vec<_> = resources
+            .view_dirs
+            .iter()
+            .map(|r| (r.namespace.as_str(), r.path.clone()))
+            .collect();
+        assert_eq!(
+            registered,
+            vec![
+                ("mail", PathBuf::from("/ws/resources/mail")),
+                ("webshop", PathBuf::from("/ws/resources/webshop/views")),
+                (
+                    "backoffice",
+                    PathBuf::from("/ws/resources/backoffice/views")
+                ),
+            ]
+        );
     }
 
     #[test]

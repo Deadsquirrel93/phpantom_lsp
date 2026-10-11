@@ -204,72 +204,7 @@ untyped constant come out as `mixed`.
 
 ## Laravel
 
-### B590. A facade `@method` tag that drops generic arguments hides the accessor's return
-
-**Impact: Medium · Complexity: Low**
-
-```php
-use Illuminate\Http\Client\Factory;
-use Illuminate\Support\Facades\Http;
-
-Http::recorded();          // Collection
-(new Factory)->recorded(); // Collection<int, array{0: Request, 1: Response|null}>
-
-Http::recorded(fn (Request $r) => true)
-    ->map(fn (array $pair) => $pair[0]->url()); // cannot verify 'url'
-```
-
-`Http`'s generated tag is `@method static Collection recorded(…)`, while
-`Factory::recorded()` declares the shape. `facade_concrete_owner`
-(`call_resolution/facade_owner.rs`) only falls through to the
-`getFacadeAccessor()` class when the concrete return is call-dependent (a
-conditional or a method template), so a tag that merely flattened
-`Collection<…>` to `Collection` wins.
-
-**Fix:** Also fall through when the concrete method's return carries type
-arguments or a shape the facade tag's return lacks, for the same bare class.
-
-### B606. A `when()` callback is checked against the untruthy value type
-
-**Impact: Low · Complexity: Medium**
-
-```php
-/** @var ?string $jobClass */
-$query->when(
-    $jobClass,
-    fn (Builder $query, string $jobClass) => $query->where('x', $jobClass),
-);
-// expects callable($this, ?string): $this, got Closure(Builder, string)
-```
-
-`Conditionable::when()` only calls the callback when the value is truthy
-(and `unless()` only when it is falsy), so the callback's parameter can
-never see `null` here. The template `TWhenParameter` is bound to the raw
-`?string`. Removing the falsy members (or only the truthy ones, for
-`unless()`) from the binding before checking the callback would match the
-runtime.
-
-### B607. `View::addNamespace()` in a provider does not register the namespace
-
-**Impact: Medium · Complexity: Low**
-
-```php
-final class ViewServiceProvider extends ServiceProvider {
-    public function boot(): void {
-        View::addNamespace('webshop', base_path('resources/webshop/views'));
-    }
-}
-```
-
-```blade
-@include('webshop::components.box') {{-- Unknown view: 'webshop::components.box' --}}
-```
-
-`provider_resources.rs` records `loadViewsFrom($path, $namespace)` but not
-the `View` facade's `addNamespace()` (nor `$this->app['view']->addNamespace()`
-or `View::prependNamespace()`). One large Laravel project registers all
-three of its view namespaces this way, which leaves every
-`view('webshop::…')` and `@include('backoffice::…')` unknown.
+No outstanding items.
 
 ## Blade
 

@@ -23,7 +23,9 @@
 //!    `TWhenReturnType` template
 //!    parameter breaks `is_self_like` checks, degrading Builder chains.
 //!    The patch replaces the return type with `$this` so that chained
-//!    `when()` / `unless()` calls preserve the receiver type.
+//!    `when()` / `unless()` calls preserve the receiver type.  It also gives
+//!    the `$default` callback a value template of its own, so each callback
+//!    is bound to the half of the value (truthy or falsy) it is called with.
 //!
 //! 3. **Bare `Builder` return types on scope methods** are handled
 //!    separately in `scopes.rs` (`is_bare_builder_type`) because that
@@ -284,13 +286,17 @@ fn patch_eloquent_builder_call_return_type(class: &mut ClassInfo) {
 /// `$this` unconditionally.  This matches the common case (the callback
 /// returns void and the method returns the receiver) and preserves
 /// chain continuation.
+///
+/// The `$default` callback is also moved onto a value template of its own
+/// (see [`split_conditionable_default_template`]).
 fn patch_conditionable_when_unless(class: &mut ClassInfo) {
     let this_type = PhpType::this();
     for method in class.methods.make_mut().iter_mut() {
-        let method = Arc::make_mut(method);
         if method.name != "when" && method.name != "unless" {
             continue;
         }
+        let method = Arc::make_mut(method);
+        split_conditionable_default_template(method);
         let dominated_by_template = match &method.return_type {
             Some(rt) => return_type_has_unresolved_template(rt),
             None => false,
@@ -298,6 +304,114 @@ fn patch_conditionable_when_unless(class: &mut ClassInfo) {
         if dominated_by_template {
             method.return_type = Some(this_type.clone());
         }
+    }
+}
+
+/// The value template a `Conditionable` method names, the one this patch
+/// gives its `$default` callback instead, and whether the main callback
+/// runs on a truthy value (`when()`) or a falsy one (`unless()`).
+fn conditionable_value_templates(method_name: &str) -> Option<(&'static str, &'static str, bool)> {
+    match method_name {
+        "when" => Some(("TWhenParameter", "TWhenDefaultParameter", true)),
+        "unless" => Some(("TUnlessParameter", "TUnlessDefaultParameter", false)),
+        _ => None,
+    }
+}
+
+/// Give `when()` / `unless()`'s `$default` callback a value template of its
+/// own.
+///
+/// The `$callback` and `$default` callbacks are each called with the opposite
+/// half of the value (`when()` calls `$default` only when the value is falsy),
+/// yet the signature names one template for both.  A second template lets
+/// [`narrow_conditionable_value_binding`] bind each callback to the half it
+/// actually receives.
+fn split_conditionable_default_template(method: &mut crate::types::MethodInfo) {
+    let Some((value_template, default_template, _)) = conditionable_value_templates(&method.name)
+    else {
+        return;
+    };
+    // A method inherited from an already-patched class has been split once.
+    if !method.template_params().iter().any(|t| t == value_template)
+        || method
+            .template_params()
+            .iter()
+            .any(|t| t == default_template)
+    {
+        return;
+    }
+    let renamed: std::collections::HashMap<String, PhpType> = [(
+        value_template.to_string(),
+        PhpType::named(atom(default_template)),
+    )]
+    .into();
+    let mut default_name = None;
+    for param in method.parameters.make_mut().iter_mut() {
+        if param.name != "$default" {
+            continue;
+        }
+        if let Some(hint) = param.type_hint.as_mut() {
+            *hint = hint.substitute(&renamed);
+        }
+        default_name = Some(param.name);
+    }
+    let Some(default_name) = default_name else {
+        return;
+    };
+    let extras = method.extras_mut();
+    extras.template_params.push(atom(default_template));
+    for (template, param) in extras.template_bindings.iter_mut() {
+        if *param == default_name && template == value_template {
+            *template = atom(default_template);
+        }
+    }
+}
+
+/// Narrow the value template a `Conditionable::when()` / `unless()` call
+/// binds from its `$value` argument to what the callback can actually see.
+///
+/// `when()` only runs its callback when the value is truthy, and `unless()`
+/// only when it is falsy, but both signatures name the same template for
+/// the value and the callback's parameter.  Binding it to the raw argument
+/// type would make `->when($nullableString, fn ($q, string $s) => …)`
+/// look like it hands the callback a `null` it can never receive.
+///
+/// `$default` gets the opposite half, through the template
+/// [`split_conditionable_default_template`] gave it.  A value with no half
+/// for one of the callbacks means that callback never runs, so its binding
+/// is left at the full value rather than collapsed to nothing.
+pub(crate) fn narrow_conditionable_value_binding(
+    method: &crate::types::MethodInfo,
+    subs: &mut std::collections::HashMap<String, PhpType>,
+) {
+    let Some((value_template, default_template, truthy)) =
+        conditionable_value_templates(&method.name)
+    else {
+        return;
+    };
+    if !method.template_params().iter().any(|t| t == value_template) {
+        return;
+    }
+    let Some(bound) = subs.get(value_template).cloned() else {
+        return;
+    };
+    let (callback_half, default_half) = if truthy {
+        (bound.truthy_type(), bound.falsy_type())
+    } else {
+        (bound.falsy_type(), bound.truthy_type())
+    };
+    if method
+        .template_params()
+        .iter()
+        .any(|t| t == default_template)
+    {
+        subs.insert(
+            default_template.to_string(),
+            default_half.unwrap_or_else(|| bound.clone()),
+        );
+    }
+    if let Some(callback_half) = callback_half {
+        subs.insert(value_template.to_string(), callback_half);
     }
 }
 

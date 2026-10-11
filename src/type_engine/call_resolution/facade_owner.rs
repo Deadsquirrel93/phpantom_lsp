@@ -46,11 +46,56 @@ pub(crate) fn facade_concrete_owner(
     // `Container::make()`'s `class-string<T>`-aware conditional return
     // becomes a bare `object|mixed` on the `App` facade's tag, and
     // `PendingRequest::async()`'s `self<T>` becomes a bare class name on
-    // `Http`'s). Fall through to the concrete accessor only when it
-    // actually supplies a return the facade's own tag could not express.
+    // `Http`'s), or that drops the type arguments of a fixed one
+    // (`Factory::recorded()`'s `Collection<int, array{…}>` becomes a bare
+    // `Collection` on `Http`'s). Fall through to the concrete accessor only
+    // when it actually supplies a return the facade's own tag lacks.
+    let facade_return = method_return_type(owner, method_name, class_loader, cache);
     facade_accessor_concrete_owner(owner, method_name, class_loader, cache, backend).filter(
-        |concrete| method_return_is_call_dependent(concrete, method_name, class_loader, cache),
+        |concrete| {
+            method_return_is_call_dependent(concrete, method_name, class_loader, cache)
+                || facade_return.as_ref().is_some_and(|facade_return| {
+                    method_return_type(concrete, method_name, class_loader, cache).is_some_and(
+                        |concrete_return| refines_bare_return(facade_return, &concrete_return),
+                    )
+                })
+        },
     )
+}
+
+fn method_return_type(
+    class_info: &ClassInfo,
+    method_name: &str,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    cache: Option<&ResolvedClassCache>,
+) -> Option<PhpType> {
+    if let Some(method) = class_info.get_method_ci(method_name) {
+        return method.return_type.clone();
+    }
+    let merged =
+        crate::virtual_members::resolve_class_fully_maybe_cached(class_info, class_loader, cache);
+    merged.get_method_ci(method_name)?.return_type.clone()
+}
+
+/// Whether `concrete` is the same type as the bare `facade` return, with the
+/// type arguments or shape the facade's tag left out: `Collection<int, User>`
+/// for a bare `Collection`, or `list<string>` / `array{…}` for a bare
+/// `array`.
+fn refines_bare_return(facade: &PhpType, concrete: &PhpType) -> bool {
+    match (facade.kind(), concrete.kind()) {
+        (TypeKind::Nullable(facade), TypeKind::Nullable(concrete)) => {
+            refines_bare_return(facade, concrete)
+        }
+        (TypeKind::Named(_), _) if facade.is_bare_array() => {
+            concrete.is_array_like() && !concrete.is_bare_array()
+        }
+        (TypeKind::Named(facade_name), TypeKind::Generic(generic)) => {
+            !generic.args.is_empty()
+                && crate::util::short_name(facade_name)
+                    .eq_ignore_ascii_case(crate::util::short_name(&generic.name))
+        }
+        _ => false,
+    }
 }
 
 fn class_has_method(

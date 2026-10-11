@@ -4962,6 +4962,92 @@ function test(): void {
 }
 
 #[test]
+fn conditionable_callbacks_only_see_the_value_half_that_runs_them() {
+    let php = r#"<?php
+trait Conditionable {
+    /**
+     * @template TWhenParameter
+     * @template TWhenReturnType
+     * @param (\Closure($this): TWhenParameter)|TWhenParameter|null $value
+     * @param (callable($this, TWhenParameter): TWhenReturnType)|null $callback
+     * @param (callable($this, TWhenParameter): TWhenReturnType)|null $default
+     * @return $this|TWhenReturnType
+     */
+    public function when($value = null, ?callable $callback = null, ?callable $default = null) {
+        return $this;
+    }
+
+    /**
+     * @template TUnlessParameter
+     * @template TUnlessReturnType
+     * @param (\Closure($this): TUnlessParameter)|TUnlessParameter|null $value
+     * @param (callable($this, TUnlessParameter): TUnlessReturnType)|null $callback
+     * @param (callable($this, TUnlessParameter): TUnlessReturnType)|null $default
+     * @return $this|TUnlessReturnType
+     */
+    public function unless($value = null, ?callable $callback = null, ?callable $default = null) {
+        return $this;
+    }
+}
+
+class Builder {
+    use Conditionable;
+    public function where(string $column, mixed $value): static { return $this; }
+}
+
+class Job {}
+
+/** @param ?string $jobClass */
+function test(Builder $query, ?string $jobClass, ?Job $job): void {
+    $query->when(
+        $jobClass,
+        fn (Builder $query, string $jobClass) => $query->where('x', $jobClass),
+        fn (Builder $query) => $query->where('x', null),
+    );
+    $query->unless($job, fn (Builder $query, null $job) => $query, fn (Builder $query, Job $job) => $query);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "when() hands its callback the truthy value and unless() the falsy one: {:?}",
+        messages_with_code(&diags, "type_mismatch_argument")
+    );
+}
+
+#[test]
+fn conditionable_callback_still_rejects_the_wrong_value_type() {
+    let php = r#"<?php
+trait Conditionable {
+    /**
+     * @template TWhenParameter
+     * @template TWhenReturnType
+     * @param (\Closure($this): TWhenParameter)|TWhenParameter|null $value
+     * @param (callable($this, TWhenParameter): TWhenReturnType)|null $callback
+     * @param (callable($this, TWhenParameter): TWhenReturnType)|null $default
+     * @return $this|TWhenReturnType
+     */
+    public function when($value = null, ?callable $callback = null, ?callable $default = null) {
+        return $this;
+    }
+}
+
+class Builder {
+    use Conditionable;
+}
+
+function test(Builder $query, ?string $name): void {
+    $query->when($name, fn (Builder $query, int $name) => $query, fn (Builder $query) => $query);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        has_type_error(&diags),
+        "A callback typed for a value when() never passes must still be flagged: {diags:?}"
+    );
+}
+
+#[test]
 fn no_false_positive_for_conditionable_when_with_integer_and_callback_param() {
     let php = r#"<?php
 trait Conditionable {
@@ -8047,6 +8133,52 @@ function testFacade(): void
         !has_type_error(&diags),
         "An explicitly selected template argument must beat the declared default, through a mixin and a facade as well as directly: {:?}",
         messages_with_code(&diags, "type_mismatch_argument")
+    );
+}
+
+#[test]
+fn a_facade_tag_that_drops_type_arguments_defers_to_the_concrete_return() {
+    let php = r#"<?php
+/**
+ * @template TKey of array-key
+ * @template TValue
+ */
+class Collection
+{
+    /** @return TValue|null */
+    public function first() {}
+}
+
+class Request {}
+class Response {}
+
+function takesResponse(Response $response): void {}
+
+class Factory
+{
+    /** @return Collection<int, Request> */
+    public function recorded() {}
+}
+
+/** @method static Collection recorded() */
+class Http
+{
+    protected static function getFacadeAccessor()
+    {
+        return Factory::class;
+    }
+}
+
+function test(): void
+{
+    takesResponse(Http::recorded()->first());
+}
+"#;
+    let diags = collect(php);
+    let mismatches = messages_with_code(&diags, "type_mismatch_argument");
+    assert!(
+        mismatches.iter().any(|m| m.contains("Request")),
+        "The concrete `Collection<int, Request>` must type the facade call, not the tag's bare `Collection`: {mismatches:?}",
     );
 }
 

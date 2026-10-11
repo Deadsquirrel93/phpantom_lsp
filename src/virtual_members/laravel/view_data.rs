@@ -160,7 +160,7 @@ pub(crate) fn is_view_facade(class: &Expression<'_>) -> bool {
 /// Whether an expression hands back Laravel's view factory: the container
 /// entry a provider resolves (`$this->app['view']`, `$this->app->make('view')`,
 /// `app('view')`) or the `view()` helper called with no arguments.
-fn is_view_factory_expr(expr: &Expression<'_>) -> bool {
+pub(crate) fn is_view_factory_expr(expr: &Expression<'_>) -> bool {
     match expr {
         Expression::ArrayAccess(access) => {
             is_laravel_container_expr(access.array) && is_view_key(access.index)
