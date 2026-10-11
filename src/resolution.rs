@@ -1301,7 +1301,9 @@ impl Backend {
         // ── Unqualified name (no `\` at all) ────────────────
         if !name.contains('\\') {
             // Check the import table first (`use` statements).
-            if let Some(fqn) = file_use_map.get(name) {
+            if let Some(fqn) = file_use_map.get(name)
+                && (fqn == name || !file_use_map.values().any(|v| v == name))
+            {
                 return self.find_or_load_class(fqn);
             }
             // Check local classes (same-file shortcut).  Only a class in
@@ -1549,6 +1551,11 @@ impl Backend {
             if !has_leading_backslash
                 && !stripped.contains('\\')
                 && let Some(fqn) = use_map.get(stripped)
+                // `use Redis as PhpRedis;` expands `PhpRedis` to the bare
+                // global `Redis`; when another import also claims that
+                // short name, the bare name is the alias target, not a
+                // reference to the other import.
+                && (fqn == stripped || !use_map.values().any(|v| v == stripped))
                 && let Some(cls) = self.find_or_load_class(fqn)
             {
                 return Some(cls);

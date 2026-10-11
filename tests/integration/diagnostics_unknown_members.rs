@@ -14575,3 +14575,38 @@ class Service
             .collect::<Vec<_>>()
     );
 }
+
+/// A `use X as Y` target is always fully qualified, so it must not be
+/// re-resolved through an earlier import that shares the short name of `X`.
+#[test]
+fn aliased_import_is_not_resolved_through_same_short_name_import() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[(
+            "src/Facades/Redis.php",
+            "<?php\nnamespace App\\Facades;\nclass Redis {}\n",
+        )],
+    );
+    backend.update_ast(
+        "file:///redis.php",
+        "<?php\nclass Redis {\n    const OPT_PREFIX = 2;\n    public function select(int $db): void {}\n}\n",
+    );
+
+    let uri = "file:///alias_vs_import.php";
+    let text = r#"<?php
+namespace App;
+
+use App\Facades\Redis;
+use Redis as PhpRedis;
+
+final class Svc {
+    public function a(PhpRedis $r): void {
+        $x = PhpRedis::OPT_PREFIX;
+        $r->select(1);
+    }
+}
+"#;
+
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+}

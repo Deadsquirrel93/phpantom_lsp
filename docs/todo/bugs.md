@@ -608,26 +608,3 @@ but the same type written as a docblock `object|null` reports the subject
 as "could not be resolved", which is the message reserved for a gap in
 PHPantom's own inference. Laravel's `Http\Client\Response::object()`
 returns exactly this.
-
-### B611. `use X as Y` resolves `X` through an earlier import
-
-**Impact: Medium · Complexity: Low**
-
-```php
-namespace App;
-
-use App\Facades\ArrayObject;
-use ArrayObject as Real;
-
-final class Svc2 {
-    public function a(): void {
-        $x = Real::STD_PROP_LIST; // Member 'STD_PROP_LIST' not found on class 'App\Facades\ArrayObject'
-    }
-}
-```
-
-A `use` statement's target is always fully qualified, so `Real` is the
-global `\ArrayObject`. PHPantom resolves it through the file's own import
-of the same short name. The real-world shape is
-`use Illuminate\Support\Facades\Redis; use Redis as PhpRedis;`, where every
-`PhpRedis::OPT_*` constant and `PhpRedis` parameter lands on the facade.
