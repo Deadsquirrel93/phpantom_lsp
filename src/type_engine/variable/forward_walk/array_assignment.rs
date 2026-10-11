@@ -6,6 +6,7 @@ use mago_span::HasSpan;
 
 use crate::atom::bytes_to_str;
 use crate::php_type::{PhpType, TypeKind};
+use crate::type_engine::resolver::VarResolutionCtx;
 use crate::type_engine::types::narrowing;
 use crate::types::ResolvedType;
 
@@ -33,30 +34,35 @@ pub(crate) fn process_destructuring_assignment<'b>(
         Some(scope.proofs()),
     );
 
-    // Try inline @var docblock first, then fall back to RHS expression.
-    let stmt_offset = assignment.span().start.offset as usize;
-    let raw_type: Option<PhpType> =
-        crate::docblock::find_inline_var_docblock(ctx.content, stmt_offset)
-            .map(|(vt, _)| crate::util::resolve_php_type_names(&vt, ctx.class_loader))
-            .or_else(|| {
-                super::super::foreach_resolution::resolve_expression_type(assignment.rhs, &var_ctx)
-            });
-
-    // Expand type aliases before shape/generic extraction.
-    let raw_type = raw_type.map(|rt| {
-        crate::type_engine::type_resolution::resolve_type_alias_typed(
-            &rt,
-            &ctx.current_class.name,
-            ctx.all_classes,
-            ctx.class_loader,
-        )
-        .unwrap_or(rt)
-    });
-
-    match raw_type {
+    match destructuring_rhs_type(assignment, &var_ctx) {
         Some(ref rhs_type) => bind_destructured_pattern(assignment.lhs, rhs_type, scope, ctx),
         None => forget_destructured_vars(assignment.lhs, scope),
     }
+}
+
+/// The type a destructuring assignment takes apart: an inline `@var`
+/// docblock above it when there is one, otherwise its right-hand side,
+/// with type aliases expanded so shapes and generics can be read off it.
+pub(crate) fn destructuring_rhs_type(
+    assignment: &Assignment<'_>,
+    var_ctx: &VarResolutionCtx<'_>,
+) -> Option<PhpType> {
+    let stmt_offset = assignment.span().start.offset as usize;
+    let raw_type = crate::docblock::find_inline_var_docblock(var_ctx.content, stmt_offset)
+        .map(|(vt, _)| crate::util::resolve_php_type_names(&vt, var_ctx.class_loader))
+        .or_else(|| {
+            super::super::foreach_resolution::resolve_expression_type(assignment.rhs, var_ctx)
+        })?;
+
+    Some(
+        crate::type_engine::type_resolution::resolve_type_alias_typed(
+            &raw_type,
+            &var_ctx.current_class.name,
+            var_ctx.all_classes,
+            var_ctx.class_loader,
+        )
+        .unwrap_or(raw_type),
+    )
 }
 
 /// Record every direct variable in a destructuring LHS pattern as holding
@@ -154,7 +160,7 @@ pub(crate) fn bind_destructured_pattern<'b>(
 /// would have read off any of them. Destructuring `null` or another scalar
 /// assigns `null` to every target, so a nullable RHS hands each target its
 /// element type or `null`.
-fn destructured_element_type(rhs_type: &PhpType, key: Option<&str>) -> Option<PhpType> {
+pub(crate) fn destructured_element_type(rhs_type: &PhpType, key: Option<&str>) -> Option<PhpType> {
     match rhs_type.kind() {
         TypeKind::Nullable(inner) => destructured_element_type(inner, key).map(PhpType::or_null),
         TypeKind::Union(members) => members

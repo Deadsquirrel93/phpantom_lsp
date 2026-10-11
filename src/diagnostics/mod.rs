@@ -248,6 +248,7 @@ pub(crate) mod class_case_mismatch;
 pub(crate) mod class_name_mismatch;
 pub(crate) mod cross_file;
 mod deprecated;
+mod destructuring_offsets;
 mod docblock_native_mismatch;
 mod enum_errors;
 pub(crate) mod existence_guards;
@@ -607,6 +608,10 @@ impl Backend {
         step!(
             "match_type_mismatch",
             self.collect_match_type_diagnostics(uri_str, content, out)
+        );
+        step!(
+            "unknown_offset",
+            self.collect_destructuring_offset_diagnostics(uri_str, content, out)
         );
         if let Some(ctx) = &file_ctx {
             step!(

@@ -126,6 +126,31 @@ class UnknownMemberDemo
 }
 
 
+// ── Diagnostic: Destructuring Offsets ───────────────────────────────────────
+// `[$a, $b] = …` reads offsets 0 and 1, and `['id' => $id] = …` reads 'id'.
+// When the array's type rules the offset out, the target ends up null and PHP
+// warns about an undefined key, so PHPantom flags the element.
+
+class DestructuringOffsetDemo
+{
+    /**
+     * @param array<string, int> $totals
+     * @param array{id: int, name: string} $row
+     */
+    public function demo(array $totals, array $row): void
+    {
+        // No warning: the shape has both keys.
+        ['id' => $id, 'name' => $name] = $row;
+
+        // Warning: a string-keyed array has no offsets 0 and 1.
+        [$first, $second] = $totals;
+
+        // Warning: the shape has no 'email' key.
+        ['email' => $email] = $row;
+    }
+}
+
+
 // ── Diagnostic: Scalar Member Access ────────────────────────────────────────
 // Accessing a property or calling a method on a scalar type (int, string,
 // bool, float, null, void, never) is always a runtime error.  PHPantom flags

@@ -411,27 +411,6 @@ check behind a `[diagnostics]` toggle if a safe default can't be found.
 Found running the php-typing-conformance suite
 (`properties_uninitialized_read.php`). Psalm and Qodana report it.
 
-## D27. Destructuring offsets an array cannot have is not reported
-
-**Impact: Low · Complexity: Medium**
-
-```php
-/** @return array<string, int> */
-function stringKeyed(): array { return ['a' => 1]; }
-
-[$a, $b] = stringKeyed(); // should be reported: offsets 0 and 1 cannot exist on array<string, int>
-```
-
-`[$a, $b] = …` reads offsets `0` and `1`. When the right-hand side's key type
-excludes them (string keys only, or a shape without those keys), the
-destructure yields `null` with a warning at runtime. The destructuring
-resolver already reads the key and value types. It could report a
-positional destructure of a string-keyed array, and a keyed one (`['x' => $x]
-= …`) of a shape that lacks the key.
-
-Found running the php-typing-conformance suite
-(`regressions_list_destructure_string_key.php`). PHPStan and mago report it.
-
 ## D28. "Remove unreachable code" is wired to PHPStan only
 
 **Impact: Low-Medium · Complexity: Medium**
