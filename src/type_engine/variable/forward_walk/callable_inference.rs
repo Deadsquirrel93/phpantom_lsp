@@ -110,7 +110,7 @@ pub(crate) fn infer_callable_params_from_receiver_fw(
     // For relation-query methods (whereHas, etc.), override the closure
     // parameter type with Builder<RelatedModel>.
     if let Some(override_params) = super::super::closure_resolution::try_relation_query_override_pub(
-        &receiver_classes,
+        &resolved_types,
         method_name,
         first_arg_text,
         ctx.class_loader,
@@ -397,13 +397,14 @@ pub(crate) fn infer_callable_params_from_static_receiver_fw(
     });
     if let Some(ref cls) = owner {
         // For relation-query methods, override with Builder<RelatedModel>.
-        if let Some(override_params) =
-            super::super::closure_resolution::try_relation_query_override_pub(
-                &[Arc::new(cls.clone())],
-                method_name,
-                first_arg_text,
-                ctx.class_loader,
-            )
+        if crate::virtual_members::laravel::RELATION_QUERY_METHODS.contains(&method_name)
+            && let Some(override_params) =
+                super::super::closure_resolution::try_relation_query_override_pub(
+                    &[ResolvedType::from_class(cls.clone())],
+                    method_name,
+                    first_arg_text,
+                    ctx.class_loader,
+                )
         {
             return override_params;
         }
