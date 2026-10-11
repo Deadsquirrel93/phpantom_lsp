@@ -932,8 +932,32 @@ fn write_fake_tool(dir: &std::path::Path, name: &str, script_body: &str) -> Path
     use std::os::unix::fs::PermissionsExt;
 
     let path = dir.join(name);
-    std::fs::write(&path, format!("#!/bin/sh\n{}\n", script_body)).unwrap();
+    std::fs::write(
+        &path,
+        format!(
+            "#!/bin/sh\n[ -n \"$PHPANTOM_FAKE_TOOL_PROBE\" ] && exit 0\n{}\n",
+            script_body
+        ),
+    )
+    .unwrap();
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    // A process another test thread forks while the script is open for
+    // writing holds that handle until it execs, and executing the script
+    // in that window fails with ETXTBSY. Run it once (as a no-op) so the
+    // test's own spawn never meets that window.
+    loop {
+        match std::process::Command::new(&path)
+            .env("PHPANTOM_FAKE_TOOL_PROBE", "1")
+            .output()
+        {
+            Err(e) if e.raw_os_error() == Some(26) => std::thread::yield_now(),
+            result => {
+                result.unwrap();
+                break;
+            }
+        }
+    }
     path
 }
 

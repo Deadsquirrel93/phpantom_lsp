@@ -79,17 +79,4 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B583. A fake formatter in the formatting tests can fail to start
-
-**Impact: Low · Complexity: Low**
-
-`formatting::tests::phpcbf_fixes_against_the_phpcs_standard` failed once
-in a full `cargo test` run with "Failed to spawn phpcbf: Text file busy
-(os error 26)" and passed on every rerun. `write_fake_tool` writes an
-executable script that the test runs straight away. When another test
-thread forks to start its own tool while the script is still open for
-writing, the child holds the write handle until it execs, and starting
-the script in that window fails with `ETXTBSY`.
-
-**Fix:** Retry starting the tool on `ETXTBSY`, or write every fake tool
-before any test can start a process.
+No outstanding items.
