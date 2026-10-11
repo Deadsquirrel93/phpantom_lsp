@@ -648,11 +648,18 @@ fn verify_project(
 
     for (uri, content) in files {
         let original = open(backend, &uri, &content);
+        let first = backend.collect_slow_diagnostics_incremental(&uri, &original, None);
+        if first.kind == SlowPassKind::Full(FullPassReason::Template) {
+            *kinds.entry("template".to_string()).or_default() += 1;
+            continue;
+        }
         // A first pass may load classes and so not qualify as a baseline.
-        let baseline = (0..3).find_map(|_| {
-            backend
-                .collect_slow_diagnostics_incremental(&uri, &original, None)
-                .baseline
+        let baseline = first.baseline.or_else(|| {
+            (0..2).find_map(|_| {
+                backend
+                    .collect_slow_diagnostics_incremental(&uri, &original, None)
+                    .baseline
+            })
         });
         let Some(baseline) = baseline else {
             // In the editor such a file only ever gets full passes.

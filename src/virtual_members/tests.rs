@@ -1304,6 +1304,141 @@ fn intern_transformed_method_without_active_cache_builds_directly() {
     );
 }
 
+// ── member pool tests ───────────────────────────────────────────────
+
+#[test]
+fn specialisations_share_members_their_arguments_do_not_reach() {
+    use crate::test_fixtures::{make_method_with_params, make_param};
+
+    let mut collection = make_class("Collection");
+    collection.template_params.push(atom("TKey"));
+    collection.template_params.push(atom("TValue"));
+    collection.methods.push(Arc::new(make_method_with_params(
+        "offsetExists",
+        Some("bool"),
+        vec![make_param("$key", Some("TKey"), true)],
+    )));
+    collection.methods.push(Arc::new(make_method_with_params(
+        "push",
+        Some("static"),
+        vec![make_param("$value", Some("TValue"), true)],
+    )));
+    collection.properties.push(Arc::new(make_property(
+        "items",
+        Some("array<TKey, TValue>"),
+    )));
+    collection
+        .properties
+        .push(Arc::new(make_property("count", Some("TKey"))));
+
+    let cache = new_resolved_class_cache();
+    let _guard = with_active_resolved_class_cache(&cache);
+    let class_loader = |_name: &str| None;
+    let resolve = |value: &str| {
+        let args = [PhpType::parse("int"), PhpType::parse(value)];
+        resolve_class_fully_with_type_args(&collection, &class_loader, Some(&cache), &args)
+    };
+    let users = resolve("User");
+    let orders = resolve("Order");
+
+    let method = |class: &ClassInfo, name: &str| class.get_method_arc(name).unwrap();
+    assert!(
+        Arc::ptr_eq(
+            &method(&users, "offsetExists"),
+            &method(&orders, "offsetExists")
+        ),
+        "a method that names only TKey is the same for every TValue"
+    );
+    assert!(!Arc::ptr_eq(
+        &method(&users, "push"),
+        &method(&orders, "push")
+    ));
+    assert_eq!(
+        method(&orders, "push").parameters[0]
+            .type_hint
+            .as_ref()
+            .map(|t| t.to_string())
+            .as_deref(),
+        Some("Order")
+    );
+
+    let property = |class: &ClassInfo, name: &str| {
+        class
+            .properties
+            .iter()
+            .find(|p| p.name == name)
+            .cloned()
+            .unwrap()
+    };
+    assert!(Arc::ptr_eq(
+        &property(&users, "count"),
+        &property(&orders, "count")
+    ));
+    assert!(!Arc::ptr_eq(
+        &property(&users, "items"),
+        &property(&orders, "items")
+    ));
+}
+
+#[test]
+fn transformed_methods_share_equal_parameter_lists() {
+    use crate::test_fixtures::{make_method_with_params, make_param};
+
+    let cache = new_resolved_class_cache();
+    let _guard = with_active_resolved_class_cache(&cache);
+
+    let origin = Arc::new(make_method_with_params(
+        "where",
+        Some("TModel"),
+        vec![make_param("$column", Some("string"), true)],
+    ));
+    let substitute = |model: &str| {
+        let mut subs = std::collections::HashMap::new();
+        subs.insert("TModel".to_string(), PhpType::parse(model));
+        let fp = cache::TransformFingerprint::new(Some(&subs), None, 0);
+        cache::intern_transformed_method(&origin, fp, || {
+            // Rebuild the list the way a substitution that rewrites every
+            // parameter would, so only the pool can share it.
+            let mut m = (*origin).clone();
+            m.parameters = m.parameters.to_vec().into();
+            m.return_type = Some(PhpType::parse(model));
+            m
+        })
+    };
+    let user = substitute("User");
+    let order = substitute("Order");
+
+    assert!(!Arc::ptr_eq(&user, &order));
+    assert!(Arc::ptr_eq(
+        user.parameters.as_arc(),
+        order.parameters.as_arc()
+    ));
+}
+
+#[test]
+fn pool_does_not_share_members_that_differ_only_in_description() {
+    let cache = new_resolved_class_cache();
+    let _guard = with_active_resolved_class_cache(&cache);
+
+    let origin = Arc::new(make_method("first", Some("TValue")));
+    let fp = cache::TransformFingerprint::new(None, None, 0);
+    let plain = cache::intern_transformed_method(&origin, fp, || (*origin).clone());
+
+    let other_origin = Arc::new(make_method("first", Some("TValue")));
+    let described = cache::intern_transformed_method(&other_origin, fp, || {
+        let mut m = (*other_origin).clone();
+        m.description = Some("Get the first item.".to_string());
+        m
+    });
+    let same =
+        cache::intern_transformed_method(&other_origin, cache::TransformFingerprint(1), || {
+            (*origin).clone()
+        });
+
+    assert!(!Arc::ptr_eq(&plain, &described));
+    assert!(Arc::ptr_eq(&plain, &same));
+}
+
 // ── evict_fqn / depends_on_any tests ────────────────────────────────
 
 /// Helper: create a bare cache store for eviction tests.

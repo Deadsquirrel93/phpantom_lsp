@@ -73,19 +73,6 @@ impl Drop for PublicationGuard<'_> {
     }
 }
 
-fn debug_trace(label: &str) {
-    if std::env::var_os("PHPANTOM_EPOCH_TRACE").is_none() {
-        return;
-    }
-    let bt = std::backtrace::Backtrace::force_capture().to_string();
-    let frames: Vec<&str> = bt
-        .lines()
-        .filter(|l| l.contains("phpantom_lsp::") && !l.contains("epoch::"))
-        .take(6)
-        .collect();
-    eprintln!("EPOCH {label}: {}", frames.join(" <- ").replace("  ", ""));
-}
-
 impl PublicationEpoch {
     /// Mark the start of a publication of `uris`.  The publication counts as
     /// in progress until the guard is dropped.
@@ -93,7 +80,6 @@ impl PublicationEpoch {
         &self,
         uris: impl IntoIterator<Item = &'u str>,
     ) -> PublicationGuard<'_> {
-        debug_trace("publication");
         let mut state = self.state.lock();
         state.generation += 1;
         state.active += 1;
@@ -117,7 +103,6 @@ impl PublicationEpoch {
     /// write then sees the generation move by its next check, and one that
     /// started after it has already read the new state.
     pub(crate) fn note_change(&self) {
-        debug_trace("change");
         self.state.lock().generation += 1;
     }
 

@@ -50,6 +50,7 @@
 
 pub mod cache;
 pub mod laravel;
+mod member_pool;
 pub mod phpdoc;
 pub mod resolve;
 

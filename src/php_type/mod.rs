@@ -38,6 +38,7 @@ mod transform;
 
 #[cfg(any(test, feature = "mem-audit"))]
 pub(crate) use intern::interned_len;
+pub(crate) use intern::{FxHasher, PassThroughHasher};
 pub(crate) use keywords::*;
 pub(crate) use normalize::*;
 pub(crate) use parse::*;

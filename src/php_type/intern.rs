@@ -40,10 +40,10 @@ const SHARD_COUNT: usize = 64;
 /// entries whose last handle has been dropped.
 const SWEEP_INTERVAL: usize = 1024;
 
-/// Hasher for the shard maps. The key is already a well-mixed 64-bit
-/// content hash, so re-hashing it would be pure overhead.
+/// Hasher for maps keyed by an already well-mixed 64-bit content hash,
+/// where re-hashing the key would be pure overhead.
 #[derive(Default)]
-struct PassThroughHasher(u64);
+pub(crate) struct PassThroughHasher(u64);
 
 impl Hasher for PassThroughHasher {
     fn finish(&self) -> u64 {
@@ -63,7 +63,8 @@ impl Hasher for PassThroughHasher {
 ///
 /// Cheap by construction: child types hash as pointers, so this is
 /// proportional to the node's direct arity, not to the size of the tree.
-struct FxHasher(u64);
+#[derive(Default)]
+pub(crate) struct FxHasher(u64);
 
 impl FxHasher {
     const SEED: u64 = 0x51_7c_c1_b7_27_22_0a_95;

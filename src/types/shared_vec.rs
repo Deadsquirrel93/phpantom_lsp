@@ -112,6 +112,26 @@ impl<T: Clone> SharedVec<T> {
         Arc::make_mut(&mut self.0)
     }
 
+    /// The backing allocation, for pools that share equal vectors
+    /// between owners.
+    #[inline]
+    pub(crate) fn as_arc(&self) -> &Arc<Vec<T>> {
+        &self.0
+    }
+
+    /// Wrap a backing allocation obtained from [`as_arc`](Self::as_arc).
+    #[inline]
+    pub(crate) fn from_arc(arc: Arc<Vec<T>>) -> Self {
+        SharedVec(arc)
+    }
+
+    /// Whether no other `SharedVec` holds this allocation, so
+    /// [`make_mut`](Self::make_mut) will not copy it.
+    #[inline]
+    pub(crate) fn is_unique(&self) -> bool {
+        Arc::strong_count(&self.0) == 1 && Arc::weak_count(&self.0) == 0
+    }
+
     /// Consume and return the inner `Vec`, cloning only if shared.
     #[inline]
     pub fn into_vec(self) -> Vec<T> {

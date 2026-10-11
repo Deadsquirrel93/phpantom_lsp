@@ -382,7 +382,9 @@ pub(crate) fn resolve_class_base_cached(
         }
     }
 
-    let result = Arc::new(resolve_class_with_inheritance(class, class_loader));
+    let mut merged = resolve_class_with_inheritance(class, class_loader);
+    cache.read().share_members(&mut merged);
+    let result = Arc::new(merged);
     cache.write().insert(key, Arc::clone(&result));
     result
 }
@@ -493,6 +495,11 @@ pub fn resolve_class_fully_with_generics(
     if let Some(c) = cache
         && !post_merge_skipped
     {
+        // `result` is still `base` when nothing was substituted, and
+        // `base` was pooled when it was cached.
+        if let Some(specialised) = Arc::get_mut(&mut result) {
+            c.read().share_members(specialised);
+        }
         c.write().insert(cache_key, Arc::clone(&result));
     }
 
@@ -672,6 +679,7 @@ fn resolve_class_fully_inner(
 
     // ── Cache store ─────────────────────────────────────────────────
     merged.rebuild_method_index();
+    cache.read().share_members(&mut merged);
     let result = Arc::new(merged);
     cache.write().insert(cache_key, Arc::clone(&result));
     drop(pending_guard);

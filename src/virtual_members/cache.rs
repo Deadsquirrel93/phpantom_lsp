@@ -16,6 +16,7 @@ use parking_lot::RwLock;
 use crate::atom::Atom;
 use crate::types::{ClassInfo, MethodInfo, PropertyInfo};
 use crate::virtual_members::laravel::database_schema::SchemaIndex;
+use crate::virtual_members::member_pool::MemberPool;
 
 /// Cache key for [`ResolvedClassCache`]: fully-qualified class name
 /// paired with the concrete generic type arguments used at this
@@ -158,6 +159,13 @@ pub struct ResolvedCacheInner {
     /// importer, so each entry also lists every class the linking loaded,
     /// and [`evict_fqn`] drops the entries that list the evicted class.
     linked_aliases: HashMap<usize, LinkedAliasesEntry>,
+    /// Members of the cached classes, pooled by content so classes that
+    /// inherit an identical member share one allocation of it.  See
+    /// [`MemberPool`].
+    ///
+    /// Behind its own lock so classes can be pooled under a read guard
+    /// of the cache, without blocking lookups.
+    member_pool: parking_lot::Mutex<MemberPool>,
 }
 
 /// One class with its imported type aliases linked.  See
@@ -222,6 +230,7 @@ impl Default for ResolvedCacheInner {
             substituted_methods: HashMap::new(),
             substituted_properties: HashMap::new(),
             linked_aliases: HashMap::new(),
+            member_pool: parking_lot::Mutex::default(),
         }
     }
 }
@@ -396,6 +405,14 @@ impl ResolvedCacheInner {
         self.substituted_methods.clear();
         self.substituted_properties.clear();
         self.linked_aliases.clear();
+        self.member_pool.get_mut().clear();
+    }
+
+    /// Share the members of a resolved class about to be cached with the
+    /// identical members of classes cached before it.  See
+    /// [`member_pool`](Self::member_pool).
+    pub(crate) fn share_members(&self, class: &mut ClassInfo) {
+        self.member_pool.lock().share_class(class);
     }
 
     /// The copy of `class` with its imported type aliases linked, when one
@@ -761,7 +778,8 @@ pub(crate) fn intern_transformed_method(
     if let Some(hit) = cache.read().get_substituted(origin, fp.0) {
         return hit;
     }
-    let value = Arc::new(build());
+    let built = build();
+    let value = cache.read().member_pool.lock().share_method(built);
     cache
         .write()
         .insert_substituted(origin, fp.0, Arc::clone(&value));
@@ -788,7 +806,8 @@ pub(crate) fn intern_transformed_property(
     if let Some(hit) = cache.read().get_substituted_property(origin, fp.0) {
         return hit;
     }
-    let value = Arc::new(build());
+    let built = build();
+    let value = cache.read().member_pool.lock().share_property(built);
     cache
         .write()
         .insert_substituted_property(origin, fp.0, Arc::clone(&value));
