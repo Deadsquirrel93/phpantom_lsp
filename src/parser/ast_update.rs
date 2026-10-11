@@ -258,6 +258,9 @@ impl Backend {
         for (uri, map) in refreshed {
             symbol_maps.insert(uri, map);
         }
+        drop(symbol_maps);
+        // The refreshed maps decide which string keys those files check.
+        self.diag.epoch.note_change();
         true
     }
 
@@ -974,11 +977,14 @@ impl Backend {
 
             // Build the precomputed symbol map while the AST is still alive.
             // This must happen before the `Program` (and its arena) are dropped.
-            let symbol_map = Arc::new(extract_symbol_map_for_index(
-                program,
-                content,
-                &owned_resolved,
-            ));
+            let mut symbol_map = extract_symbol_map_for_index(program, content, &owned_resolved);
+            // An open file's slow diagnostics are built on the previous
+            // pass's, which is only sound if that pass read an index built
+            // from exactly the text it diagnosed.
+            if self.open_files.read().contains_key(uri) {
+                symbol_map.source_hash = Some(SymbolMap::hash_source(content));
+            }
+            let symbol_map = Arc::new(symbol_map);
 
             // For files without any explicit namespace blocks, synthesize a
             // single span covering the entire file with the detected namespace
@@ -1011,6 +1017,14 @@ impl Backend {
         if updates.is_empty() {
             return false;
         }
+
+        // Held until every index below is written, so that a slow pass
+        // running alongside never keeps a result read partly before this
+        // publication and partly after it.
+        let _publication = self
+            .diag
+            .epoch
+            .begin_publication(updates.iter().map(|update| update.uri.as_str()));
 
         struct PreparedAstIndexUpdate {
             uri: String,

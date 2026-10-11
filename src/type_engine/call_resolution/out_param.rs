@@ -313,6 +313,7 @@ fn read_out_type(
     name_offset: u32,
     param_name: &str,
 ) -> Option<PhpType> {
+    crate::type_engine::body_reads::record(uri, name_offset);
     let content = backend.get_file_content_arc(uri)?;
     let file_ctx = backend.file_context(uri);
     // A file may declare several `namespace` blocks; the callee's names

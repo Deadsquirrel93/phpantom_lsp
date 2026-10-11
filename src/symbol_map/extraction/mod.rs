@@ -367,5 +367,6 @@ fn extract_symbol_map_inner(
         view_receiver_sites: ctx.view_receiver_sites,
         gate_subjects: ctx.gate_subjects,
         source_len: u32::try_from(content.len()).unwrap_or(u32::MAX),
+        source_hash: None,
     }
 }

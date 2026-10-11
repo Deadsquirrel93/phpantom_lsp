@@ -54,6 +54,7 @@ impl Backend {
             symbol_map
                 .spans
                 .iter()
+                .filter(|span| super::incremental::reports_site(span.start))
                 .filter_map(|span| {
                     if let SymbolKind::CommandOwnParam { name, is_option } = &span.kind {
                         Some((name.clone(), *is_option, span.start, span.end))
@@ -144,6 +145,7 @@ impl Backend {
             .spans
             .iter()
             .chain(extra.iter())
+            .filter(|span| super::incremental::reports_site(span.start))
             .filter_map(|span| {
                 if let SymbolKind::LaravelStringKey {
                     kind,

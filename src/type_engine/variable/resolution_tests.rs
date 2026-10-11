@@ -2380,3 +2380,79 @@ fn stub_function_info(name: &str, return_type: Option<PhpType>) -> crate::types:
         is_impure: false,
     }
 }
+
+// ── @param docblock of a declaration ────────────────────────────────────────
+
+/// The `@param` type `declared_param_docblock_type` reads for `$filter`
+/// in the declaration that starts with `decl`.
+fn filter_param_docblock_type(content: &str, decl: &str) -> Option<String> {
+    let decl_start = content.find(decl).unwrap();
+    super::declared_param_docblock_type(content, decl_start, "$filter").map(|t| t.to_string())
+}
+
+#[test]
+fn a_sibling_methods_docblock_does_not_describe_the_next_method() {
+    // A method whose body sits on one line, documented with the same
+    // parameter name, must not lend its `@param` to the method below.
+    let one_line = r#"<?php
+class Engine {
+    /** @param Filter $filter */
+    public function setFileFilter($filter): void { $this->fileFilter = $filter; }
+
+    public function setCodeFilter(ArtifactFilter $filter): void {}
+}
+"#;
+    assert_eq!(
+        filter_param_docblock_type(one_line, "public function setCodeFilter"),
+        None
+    );
+
+    let body_on_its_own_line = r#"<?php
+class Engine {
+    /**
+     * @param Filter $filter
+     */
+    public function addFileFilter(Filter $filter): void
+    {}
+
+    /**
+     * Sets the code filter.
+     */
+    public function setCodeFilter(ArtifactFilter $filter): void {}
+}
+"#;
+    assert_eq!(
+        filter_param_docblock_type(body_on_its_own_line, "public function setCodeFilter"),
+        None
+    );
+}
+
+#[test]
+fn a_docblock_above_a_closures_statement_still_describes_it() {
+    let content = r#"<?php
+/** @param Filter $filter */
+$register(
+    'name',
+    function ($filter) {}
+);
+"#;
+    assert_eq!(
+        filter_param_docblock_type(content, "function ($filter)").as_deref(),
+        Some("Filter")
+    );
+}
+
+#[test]
+fn a_comment_between_a_docblock_and_its_method_is_crossed() {
+    let content = r#"<?php
+class Engine {
+    /** @param Filter $filter */
+    // phpcs:ignore
+    public function setFilter($filter): void {}
+}
+"#;
+    assert_eq!(
+        filter_param_docblock_type(content, "public function setFilter").as_deref(),
+        Some("Filter")
+    );
+}

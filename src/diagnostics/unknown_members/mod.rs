@@ -221,11 +221,17 @@ impl Backend {
         // in the same fluent chain are suppressed because their failure
         // is a direct consequence of the first break.  We record
         // "broken chain prefixes" and skip any span whose subject_text
-        // starts with one of them.
-        let mut broken_chain_prefixes: Vec<String> = Vec::new();
+        // starts with one of them.  Each prefix is keyed by the function
+        // scope it was flagged in: the same text in another function can
+        // be a different value, and that access has to be judged on its
+        // own.
+        let mut broken_chain_prefixes: Vec<(u32, String)> = Vec::new();
 
         // ── Walk every symbol span ──────────────────────────────────────
         for span in &symbol_map.spans {
+            if !super::incremental::reports_site(span.start) {
+                continue;
+            }
             let (subject_text, member_name, is_static, is_method_call, docblock_ref, is_nullsafe) =
                 match &span.kind {
                     SymbolKind::MemberAccess {
@@ -384,7 +390,8 @@ impl Backend {
             // already-flagged broken chain, skip it entirely.  The
             // original broken prefix propagates to all further links
             // naturally (it is a prefix of every subsequent subject).
-            if is_downstream_of_broken_chain(subject_text, &broken_chain_prefixes) {
+            let scope = symbol_map.find_enclosing_scope(span.start);
+            if is_downstream_of_broken_chain(subject_text, scope, &broken_chain_prefixes) {
                 continue;
             }
 
@@ -417,11 +424,9 @@ impl Backend {
                         SCALAR_MEMBER_ACCESS_CODE,
                         message,
                     ));
-                    broken_chain_prefixes.push(broken_chain_prefix(
-                        subject_text,
-                        member_name,
-                        is_static,
-                        is_method_call,
+                    broken_chain_prefixes.push((
+                        scope,
+                        broken_chain_prefix(subject_text, member_name, is_static, is_method_call),
                     ));
                 }
 
@@ -453,11 +458,9 @@ impl Backend {
                         UNKNOWN_MEMBER_CODE,
                         message,
                     ));
-                    broken_chain_prefixes.push(broken_chain_prefix(
-                        subject_text,
-                        member_name,
-                        is_static,
-                        is_method_call,
+                    broken_chain_prefixes.push((
+                        scope,
+                        broken_chain_prefix(subject_text, member_name, is_static, is_method_call),
                     ));
                 }
 
@@ -501,11 +504,14 @@ impl Backend {
                             UNRESOLVED_MEMBER_ACCESS_CODE,
                             message,
                         ));
-                        broken_chain_prefixes.push(broken_chain_prefix(
-                            subject_text,
-                            member_name,
-                            is_static,
-                            is_method_call,
+                        broken_chain_prefixes.push((
+                            scope,
+                            broken_chain_prefix(
+                                subject_text,
+                                member_name,
+                                is_static,
+                                is_method_call,
+                            ),
                         ));
                     }
                 }
@@ -587,11 +593,14 @@ impl Backend {
                     // is emitted but the chain continues because the
                     // magic method's return type recovers the type.
                     if result == MemberCheckResult::Break {
-                        broken_chain_prefixes.push(broken_chain_prefix(
-                            subject_text,
-                            member_name,
-                            is_static,
-                            is_method_call,
+                        broken_chain_prefixes.push((
+                            scope,
+                            broken_chain_prefix(
+                                subject_text,
+                                member_name,
+                                is_static,
+                                is_method_call,
+                            ),
                         ));
                     }
                 }
@@ -904,17 +913,24 @@ fn broken_chain_prefix(
     }
 }
 
-/// Check whether `subject_text` is downstream of any previously flagged
-/// broken chain expression.
+/// Check whether `subject_text` is downstream of a broken chain
+/// expression previously flagged in the same function `scope`.
 ///
 /// Normalises null-safe operators (`?->` → `->`) so that chains mixing
 /// `->` and `?->` are handled correctly.
-fn is_downstream_of_broken_chain(subject_text: &str, broken_prefixes: &[String]) -> bool {
+fn is_downstream_of_broken_chain(
+    subject_text: &str,
+    scope: u32,
+    broken_prefixes: &[(u32, String)],
+) -> bool {
     if broken_prefixes.is_empty() {
         return false;
     }
     let normalized = subject_text.replace("?->", "->");
-    broken_prefixes.iter().any(|prefix| {
+    broken_prefixes.iter().any(|(prefix_scope, prefix)| {
+        if *prefix_scope != scope {
+            return false;
+        }
         if prefix.ends_with('(') {
             // Method-call prefix: `starts_with` is sufficient because
             // the trailing `(` prevents name-prefix ambiguity.

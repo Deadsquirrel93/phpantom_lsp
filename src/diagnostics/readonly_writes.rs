@@ -479,7 +479,7 @@ impl Backend {
             let Some(form) = writes.targets.get(&span.start).copied() else {
                 continue;
             };
-            if *is_static || *is_method_call {
+            if *is_static || *is_method_call || !super::incremental::reports_site(span.start) {
                 continue;
             }
 

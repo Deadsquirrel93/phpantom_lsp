@@ -221,6 +221,13 @@
 //! External tool workers (PHPStan, PHPCS, Mago) use their own
 //! debounce timers in both modes because they are expensive.
 //!
+//! ## Edits inside function bodies
+//!
+//! The slow phase keeps what its last pass found: when the edit since
+//! then only touched some function and method bodies, it diagnoses
+//! those again and moves the rest of the file's slow diagnostics to
+//! their new positions.  See [`incremental`] for when that is sound.
+//!
 //! ## Files that are not open
 //!
 //! Everything above covers the files the user has open.  Diagnostics
@@ -246,6 +253,7 @@ pub(crate) mod helpers;
 pub(crate) mod ignore_rules;
 mod implementation_errors;
 mod incompatible_override;
+pub(crate) mod incremental;
 mod invalid_class_kind;
 mod laravel_string_keys;
 mod match_type_errors;
@@ -358,6 +366,39 @@ impl Backend {
         out: &mut Vec<Diagnostic>,
         observe: Option<SlowDiagnosticObserver<'_>>,
     ) {
+        self.collect_slow_diagnostics_scoped(uri_str, content, out, observe, None);
+    }
+
+    /// [`Self::collect_slow_diagnostics`] for the functions and methods
+    /// spanning `spans` only, whose bodies open at `targets`.
+    ///
+    /// Collectors skip the sites outside `spans` (see
+    /// [`incremental::region`]), and the forward walk visits only the
+    /// bodies holding `targets`.  A collector may still report outside
+    /// `spans`; the caller drops those.
+    pub(crate) fn collect_slow_diagnostics_in_region(
+        &self,
+        uri_str: &str,
+        content: &str,
+        spans: &[(u32, u32)],
+        targets: &[u32],
+        out: &mut Vec<Diagnostic>,
+    ) {
+        let _region = incremental::region::restrict_to(spans.to_vec());
+        self.collect_slow_diagnostics_scoped(uri_str, content, out, None, Some(targets));
+    }
+
+    /// The slow pass behind [`Self::collect_slow_diagnostics_observed`] and
+    /// [`Self::collect_slow_diagnostics_in_region`]: the whole file when
+    /// `targets` is `None`, otherwise only the bodies holding `targets`.
+    fn collect_slow_diagnostics_scoped(
+        &self,
+        uri_str: &str,
+        content: &str,
+        out: &mut Vec<Diagnostic>,
+        observe: Option<SlowDiagnosticObserver<'_>>,
+        targets: Option<&[u32]>,
+    ) {
         // Where this pass's own diagnostics start, so the reachability
         // filter below only judges what the collectors add and leaves any
         // fast diagnostics the caller already collected.
@@ -379,7 +420,7 @@ impl Backend {
         let _scope_guard =
             crate::type_engine::variable::forward_walk::with_diagnostic_scope_cache();
 
-        self.run_slow_collectors(uri_str, content, out, observe);
+        self.run_slow_collectors(uri_str, content, out, observe, targets);
 
         // ── Drop what a branch that cannot run reported ──────────────
         // The collectors each walk spans of their own with no notion of
@@ -421,6 +462,7 @@ impl Backend {
         content: &str,
         out: &mut Vec<Diagnostic>,
         mut observe: Option<SlowDiagnosticObserver<'_>>,
+        targets: Option<&[u32]>,
     ) {
         // Activate the chain resolution cache so that all slow
         // diagnostic collectors share cached intermediate chain
@@ -453,14 +495,27 @@ impl Backend {
         if let Some(ctx) = &file_ctx {
             let class_loaders = self.class_loaders(&ctx.file);
             let owned_loaders = self.diagnostic_loaders(&ctx.file);
-            crate::type_engine::variable::forward_walk::build_diagnostic_scopes(
-                content,
-                &ctx.file.classes,
-                &class_loaders.as_dyn(),
-                Some(self),
-                owned_loaders.loaders(),
-                Some(&self.resolved_class_cache),
-            );
+            match targets {
+                None => crate::type_engine::variable::forward_walk::build_diagnostic_scopes(
+                    content,
+                    &ctx.file.classes,
+                    &class_loaders.as_dyn(),
+                    Some(self),
+                    owned_loaders.loaders(),
+                    Some(&self.resolved_class_cache),
+                ),
+                Some(targets) => {
+                    crate::type_engine::variable::forward_walk::build_diagnostic_scopes_for_offsets(
+                        content,
+                        &ctx.file.classes,
+                        &class_loaders.as_dyn(),
+                        Some(self),
+                        owned_loaders.loaders(),
+                        Some(&self.resolved_class_cache),
+                        targets,
+                    )
+                }
+            }
         }
 
         // Run one collector, reporting its name and duration to the
@@ -614,8 +669,10 @@ impl Backend {
     /// full set (fast + fresh slow + cached PHPStan), and deliver it the
     /// same way: push mode publishes the complete set, replacing the
     /// Phase 1 snapshot; pull mode caches it, bumps the `resultId`, and
-    /// sends another `workspace/diagnostic/refresh`.
-    pub(crate) async fn publish_diagnostics_for_file(&self, uri_str: &str, content: &str) {
+    /// sends another `workspace/diagnostic/refresh`.  When the edit since
+    /// the last pass only touched some function bodies, only those are
+    /// diagnosed again (see [`incremental`]).
+    pub(crate) async fn publish_diagnostics_for_file(&self, uri_str: &str, content: &Arc<String>) {
         if self.should_skip_diagnostics(uri_str) {
             return;
         }
@@ -633,7 +690,7 @@ impl Backend {
         let fast_diagnostics = {
             let backend = self.clone_for_blocking();
             let uri = uri_str.to_string();
-            let content = content.to_string();
+            let content = Arc::clone(content);
             crate::server::run_blocking_cancel_safe("fast diagnostics", move || {
                 let mut out = Vec::new();
                 let effective = backend.analysable_content_or(&uri, &content);
@@ -662,10 +719,16 @@ impl Backend {
         self.assemble_and_refresh(uri_str).await;
 
         // ── Phase 2: compute and cache slow diagnostics ─────────────
-        let slow_diagnostics = {
+        let full_pass_requested = self.diag.full_slow_pass_requested.lock().remove(uri_str);
+        let baseline = if full_pass_requested {
+            None
+        } else {
+            self.diag.slow_baselines.lock().get(uri_str).cloned()
+        };
+        let slow_pass = {
             let backend = self.clone_for_blocking();
             let uri = uri_str.to_string();
-            let content = content.to_string();
+            let content = Arc::clone(content);
             crate::server::run_blocking_cancel_safe("slow diagnostics", move || {
                 // The resolved-class cache guard contains a thread-local raw
                 // pointer; activate it on this blocking thread for the
@@ -673,13 +736,35 @@ impl Backend {
                 let _cache_guard = crate::virtual_members::with_active_resolved_class_cache(
                     &backend.resolved_class_cache,
                 );
-                let mut out = Vec::new();
-                let effective = backend.analysable_content_or(&uri, &content);
-                backend.collect_slow_diagnostics(&uri, &effective, &mut out);
-                out
+                let started = std::time::Instant::now();
+                let pass = backend.collect_slow_diagnostics_incremental(
+                    &uri,
+                    &content,
+                    baseline.as_deref(),
+                );
+                let elapsed = started.elapsed();
+                if elapsed >= std::time::Duration::from_millis(100) {
+                    tracing::debug!(
+                        target: "performance",
+                        "PHPantom: slow diagnostics took {:?} ({:?})",
+                        elapsed,
+                        pass.kind
+                    );
+                }
+                pass
             })
             .await
-            .unwrap_or_default()
+        };
+        let (slow_diagnostics, new_baseline) = match slow_pass {
+            Some(pass) => (pass.diagnostics, pass.baseline),
+            None => {
+                // The full pass a save asked for did not happen; the next
+                // pass still owes it.
+                if full_pass_requested {
+                    self.request_full_slow_pass(&[uri_str]);
+                }
+                (Vec::new(), None)
+            }
         };
 
         // Re-check again: Phase 2 runs a full-file forward walk and can
@@ -691,6 +776,15 @@ impl Backend {
         {
             let mut cache = self.diag.last_slow.lock();
             cache.insert(uri_str.to_string(), slow_diagnostics);
+        }
+        // A pass that cannot serve as a baseline leaves the previous one in
+        // place: it still describes the text it was computed on, and the
+        // next pass checks that nothing else moved since.
+        if let Some(baseline) = new_baseline {
+            self.diag
+                .slow_baselines
+                .lock()
+                .insert(uri_str.to_string(), baseline);
         }
 
         // Update again with fresh slow results merged in.
@@ -1009,6 +1103,17 @@ impl Backend {
         self.schedule_mago_analyze(uri);
     }
 
+    /// Make the next slow pass of each of `uris` diagnose the whole file.
+    ///
+    /// A save is the point where everything is brought back in line: a
+    /// partial pass keeps what the rest of the file reported, and an edit
+    /// can reach that through a project-wide registry the file feeds (see
+    /// [`incremental`]).
+    pub(crate) fn request_full_slow_pass<S: AsRef<str>>(&self, uris: &[S]) {
+        let mut requested = self.diag.full_slow_pass_requested.lock();
+        requested.extend(uris.iter().map(|uri| uri.as_ref().to_string()));
+    }
+
     /// Invalidate diagnostics for the open files a save can affect.
     ///
     /// Diagnostics in other open files (unknown member, unknown class,
@@ -1048,6 +1153,10 @@ impl Backend {
                 cache.remove(uri);
             }
         }
+
+        // These files are re-diagnosed because something they depend on
+        // changed, so nothing of their last pass may be kept.
+        self.request_full_slow_pass(&uris);
 
         // Both modes: queue all files for the debounced background worker.
         // In push mode the worker pushes the full assembled set.
@@ -1247,6 +1356,9 @@ impl Backend {
         // Remove all per-source caches so we don't leak memory.
         self.diag.last_fast.lock().remove(uri_str);
         self.diag.last_slow.lock().remove(uri_str);
+        self.diag.slow_baselines.lock().remove(uri_str);
+        self.diag.full_slow_pass_requested.lock().remove(uri_str);
+        self.diag.epoch.forget(uri_str);
         // Remove cached PHPStan, PHPCS, PHPMD, and Mago diagnostics too.
         self.phpstan_tool.forget(uri_str);
         self.phpcs_tool.forget(uri_str);
@@ -1646,9 +1758,9 @@ mod tests {
     async fn publish_diagnostics_skips_write_when_file_not_open() {
         let backend = Backend::new_test();
         let uri = "file:///not_open.php";
-        let content = "<?php\nclass Foo {}\n";
+        let content = Arc::new("<?php\nclass Foo {}\n".to_string());
 
-        backend.publish_diagnostics_for_file(uri, content).await;
+        backend.publish_diagnostics_for_file(uri, &content).await;
 
         assert!(backend.diag.last_fast.lock().get(uri).is_none());
         assert!(backend.diag.last_slow.lock().get(uri).is_none());

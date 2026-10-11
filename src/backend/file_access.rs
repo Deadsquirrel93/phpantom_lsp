@@ -485,6 +485,8 @@ impl Backend {
         // are otherwise only refreshed when the file is re-parsed, which a
         // deleted file never is.
         self.laravel_runtime_config_keys.write().remove(uri);
+        // What the file declared is gone for every other file's diagnostics.
+        self.diag.epoch.note_change();
         // NOTE: We intentionally keep fqn_uri_index and fqn_class_index intact.
         // fqn_uri_index maps FQN → URI so GTD can locate the file, and
         // fqn_class_index keeps the full ClassInfo for cross-file resolution.

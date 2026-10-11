@@ -65,6 +65,7 @@ impl Backend {
             .spans
             .iter()
             .chain(extra.iter())
+            .filter(|span| super::incremental::reports_site(span.start))
             .filter_map(|span| match &span.kind {
                 SymbolKind::LaravelStringKey {
                     kind: LaravelStringKind::View,

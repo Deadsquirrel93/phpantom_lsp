@@ -1648,11 +1648,48 @@ pub(crate) fn declared_param_docblock_type(
     decl_start: usize,
     pname: &str,
 ) -> Option<PhpType> {
-    content
-        .get(..decl_start)
-        .and_then(extract_preceding_docblock)
+    let before = content.get(..decl_start)?;
+    extract_preceding_docblock(before)
         .and_then(|doc| docblock::extract_param_raw_type(doc, pname))
-        .or_else(|| docblock::find_iterable_raw_type_in_source(content, decl_start, pname))
+        .or_else(|| {
+            // The scan is confined to the declaration's own preamble.  Its
+            // brace counting cannot see a method whose body sits on one
+            // line, so left to itself it would walk on into that method's
+            // docblock and hand its `@param $filter` to this declaration's
+            // unrelated `$filter`.
+            let preamble = &before[declaration_preamble_start(before)..];
+            docblock::find_iterable_raw_type_in_source(preamble, preamble.len(), pname)
+        })
+}
+
+/// Where the text that can document a declaration starting at the end of
+/// `before` begins: just past the last line of code above it that ends a
+/// statement, opens a block, or closes one.
+///
+/// Comment lines are crossed, and so is a closure's own statement when it
+/// runs over several lines (`register(`, `'name',`), which is what lets a
+/// docblock above the statement document the closure.
+fn declaration_preamble_start(before: &str) -> usize {
+    // The text of the declaration's own line before it is always kept: it
+    // is indentation, or the statement a closure is part of.
+    let Some(mut line_end) = before.rfind('\n') else {
+        return 0;
+    };
+    loop {
+        let line_start = before[..line_end].rfind('\n').map_or(0, |i| i + 1);
+        let line = before[line_start..line_end].trim();
+        let is_comment = line.starts_with('*')
+            || line.starts_with("/*")
+            || line.starts_with("//")
+            || line.starts_with('#');
+        if !is_comment && (line.ends_with(';') || line.ends_with('{') || line.ends_with('}')) {
+            return line_end + 1;
+        }
+        if line_start == 0 {
+            return 0;
+        }
+        line_end = line_start - 1;
+    }
 }
 
 /// Extract the docblock comment immediately preceding a given offset.

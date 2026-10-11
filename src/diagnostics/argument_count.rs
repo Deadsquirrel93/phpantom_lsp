@@ -263,7 +263,7 @@ impl Backend {
         for call_site in &symbol_map.call_sites {
             // Skip calls with argument unpacking — actual count is
             // unknown at static analysis time.
-            if call_site.has_unpacking {
+            if call_site.has_unpacking || !super::incremental::reports_site(call_site.args_start) {
                 continue;
             }
 

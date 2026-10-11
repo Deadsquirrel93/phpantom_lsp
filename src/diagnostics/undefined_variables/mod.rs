@@ -296,6 +296,9 @@ fn collect_from_statement(
 ) {
     match stmt {
         Statement::Function(func) => {
+            if !super::incremental::reports_site(func.name.span.start.offset) {
+                return;
+            }
             let body_start = func.body.left_brace.start.offset;
             let body_end = func.body.right_brace.end.offset;
             let scope = collect_function_scope_with_resolver(
@@ -349,6 +352,9 @@ fn collect_from_class_members(
     class_name: Option<&str>,
 ) {
     for member in members.iter() {
+        if !super::incremental::reports_site(member.span().start.offset) {
+            continue;
+        }
         match member {
             ClassLikeMember::Method(method) => {
                 // A constructor-promoted property carries its hooks in

@@ -2676,3 +2676,32 @@ class Builder {
         property_error_messages(&diags)
     );
 }
+
+/// A one-line method's `@param` documents that method alone, not a
+/// parameter of the same name in the method below it.
+#[test]
+fn a_one_line_methods_param_docblock_stays_with_it() {
+    let php = r#"<?php
+interface Filter {}
+interface ArtifactFilter {}
+
+class Engine {
+    private ArtifactFilter $codeFilter;
+    private ?Filter $fileFilter = null;
+
+    /** @param Filter $filter */
+    public function setFileFilter($filter): void { $this->fileFilter = $filter; }
+
+    public function setCodeFilter(ArtifactFilter $filter): void
+    {
+        $this->codeFilter = $filter;
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_property_error(&diags),
+        "`$filter` in setCodeFilter() is an ArtifactFilter, got: {:?}",
+        property_error_messages(&diags)
+    );
+}

@@ -90,6 +90,10 @@ impl Backend {
 
         // ── Walk every symbol span ──────────────────────────────────────
         for span in &symbol_map.spans {
+            if !super::incremental::reports_site(span.start) {
+                continue;
+            }
+
             // Skip spans on `use` statement lines — those are the import
             // declarations themselves, not references to resolve.
             if is_offset_in_ranges(span.start, &use_line_ranges) {

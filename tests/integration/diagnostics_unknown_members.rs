@@ -14543,3 +14543,35 @@ namespace B {
             .collect::<Vec<_>>()
     );
 }
+
+/// A chain that could not be checked in one method says nothing about the
+/// same text in another, where the variable holds a known class.
+#[test]
+fn a_broken_chain_in_one_method_does_not_hide_one_in_another() {
+    let backend = create_test_backend();
+    let uri = "file:///broken_chain_scope.php";
+    let text = r#"<?php
+namespace App;
+
+class Good { public function foo(): Good { return $this; } }
+
+class Service
+{
+    public function one(Bad $x): void { $x->foo()->bar(); }
+
+    public function two(Good $x): void { $x->foo()->bar(); }
+}
+"#;
+
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.range.start.line == 9 && d.message.contains("'bar'")),
+        "`bar()` on `Good` in `two()` should be reported, got: {:?}",
+        diags
+            .iter()
+            .map(|d| (d.range.start.line, &d.message))
+            .collect::<Vec<_>>()
+    );
+}

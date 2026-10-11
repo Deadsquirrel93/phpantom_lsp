@@ -1146,6 +1146,9 @@ pub(crate) struct SymbolMap {
     /// `symbol_maps` may get a map built from *older* text than the buffer
     /// it was handed.  See [`Self::matches_source`].
     pub source_len: u32,
+    /// A hash of the source text, recorded only for a file open in the
+    /// editor when it was parsed.  See [`Self::built_from`].
+    pub source_hash: Option<u64>,
 }
 
 impl SymbolMap {
@@ -1256,6 +1259,26 @@ impl SymbolMap {
     pub(crate) fn source<'a>(&self, content: &'a str) -> Option<MappedSource<'a>> {
         self.matches_source(content)
             .then_some(MappedSource(content))
+    }
+
+    /// The hash [`Self::source_hash`] records for `content`.
+    pub(crate) fn hash_source(content: &str) -> u64 {
+        use std::hash::Hasher;
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        hasher.write(content.as_bytes());
+        hasher.finish()
+    }
+
+    /// Whether this map was built from exactly `content`, as far as can be
+    /// told: `false` whenever no hash was recorded.
+    ///
+    /// Stricter than [`Self::matches_source`], which a same-length edit
+    /// passes.  A diagnostic pass that keeps its results to build the next
+    /// one on needs every offset it reported to describe `content`, not
+    /// just the ones it happened to re-validate.  Only open files pay for
+    /// the hash.
+    pub(crate) fn built_from(&self, content: &str) -> bool {
+        self.matches_source(content) && self.source_hash == Some(Self::hash_source(content))
     }
 
     /// Indices into [`Self::spans`] for member accesses named `name`.

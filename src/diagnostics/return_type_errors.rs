@@ -283,6 +283,9 @@ fn resolve_return_and_push(
     backend: &Backend,
     out: &mut Vec<ResolvedReturn>,
 ) {
+    if !super::incremental::reports_site(start as u32) {
+        return;
+    }
     match maybe_expr {
         None => {
             // Bare `return;` — push with ty: None for the emission logic.
@@ -538,6 +541,9 @@ fn process_top_level_statement(
         Statement::Function(func) => {
             let func_name = bytes_to_str(func.name.value);
             let func_offset = func.name.span.start.offset;
+            if !super::incremental::reports_site(func_offset) {
+                return;
+            }
 
             // Extract the declared return type.  Prefer the indexed
             // `FunctionInfo`, where the parser has already merged the
@@ -685,6 +691,9 @@ fn process_class_member(
 
     let method_name = bytes_to_str(method.name.value);
     let method_offset = method.name.span.start.offset;
+    if !super::incremental::reports_site(method_offset) {
+        return;
+    }
 
     // Find the enclosing class to look up the method's declared return type.
     let enclosing = find_innermost_enclosing_class(&file_ctx.classes, method_offset);

@@ -26,6 +26,19 @@ pub(crate) struct DiagnosticState {
     pub(crate) pending_uris: Arc<Mutex<HashSet<String>>>,
     /// Last-published slow diagnostics per file URI.
     pub(crate) last_slow: Arc<Mutex<HashMap<String, Vec<Diagnostic>>>>,
+    /// What each open file's next slow pass can start from instead of
+    /// diagnosing the whole file again.  See
+    /// [`crate::diagnostics::incremental`].
+    pub(crate) slow_baselines:
+        Arc<Mutex<HashMap<String, Arc<crate::diagnostics::incremental::SlowBaseline>>>>,
+    /// Open files whose next slow pass must diagnose the whole file
+    /// (they were saved, or something they depend on was).  Consumed by
+    /// the pass that starts next, so a pass already running when the
+    /// request lands cannot satisfy it.
+    pub(crate) full_slow_pass_requested: Arc<Mutex<HashSet<String>>>,
+    /// Counts publications to the workspace index, so a slow pass can tell
+    /// its own file's edits from every other change.
+    pub(crate) epoch: Arc<crate::diagnostics::incremental::epoch::PublicationEpoch>,
     /// Last-computed fast diagnostics per file URI.
     pub(crate) last_fast: Arc<Mutex<HashMap<String, Vec<Diagnostic>>>>,
     /// Per-file `resultId` for pull diagnostics, drawn from
@@ -87,6 +100,9 @@ impl DiagnosticState {
             notify: Arc::new(Notify::new()),
             pending_uris: Arc::new(Mutex::new(HashSet::new())),
             last_slow: Arc::new(Mutex::new(HashMap::new())),
+            slow_baselines: Arc::new(Mutex::new(HashMap::new())),
+            full_slow_pass_requested: Arc::new(Mutex::new(HashSet::new())),
+            epoch: Arc::default(),
             last_fast: Arc::new(Mutex::new(HashMap::new())),
             result_ids: Arc::new(Mutex::new(HashMap::new())),
             result_id_seq: Arc::new(AtomicU64::new(0)),

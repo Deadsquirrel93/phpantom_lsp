@@ -35,6 +35,7 @@
 //! - **foreach_resolution**: Foreach value/key and array destructuring type resolution
 //! - **closure_resolution**: Closure and arrow-function parameter resolution
 
+pub(crate) mod body_reads;
 pub(crate) mod call_resolution;
 pub(crate) mod regex_shape;
 pub(crate) mod resolver;

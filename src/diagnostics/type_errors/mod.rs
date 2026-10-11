@@ -318,7 +318,7 @@ impl Backend {
         let call_site_starts: HashSet<u32> = symbol_map
             .call_sites
             .iter()
-            .filter(|cs| !cs.has_unpacking)
+            .filter(|cs| !cs.has_unpacking && super::incremental::reports_site(cs.args_start))
             .map(|cs| cs.args_start)
             .collect();
 
@@ -481,7 +481,7 @@ impl Backend {
         for call_site in &symbol_map.call_sites {
             // Skip calls with argument unpacking — actual types of
             // individual arguments are unknown.
-            if call_site.has_unpacking {
+            if call_site.has_unpacking || !super::incremental::reports_site(call_site.args_start) {
                 continue;
             }
 

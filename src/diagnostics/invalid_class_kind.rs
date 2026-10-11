@@ -72,6 +72,9 @@ impl Backend {
         let class_loaders = self.class_loaders(&ctx.file);
 
         for span in &symbol_map.spans {
+            if !super::incremental::reports_site(span.start) {
+                continue;
+            }
             let (ref_name, is_fqn, ref_ctx) = match &span.kind {
                 SymbolKind::ClassReference {
                     name,

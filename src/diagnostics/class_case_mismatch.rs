@@ -77,6 +77,9 @@ impl Backend {
         let mut out = Vec::new();
 
         for span in &symbol_map.spans {
+            if !super::incremental::reports_site(span.start) {
+                continue;
+            }
             let (ref_name, is_fqn, context) = match &span.kind {
                 SymbolKind::ClassReference {
                     name,

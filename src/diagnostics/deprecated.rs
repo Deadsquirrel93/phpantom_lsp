@@ -101,6 +101,9 @@ impl Backend {
 
         // ── Walk every symbol span ──────────────────────────────────────
         for span in &symbol_map.spans {
+            if !super::incremental::reports_site(span.start) {
+                continue;
+            }
             let file_use_map = ctx.file.use_map_at(span.start);
             let file_namespace = ctx.file.namespace_at(span.start);
             let class_loader = class_loaders.at(span.start);

@@ -118,6 +118,9 @@ impl Backend {
 
         // ── Walk every symbol span ──────────────────────────────────────
         for span in &symbol_map.spans {
+            if !super::incremental::reports_site(span.start) {
+                continue;
+            }
             let (name, is_docblock_reference) = match &span.kind {
                 SymbolKind::FunctionCall {
                     name,

@@ -306,6 +306,7 @@ fn infer_body_return_type(
         // Fall back to the receiver's own file when the declaring
         // class could not be located (e.g. only known via the AST).
         .or_else(|| backend.symbols.fqn_uri_index.read().get(class_fqn).cloned())?;
+    crate::type_engine::body_reads::record(&file_uri, method.name_offset);
 
     let content = backend.get_file_content_arc(&file_uri)?;
     if method.name_offset as usize >= content.len() {

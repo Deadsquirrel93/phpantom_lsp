@@ -245,6 +245,9 @@ fn check_expression_for_property_assignment(expr: &Expression<'_>, ctx: &mut Pro
         Expression::Assignment(a) if a.operator.is_assign() => a,
         _ => return,
     };
+    if !super::incremental::reports_site(assign.rhs.span().start.offset) {
+        return;
+    }
 
     // Check if the LHS is a property access.
     let (prop_name, prop_class) = match assign.lhs {

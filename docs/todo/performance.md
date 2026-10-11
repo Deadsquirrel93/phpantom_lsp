@@ -20,47 +20,7 @@ against that bar.
 
 ---
 
-## P21. Offset-shifting for cached diagnostics on partial edits
-
-**Impact: Medium · Complexity: Very High**
-
-When a user edits one method in a file, PHPantom currently re-runs
-diagnostics on the entire file. For large files (500+ lines), this
-is wasteful — diagnostics in unchanged regions are still valid, just
-at shifted byte offsets.
-
-**Fix:** After a file edit, compute a line-level diff (Myers algorithm)
-to produce byte-offset shift deltas. Apply the deltas to cached
-diagnostics in unchanged regions. Only re-diagnose methods whose
-byte ranges overlap with the edited region.
-
-Psalm implements this with:
-1. `FileDiffer` — Myers line-level diff producing byte-offset ranges
-2. `FileStatementsDiffer` — AST-level statement diff classifying
-   statements as keep/keep_signature/add_or_delete
-3. `shiftFileOffsets()` — shifts surviving diagnostics/references by
-   the offset delta, removes those in deleted ranges
-
-**Design:**
-
-1. On `didChange`, compute a line diff between old and new content.
-2. Produce a `diff_map: Vec<(old_start, old_end, offset_delta)>`.
-3. Walk cached diagnostics for this file:
-   - If diagnostic span falls in a deleted range → remove it.
-   - If diagnostic span is after the edit → shift by delta.
-   - If diagnostic span is before the edit → keep as-is.
-4. Re-run diagnostics only for methods/functions whose spans overlap
-   with changed regions.
-5. Merge shifted cached diagnostics with freshly-computed ones.
-
-**Prerequisites:** a member-level diff. The edit path only compares
-class signatures today (`ast_update.rs`), so which members changed has
-to be worked out first.
-
-**References:**
-- Psalm: `FileDiffer` and `FileStatementsDiffer` in
-  `Psalm\Internal\Diff`
-- Psalm: `Analyzer::shiftFileOffsets()` for the offset-shifting logic
+No outstanding items.
 
 ---
 

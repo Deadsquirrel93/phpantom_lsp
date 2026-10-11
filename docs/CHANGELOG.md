@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Faster diagnostics while editing.** After an edit inside a function or method, only that function is type-checked again, and the rest of the file keeps its diagnostics, moved along with the text. In a 1,500-line class the type checking after such an edit is around 70 times cheaper. Saving still checks the whole file.
 - **Faster analysis of methods that check many properties.** Narrowing a property or a call's result no longer walks the method again from its first line.
 - **Faster analysis of loops.** A loop body is no longer walked again once its types have settled.
 - **Faster analysis of `switch` lookup tables.** A `switch` that assigns a different literal in each case, such as a table of country or currency names, no longer slows down out of proportion to its length. One with 8,000 cases is checked in about a tenth of a second.
@@ -30,6 +31,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`keyBy()` and `groupBy()` on an Eloquent collection keep the model type.** `Member::all()->keyBy('id')` now reads as a collection of `Member` instead of `mixed`. This also holds for any generic class that names its parent or interface by a fully qualified name in `@extends`, `@implements`, or `@use`.
 - **`!== null` on a value that is one of several literals.** After an `if`/`elseif` chain that assigns a different literal in each arm and `null` in the `else`, testing the variable against `null` now narrows the types the arms tested, so passing `$node` to a parameter typed `A|B` no longer reports a mismatch.
+- **A method's `@param` no longer describes the method below it.** When a documented method fits on one line, a parameter of the same name in the next method kept the type documented for the first one, which produced false type errors. It now keeps its own declared type.
+- **A broken chain in one method no longer hides problems in another.** When `$x->foo()` cannot be checked in one method, the same `$x->foo()->bar()` in a different method, where `$x` is a known class, is still checked for a missing `bar()`.
 - **Organize imports on save.** "Remove all unused imports" and "Sort use statements" now run through `editor.codeActionsOnSave`, and applying both in one go leaves a correctly sorted import block. "Import all missing classes" no longer runs as part of organizing imports, since it may have to pick between candidates.
 - **An array filled under repeated checks keeps every key.** After `if ($flag) { $data['a'] = 1; }` followed by more `if ($flag)` blocks that each add a key, `$data` keeps all of the keys instead of losing the ones added in between. The same holds for writes under a key only known at runtime (`$data[$id]`) and for `array_push()`.
 - **Constants next to a removed one are no longer hidden.** `ASSERT_EXCEPTION`, `MB_CASE_UPPER`, `MB_CASE_LOWER`, `MB_CASE_TITLE`, and `MCRYPT_BLOWFISH_COMPAT` resolve again on the PHP versions that have them, instead of being treated as removed along with the constant declared just before them.

@@ -307,7 +307,9 @@ impl Backend {
         // (e.g. a function signature change in test2.php that affects
         // diagnostics in test.php) and provides a fallback for editors
         // (like Neovim) where didChange alone may not trigger a
-        // visible diagnostic refresh.
+        // visible diagnostic refresh.  The saved file gets a full slow
+        // pass rather than one built on the last.
+        self.request_full_slow_pass(std::slice::from_ref(&uri));
         self.schedule_diagnostics(uri.clone());
         self.schedule_diagnostics_for_open_files(&uri);
 

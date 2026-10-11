@@ -75,6 +75,9 @@ impl Backend {
                 let mut issues = Vec::new();
                 for match_data in &matches {
                     let subject_offset = match_data.subject.span().start.offset;
+                    if !super::incremental::reports_site(subject_offset) {
+                        continue;
+                    }
                     let enclosing =
                         find_innermost_enclosing_class(&file_ctx.classes, subject_offset);
                     let current_class = enclosing.unwrap_or(&default_class);

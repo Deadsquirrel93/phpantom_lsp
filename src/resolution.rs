@@ -395,6 +395,10 @@ impl Backend {
     pub(crate) fn clear_resolved_class_cache(&self) {
         self.resolved_class_cache.write().clear();
         self.clear_resolved_member_files();
+        // Whatever made every resolved class stale (a configuration
+        // reload, a re-scan) makes every open file's slow diagnostics
+        // stale too.
+        self.diag.epoch.note_change();
     }
 
     /// Rebuild the reverse pivot index from every parsed class.
@@ -1053,6 +1057,10 @@ impl Backend {
                     let _ = crate::virtual_members::evict_fqn(&mut cache, old_fqn);
                 }
             }
+            drop(cache);
+            // A first load only adds what a lookup would have found on disk
+            // anyway, but a re-parse can change what open files resolve to.
+            self.diag.epoch.note_change();
         }
 
         Some(arc_classes)
