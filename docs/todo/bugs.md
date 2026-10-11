@@ -651,24 +651,25 @@ docblock signatures follow the same convention (PHPStan treats them so).
 Generated facade tags use it widely, e.g. Laravel Excel's
 `toCollection(..., string $disk = null, ...)`.
 
-### B613. `$this` in a Pest test closure is not the configured test case
+### B614. Pest bindings outside `tests/Pest.php`'s `->in()` are ignored
 
-**Impact: Medium · Complexity: Medium**
+**Impact: Low · Complexity: Medium**
 
 ```php
-// tests/Pest.php
-pest()->extends(BrowserTestCase::class)->in('Webshop/Browser');
+// tests/Feature/GiftTest.php
+uses(FeatureTestCase::class, CreatesProducts::class);
 
-// tests/Webshop/Browser/GiftTest.php
 it('gives a gift', function (): void {
-    $products = $this->createProductCollection(5); // Pest\PendingCalls\TestCall
-    addToBasket($page, $products->firstOrFail());   // expects Product, got TestCall
+    $this->createProductCollection(5); // not found on PHPUnit\Framework\TestCase
 });
 ```
 
-Pest's own `it()`/`test()` declare `@param-closure-this TestCall`, and
-`TestCall::__call()` returns `self`, so every helper on the real test case
-becomes `TestCall`. `pest-plugin-phpstan` resolves `$this` to the class
-`pest()->extends()`/`uses()` binds for the test file's directory (falling
-back to `PHPUnit\Framework\TestCase`). Reading those bindings from
-`tests/Pest.php` would do the same.
+`$this` in a Pest test closure is read from the `pest()->extends()` and
+`uses()` chains `tests/Pest.php` binds with `->in()`. Three cases are not:
+
+- A `uses()` or `pest()->extends()` written in the test file itself, with no
+  `->in()`, which binds that file.
+- Traits in the binding. Pest builds the test class from the bound test case
+  plus every bound trait, but only the class is used for `$this`, so a
+  helper that lives on a trait is not found.
+- A test directory other than `tests/` (Pest's `--test-directory`).

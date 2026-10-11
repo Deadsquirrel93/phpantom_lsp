@@ -334,6 +334,7 @@ impl Backend {
                     namespace: file_ctx.namespace.clone(),
                     namespace_spans: file_ctx.namespace_spans.clone(),
                     resolved_names: file_ctx.resolved_names.clone(),
+                    pest_uses: file_ctx.pest_uses.clone(),
                 };
                 match self.resolve_variable_raw_type(
                     &ctx.var_name,

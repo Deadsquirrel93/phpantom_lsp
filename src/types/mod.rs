@@ -2713,6 +2713,10 @@ pub(crate) struct FileContext {
     /// `None` for files that were loaded via `parse_and_cache_content`
     /// (vendor/stub files) which don't run the name resolver.
     pub resolved_names: Option<Arc<crate::names::OwnedResolvedNames>>,
+    /// The classes and traits `tests/Pest.php` binds to this file when it
+    /// is a Pest test, which decide what `$this` is inside its test
+    /// closures.  `None` for every other file.
+    pub pest_uses: Option<Arc<[String]>>,
 }
 
 /// A class loader per `namespace` block of a file (see
@@ -2824,6 +2828,7 @@ impl FileContext {
             namespace: self.namespace_at(offset).clone(),
             namespace_spans: self.namespace_spans.clone(),
             resolved_names: self.resolved_names.clone(),
+            pest_uses: self.pest_uses.clone(),
         }
     }
 

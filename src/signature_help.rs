@@ -591,6 +591,7 @@ impl Backend {
                         namespace: ctx.namespace.clone(),
                         namespace_spans: ctx.namespace_spans.clone(),
                         resolved_names: ctx.resolved_names.clone(),
+                        pest_uses: ctx.pest_uses.clone(),
                     };
                     if let Some(result) =
                         self.resolve_signature(&site, &patched, position, &patched_ctx)

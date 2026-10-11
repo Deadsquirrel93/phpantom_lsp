@@ -302,6 +302,10 @@ impl Backend {
             return;
         }
 
+        if uri.ends_with("/tests/Pest.php") {
+            self.invalidate_pest_config();
+        }
+
         // A save is a reliable sync point: re-diagnose the saved file
         // and all other open files.  This catches cross-file changes
         // (e.g. a function signature change in test2.php that affects

@@ -280,6 +280,7 @@ pub mod move_cli;
 pub(crate) mod names;
 mod parallel;
 mod parser;
+pub(crate) mod pest;
 pub(crate) mod phar;
 pub mod php_type;
 mod phpcs;
@@ -845,6 +846,9 @@ pub struct Backend {
     /// The outer option is `None` until startup discovery completes; the inner
     /// option is `None` when discovery found no project override.
     pub(crate) laravel_date_class: Arc<RwLock<Option<Option<String>>>>,
+    /// The `->in(…)` bindings of the project's `tests/Pest.php`, parsed on
+    /// first use and dropped when that file is saved.  `None` until then.
+    pub(crate) pest_config: Arc<RwLock<Option<Arc<pest::PestConfig>>>>,
     /// URIs whose edits can change the configured date class: every registered
     /// service provider scanned by [`build_laravel_date_class`], plus the app's
     /// provider-registration files (which decide *which* providers are
@@ -1293,6 +1297,7 @@ impl Backend {
             laravel_macro_seeds: Arc::new(RwLock::new(HashMap::new())),
             laravel_macro_mixin_uris: Arc::new(RwLock::new(std::collections::HashSet::new())),
             laravel_date_class: Arc::new(RwLock::new(None)),
+            pest_config: Arc::new(RwLock::new(None)),
             laravel_date_seed_uris: Arc::new(RwLock::new(std::collections::HashSet::new())),
             laravel_provider_resources: Arc::new(RwLock::new(
                 virtual_members::laravel::ProviderResources::default(),
@@ -2112,6 +2117,7 @@ impl Backend {
             laravel_macro_seeds: Arc::clone(&self.laravel_macro_seeds),
             laravel_macro_mixin_uris: Arc::clone(&self.laravel_macro_mixin_uris),
             laravel_date_class: Arc::clone(&self.laravel_date_class),
+            pest_config: Arc::clone(&self.pest_config),
             laravel_date_seed_uris: Arc::clone(&self.laravel_date_seed_uris),
             laravel_provider_resources: Arc::clone(&self.laravel_provider_resources),
             laravel_provider_scans: Arc::clone(&self.laravel_provider_scans),

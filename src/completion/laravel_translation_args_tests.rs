@@ -28,6 +28,7 @@ fn complete(source: &str) -> Option<Vec<CompletionItem>> {
         namespace: None,
         namespace_spans: None,
         resolved_names: None,
+        pest_uses: None,
     };
     match backend.try_translation_argument_completion(
         &content,

@@ -232,6 +232,7 @@ mod narrowing_flow_tracking;
 mod narrowing_nested_short_circuit;
 mod param_out;
 mod parser;
+mod pest_test_case;
 mod php_version;
 mod position_encoding_robustness;
 mod preg_match_shapes;

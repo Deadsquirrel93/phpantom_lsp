@@ -239,6 +239,7 @@ impl Backend {
             namespace,
             namespace_spans,
             resolved_names,
+            pest_uses: self.pest_uses_for(uri),
         }
     }
 

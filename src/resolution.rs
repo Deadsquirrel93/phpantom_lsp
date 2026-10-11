@@ -1681,7 +1681,13 @@ impl Backend {
         &'a self,
         ctx: &'a FileContext,
     ) -> impl Fn(&str, u32) -> Option<FunctionInfo> + 'a {
-        self.function_loader_with(ctx.resolved_names.as_deref(), &ctx.use_map, &ctx.namespace)
+        let load =
+            self.function_loader_with(ctx.resolved_names.as_deref(), &ctx.use_map, &ctx.namespace);
+        move |name: &str, offset: u32| {
+            let mut fi = load(name, offset)?;
+            self.bind_pest_closure_this(&mut fi, ctx.pest_uses.as_deref());
+            Some(fi)
+        }
     }
 
     /// Return one function-loader closure per `namespace` block of the
@@ -1691,7 +1697,12 @@ impl Backend {
         ctx: &'a FileContext,
     ) -> crate::types::PerBlock<'a, impl Fn(&str, u32) -> Option<FunctionInfo> + 'a> {
         ctx.per_block(|use_map, namespace| {
-            self.function_loader_with(ctx.resolved_names.as_deref(), use_map, namespace)
+            let load = self.function_loader_with(ctx.resolved_names.as_deref(), use_map, namespace);
+            move |name: &str, offset: u32| {
+                let mut fi = load(name, offset)?;
+                self.bind_pest_closure_this(&mut fi, ctx.pest_uses.as_deref());
+                Some(fi)
+            }
         })
     }
 

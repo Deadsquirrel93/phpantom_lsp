@@ -63,6 +63,7 @@ impl Backend {
                         namespace: ctx.namespace.clone(),
                         namespace_spans: ctx.namespace_spans.clone(),
                         resolved_names: ctx.resolved_names.clone(),
+                        pest_uses: ctx.pest_uses.clone(),
                     };
                     params =
                         self.resolve_named_arg_params(&na_ctx, &patched, position, &patched_ctx);
