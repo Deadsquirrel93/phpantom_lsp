@@ -25,39 +25,7 @@ No outstanding items.
 
 ## Type comparison
 
-#### B1. A closure parameter hint matches an inferred generic by short name
-
-**Impact: Low-Medium · Complexity: Low**
-
-When a closure is passed where the callee declares a callable signature,
-`inferred_type_is_more_specific` lets the inferred generic type replace
-a bare class hint if the two share a short name. A hint that names an
-unrelated class with the same short name is overwritten:
-
-```php
-namespace App;
-
-class Collection { public function own(): void {} }
-
-/** @param callable(\Illuminate\Support\Collection<int, Loaf>): void $cb */
-function takesCollection(callable $cb): void {}
-
-takesCollection(function (Collection $c) {
-    $c->own();   // $c is typed Illuminate\Support\Collection<int, Loaf>
-});
-```
-
-The parameter is `App\Collection` at runtime (PHP enforces the hint), so
-completion offers the wrong class's members and diagnostics check against
-it. The argument-level diagnostic that reports the callable mismatch is
-correct; only the type inside the closure is wrong.
-
-**Where to change:** the short-name comparison in
-`inferred_type_is_more_specific`
-(`src/type_engine/variable/closure_resolution.rs`). The hint is already
-resolved to a FQN, so the subtype check below it covers the legitimate
-cases (`Collection` imported as `Illuminate\Support\Collection`) on its
-own.
+No outstanding items.
 
 ## Standard-library return types
 
@@ -73,7 +41,66 @@ No outstanding items.
 
 ## Array types
 
-No outstanding items.
+#### B4. A `=>` nested inside an array literal element is read as its key
+
+**Impact: Medium · Complexity: Low**
+
+When a template binds from an array literal argument, a `=>` inside an
+element's own call arguments is taken as that element's key separator:
+
+```php
+/**
+ * @template TKey of array-key
+ * @template TValue
+ * @param array<TKey, TValue> $value
+ * @return Coll<TKey, TValue>
+ */
+function wrap(array $value): Coll { return new Coll($value); }
+
+wrap([M::make()]);              // Coll<int, M>, correct
+wrap([M::make(['a' => 1])]);    // Coll<M, mixed>, expected Coll<int, M>
+```
+
+In a Laravel test, `collect([Model::factory()->create(['col' => 'x'])])`
+comes out as `Collection<array-key, mixed>`, so a `foreach` over it has
+`mixed` items. Assigning the array to a variable first avoids it.
+
+**Where to change:** `array_literal_element_type` and
+`array_literal_shape_type_with` in
+`src/type_engine/call_resolution/template_subs.rs` split each element on
+`elem.find("=>")`, which matches at any depth (including inside strings
+and `fn () =>` bodies). They need the first top-level `=>` only. The
+same `find("=>")` shape appears in
+`type_engine/variable/rhs_resolution/instantiation.rs` and
+`virtual_members/laravel/model_extraction.rs` and is worth checking at
+the same time.
+
+#### B5. A named `@var` above a destructuring types the whole right-hand side
+
+**Impact: Low-Medium · Complexity: Low**
+
+A `@var` tag that names one of the destructured variables is applied to
+the value being destructured instead:
+
+```php
+/**
+ * @var array<string, Scope> $map
+ * @var array<string, string> $hashes
+ */
+[$map, $hashes] = $cached;
+// Offset 0 does not exist on array<string, Scope>
+// Offset 1 does not exist on array<string, Scope>
+```
+
+The tags describe `$map` and `$hashes`. Only an unnamed `@var` (or one
+naming the right-hand side variable) says anything about `$cached`.
+
+**Where to change:** `destructuring_rhs_type` in
+`src/type_engine/variable/forward_walk/array_assignment.rs` takes the
+first `@var` from `find_inline_var_docblock` without checking its
+variable name. The named tags should instead type the matching
+destructured variables, which the forward walker shares with hover and
+completion.
 
 ## Laravel
 
@@ -146,8 +173,130 @@ No outstanding items.
 
 ## Templates
 
-No outstanding items.
+#### B6. A closure returning a local variable binds the template from its declared type
+
+**Impact: Medium · Complexity: Medium**
+
+A closure's declared return type is narrowed by what its body returns
+before it binds a `Closure(): T` template, but only when the returned
+expression resolves without the closure's own local variables:
+
+```php
+/**
+ * @template T
+ * @param \Closure(): T $cb
+ * @return T
+ */
+function remember(\Closure $cb): mixed { return $cb(); }
+
+function local(): Sub {
+    return remember(function (): Base {
+        $p = make();          // returns Sub
+        return $p->sortBy();  // returns static
+    });
+    // Return type Base is incompatible with declared return type Sub
+}
+
+function direct(): Sub {
+    return remember(function (): Base {
+        return make()->sortBy();  // fine, T = Sub
+    });
+}
+```
+
+`Sub` extends `Base`. PHPStan intersects the declared type with the
+union of every `return` statement's type, so `T` is `Sub` in both.
+
+**Where to change:** `infer_closure_return_type_seeded` in
+`src/type_engine/call_resolution/template_subs.rs` resolves the text of
+the first `return EXPR;` with only the closure's parameters seeded, so a
+variable assigned inside the body is unknown and the declared type wins.
+The body should be walked by the forward walker so locals are in scope,
+and every `return` should contribute.
+
+#### B7. A class named like a template parameter still shadows it in type checks
+
+**Impact: Low-Medium · Complexity: Low**
+
+With a class-like named `T` anywhere in the project (PDepend's test
+fixtures declare `trait T`), member access on a `@template T` value now
+resolves correctly, but argument and return compatibility checks still
+compare against the class instead of the template's bound:
+
+```php
+trait T {}   // anywhere in the index
+```
+
+```php
+namespace App;
+
+/** @template T of Art */
+class ArtList {
+    /** @param T[] $artifacts */
+    public function __construct(array $artifacts) {
+        foreach ($artifacts as $artifact) {
+            (new Filter())->accept($artifact);  // expects Art, got T
+        }
+    }
+}
+
+interface Node {
+    /**
+     * @template T of Node
+     * @param class-string<T> $targetType
+     * @return T|null
+     */
+    public function first($targetType);
+}
+
+abstract class AbstractNode implements Node {
+    public function first($targetType): ?Node {
+        foreach ($this->children() as $node) {
+            if ($node instanceof $targetType) {
+                return $node;  // Return type T is incompatible with ?Node
+            }
+            if (($child = $node->first($targetType)) !== null) {
+                // expects class-string<Node>, got class-string<T>
+                return $child;
+            }
+        }
+        return null;
+    }
+}
+```
+
+Removing the trait makes all three clean.
+
+**Where to change:** the argument and return type compatibility checks
+need the template names in scope (including ones inherited from an
+interface method's docblock) to win over class lookup, the way member
+access does since the earlier fix. An unqualified `T` inside
+`namespace App` also should not fall back to the global `\T` at all.
 
 ## Miscellaneous
 
-No outstanding items.
+#### B8. `use X as Y` makes a bare `X` skip another import of the same short name
+
+**Impact: Low-Medium · Complexity: Medium**
+
+```php
+namespace App;
+
+use Illuminate\Support\Facades\Redis;
+use Redis as PhpRedis;
+
+Redis::connection('cache');
+// Method 'connection' not found on class 'Redis'
+```
+
+PHP resolves `Redis` through the first import, the facade. PHPantom
+resolves it to the global `\Redis` extension class.
+
+**Where to change:** `resolve_class_name` and `class_loader_with` in
+`src/resolution.rs` deliberately skip an import when another import's
+target is the bare name, because the loader cannot tell a name spelled
+in source (`Redis`, meaning the facade) from an already-resolved FQN
+(`Redis`, expanded from `PhpRedis`). The real fix is to stop feeding
+the loader a mix of the two: resolve `PhpRedis` to `\Redis` (or mark it
+as already qualified) before it reaches the use-map check, then drop
+the heuristic.

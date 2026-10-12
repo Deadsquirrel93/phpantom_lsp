@@ -770,6 +770,45 @@ async fn test_explicit_bare_hint_uses_inferred_generics_for_foreach() {
     );
 }
 
+/// A bare hint naming an unrelated class that only shares the inferred
+/// generic's short name keeps its own type: PHP enforces the hint.
+#[tokio::test]
+async fn test_explicit_hint_with_same_short_name_is_not_replaced() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test/closure_same_short_name.php").unwrap();
+
+    let src = concat!(
+        "<?php\n",
+        "namespace Vendor {\n",
+        "    class Loaf {}\n",
+        "    /** @template TValue */\n",
+        "    class Collection { public function vendorOnly(): void {} }\n",
+        "}\n",
+        "namespace App {\n",
+        "    class Collection { public function own(): void {} }\n",
+        "    /** @param callable(\\Vendor\\Collection<\\Vendor\\Loaf>): void $cb */\n",
+        "    function takesCollection(callable $cb): void {}\n",
+        "    takesCollection(function (Collection $c) {\n",
+        "        $c->\n",
+        "    });\n",
+        "}\n",
+    );
+
+    // Line 11: `        $c->`
+    let items = complete_at(&backend, &uri, src, 11, 12).await;
+    let names = method_names(&items);
+    assert!(
+        names.contains(&"own"),
+        "Expected own from App\\Collection, got: {:?}",
+        names,
+    );
+    assert!(
+        !names.contains(&"vendorOnly"),
+        "Vendor\\Collection members should not leak in, got: {:?}",
+        names,
+    );
+}
+
 /// Simpler variant: static call chain where the closure param is the
 /// direct target (no foreach indirection). Verifies that
 /// `infer_callable_params_from_receiver` works when the receiver is a
@@ -975,7 +1014,7 @@ async fn test_inline_stubs_chunk_closure_foreach_resolution() {
         "     * @template TKey of array-key\n",
         "     * @template TModel of \\Illuminate\\Database\\Eloquent\\Model\n",
         "     */\n",
-        "    class Collection {\n",
+        "    class Collection extends \\Illuminate\\Support\\Collection {\n",
         "        /** @return TModel|null */\n",
         "        public function first(): mixed { return null; }\n",
         "        public function count(): int { return 0; }\n",

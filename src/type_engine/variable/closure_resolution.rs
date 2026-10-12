@@ -809,9 +809,8 @@ fn resolve_closure_this_class(
 ///
 /// * The explicit hint is a bare class name (e.g. `Collection`) and the
 ///   inferred type is the same class with generic arguments (e.g.
-///   `Collection<int, Customer>`).  Namespace-qualified names are compared
-///   by their last segment so that `Collection` matches
-///   `Illuminate\Support\Collection<int, Customer>`.
+///   `Collection<int, Customer>`).  Names are compared as FQNs, so an
+///   unrelated class that only shares the short name does not match.
 /// * The explicit hint is a bare `array`/`iterable` keyword, which says
 ///   nothing about the elements, and the inferred type is an array-like
 ///   type that does describe them (e.g. `array{Foo, string}`,
@@ -853,12 +852,8 @@ fn inferred_type_is_more_specific(
         _ => return false,
     };
 
-    // Compare by short name so that `Collection` matches
-    // `Illuminate\Support\Collection<…>`.
-    let explicit_short = crate::util::short_name(explicit_base);
-    let inferred_short = crate::util::short_name(inferred_base);
-
-    explicit_short.eq_ignore_ascii_case(inferred_short)
+    let explicit_base = explicit_base.trim_start_matches('\\');
+    explicit_base.eq_ignore_ascii_case(inferred_base.trim_start_matches('\\'))
         || class_loader(explicit_base).is_some_and(|explicit| {
             crate::class_lookup::is_subtype_of_typed(
                 inferred,
