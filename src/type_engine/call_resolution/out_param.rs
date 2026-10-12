@@ -19,8 +19,8 @@
 //! through, so branch merging and narrowing are accounted for by the
 //! shared pipeline rather than by a second one written here.
 
-use std::cell::{Cell, RefCell};
-use std::collections::{HashMap, HashSet};
+use std::cell::RefCell;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use mago_syntax::cst::Program;
@@ -156,28 +156,25 @@ impl OutParamCallee {
 /// `(declaring class FQN or empty, function/method name, parameter index)`.
 type OutTypeKey = (Atom, Atom, u16);
 
+/// Memoized out-parameter readings.
+type OutTypeMemo = crate::type_engine::BoundedMemo<OutTypeKey, Option<PhpType>>;
+
 thread_local! {
     /// When `Some`, memoizes completed out-parameter readings for the
     /// current request. Every call site that passes a variable to the
     /// same out-parameter would otherwise re-walk the whole callee body,
     /// and a by-reference helper called from fifty places is common.
-    static OUT_TYPE_MEMO: RefCell<Option<HashMap<OutTypeKey, Option<PhpType>>>> =
-        const { RefCell::new(None) };
+    static OUT_TYPE_MEMO: RefCell<Option<OutTypeMemo>> = const { RefCell::new(None) };
 
     /// The out-parameters currently being read. A callee that reaches
     /// itself (directly or through a cycle) re-enters on the same key and
     /// falls back to its declaration rather than recursing.
     static OUT_TYPE_VISITED: RefCell<HashSet<OutTypeKey>> = RefCell::new(HashSet::new());
-
-    /// Nesting depth of out-parameter readings, so a chain of by-reference
-    /// helpers cannot queue up an unbounded run of body walks.
-    static OUT_TYPE_DEPTH: Cell<u8> = const { Cell::new(0) };
 }
 
 /// Activate the out-parameter memo for the current thread.
 /// The guard [`with_out_type_memo`] hands back.
-pub(crate) type OutTypeMemoGuard =
-    crate::type_engine::MemoGuard<HashMap<OutTypeKey, Option<PhpType>>>;
+pub(crate) type OutTypeMemoGuard = crate::type_engine::MemoGuard<OutTypeMemo>;
 
 pub(super) fn with_out_type_memo() -> OutTypeMemoGuard {
     crate::type_engine::activate_memo(&OUT_TYPE_MEMO)
@@ -284,7 +281,7 @@ fn infer_out_type(
     crate::type_engine::memoized_bounded_inference(
         &OUT_TYPE_MEMO,
         &OUT_TYPE_VISITED,
-        &OUT_TYPE_DEPTH,
+        crate::type_engine::BoundedInference::OutParam,
         MAX_OUT_TYPE_DEPTH,
         key,
         key,

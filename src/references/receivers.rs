@@ -294,6 +294,12 @@ impl Backend {
         let _parse_cache_guard = crate::parser::with_parse_cache_arc(Arc::clone(content));
         let file_ctx = self.file_context(uri);
 
+        // Up before the scope build, not just the resolutions after it: the
+        // walk infers the return type of every untyped method it meets, and
+        // without the body-inference memo each call site re-walks the
+        // callee's body (and every body that one reaches) from scratch.
+        let _resolver_guard = crate::type_engine::call_resolution::activate_type_engine_caches();
+
         // Build variable scopes once, then resolve every access while those
         // snapshots are hot.  A file whose accesses all have a `$this` or
         // static receiver never needs them, which is most of the
@@ -406,7 +412,6 @@ impl Backend {
         // file's cached answer. An isolated map is only ever populated and
         // read within this one file's resolution below.
         let _chain_guard = crate::type_engine::resolver::with_isolated_chain_cache();
-        let _resolver_guard = crate::type_engine::call_resolution::activate_type_engine_caches();
         let resolved = carried
             .into_iter()
             .chain(access_indices.into_iter().filter_map(|span_index| {

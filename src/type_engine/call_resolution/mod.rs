@@ -81,6 +81,8 @@ pub(crate) use return_types::{
     MethodReturnCtx, class_constant_type, enum_case_property_literal, folded_global_constant_type,
     resolve_static_access_type,
 };
+#[cfg(test)]
+pub(crate) use target_cache::test_body_inferences;
 pub(crate) use target_cache::{
     activate_body_infer_memo, activate_type_engine_caches, body_inference_context,
     body_inference_in_progress, call_site_param_types, try_infer_body_return_type,

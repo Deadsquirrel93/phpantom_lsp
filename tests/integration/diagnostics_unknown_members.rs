@@ -1,7 +1,8 @@
 use crate::common::{
     create_psr4_workspace, create_psr4_workspace_with_stubs, create_test_backend,
     create_test_backend_with_exception_stubs, create_test_backend_with_full_stubs,
-    create_test_backend_with_stubs, unknown_member_diagnostics_with_scope_cache,
+    create_test_backend_with_stubs, slow_diagnostic_messages,
+    unknown_member_diagnostics_with_scope_cache,
 };
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
@@ -14635,4 +14636,35 @@ final class R {
 "#;
     let diags = unknown_member_diagnostics(&backend, uri, text);
     assert!(diags.is_empty(), "got: {diags:?}");
+}
+
+/// A callee first read at the bottom of a longer chain of untyped methods
+/// has no budget left for the methods it calls itself.  That cut-off
+/// reading must not answer for a later call site that reaches the same
+/// callee with budget to spare.
+#[test]
+fn flags_member_on_untyped_callee_first_read_at_the_depth_cap() {
+    let backend = create_test_backend();
+    let text = r#"<?php
+class Box { public function open(): void {} }
+class Factory {
+    public static function a() { $value = self::b(); return $value; }
+    public static function b() { $value = self::c(); return $value; }
+    public static function c() { $value = self::d(); return $value; }
+    public static function d() { $value = self::e(); return $value; }
+    public static function e() { return new Box(); }
+}
+function run(): void {
+    $box = Factory::d();
+    $box->nope();
+}
+"#;
+    let uri = "file:///test.php";
+    // Return-type inference reads the callee bodies back from the open file.
+    backend
+        .open_files()
+        .write()
+        .insert(uri.to_string(), std::sync::Arc::new(text.to_string()));
+    let messages = slow_diagnostic_messages(&backend, uri, text, "unknown_member");
+    assert_eq!(messages, ["Method 'nope' not found on class 'Box'"]);
 }

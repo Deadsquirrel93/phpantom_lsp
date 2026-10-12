@@ -36,6 +36,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **No more busy core after indexing large legacy scripts.** Preparing find-references data in the background could keep one CPU core busy indefinitely on a long file full of methods without return types.
+- **Untyped methods reached through long call chains.** A method without a declared return type that was first reached at the end of a long chain of such methods no longer stays untyped everywhere else it is called, so members used on its result are checked again.
 - **Relation callbacks follow their argument types.** Closures passed to `whereHas()` and similar methods are now typed when the relation is a variable, one of several names, or a relation object. Callbacks for `orWhereRelation()`, `whereDoesntHaveRelation()`, and `with('relation', fn)` are typed too. Contributed by @shuvroroy.
 - **Relation callbacks keep their full context.** Completion, navigation, and diagnostics retain generic model alternatives through custom relationships and eager-loading arrays. Application-defined callback signatures take precedence, and relation query methods work regardless of letter case. Contributed by @shuvroroy.
 - **Relation callbacks on a relation.** `$team->stocks()->whereHas('warehouse', fn ($q) => ...)` and `->with('warehouse', fn ($r) => ...)` now type the closure from the relation's related model instead of a generic builder or relation.
