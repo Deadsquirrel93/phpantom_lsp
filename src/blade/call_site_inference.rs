@@ -1075,6 +1075,7 @@ impl Backend {
             crate::virtual_members::with_active_resolved_class_cache(&self.resolved_class_cache);
         let file_ctx = self.file_context(uri);
         let class_loaders = self.class_loaders(&file_ctx);
+        let resolved_class_loaders = self.resolved_class_loaders(&file_ctx);
         let function_loaders = self.function_loaders(&file_ctx);
 
         with_parsed_program(content, "blade_call_site_inference", |program, content| {
@@ -1095,13 +1096,16 @@ impl Backend {
             let mut result = Vec::new();
             for site in collected {
                 let class_loader = class_loaders.at(site.offset);
+                let resolved_class_loader = resolved_class_loaders.at(site.offset);
                 let function_loader = function_loaders.at(site.offset);
+                let imports = file_ctx.use_map_at(site.offset);
                 let function_loader_cl = |name: &str, offset: u32| function_loader(name, offset);
                 let enclosing =
                     crate::class_lookup::find_class_at_offset(&file_ctx.classes, site.offset);
                 let current_class = enclosing.unwrap_or(&default_class);
                 let loaders = Loaders::with_function(Some(&function_loader_cl));
                 let var_ctx = VarResolutionCtx {
+                    source_imports: Some(imports),
                     backend: Some(self),
                     loaders,
                     resolved_class_cache: Some(&self.resolved_class_cache),
@@ -1111,6 +1115,7 @@ impl Backend {
                         &file_ctx.classes,
                         content,
                         site.offset,
+                        resolved_class_loader,
                         class_loader,
                     )
                 };
@@ -1139,7 +1144,9 @@ impl Backend {
                                     site.offset,
                                     Some(current_class),
                                     &file_ctx.classes,
+                                    resolved_class_loader,
                                     class_loader,
+                                    Some(imports),
                                     Some(self),
                                     Loaders::with_function(Some(&function_loader_cl)),
                                 ),
@@ -1158,7 +1165,9 @@ impl Backend {
                                 site.offset,
                                 Some(current_class),
                                 &file_ctx.classes,
+                                resolved_class_loader,
                                 class_loader,
+                                Some(imports),
                                 Some(self),
                                 loaders,
                             )
@@ -1185,7 +1194,7 @@ impl Backend {
                                 Some(entries) => {
                                     vars.extend(entries.into_iter().map(|(name, ty)| PassedVar {
                                         name,
-                                        ty: qualify_class_names(ty, class_loader),
+                                        ty: qualify_class_names(ty, resolved_class_loader),
                                         key_range: range,
                                         value_range: range,
                                         framework_bound: false,
@@ -1198,7 +1207,7 @@ impl Backend {
                     };
                     vars.push(PassedVar {
                         name,
-                        ty: qualify_class_names(ty, class_loader),
+                        ty: qualify_class_names(ty, resolved_class_loader),
                         key_range,
                         value_range,
                         framework_bound,
@@ -1237,6 +1246,7 @@ impl Backend {
         name: &str,
     ) -> Option<PhpType> {
         let class_loader = self.class_loader(file_ctx);
+        let resolved_class_loader = self.resolved_class_loader(file_ctx);
         let function_loader = self.function_loader(file_ctx);
         let function_loader_cl = |name: &str, offset: u32| function_loader(name, offset);
         let ty = crate::type_engine::variable::resolution::resolve_variable_php_type(
@@ -1245,11 +1255,13 @@ impl Backend {
             offset,
             crate::class_lookup::find_class_at_offset(&file_ctx.classes, offset),
             &file_ctx.classes,
+            &resolved_class_loader,
             &class_loader,
+            Some(&file_ctx.use_map),
             Some(self),
             Loaders::with_function(Some(&function_loader_cl)),
         )?;
-        Some(qualify_class_names(ty, &class_loader))
+        Some(qualify_class_names(ty, &resolved_class_loader))
     }
 
     /// Extract the variables one Blade caller passes to component tags,
@@ -1276,6 +1288,7 @@ impl Backend {
             crate::virtual_members::with_active_resolved_class_cache(&self.resolved_class_cache);
         let file_ctx = self.file_context(uri);
         let class_loader = self.class_loader(&file_ctx);
+        let resolved_class_loader = self.resolved_class_loader(&file_ctx);
         let function_loader = self.function_loader(&file_ctx);
         let function_loader_cl = |name: &str, offset: u32| function_loader(name, offset);
 
@@ -1305,6 +1318,7 @@ impl Backend {
                         let current_class = enclosing.unwrap_or(&default_class);
                         let loaders = Loaders::with_function(Some(&function_loader_cl));
                         let var_ctx = VarResolutionCtx {
+                            source_imports: Some(&file_ctx.use_map),
                             backend: Some(self),
                             loaders,
                             resolved_class_cache: Some(&self.resolved_class_cache),
@@ -1314,6 +1328,7 @@ impl Backend {
                                 &file_ctx.classes,
                                 content,
                                 offset,
+                                &resolved_class_loader,
                                 &class_loader,
                             )
                         };
@@ -1321,7 +1336,7 @@ impl Backend {
                         expr, &var_ctx,
                     )
                     .unwrap_or_else(PhpType::mixed);
-                        vars.push((name, qualify_class_names(ty, &class_loader)));
+                        vars.push((name, qualify_class_names(ty, &resolved_class_loader)));
                     }
                     if !vars.is_empty() {
                         result.push(vars);

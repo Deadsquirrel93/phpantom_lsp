@@ -2479,6 +2479,7 @@ async fn test_use_import_excludes_constants_and_functions() {
                     is_pure: false,
                     is_impure: false,
                     reads_func_args: false,
+                    unverified_doc_types: Default::default(),
                 },
             ),
         );
@@ -2617,6 +2618,7 @@ async fn test_use_function_shows_only_functions() {
                     is_pure: false,
                     is_impure: false,
                     reads_func_args: false,
+                    unverified_doc_types: Default::default(),
                 },
             ),
         );

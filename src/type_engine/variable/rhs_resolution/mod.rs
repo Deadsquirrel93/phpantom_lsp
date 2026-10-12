@@ -328,6 +328,8 @@ fn resolve_var_types(
         ctx.content,
         cursor_offset,
         ctx.class_loader,
+        ctx.source_class_loader,
+        ctx.source_imports,
         ctx.backend,
         ctx.loaders,
     )
@@ -365,35 +367,29 @@ fn extract_match_arm_narrowings(
     ctx: &VarResolutionCtx<'_>,
 ) -> HashMap<String, Vec<ResolvedType>> {
     let mut narrowed: Option<(String, Vec<ResolvedType>)> = None;
+    let names = ctx.written_class_names();
     for condition in expr_arm.conditions.iter() {
         // `match ($x::class) { Foo::class, Bar::class => … }` — each
         // condition names one class the subject may be, so the arm body
         // sees the union of them.
         let pair = match subject_var {
             Some(var) => {
-                crate::type_engine::types::narrowing::class_match_condition_class(condition)
+                crate::type_engine::types::narrowing::class_match_condition_class(condition, &names)
                     .map(|ty| (var.to_owned(), ty))
             }
-            None => extract_instanceof_pair(condition),
+            None => extract_instanceof_pair(condition, &names),
         };
         // A condition that says nothing this one can read about the
         // variable the others narrow lets the arm run whatever it holds.
-        let Some((var_name, mut class_type)) = pair else {
+        let Some((var_name, class_type)) = pair else {
             return HashMap::new();
         };
         if narrowed.as_ref().is_some_and(|(name, _)| *name != var_name) {
             return HashMap::new();
         }
-        // Resolve the short class name to FQN so that downstream
-        // comparisons and ResolvedType hints carry the fully-qualified name.
-        if let TypeKind::Named(name) = class_type.kind()
-            && let Some(cls) = (ctx.class_loader)(name)
-        {
-            class_type = PhpType::named(cls.fqn());
-        }
         let resolved = type_resolution::type_hint_to_classes_typed(
             &class_type,
-            &ctx.current_class.name,
+            &ctx.current_class.fqn(),
             ctx.all_classes,
             ctx.class_loader,
         );
@@ -447,7 +443,10 @@ fn match_true_arm_narrowings(
 }
 
 /// Extract `($var_name, ClassName)` from `$var instanceof ClassName`.
-fn extract_instanceof_pair(expr: &Expression<'_>) -> Option<(String, PhpType)> {
+fn extract_instanceof_pair(
+    expr: &Expression<'_>,
+    names: &crate::type_engine::types::narrowing::WrittenClassNames<'_>,
+) -> Option<(String, PhpType)> {
     let expr = match expr {
         Expression::Parenthesized(inner) => inner.expression,
         other => other,
@@ -462,7 +461,7 @@ fn extract_instanceof_pair(expr: &Expression<'_>) -> Option<(String, PhpType)> {
         };
         // RHS: the class name
         let class_type = match bin.rhs {
-            Expression::Identifier(ident) => PhpType::named(atom(bytes_to_str(ident.value()))),
+            Expression::Identifier(ident) => names.class_type(bytes_to_str(ident.value())),
             Expression::Self_(_) => PhpType::named(atom("self")),
             Expression::Static(_) => PhpType::named(atom("static")),
             Expression::Parent(_) => PhpType::named(atom("parent")),
@@ -488,10 +487,8 @@ fn resolved_type_with_lookup(
         let base = base.strip_prefix('\\').unwrap_or(base);
         // Don't try to look up scalars/pseudo-types
         if !crate::php_type::is_keyword_type(base) {
-            // Try in-file classes first
-            let cls = crate::class_lookup::find_class_by_name(all_classes, base)
-                .map(|arc| arc.as_ref().clone())
-                .or_else(|| class_loader(base).map(Arc::unwrap_or_clone));
+            let cls = crate::class_lookup::find_or_load_resolved(base, all_classes, class_loader)
+                .map(Arc::unwrap_or_clone);
             if let Some(class) = cls {
                 return ResolvedType::from_both(ty, class);
             }
@@ -545,6 +542,8 @@ fn narrowed_subject_from_scope(
             ctx.content,
             ctx.cursor_offset,
             ctx.class_loader,
+            ctx.source_class_loader,
+            ctx.source_imports,
             ctx.backend,
             ctx.loaders,
         ),
@@ -1385,7 +1384,7 @@ fn resolve_rhs_expression_inner<'b>(
             let lookup_ty = PhpType::closure();
             let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
                 &lookup_ty,
-                &ctx.current_class.name,
+                &ctx.current_class.fqn(),
                 ctx.all_classes,
                 ctx.class_loader,
             );
@@ -1405,7 +1404,7 @@ fn resolve_rhs_expression_inner<'b>(
                 return ResolvedType::from_classes_with_hint(
                     crate::type_engine::type_resolution::type_hint_to_classes_typed(
                         send_php_type,
-                        &ctx.current_class.name,
+                        &ctx.current_class.fqn(),
                         ctx.all_classes,
                         ctx.class_loader,
                     ),
@@ -2214,7 +2213,7 @@ fn resolve_rhs_pipe(pipe: &Pipe<'_>, ctx: &VarResolutionCtx<'_>) -> Vec<Resolved
                 return ResolvedType::from_classes_with_hint(
                     crate::type_engine::type_resolution::type_hint_to_classes_typed(
                         ret,
-                        &ctx.current_class.name,
+                        &ctx.current_class.fqn(),
                         ctx.all_classes,
                         ctx.class_loader,
                     ),
@@ -2267,19 +2266,18 @@ fn resolve_rhs_clone(clone_expr: &Clone<'_>, ctx: &VarResolutionCtx<'_>) -> Vec<
 ///
 /// Returns the type-hint string when the expression is a `Closure` or
 /// `ArrowFunction` with an explicit return type annotation, e.g.
-/// `fn (): Foo => …` yields `"Foo"`.  Returns `None` otherwise.
-fn extract_closure_or_arrow_return_type(expr: &Expression<'_>) -> Option<PhpType> {
-    match expr {
-        Expression::ArrowFunction(arrow) => arrow
-            .return_type_hint
-            .as_ref()
-            .map(|rth| extract_hint_type(&rth.hint)),
-        Expression::Closure(closure) => closure
-            .return_type_hint
-            .as_ref()
-            .map(|rth| extract_hint_type(&rth.hint)),
-        _ => None,
-    }
+/// `fn (): Foo => …` yields `Foo`, qualified against the file's imports.
+/// Returns `None` otherwise.
+fn extract_closure_or_arrow_return_type(
+    expr: &Expression<'_>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<PhpType> {
+    let hint = match expr {
+        Expression::ArrowFunction(arrow) => arrow.return_type_hint.as_ref()?,
+        Expression::Closure(closure) => closure.return_type_hint.as_ref()?,
+        _ => return None,
+    };
+    Some(ctx.resolve_hint_type(&extract_hint_type(&hint.hint)))
 }
 
 /// Infer template parameter substitutions from a `@psalm-if-this-is` pattern

@@ -492,19 +492,19 @@ pub(crate) fn resolve_type_to_resolved_types(
     php_type: &PhpType,
     ctx: &ForwardWalkCtx<'_>,
 ) -> Vec<ResolvedType> {
+    ctx.resolved_types_for(resolve_var_docblock_type(php_type, ctx))
+}
+
+/// The class names of a `@var` type read out of the source, qualified as
+/// [`resolve_type_to_resolved_types`] does.
+pub(crate) fn resolve_var_docblock_type(php_type: &PhpType, ctx: &ForwardWalkCtx<'_>) -> PhpType {
     // The declaration's templates are marked before names are qualified,
     // while `T` is still spelled the way the `@template` tag spells it.
     let marked = ctx
         .template_markers
         .as_ref()
         .map(|m| php_type.substitute(m));
-    let php_type = crate::util::resolve_source_php_type_names(
-        marked.as_ref().unwrap_or(php_type),
-        ctx.current_class.file_namespace.as_deref(),
-        ctx.all_classes,
-        ctx.class_loader,
-    );
-    ctx.resolved_types_for(php_type)
+    ctx.resolve_written_type(marked.as_ref().unwrap_or(php_type))
 }
 
 /// Process assignment expressions, updating the scope.
@@ -702,7 +702,7 @@ pub(crate) fn process_assignment_expr<'b>(
         }
         // `$isHtml = $raw instanceof HtmlString` makes `$isHtml` stand
         // for the check, so testing it later narrows `$raw`.
-        record_assertion_variable(&lhs_name, assignment.rhs, scope);
+        record_assertion_variable(&lhs_name, assignment.rhs, scope, ctx);
         if !condition_proofs.is_empty() {
             scope
                 .implied_narrowings
@@ -1260,7 +1260,8 @@ pub(crate) fn resolve_rhs_with_types<'b>(
             cca.class,
             ctx.current_class,
             ctx.all_classes,
-            ctx.class_loader,
+            ctx.source_class_loader,
+            ctx.source_imports,
         )
         .filter(|name| !name.is_empty());
         if let Some(name) = class_name {
@@ -1269,7 +1270,7 @@ pub(crate) fn resolve_rhs_with_types<'b>(
             // with class_info.  This allows `new $var` to work.
             let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
                 &PhpType::named(atom(resolved_name)),
-                &ctx.current_class.name,
+                &ctx.current_class.fqn(),
                 ctx.all_classes,
                 ctx.class_loader,
             );
@@ -1532,16 +1533,19 @@ pub(crate) fn process_assert_narrowing<'b>(
         if scope.get(&var_name).is_empty() {
             // Variable not in scope — seed it with the asserted type.
             let class_name = match bin.rhs {
-                Expression::Identifier(ident) => Some(bytes_to_str(ident.value()).to_string()),
-                Expression::Self_(_) => Some(ctx.current_class.name.to_string()),
-                Expression::Static(_) => Some(ctx.current_class.name.to_string()),
+                Expression::Identifier(ident) => {
+                    Some(ctx.resolve_written_class(bytes_to_str(ident.value())))
+                }
+                Expression::Self_(_) | Expression::Static(_) => {
+                    Some(ctx.current_class.fqn().to_string())
+                }
                 Expression::Parent(_) => ctx.current_class.parent_class.map(|a| a.to_string()),
                 _ => None,
             };
             if let Some(name) = class_name {
                 let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
                     &PhpType::named(atom(&name)),
-                    &ctx.current_class.name,
+                    &ctx.current_class.fqn(),
                     ctx.all_classes,
                     ctx.class_loader,
                 );
@@ -1829,7 +1833,7 @@ pub(crate) fn process_self_out_narrowing<'b>(
             // parameter would keep resolving to the pre-call binding.
             let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
                 &final_ty,
-                &ctx.current_class.name,
+                &ctx.current_class.fqn(),
                 ctx.all_classes,
                 ctx.class_loader,
             );

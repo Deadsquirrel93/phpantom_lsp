@@ -159,7 +159,7 @@ impl MemberTargetResolver<'_> {
             return Some(format!("{declaring_owner}::{member_name}"));
         }
 
-        let loader = self.backend.class_loader(self.context);
+        let loader = self.backend.resolved_class_loader(self.context);
         let class = loader(&owner)?;
         let resolved = crate::virtual_members::resolve_class_fully_maybe_cached(
             &class,
@@ -180,7 +180,8 @@ fn resolve_member_owner(
 ) -> Option<String> {
     let use_map = context.use_map_at(offset);
     let namespace = context.namespace_at(offset);
-    let class_loader = backend.class_loader_with(&context.classes, use_map, namespace);
+    let class_loader = backend.resolved_class_loader_with(&context.classes);
+    let source_class_loader = backend.class_loader_with(&context.classes, use_map, namespace);
     let function_loader =
         backend.function_loader_with(context.resolved_names.as_deref(), use_map, namespace);
     let resolution_context = crate::type_engine::subject_resolution::SubjectResolutionCtx {
@@ -189,6 +190,7 @@ fn resolve_member_owner(
         namespace,
         content: source,
         class_loader: &class_loader,
+        source_class_loader: &source_class_loader,
         backend: Some(backend),
         function_loader: &function_loader,
     };
@@ -215,7 +217,7 @@ fn resolve_declaring_member_owner(
     member_name: &str,
     kind: OccurrenceKind,
 ) -> Option<String> {
-    let class_loader = backend.class_loader(context);
+    let class_loader = backend.resolved_class_loader(context);
     let class = class_loader(owner)?;
     let declares = |candidate: &ClassInfo| member_exists(candidate, member_name, kind);
     if declares(&class) {

@@ -565,7 +565,7 @@ fn try_generator_yield_inference(
 
     let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
         value_type,
-        &ctx.current_class.name,
+        &ctx.current_class.fqn(),
         ctx.all_classes,
         ctx.class_loader,
     );

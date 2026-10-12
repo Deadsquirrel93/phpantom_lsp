@@ -143,25 +143,33 @@ impl Backend {
     /// variable/class paths.
     ///
     /// Only consulted when nothing in the map extends this far, so it never
-    /// second-guesses successfully parsed code — string literals, comments,
-    /// and ordinary whitespace gaps all sit before the map's last span and
-    /// are left alone.
+    /// second-guesses successfully parsed code, and a cursor inside a
+    /// string literal or comment is left alone.
     fn hover_dropped_tail_identifier(
         &self,
         uri: &str,
         content: &str,
         offset: u32,
     ) -> Option<Hover> {
-        let past_every_span = self
-            .symbol_maps
-            .read()
-            .get(uri)
-            .is_some_and(|map| map.spans.iter().all(|s| s.end <= offset));
-        if !past_every_span {
-            return None;
-        }
+        let last_span_end = {
+            let maps = self.symbol_maps.read();
+            let map = maps.get(uri)?;
+            if !map.spans.iter().all(|s| s.end <= offset) {
+                return None;
+            }
+            map.spans.iter().map(|s| s.end).max().unwrap_or(0)
+        };
 
         let (is_variable, name, token_start) = identifier_token_at(content, offset as usize)?;
+        // Text past the last span is not necessarily code: a string literal
+        // or comment there is left alone, as one before it is.
+        if inside_string_or_comment(
+            content.as_bytes(),
+            last_span_end as usize,
+            token_start as usize,
+        ) {
+            return None;
+        }
 
         let ctx = self.file_context_at(uri, offset);
         let current_class = find_class_at_offset(&ctx.classes, offset);
@@ -192,6 +200,7 @@ impl Backend {
         let ctx = self.file_context_at(uri, cursor_offset);
         let current_class = find_class_at_offset(&ctx.classes, cursor_offset);
         let class_loader = self.class_loader(&ctx);
+        let resolved_class_loader = self.resolved_class_loader(&ctx);
         let function_loader = self.function_loader(&ctx);
         let laravel_macro_this_resolver = self.laravel_macro_this_resolver(&class_loader);
 
@@ -238,10 +247,12 @@ impl Backend {
                     content,
                     cursor_offset,
                     CtxLoaders::new(
+                        &resolved_class_loader,
                         &class_loader,
                         &function_loader,
                         &laravel_macro_this_resolver,
-                    ),
+                    )
+                    .with_imports(&ctx.use_map),
                 );
 
                 let access_kind = if *is_static {
@@ -276,7 +287,7 @@ impl Backend {
                     // found on the fully-resolved version.
                     let merged = crate::virtual_members::resolve_class_fully_cached(
                         target_class,
-                        &class_loader,
+                        &resolved_class_loader,
                         &self.resolved_class_cache,
                     );
                     let find_result =
@@ -349,7 +360,7 @@ impl Backend {
                                 Self::configured_laravel_date_return(
                                     &owner,
                                     member_name,
-                                    &class_loader,
+                                    &resolved_class_loader,
                                 )
                             {
                                 method.return_type = Some(date_return_type);
@@ -359,14 +370,14 @@ impl Backend {
                                 &owner,
                                 member_name,
                                 &MemberKindForOrigin::Method,
-                                &class_loader,
+                                &resolved_class_loader,
                             );
                             Some((
-                                declaring.name.to_string(),
+                                declaring.fqn().to_string(),
                                 self.hover_for_method(
                                     &method,
                                     &declaring,
-                                    &class_loader,
+                                    &resolved_class_loader,
                                     uri,
                                     content,
                                 ),
@@ -377,11 +388,11 @@ impl Backend {
                                 &owner,
                                 &prop.name,
                                 &MemberKindForOrigin::Property,
-                                &class_loader,
+                                &resolved_class_loader,
                             );
                             Some((
-                                declaring.name.to_string(),
-                                self.hover_for_property(prop, &declaring, &class_loader),
+                                declaring.fqn().to_string(),
+                                self.hover_for_property(prop, &declaring, &resolved_class_loader),
                             ))
                         }
                         Some(HoverMemberHit::Constant(ref constant)) => {
@@ -389,11 +400,15 @@ impl Backend {
                                 &owner,
                                 &constant.name,
                                 &MemberKindForOrigin::Constant,
-                                &class_loader,
+                                &resolved_class_loader,
                             );
                             Some((
-                                declaring.name.to_string(),
-                                self.hover_for_constant(constant, &declaring, &class_loader),
+                                declaring.fqn().to_string(),
+                                self.hover_for_constant(
+                                    constant,
+                                    &declaring,
+                                    &resolved_class_loader,
+                                ),
                             ))
                         }
                         None => None,
@@ -422,7 +437,15 @@ impl Backend {
                 }
             }
 
-            SymbolKind::ClassReference { name, .. } => {
+            SymbolKind::ClassReference { name, is_fqn, .. } => {
+                // A fully qualified reference (`\stdClass`, stored without
+                // its backslash) must not go through the file's imports
+                // and namespace again.
+                let class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>> = if *is_fqn {
+                    &resolved_class_loader
+                } else {
+                    &class_loader
+                };
                 // Check whether this class reference is in a `new ClassName` context.
                 // If so, show the __construct method hover instead of the class hover.
                 let before = content.get(..symbol.start as usize)?;
@@ -436,21 +459,21 @@ impl Backend {
                 if is_new_context && let Some(cls) = class_loader(name) {
                     let merged = crate::virtual_members::resolve_class_fully_cached(
                         &cls,
-                        &class_loader,
+                        &resolved_class_loader,
                         &self.resolved_class_cache,
                     );
                     if let Some(constructor) = merged.get_method_ci("__construct") {
                         return Some(self.hover_for_method(
                             constructor,
                             &merged,
-                            &class_loader,
+                            &resolved_class_loader,
                             uri,
                             content,
                         ));
                     }
                 }
 
-                self.hover_class_reference(name, uri, content, &class_loader, cursor_offset)
+                self.hover_class_reference(name, uri, content, class_loader, cursor_offset)
             }
 
             SymbolKind::ClassDeclaration { .. }
@@ -484,13 +507,13 @@ impl Backend {
                 {
                     return Some(match hit {
                         HoverMemberHit::Method(m) => {
-                            self.hover_for_method(&m, &class, &class_loader, uri, content)
+                            self.hover_for_method(&m, &class, &resolved_class_loader, uri, content)
                         }
                         HoverMemberHit::Property(p) => {
-                            self.hover_for_property(&p, &class, &class_loader)
+                            self.hover_for_property(&p, &class, &resolved_class_loader)
                         }
                         HoverMemberHit::Constant(c) => {
-                            self.hover_for_constant(&c, &class, &class_loader)
+                            self.hover_for_constant(&c, &class, &resolved_class_loader)
                         }
                     });
                 }
@@ -511,7 +534,7 @@ impl Backend {
                     SelfStaticParentKind::Parent => current_class
                         .and_then(|cc| cc.parent_class.as_ref())
                         .and_then(|parent_name| {
-                            class_loader(parent_name).map(Arc::unwrap_or_clone)
+                            resolved_class_loader(parent_name).map(Arc::unwrap_or_clone)
                         }),
                 };
                 if let Some(cls) = resolved {
@@ -969,7 +992,8 @@ impl Backend {
 
         let model_name = extract_model_name_from_model_property_type(param_type)?;
 
-        let class_loader = self.class_loader(&ctx);
+        let class_loader = self.resolved_class_loader(&ctx);
+
         let model_class = class_loader(&model_name)?;
         let resolved_model = crate::virtual_members::resolve_class_fully_cached(
             &model_class,
@@ -984,6 +1008,29 @@ impl Backend {
 
         Some(self.hover_for_property(property, &resolved_model, &class_loader))
     }
+}
+
+/// Whether `target` lies inside a string literal or comment, scanning
+/// from `from`, a point known to be outside both.
+fn inside_string_or_comment(bytes: &[u8], from: usize, target: usize) -> bool {
+    let mut pos = from;
+    while pos < target {
+        let end = match bytes[pos] {
+            b'\'' | b'"' => crate::text_scan::skip_string_forward(bytes, pos),
+            _ => match crate::text_scan::skip_php_comment(bytes, pos) {
+                Some(end) => end,
+                None => {
+                    pos += 1;
+                    continue;
+                }
+            },
+        };
+        if end > target {
+            return true;
+        }
+        pos = end;
+    }
+    false
 }
 
 /// Whether `c` can appear inside a PHP identifier.  PHP allows every byte

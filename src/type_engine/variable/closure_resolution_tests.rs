@@ -8,6 +8,8 @@ fn context(loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>) -> ResolutionCtx<'_>
         content: "",
         cursor_offset: 0,
         class_loader: loader,
+        source_class_loader: loader,
+        source_imports: None,
         backend: None,
         laravel_macro_this_resolver: None,
         resolved_class_cache: None,
@@ -51,7 +53,7 @@ fn builder_receiver_recovers_model_from_instantiated_methods() {
     model.parent_class = Some(atom(ELOQUENT_MODEL_FQN));
     let model = Arc::new(model);
     let base = Arc::new(make_class(ELOQUENT_MODEL_FQN));
-    let loader = |name: &str| match name {
+    let loader = |name: &str| match name.trim_start_matches('\\') {
         "App\\Product" => Some(Arc::clone(&model)),
         ELOQUENT_MODEL_FQN => Some(Arc::clone(&base)),
         _ => None,

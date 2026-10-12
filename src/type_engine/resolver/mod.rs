@@ -32,7 +32,8 @@ mod context;
 
 pub(crate) use context::{
     CtxLoaders, FunctionLoaderFn, LendsLoaders, Loaders, OwnedLoaders, ResolutionCtx,
-    ScopeVarResolverFn, VarResolutionCtx, with_chain_resolution_cache, with_isolated_chain_cache,
+    ScopeVarResolverFn, SourceImports, VarResolutionCtx, with_chain_resolution_cache,
+    with_isolated_chain_cache,
 };
 
 use crate::atom::atom;
@@ -594,13 +595,14 @@ fn resolve_target_classes_expr_inner(
             if let Some(cc) = current_class
                 && let Some(ref parent_name) = cc.parent_class
             {
-                if let Some(cls) = find_class_by_name(all_classes, parent_name) {
-                    return vec![ResolvedType::from_arc(Arc::clone(cls))];
-                }
-                return class_loader(parent_name)
-                    .map(ResolvedType::from_arc)
-                    .into_iter()
-                    .collect();
+                return crate::class_lookup::find_or_load_resolved(
+                    parent_name,
+                    all_classes,
+                    class_loader,
+                )
+                .map(ResolvedType::from_arc)
+                .into_iter()
+                .collect();
             }
             vec![]
         }
@@ -633,21 +635,17 @@ fn resolve_target_classes_expr_inner(
                     .into_iter()
                     .collect()
             } else if let Some(parent_name) = resolve_class_keyword(class, current_class) {
-                // parent — resolve via all_classes first, then class_loader
-                if let Some(cls) = find_class_by_name(all_classes, &parent_name) {
-                    vec![Arc::clone(cls)]
-                } else {
-                    class_loader(&parent_name).into_iter().collect()
-                }
+                // `parent`, whose name the parser already resolved.
+                crate::class_lookup::find_or_load_resolved(&parent_name, all_classes, class_loader)
+                    .into_iter()
+                    .collect()
             } else {
                 // `Foo::` is a source-level reference: PHP resolves an
-                // unqualified name against the current namespace before
-                // the global scope, so a same-namespace class must win
-                // over a global class of the same short name.
-                let ns = current_class.and_then(|c| c.file_namespace.as_deref());
-                let fqn =
-                    crate::util::resolve_source_class_name(class, ns, all_classes, class_loader);
-                class_loader(&fqn).into_iter().collect()
+                // unqualified name through the imports, else the current
+                // namespace, never a global class of the same short name.
+                class_loader(&ctx.resolve_written_class(class))
+                    .into_iter()
+                    .collect()
             };
 
             // When the member is a static property (starts with `$`),
@@ -693,7 +691,7 @@ fn resolve_target_classes_expr_inner(
                 // through this same path, so no separate case is needed.
                 let mut const_results: Vec<ResolvedType> = Vec::new();
                 for owner in &owner_classes {
-                    let text = format!("{}::{member}", owner.fqn());
+                    let text = format!("\\{}::{member}", owner.fqn());
                     if let Some(ty) = super::call_resolution::resolve_static_access_type(&text, ctx)
                     {
                         let owning_class_name = owner.fqn().to_string();
@@ -724,12 +722,9 @@ fn resolve_target_classes_expr_inner(
         //    call parens, are the same reference written two ways ──
         SubjectExpr::ClassName(name) | SubjectExpr::NewExpr { class_name: name } => {
             // Both are source-level references: PHP resolves an
-            // unqualified name against the current namespace before the
-            // global scope, so a same-namespace class must win over a
-            // global stub of the same short name.
-            let ns = current_class.and_then(|c| c.file_namespace.as_deref());
-            let fqn = crate::util::resolve_source_class_name(name, ns, all_classes, class_loader);
-            class_loader(&fqn)
+            // unqualified name through the imports, else the current
+            // namespace, never a global class of the same short name.
+            class_loader(&ctx.resolve_written_class(name))
                 .map(ResolvedType::from_arc)
                 .into_iter()
                 .collect()
@@ -902,6 +897,8 @@ fn resolve_target_classes_expr_inner(
                     ctx.content,
                     ctx.cursor_offset,
                     class_loader,
+                    ctx.source_class_loader,
+                    ctx.source_imports,
                     ctx.backend,
                     Loaders::with_function(ctx.function_loader),
                 );
@@ -988,7 +985,7 @@ fn resolve_target_classes_expr_inner(
                 ctx.cursor_offset as usize,
                 &base_var,
             )
-            .map(|t| crate::util::resolve_php_type_names(&t, ctx.class_loader));
+            .map(|t| ctx.resolve_written_type(&t));
             // resolve_variable_types is designed for bare `$variable` names;
             // property chains like `$this->query->joins` are handled by the
             // property_raw_type strategy above.  Skip this strategy for
@@ -1032,6 +1029,8 @@ fn resolve_target_classes_expr_inner(
                         ctx.content,
                         ctx.cursor_offset,
                         class_loader,
+                        ctx.source_class_loader,
+                        ctx.source_imports,
                         ctx.backend,
                         Loaders::with_function(ctx.function_loader),
                     );
@@ -1119,10 +1118,10 @@ fn resolved_array_access_type_to_resolved(
     all_classes: &[Arc<ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Vec<ResolvedType> {
-    let current_class_name = current_class.map(|c| c.name.as_str()).unwrap_or("");
+    let current_class_fqn = current_class.map(|c| c.fqn());
     let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
         &resolved,
-        current_class_name,
+        current_class_fqn.as_deref().unwrap_or(""),
         all_classes,
         class_loader,
     );
@@ -1408,6 +1407,8 @@ pub(crate) fn resolve_subject_outcome(
                 ctx.current_class,
                 ctx.all_classes,
                 ctx.class_loader,
+                ctx.source_class_loader,
+                ctx.source_imports,
                 ctx.backend,
                 Loaders::with_function(ctx.function_loader),
             )
@@ -1485,7 +1486,7 @@ fn declared_call_return_type(
         }
         // Static method call: Foo::getInt()
         SubjectExpr::StaticMethodCall { class, method } => {
-            let cls = (ctx.class_loader)(class);
+            let cls = resolve_static_owner_class(class, ctx);
             declared_return_type_of(cls.as_slice(), method, ctx, accept)
         }
         _ => None,
@@ -1602,6 +1603,8 @@ fn resolve_this_from_scope(ctx: &ResolutionCtx<'_>) -> Option<Vec<ResolvedType>>
         ctx.content,
         ctx.cursor_offset,
         ctx.class_loader,
+        ctx.source_class_loader,
+        ctx.source_imports,
         ctx.backend,
         Loaders::with_function(ctx.function_loader),
     );
@@ -1784,15 +1787,24 @@ fn resolve_variable_fallback(
 
     // ── `$var::` where `$var` holds a class-string ──
     if access_kind == AccessKind::DoubleColon {
-        let class_string_targets =
-            crate::type_engine::variable::class_string_resolution::resolve_class_string_targets(
+        let var_ctx = VarResolutionCtx {
+            source_imports: ctx.source_imports,
+            backend: ctx.backend,
+            ..VarResolutionCtx::new(
                 var_name,
                 effective_class,
                 all_classes,
                 ctx.content,
                 ctx.cursor_offset,
                 class_loader,
-                ctx.backend,
+                ctx.source_class_loader,
+            )
+        };
+        let class_string_targets =
+            crate::type_engine::variable::class_string_resolution::resolve_class_string_targets(
+                var_name,
+                ctx.cursor_offset,
+                &var_ctx,
             );
         if !class_string_targets.is_empty() {
             return class_string_targets
@@ -1830,6 +1842,8 @@ fn resolve_variable_fallback(
                 ctx.content,
                 ctx.cursor_offset,
                 class_loader,
+                ctx.source_class_loader,
+                ctx.source_imports,
                 ctx.backend,
                 Loaders::with_function(function_loader),
             )
@@ -1856,7 +1870,7 @@ fn resolve_variable_fallback(
         ) {
             let classes = super::type_resolution::type_hint_to_classes_typed(
                 &var_type,
-                &effective_class.name,
+                &effective_class.fqn(),
                 all_classes,
                 class_loader,
             );
@@ -1925,9 +1939,7 @@ pub(in crate::type_engine) fn resolve_static_owner_class(
         // parent — load via class_loader so we get the full parent ClassInfo
         (rctx.class_loader)(&resolved_name)
     } else {
-        let ns = rctx.current_class.and_then(|c| c.file_namespace.as_deref());
-        let fqn =
-            crate::util::resolve_source_class_name(class, ns, rctx.all_classes, rctx.class_loader);
+        let fqn = rctx.resolve_written_class(class);
         (rctx.class_loader)(&fqn).or_else(|| {
             resolved_to_arcs(resolve_target_classes(
                 class,
@@ -2098,6 +2110,8 @@ fn lookup_scope_for_subject(key: &str, ctx: &ResolutionCtx<'_>) -> Option<Vec<Re
             ctx.content,
             ctx.cursor_offset,
             ctx.class_loader,
+            ctx.source_class_loader,
+            ctx.source_imports,
             ctx.backend,
             Loaders::with_function(ctx.function_loader),
         );

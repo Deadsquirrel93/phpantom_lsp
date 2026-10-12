@@ -646,15 +646,22 @@ pub(in crate::type_engine) fn resolve_receiver_types(
     crate::type_engine::resolver::resolve_target_classes(obj_text, AccessKind::Arrow, &obj_ctx)
 }
 
-/// Resolve the class name referenced by a static-call receiver
-/// expression (`self`, `static`, `parent`, or a class identifier).
+/// The FQN of the class a static-call receiver expression (`self`,
+/// `static`, `parent`, or a class identifier) names.
+///
+/// `resolve_written_class` is the context's
+/// [`resolve_written_class`](crate::type_engine::resolver::ResolutionCtx::resolve_written_class),
+/// which reads `self`, `static` and `parent` against the enclosing class.
 pub(in crate::type_engine) fn static_receiver_class_name(
     class_expr: &Expression<'_>,
     current_class: Option<&ClassInfo>,
+    resolve_written_class: &dyn Fn(&str) -> String,
 ) -> Option<String> {
     match class_expr {
-        Expression::Self_(_) | Expression::Static(_) => current_class.map(|cc| cc.name.to_string()),
-        Expression::Identifier(ident) => Some(bytes_to_str(ident.value()).to_string()),
+        Expression::Self_(_) | Expression::Static(_) => {
+            current_class.map(|cc| cc.fqn().to_string())
+        }
+        Expression::Identifier(ident) => Some(resolve_written_class(bytes_to_str(ident.value()))),
         Expression::Parent(_) => {
             current_class.and_then(|cc| cc.parent_class.map(|a| a.to_string()))
         }
@@ -662,18 +669,18 @@ pub(in crate::type_engine) fn static_receiver_class_name(
     }
 }
 
-/// Look up a class by name: local classes first, then the cross-file
+/// Look up a class by its FQN: local classes first, then the cross-file
 /// loader.
 pub(in crate::type_engine) fn find_owner_by_name(
-    name: &str,
+    fqn: &str,
     all_classes: &[Arc<ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<ClassInfo> {
     all_classes
         .iter()
-        .find(|c| c.name == name)
+        .find(|c| c.fqn().eq_ignore_ascii_case(fqn))
         .map(|c| ClassInfo::clone(c))
-        .or_else(|| class_loader(name).map(Arc::unwrap_or_clone))
+        .or_else(|| class_loader(fqn).map(Arc::unwrap_or_clone))
 }
 
 /// Look up `closure_this_type` on an instance method's parameter at
@@ -711,7 +718,9 @@ fn closure_this_from_static_receiver(
     arg_idx: usize,
     ctx: &ResolutionCtx<'_>,
 ) -> Option<Vec<ResolvedType>> {
-    let class_name = static_receiver_class_name(class_expr, ctx.current_class)?;
+    let class_name = static_receiver_class_name(class_expr, ctx.current_class, &|name| {
+        ctx.resolve_written_class(name)
+    })?;
 
     if method_name.eq_ignore_ascii_case("macro")
         && arg_idx == 1

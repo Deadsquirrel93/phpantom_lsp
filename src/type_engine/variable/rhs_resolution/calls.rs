@@ -161,7 +161,7 @@ pub(crate) fn resolve_arg_variable_raw_type(
         rctx.cursor_offset as usize,
         var_name,
     )
-    .map(|t| crate::util::resolve_php_type_names(&t, rctx.class_loader))
+    .map(|t| rctx.resolve_written_type(&t))
     {
         return Some(raw);
     }
@@ -260,6 +260,8 @@ pub(crate) fn resolve_arg_variable_raw_type(
         rctx.content,
         rctx.cursor_offset,
         rctx.class_loader,
+        rctx.source_class_loader,
+        rctx.source_imports,
         rctx.backend,
         Loaders::with_function(rctx.function_loader),
     );
@@ -522,12 +524,7 @@ pub(crate) fn infer_closure_literal_type(
             .filter_map(|param| {
                 let hint = param.hint.as_ref()?;
                 let name = bytes_to_str(param.variable.name).to_string();
-                let ty = crate::util::resolve_source_php_type_names(
-                    &crate::parser::extract_hint_type(hint),
-                    ctx.current_class.file_namespace.as_deref(),
-                    ctx.all_classes,
-                    ctx.class_loader,
-                );
+                let ty = ctx.resolve_hint_type(&crate::parser::extract_hint_type(hint));
                 Some((name, ty))
             })
             .collect();
@@ -560,12 +557,7 @@ pub(crate) fn infer_closure_literal_type(
         // `: Closure` on a closure whose body returns a closure with a
         // known signature).
         Some(declared) => {
-            let declared = crate::util::resolve_source_php_type_names(
-                &declared,
-                ctx.current_class.file_namespace.as_deref(),
-                ctx.all_classes,
-                ctx.class_loader,
-            );
+            let declared = ctx.resolve_written_type(&declared);
             let narrowed = body_return().filter(|body| {
                 crate::class_lookup::is_subtype_of_typed(body, &declared, ctx.class_loader)
             });
@@ -642,14 +634,7 @@ fn declared_closure_params(
             type_hint: param
                 .hint
                 .as_ref()
-                .map(|hint| {
-                    crate::util::resolve_source_php_type_names(
-                        &crate::parser::extract_hint_type(hint),
-                        ctx.current_class.file_namespace.as_deref(),
-                        ctx.all_classes,
-                        ctx.class_loader,
-                    )
-                })
+                .map(|hint| ctx.resolve_hint_type(&crate::parser::extract_hint_type(hint)))
                 .unwrap_or_else(PhpType::mixed),
             optional: param.default_value.is_some(),
             variadic: param.ellipsis.is_some(),
@@ -694,7 +679,8 @@ pub(super) fn resolve_rhs_function_call<'b>(
     expr: &'b Expression<'b>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Vec<ResolvedType> {
-    let current_class_name: &str = &ctx.current_class.name;
+    let current_class_fqn = ctx.current_class.fqn();
+    let current_class_name: &str = &current_class_fqn;
     let all_classes = ctx.all_classes;
     let content = ctx.content;
     let class_loader = ctx.class_loader;
@@ -738,7 +724,7 @@ pub(super) fn resolve_rhs_function_call<'b>(
                         let resolved =
                             crate::type_engine::type_resolution::type_hint_to_classes_typed(
                                 ret,
-                                &ctx.current_class.name,
+                                &ctx.current_class.fqn(),
                                 ctx.all_classes,
                                 ctx.class_loader,
                             );
@@ -747,7 +733,7 @@ pub(super) fn resolve_rhs_function_call<'b>(
                         }
                         return vec![resolved_type_with_lookup(
                             ret.clone(),
-                            &ctx.current_class.name,
+                            &ctx.current_class.fqn(),
                             ctx.all_classes,
                             ctx.class_loader,
                         )];
@@ -1013,8 +999,9 @@ pub(super) fn resolve_rhs_function_call<'b>(
                     crate::type_engine::conditional_resolution::ConditionalClassContext {
                         calling: Some(current_class_name),
                         declaring: None,
+                        written_class: Some(&|name: &str| ctx.resolve_written_class(name)),
                     },
-                    class_loader,
+                    ctx.class_loader,
                     &tpl,
                 )
             })
@@ -1145,7 +1132,7 @@ pub(super) fn resolve_rhs_function_call<'b>(
         //    `@param callable(int): Response $fn`
         if let Some(raw_type) =
             crate::docblock::find_iterable_raw_type_in_source(content, offset, &var_name)
-                .map(|t| crate::util::resolve_php_type_names(&t, class_loader))
+                .map(|t| ctx.resolve_written_type(&t))
             && let Some(ret_type) = raw_type.callable_return_type()
         {
             let resolved = callable_return_resolution(ret_type, ctx);
@@ -1232,7 +1219,7 @@ pub(super) fn resolve_rhs_function_call<'b>(
         // `(fn (): Foo => …)()` or `(function (): Foo { … })()`
         // Extract the return type from the literal instead of going
         // through `__invoke()` on the generic `Closure` stub.
-        if let Some(parsed_ret_type) = extract_closure_or_arrow_return_type(callee_expr) {
+        if let Some(parsed_ret_type) = extract_closure_or_arrow_return_type(callee_expr, ctx) {
             let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
                 &parsed_ret_type,
                 current_class_name,
@@ -1332,7 +1319,7 @@ fn joined_callable_return(types: &[ResolvedType]) -> Option<PhpType> {
 fn callable_return_resolution(ret_type: &PhpType, ctx: &VarResolutionCtx<'_>) -> Vec<ResolvedType> {
     let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
         ret_type,
-        &ctx.current_class.name,
+        &ctx.current_class.fqn(),
         ctx.all_classes,
         ctx.class_loader,
     );
@@ -1344,7 +1331,7 @@ fn callable_return_resolution(ret_type: &PhpType, ctx: &VarResolutionCtx<'_>) ->
     }
     vec![resolved_type_with_lookup(
         ret_type.clone(),
-        &ctx.current_class.name,
+        &ctx.current_class.fqn(),
         ctx.all_classes,
         ctx.class_loader,
     )]
@@ -1358,7 +1345,7 @@ fn closure_call_return(
     ctx: &VarResolutionCtx<'_>,
 ) -> Option<Vec<ResolvedType>> {
     let closure = crate::parser::unwrap_parens(object);
-    if let Some(declared) = extract_closure_or_arrow_return_type(closure) {
+    if let Some(declared) = extract_closure_or_arrow_return_type(closure, ctx) {
         let resolved = callable_return_resolution(&declared, ctx);
         return (!resolved.is_empty()).then_some(resolved);
     }
@@ -1403,7 +1390,7 @@ fn array_callable_return(callable: &PhpType, ctx: &VarResolutionCtx<'_>) -> Vec<
     }
     let owners = crate::type_engine::type_resolution::type_hint_to_classes_typed(
         &receiver.value_type,
-        &ctx.current_class.name,
+        &ctx.current_class.fqn(),
         ctx.all_classes,
         ctx.class_loader,
     );
@@ -2001,7 +1988,7 @@ pub(super) fn resolve_conditional_return_for_call(
     method_ref: Option<&crate::types::MethodInfo>,
     text_args: &str,
     var_resolver: crate::type_engine::conditional_resolution::VarClassStringResolver<'_>,
-    calling_class_name: &str,
+    call_site: crate::type_engine::conditional_resolution::ConditionalClassContext<'_>,
     owner: &ClassInfo,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     template_subs: &HashMap<String, PhpType>,
@@ -2018,8 +2005,8 @@ pub(super) fn resolve_conditional_return_for_call(
     let params = method.parameters.as_slice();
     let declaring_fqn = owner.fqn();
     let class_ctx = crate::type_engine::conditional_resolution::ConditionalClassContext {
-        calling: Some(calling_class_name),
         declaring: Some(declaring_fqn.as_str()),
+        ..call_site
     };
     let class_values =
         crate::inheritance::class_scoped_template_values(template_subs, method.template_params());
@@ -2294,7 +2281,8 @@ pub(super) fn resolve_owner_method_call(
     template_subs: &HashMap<String, PhpType>,
     self_replace: &dyn Fn(&PhpType) -> PhpType,
 ) -> Vec<ResolvedType> {
-    let current_class_name: &str = &ctx.current_class.name;
+    let current_class_fqn = ctx.current_class.fqn();
+    let current_class_name: &str = &current_class_fqn;
     let arg_texts = crate::type_engine::variable::raw_type_inference::extract_arg_texts_from_ast(
         argument_list,
         ctx.content,
@@ -2302,6 +2290,7 @@ pub(super) fn resolve_owner_method_call(
     let text_args = arg_texts.join(", ");
     let rctx = ctx.as_resolution_ctx();
     let var_resolver = build_var_resolver_from_ctx(ctx);
+    let written = |name: &str| ctx.resolve_written_class(name);
 
     // Try the owner directly first — it may already be fully resolved with
     // generic substitutions applied.  The cache is keyed by bare FQN and
@@ -2391,7 +2380,11 @@ pub(super) fn resolve_owner_method_call(
         method_ref,
         &text_args,
         Some(&var_resolver),
-        current_class_name,
+        crate::type_engine::conditional_resolution::ConditionalClassContext {
+            calling: Some(current_class_name),
+            declaring: None,
+            written_class: Some(&written),
+        },
         owner,
         ctx.class_loader,
         template_subs,
@@ -2423,6 +2416,7 @@ pub(super) fn resolve_owner_method_call(
                 crate::type_engine::conditional_resolution::ConditionalClassContext {
                     calling: Some(current_class_name),
                     declaring: Some(owner.fqn().as_str()),
+                    written_class: Some(&written),
                 },
                 ctx.class_loader,
                 &tpl,
@@ -2459,7 +2453,8 @@ pub(super) fn resolve_owner_method_call(
         template_subs,
         var_resolver: Some(&var_resolver),
         cache: ctx.resolved_class_cache,
-        calling_class_name: Some(&ctx.current_class.name),
+        calling_class_name: Some(ctx.current_class.fqn().as_str()),
+        written_class: Some(&written),
         is_static,
         call_args: Some(&call_args),
     };
@@ -2523,7 +2518,7 @@ pub(super) fn resolve_owner_method_call(
     if let Some(hint) = ret_type_string {
         let expanded = crate::type_engine::type_resolution::resolve_type_alias_typed(
             &hint,
-            &owner.name,
+            &owner.fqn(),
             ctx.all_classes,
             ctx.class_loader,
         );
@@ -2550,7 +2545,8 @@ pub(super) fn resolve_rhs_static_call(
         return super::runtime_named_member_type();
     }
 
-    let current_class_name: &str = &ctx.current_class.name;
+    let current_class_fqn = ctx.current_class.fqn();
+    let current_class_name: &str = &current_class_fqn;
 
     // `self::`, `static::`, and `parent::` all forward late static binding, so
     // `@return static` on the target stays bound to the class the call is made
@@ -2569,7 +2565,8 @@ pub(super) fn resolve_rhs_static_call(
             static_call.class,
             ctx.current_class,
             ctx.all_classes,
-            ctx.class_loader,
+            ctx.source_class_loader,
+            ctx.source_imports,
         ),
         // ── `$var::method()` where `$var` holds a class-string ──
         Expression::Variable(Variable::Direct(dv)) => {
@@ -2577,12 +2574,8 @@ pub(super) fn resolve_rhs_static_call(
             let targets =
                 crate::type_engine::variable::class_string_resolution::resolve_class_string_targets(
                     &var_name,
-                    ctx.current_class,
-                    ctx.all_classes,
-                    ctx.content,
                     ctx.cursor_offset,
-                    ctx.class_loader,
-                    ctx.backend,
+                    ctx,
                 );
             // When there are multiple possible class targets (union class-string),
             // resolve the method return type through each and union the results.
@@ -2613,7 +2606,8 @@ pub(super) fn resolve_rhs_static_call(
                             template_subs: &template_subs,
                             var_resolver: Some(&var_resolver),
                             cache: ctx.resolved_class_cache,
-                            calling_class_name: Some(&ctx.current_class.name),
+                            calling_class_name: Some(ctx.current_class.fqn().as_str()),
+                            written_class: Some(&|name: &str| ctx.resolve_written_class(name)),
                             is_static: true,
                             // Only reached when the target has no such
                             // method, so the call resolves through a
@@ -2650,10 +2644,8 @@ pub(super) fn resolve_rhs_static_call(
                                 &mr_ctx,
                             );
                             for r in results {
-                                union_classes.push(ResolvedType::from_both_arc(
-                                    PhpType::named(atom(r.name.as_ref())),
-                                    r,
-                                ));
+                                union_classes
+                                    .push(ResolvedType::from_both_arc(PhpType::named(r.fqn()), r));
                             }
                         }
                     }
@@ -2686,7 +2678,7 @@ pub(super) fn resolve_rhs_static_call(
                 return vec![];
             }
             if let Some(first) = targets.first() {
-                Some(first.name.to_string())
+                Some(first.fqn().to_string())
             } else {
                 // Fallback: resolve the variable's type and extract the
                 // inner type from `class-string<T>`.  This handles
@@ -2742,9 +2734,7 @@ pub(super) fn resolve_rhs_static_call(
         let owner = (ctx.class_loader)(&cls_name)
             .map(Arc::unwrap_or_clone)
             .or_else(|| {
-                ctx.all_classes
-                    .iter()
-                    .find(|c| c.name == cls_name)
+                crate::class_lookup::find_class_by_fqn(ctx.all_classes, &cls_name)
                     .map(|c| ClassInfo::clone(c))
             });
         if let Some(ref owner) = owner {

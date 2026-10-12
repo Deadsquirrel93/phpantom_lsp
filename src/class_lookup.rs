@@ -161,6 +161,11 @@ pub(crate) fn find_class_by_fqn<'a>(
         None => (None, fqn),
     };
     all_classes.iter().find(|c| {
+        // An anonymous class's FQN carries the URI it was parsed from,
+        // which the split above does not take apart.
+        if c.name.starts_with(crate::types::ANONYMOUS_CLASS_PREFIX) {
+            return c.fqn().eq_ignore_ascii_case(fqn);
+        }
         c.name.eq_ignore_ascii_case(short)
             && match (c.file_namespace.as_deref(), namespace) {
                 (Some(a), Some(b)) => a.eq_ignore_ascii_case(b),
@@ -179,9 +184,10 @@ pub(crate) fn find_class_by_fqn<'a>(
 /// forwards it), and `parent` with its parent, or `None` when it has
 /// none.
 ///
-/// A name is resolved the way PHP resolves it in source (see
-/// [`crate::util::resolve_source_class_name`]): a class in the current
-/// namespace shadows a global one of the same name.
+/// A name is resolved the way PHP resolves it in code (see
+/// [`crate::util::resolve_code_class_name`]): through `imports`, else in
+/// the current namespace, never falling back to a global class when the
+/// imports are known.
 ///
 /// Every other expression kind (a variable holding a class-string, a call)
 /// needs resolution this cannot do and yields `None`; a caller that
@@ -191,16 +197,18 @@ pub(crate) fn class_expression_name(
     current_class: &ClassInfo,
     local_classes: &[Arc<ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    imports: crate::type_engine::resolver::SourceImports<'_>,
 ) -> Option<String> {
     use mago_syntax::cst::Expression;
     match expr {
-        Expression::Identifier(ident) => Some(crate::util::resolve_source_class_name(
+        Expression::Identifier(ident) => Some(crate::util::resolve_code_class_name(
             crate::atom::bytes_to_str(ident.value()),
             current_class.file_namespace.as_deref(),
+            imports,
             local_classes,
             class_loader,
         )),
-        Expression::Self_(_) | Expression::Static(_) => Some(current_class.name.to_string()),
+        Expression::Self_(_) | Expression::Static(_) => Some(current_class.fqn().to_string()),
         Expression::Parent(_) => current_class.parent_class.map(|a| a.to_string()),
         _ => None,
     }
@@ -262,35 +270,54 @@ pub(crate) fn resolve_class_keyword(
 /// that is the class itself.
 ///
 /// `parent_class`, `interfaces`, and `used_traits` hold canonical FQNs, so
-/// a backslash-free entry names a root-namespace class.  The class loader
-/// applies the *consuming* file's `use` imports to bare names, which is
-/// right for a name a user typed and wrong here: resolving
-/// `Nette\Neon\Exception extends \Exception` while answering a question
-/// asked from a file that says `use Nette\Neon\Exception;` turns the stored
-/// `Exception` back into the subclass.  The re-entry guard then cuts the
-/// chain and every member the real `\Exception` provides goes missing.
+/// a backslash-free entry names a root-namespace class.  The name is looked
+/// up fully qualified: a source-name loader would apply the *consuming*
+/// file's imports and namespace to it, so resolving
+/// `Nette\Neon\Exception extends \Exception` from a file that says
+/// `use Nette\Neon\Exception;` would turn the stored `Exception` back into
+/// the subclass, and from any other namespace would miss it entirely.
 ///
-/// PHP has no self-inheritance, so an answer naming the class we started
-/// from is proof that an import won a lookup it had no business in, and the
-/// name is retried as the explicit global reference it stood for.  A stored
-/// name that is already qualified and still resolves to the class itself is
-/// a genuine cycle and yields nothing.
+/// PHP has no self-inheritance, so a name that still resolves to the class
+/// itself is a genuine cycle and yields nothing.
 pub(crate) fn load_ancestor(
     class_fqn: &str,
     ancestor_name: &str,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<Arc<ClassInfo>> {
-    let loaded = class_loader(ancestor_name);
-    let is_self = |cls: &ClassInfo| cls.fqn().eq_ignore_ascii_case(class_fqn);
-    match loaded {
-        Some(cls) if is_self(&cls) => {
-            if ancestor_name.contains('\\') {
-                return None;
-            }
-            class_loader(&format!("\\{ancestor_name}")).filter(|c| !is_self(c))
-        }
-        other => other,
+    load_resolved_name(ancestor_name, class_loader)
+        .filter(|cls| !cls.fqn().eq_ignore_ascii_case(class_fqn))
+}
+
+/// Load the class an already-resolved `name` names, whichever loader
+/// `class_loader` is.
+///
+/// A resolved name is fully qualified.  A source-name loader would resolve
+/// it against the consuming file's imports and namespace (`Exception`
+/// through `use Foo\Exception;`, `App\Model` as `App\App\Model` inside
+/// `namespace App`), so it is looked up as the explicit reference `\Name`,
+/// which every loader reads as exactly that class.  A miss is final: read
+/// any other way, a class that does not exist would be answered by a
+/// same-named import.
+pub(crate) fn load_resolved_name(
+    name: &str,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Option<Arc<ClassInfo>> {
+    if name.starts_with('\\') {
+        return class_loader(name);
     }
+    class_loader(&format!("\\{name}"))
+}
+
+/// The class an already-resolved `fqn` names: one of `all_classes`, else
+/// whatever `class_loader` loads for it (see [`load_resolved_name`]).
+pub(crate) fn find_or_load_resolved(
+    fqn: &str,
+    all_classes: &[Arc<ClassInfo>],
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Option<Arc<ClassInfo>> {
+    find_class_by_fqn(all_classes, fqn)
+        .map(Arc::clone)
+        .or_else(|| load_resolved_name(fqn, class_loader))
 }
 
 /// Check whether `child` is a subclass (direct or transitive) of
@@ -341,18 +368,9 @@ pub(crate) fn is_subtype_of(
     // wrong here: when a calling file has `use App\Iterator;`, loading the
     // global `\Iterator` interface node inside an SPL class's hierarchy
     // would return `App\Iterator` and break the walk (so subtype checks
-    // against `Iterator`/`Traversable` spuriously fail).  Route
-    // backslash-free names through the `__fqn__\` bypass, which skips the
-    // use-map and falls back to a global short-name lookup.  The
-    // `.or_else` preserves the raw loader for genuine short names that
-    // have no global class (they resolve via namespace context as before).
-    let load_fqn = |name: &str| -> Option<Arc<ClassInfo>> {
-        if name.contains('\\') {
-            class_loader(name)
-        } else {
-            class_loader(&format!("__fqn__\\{name}")).or_else(|| class_loader(name))
-        }
-    };
+    // against `Iterator`/`Traversable` spuriously fail).  So every name
+    // is loaded as the resolved name it is.
+    let load_fqn = |name: &str| load_resolved_name(name, class_loader);
 
     // Resolve the ancestor to its FQN so that all comparisons below are
     // FQN-vs-FQN.  When `ancestor_name` is already a FQN (contains `\`)

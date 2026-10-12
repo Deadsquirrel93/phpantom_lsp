@@ -51,6 +51,8 @@ impl Backend {
         };
 
         let class_loader = self.class_loader(ctx);
+
+        let resolved_class_loader = self.resolved_class_loader(ctx);
         let function_loader = self.function_loader(ctx);
         let laravel_macro_this_resolver = self.laravel_macro_this_resolver(&class_loader);
 
@@ -70,10 +72,12 @@ impl Backend {
             content,
             cursor_offset,
             CtxLoaders::new(
+                &resolved_class_loader,
                 &class_loader,
                 &function_loader,
                 &laravel_macro_this_resolver,
-            ),
+            )
+            .with_imports(&ctx.use_map),
         );
         let mut resolved = if suppress {
             vec![]
@@ -85,8 +89,11 @@ impl Backend {
         if resolved.is_empty() && !suppress && target.subject.starts_with('$') {
             let patched = Self::patch_incomplete_member_access(content, position);
             if patched != content {
-                let patched_classes: Vec<Arc<crate::types::ClassInfo>> =
-                    self.parse_php(&patched).into_iter().map(Arc::new).collect();
+                let patched_classes: Vec<Arc<crate::types::ClassInfo>> = self
+                    .parse_php_resolved(&patched)
+                    .into_iter()
+                    .map(Arc::new)
+                    .collect();
                 let patched_offset = position_to_offset(&patched, position);
                 let patched_current = find_class_at_offset(&patched_classes, patched_offset);
                 let patched_rctx = self.resolution_ctx_at(
@@ -95,10 +102,12 @@ impl Backend {
                     &patched,
                     patched_offset,
                     CtxLoaders::new(
+                        &resolved_class_loader,
                         &class_loader,
                         &function_loader,
                         &laravel_macro_this_resolver,
-                    ),
+                    )
+                    .with_imports(&ctx.use_map),
                 );
                 resolved =
                     resolve_target_classes(&target.subject, target.access_kind, &patched_rctx);
@@ -148,7 +157,7 @@ impl Backend {
                         &candidates,
                         effective_access,
                         current_class,
-                        &class_loader,
+                        &resolved_class_loader,
                         &self.resolved_class_cache,
                         uri,
                     )
@@ -312,7 +321,8 @@ impl Backend {
             return None;
         }
 
-        let class_loader = self.class_loader(ctx);
+        let class_loader = self.resolved_class_loader(ctx);
+
         let (partial, range) = extract_method_name_partial(content, position)?;
 
         if is_after_function_keyword(content, position) {
@@ -477,7 +487,8 @@ impl Backend {
             return Some(items);
         }
 
-        let class_loader = self.class_loader(ctx);
+        let class_loader = self.resolved_class_loader(ctx);
+
         let indent = indent_for_position(content, position, class);
         let line_start = line_start_position(content, position);
         let php_version = self.php_version();

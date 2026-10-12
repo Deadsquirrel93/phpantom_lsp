@@ -14539,3 +14539,249 @@ fn a_template_shadows_a_class_of_the_same_name_in_return_checks() {
         "`T` is the template, not the global trait, got: {diags:?}"
     );
 }
+
+/// `new ReflectionClass($this)` inside a namespaced class binds the stub's
+/// template to that class, not to a global class of the same short name.
+#[test]
+fn reflection_class_of_this_binds_template_to_namespaced_class() {
+    let php = r#"<?php
+namespace {
+    class Request {}
+}
+
+namespace App\Requests {
+
+use ReflectionClass;
+use ReflectionProperty;
+
+abstract class Request {
+    /** @return array<string, mixed> */
+    public function toArray(): array {
+        $reflection = new ReflectionClass($this);
+        $out = [];
+        foreach ($reflection->getProperties(ReflectionProperty::IS_PRIVATE) as $var) {
+            $out[$var->getName()] = $var->getValue($this);
+        }
+        return $out;
+    }
+}
+}
+"#;
+    let diags = collect_with_full_stubs(php);
+    assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+}
+
+/// A `@return` naming an imported subclass that shares its short name with
+/// the native return type refines that type rather than repeating it.
+#[test]
+fn docblock_subclass_sharing_native_short_name_refines_return() {
+    let php = r#"<?php
+namespace Adapter {
+    use ReflectionProperty as CoreReflectionProperty;
+
+    final class ReflectionProperty extends CoreReflectionProperty {}
+
+    final class ReflectionClass {
+        /** @return ReflectionProperty */
+        public function getProperty(string $name): \ReflectionProperty {}
+    }
+}
+
+namespace Consumer {
+    use Adapter\ReflectionClass;
+    use Adapter\ReflectionProperty;
+
+    function take(ReflectionProperty $p): void {}
+
+    function run(ReflectionClass $c): void {
+        take($c->getProperty('x'));
+    }
+}
+"#;
+    let diags = collect_with_full_stubs(php);
+    assert!(!has_type_error(&diags), "unexpected diagnostics: {diags:?}");
+}
+
+/// A docblock class that is not the native class or a subclass of it does
+/// not replace the native type: PHP enforces the hint, so a method's return
+/// value and the argument it takes are what the hint says.
+#[test]
+fn docblock_class_unrelated_to_native_type_loses_to_it() {
+    let lib = r#"<?php
+namespace Lib;
+
+class Base {}
+class Other {}
+
+class Factory {
+    /** @return Other */
+    public function make(): Base { return new Base(); }
+
+    /** @param Other $b */
+    public function take(Base $b): void {}
+}
+"#;
+    let php = r#"<?php
+namespace App;
+
+use Lib\Base;
+use Lib\Factory;
+use Lib\Other;
+
+function takeBase(Base $b): void {}
+function takeOther(Other $o): void {}
+
+function run(Factory $f): void {
+    takeBase($f->make());
+    $f->take(new Base());
+    takeOther($f->make());
+}
+"#;
+    let backend = create_test_backend();
+    backend.update_ast("file:///lib.php", lib);
+    backend.update_ast("file:///test.php", php);
+    let mut out = Vec::new();
+    backend.collect_argument_type_diagnostics("file:///test.php", php, &mut out);
+    let msgs = messages_with_code(&out, "type_mismatch_argument");
+    assert_eq!(
+        msgs.len(),
+        1,
+        "only `takeOther($f->make())` passes a `Base` where an `Other` is expected, got: {msgs:?}"
+    );
+    assert!(msgs[0].contains("Other"), "got: {msgs:?}");
+}
+
+/// The same for a property, a promoted constructor property, and a
+/// function's return type and parameter.
+#[test]
+fn docblock_class_unrelated_to_native_property_or_function_type_loses_to_it() {
+    let php = r#"<?php
+namespace App;
+
+class Base {}
+class Other {}
+
+class Holder {
+    /** @var Other */
+    public Base $item;
+
+    public function __construct(
+        /** @var Other */
+        public Base $promoted,
+    ) {}
+}
+
+/** @return Other */
+function make(): Base { return new Base(); }
+
+/** @param Other $b */
+function handle(Base $b): void {}
+
+function takeBase(Base $b): void {}
+
+function run(Holder $h): void {
+    takeBase($h->item);
+    takeBase($h->promoted);
+    takeBase(make());
+    handle(new Base());
+    new Holder(new Base());
+}
+"#;
+    let diags = collect(php);
+    assert!(!has_type_error(&diags), "unexpected diagnostics: {diags:?}");
+}
+
+/// A docblock class that does narrow the native type still refines it: a
+/// subclass of a native class, and a class implementing a native interface.
+#[test]
+fn docblock_class_narrowing_native_type_still_refines_it() {
+    let lib = r#"<?php
+namespace Lib;
+
+interface Shape {}
+class Base {}
+final class Sub extends Base {}
+final class Circle implements Shape {}
+
+class Factory {
+    /** @return Sub */
+    public function make(): Base { return new Sub(); }
+
+    /** @return Circle|null */
+    public function shape(): ?Shape { return new Circle(); }
+
+    /** @var Sub */
+    public Base $item;
+}
+
+/** @return Sub */
+function make(): Base { return new Sub(); }
+"#;
+    let php = r#"<?php
+namespace App;
+
+use Lib\Circle;
+use Lib\Factory;
+use Lib\Sub;
+
+function takeSub(Sub $s): void {}
+function takeCircle(?Circle $c): void {}
+
+function run(Factory $f): void {
+    takeSub($f->make());
+    takeCircle($f->shape());
+    takeSub($f->item);
+    takeSub(\Lib\make());
+}
+"#;
+    let backend = create_test_backend();
+    backend.update_ast("file:///lib.php", lib);
+    backend.update_ast("file:///test.php", php);
+    let mut out = Vec::new();
+    backend.collect_argument_type_diagnostics("file:///test.php", php, &mut out);
+    let msgs = messages_with_code(&out, "type_mismatch_argument");
+    assert!(msgs.is_empty(), "unexpected diagnostics: {msgs:?}");
+}
+
+/// `self::NUM` in a class that shares its short name with a global class
+/// reads the constant off the enclosing class, not off the global one.
+#[test]
+fn self_constant_argument_binds_template_in_class_named_like_global() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+namespace {
+    class Clash {}
+}
+
+namespace App {
+    /**
+     * @template T
+     * @param T $x
+     * @return T
+     */
+    function id(mixed $x): mixed { return $x; }
+
+    function takesString(string $s): void {}
+
+    class Clash
+    {
+        const NUM = 5;
+
+        public function f(): void
+        {
+            takesString(id(self::NUM));
+        }
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        diags.iter().any(|d| d.message.contains("got 5")),
+        "`id(self::NUM)` must bind `T` to the constant's value, got: {diags:?}",
+    );
+    assert!(
+        !diags.iter().any(|d| d.message.contains("Clash")),
+        "`self` is `App\\Clash`, not the class itself as a value, got: {diags:?}",
+    );
+}

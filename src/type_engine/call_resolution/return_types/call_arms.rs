@@ -20,6 +20,7 @@ impl Backend {
         ctx: &ResolutionCtx<'_>,
         mut return_type_hint_out: Option<&mut Option<PhpType>>,
     ) -> Vec<Arc<ClassInfo>> {
+        let written = |name: &str| ctx.resolve_written_class(name);
         // Resolve the base expression preserving generic type
         // arguments (e.g. `Collection<Product>`) so class-level
         // template parameters can be substituted in the method's
@@ -190,7 +191,11 @@ impl Backend {
                         text_args,
                         Some(&var_resolver),
                         &template_subs,
-                        ctx.current_class.map(|c| c.name.as_str()),
+                        crate::type_engine::conditional_resolution::ConditionalClassContext {
+                            calling: ctx.current_class.map(|c| c.fqn().as_str()),
+                            declaring: None,
+                            written_class: Some(&written),
+                        },
                         &merged,
                         ctx.class_loader,
                     )
@@ -228,8 +233,9 @@ impl Backend {
                                 text_args,
                                 Some(&var_resolver),
                                 crate::type_engine::conditional_resolution::ConditionalClassContext {
-                                    calling: ctx.current_class.map(|c| c.name.as_str()),
+                                    calling: ctx.current_class.map(|c| c.fqn().as_str()),
                                     declaring: Some(merged.fqn().as_str()),
+                                    written_class: Some(&written),
                                 },
                                 ctx.class_loader,
                                 &tpl,
@@ -257,7 +263,8 @@ impl Backend {
                     hint_captured = true;
                 }
             }
-            let mr_ctx = MethodReturnCtx::for_call(ctx, &template_subs, &var_resolver, false);
+            let mr_ctx =
+                MethodReturnCtx::for_call(ctx, &template_subs, &var_resolver, &written, false);
             if let Some((date_class, date_return_type)) =
                 Self::configured_laravel_date_return(&owner, method_name, ctx.class_loader)
             {
@@ -293,6 +300,7 @@ impl Backend {
         ctx: &ResolutionCtx<'_>,
         mut return_type_hint_out: Option<&mut Option<PhpType>>,
     ) -> Vec<Arc<ClassInfo>> {
+        let written = |name: &str| ctx.resolve_written_class(name);
         let owner_class = if class.starts_with('$') {
             // Variable holding a class-string (e.g. `$cls::make()`).
             // May resolve to multiple classes for union class-strings.
@@ -313,8 +321,13 @@ impl Backend {
                     let template_subs =
                         Self::build_method_template_subs(owner, method_name, &arg_refs, ctx);
                     let var_resolver = build_var_resolver(ctx);
-                    let mr_ctx =
-                        MethodReturnCtx::for_call(ctx, &template_subs, &var_resolver, true);
+                    let mr_ctx = MethodReturnCtx::for_call(
+                        ctx,
+                        &template_subs,
+                        &var_resolver,
+                        &written,
+                        true,
+                    );
                     ClassInfo::extend_unique_arc(
                         &mut union_results,
                         Self::resolve_method_return_types_with_args(
@@ -395,7 +408,8 @@ impl Backend {
             }
 
             let var_resolver = build_var_resolver(ctx);
-            let mr_ctx = MethodReturnCtx::for_call(ctx, &template_subs, &var_resolver, true);
+            let mr_ctx =
+                MethodReturnCtx::for_call(ctx, &template_subs, &var_resolver, &written, true);
             if let Some((date_class, date_return_type)) =
                 Self::configured_laravel_date_return(&merged, method_name, ctx.class_loader)
             {
@@ -421,6 +435,7 @@ impl Backend {
         ctx: &ResolutionCtx<'_>,
         mut return_type_hint_out: Option<&mut Option<PhpType>>,
     ) -> Vec<Arc<ClassInfo>> {
+        let written = |name: &str| ctx.resolve_written_class(name);
         // ── Laravel container string binding ────────────────
         // `app('blade.compiler')` / `resolve('cache')` bind a plain
         // string to a concrete class.  The class-string form
@@ -478,7 +493,8 @@ impl Backend {
         // assignment right-hand side; here they cover every
         // inline use (`array_map(…)[0]`, `f(array_filter(…))`).
         if !text_args.is_empty() {
-            let owner_name = ctx.current_class.map(|c| c.name.as_str()).unwrap_or("");
+            let owner_fqn = ctx.current_class.map(ClassInfo::fqn);
+            let owner_name = owner_fqn.as_deref().unwrap_or("");
             let fn_args = TextArrayFuncArgs::new(text_args, ctx);
 
             // String builtins over literal arguments: the stub
@@ -572,12 +588,16 @@ impl Backend {
                             arg_type_resolver: Some(&arg_ty_resolver),
                             this_type: None,
                         };
-                        resolve_conditional_with_text_args(
+                        resolve_conditional_with_text_args_and_defaults(
                             cond,
                             &func_info.parameters,
                             text_args,
                             Some(&var_resolver),
-                            ctx.current_class.map(|c| c.name.as_str()),
+                            crate::type_engine::conditional_resolution::ConditionalClassContext {
+                                calling: ctx.current_class.map(|c| c.fqn().as_str()),
+                                declaring: None,
+                                written_class: Some(&written),
+                            },
                             ctx.class_loader,
                             &tpl,
                         )
@@ -730,7 +750,7 @@ impl Backend {
             cursor_offset as usize,
             var_name,
         )
-        .map(|t| crate::util::resolve_php_type_names(&t, ctx.class_loader))
+        .map(|t| ctx.resolve_written_type(&t))
             && let Some(ret_type) = raw_type.callable_return_type()
         {
             let classes: Vec<Arc<ClassInfo>> =
@@ -810,13 +830,7 @@ impl Backend {
         // resolves against the current namespace before the global
         // scope, so a same-namespace class wins over a global stub
         // of the same short name.
-        let ns = ctx.current_class.and_then(|c| c.file_namespace.as_deref());
-        let fqn = crate::util::resolve_source_class_name(
-            class_name,
-            ns,
-            ctx.all_classes,
-            ctx.class_loader,
-        );
+        let fqn = ctx.resolve_written_class(class_name);
         let cls_arc = crate::class_lookup::find_class_by_fqn(ctx.all_classes, &fqn)
             .map(Arc::clone)
             .or_else(|| (ctx.class_loader)(&fqn));

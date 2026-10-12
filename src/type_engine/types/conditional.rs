@@ -7,7 +7,7 @@
 ///
 /// Two resolution paths are supported:
 ///
-/// - **Text-based** ([`resolve_conditional_with_text_args`]): the main path,
+/// - **Text-based** ([`resolve_conditional_with_text_args_and_defaults`]): the main path,
 ///   taking the raw argument text between the call's parentheses. Callers
 ///   that hold a parsed `ArgumentList` extract each argument's source text
 ///   from it, so an assignment (`$var = func(…)`) and an inline call
@@ -102,44 +102,51 @@ pub(crate) type VarClassStringResolver<'a> = Option<&'a dyn Fn(&str) -> Vec<Stri
 /// method's own source, including a parameter's default value (`=
 /// self::SOME_CONST`) which is written there, not at the call site. These
 /// differ whenever the call sits outside the declaring class, so a single
-/// class name cannot serve both roles.
+/// class name cannot serve both roles.  `declaring` is the class's FQN.
+///
+/// `written_class` resolves a class a call-site argument names as written
+/// (`Foo::class`) by the call site's imports and namespace.  Every other
+/// name the conditional reads (its own types, a class-string a variable
+/// holds) is already resolved, and the class loader it is handed looks
+/// names up as such.  Without it, a written name goes through that loader
+/// too.
 #[derive(Clone, Copy, Default)]
 pub struct ConditionalClassContext<'a> {
     pub calling: Option<&'a str>,
     pub declaring: Option<&'a str>,
+    pub written_class: Option<&'a dyn Fn(&str) -> String>,
+}
+
+impl ConditionalClassContext<'_> {
+    /// The FQN of a class a call-site argument names as written, with
+    /// `self`/`static`/`parent` meaning the calling class.
+    fn resolve_written(
+        &self,
+        name: &str,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    ) -> String {
+        if let Some(calling) = resolve_self_keyword(name, self.calling) {
+            return crate::util::resolve_name_via_loader(&calling, class_loader);
+        }
+        match self.written_class {
+            Some(resolve) => resolve(name),
+            None => crate::util::resolve_name_via_loader(name, class_loader),
+        }
+    }
+}
+
+/// The FQN of the class a resolved `name` names, or `name` itself when no
+/// class loads.
+fn resolved_class_fqn(name: &str, class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>) -> String {
+    crate::class_lookup::load_resolved_name(name, class_loader)
+        .map(|cls| cls.fqn().to_string())
+        .unwrap_or_else(|| name.to_string())
 }
 
 /// Resolve a conditional return type using **textual** arguments extracted
 /// from the source code (e.g. `"SessionManager::class"`).
 ///
-/// This is used when the call is made inline (not assigned to a variable)
-/// and we therefore don't have an AST `ArgumentList` — only the raw text
-/// between the parentheses.
-pub(crate) fn resolve_conditional_with_text_args(
-    conditional: &PhpType,
-    params: &[ParameterInfo],
-    text_args: &str,
-    var_resolver: VarClassStringResolver<'_>,
-    calling_class_name: Option<&str>,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    tpl: &TemplateContext<'_>,
-) -> Option<PhpType> {
-    resolve_conditional_with_text_args_and_defaults(
-        conditional,
-        params,
-        text_args,
-        var_resolver,
-        ConditionalClassContext {
-            calling: calling_class_name,
-            declaring: None,
-        },
-        class_loader,
-        tpl,
-    )
-}
-
-/// Like [`resolve_conditional_with_text_args`], but also accepts optional
-/// template parameter defaults from the owning class.
+/// `tpl` carries the template parameter defaults from the owning class.
 ///
 /// When the conditional's subject (e.g. `TAsync`) is not a method parameter
 /// but a class-level template parameter with a default value, the default
@@ -338,9 +345,10 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                     None
                 } else {
                     class_string_bound_name.map(|name| {
-                        let resolved = crate::util::resolve_name_via_loader(name, class_loader);
-                        if class_loader(&resolved).is_some() {
-                            resolved
+                        if let Some(cls) =
+                            crate::class_lookup::load_resolved_name(name, class_loader)
+                        {
+                            cls.fqn().to_string()
                         } else {
                             // Concrete class that can't be resolved
                             // (cross-file name resolution failure).
@@ -413,8 +421,7 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                     for arg in args.iter().skip(param_idx) {
                         let trimmed = arg.trim();
                         if let Some(class_name) = extract_class_name_from_text(trimmed) {
-                            let class_name = resolve_self_keyword(&class_name, class_ctx.calling)
-                                .unwrap_or(class_name);
+                            let class_name = class_ctx.resolve_written(&class_name, class_loader);
                             if !class_names.contains(&class_name) {
                                 class_names.push(class_name);
                             }
@@ -422,6 +429,7 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                             && let Some(resolver) = var_resolver
                         {
                             for name in resolver(trimmed) {
+                                let name = resolved_class_fqn(&name, class_loader);
                                 if !class_names.contains(&name) {
                                     class_names.push(name);
                                 }
@@ -429,11 +437,6 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                         }
                     }
                     if !class_names.is_empty() {
-                        let class_names: Vec<String> = class_names
-                            .into_iter()
-                            .map(|n| crate::util::resolve_name_via_loader(&n, class_loader))
-                            .collect();
-
                         // When a bound exists, check all collected classes.
                         // If any fails the bound check, fall through to the
                         // else branch rather than returning a wrong type.
@@ -458,14 +461,13 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                 // Check if the argument text matches `X::class`.  An omitted
                 // argument already reads back as its `Foo::class` default, so
                 // `app()` resolves the same as `app(Foo::class)`.
-                let class_name = arg_text.and_then(extract_class_name_from_text).or_else(|| {
-                    arg_text.and_then(|text| class_named_by_quoted_string(text, class_loader))
-                });
-                if let Some(class_name) = class_name {
-                    let class_name =
-                        resolve_self_keyword(&class_name, class_ctx.calling).unwrap_or(class_name);
-                    let resolved = crate::util::resolve_name_via_loader(&class_name, class_loader);
-
+                let resolved = arg_text
+                    .and_then(extract_class_name_from_text)
+                    .map(|class_name| class_ctx.resolve_written(&class_name, class_loader))
+                    .or_else(|| {
+                        arg_text.and_then(|text| class_named_by_quoted_string(text, class_loader))
+                    });
+                if let Some(resolved) = resolved {
                     // When a bound exists, verify the class is a subtype
                     // before taking the then-branch.  E.g. for
                     // `($type is class-string<FormFlowTypeInterface> ? FormFlowInterface : FormInterface)`
@@ -489,7 +491,7 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                     if !names.is_empty() {
                         let names: Vec<String> = names
                             .into_iter()
-                            .map(|n| crate::util::resolve_name_via_loader(&n, class_loader))
+                            .map(|n| resolved_class_fqn(&n, class_loader))
                             .collect();
 
                         // When a bound exists, check all resolved names.
@@ -500,6 +502,28 @@ pub fn resolve_conditional_with_text_args_and_defaults(
 
                         return Some(substitute_bound(named_or_union(names)));
                     }
+                }
+                // Any other argument (a property, a method's return, a class
+                // constant) is judged by its resolved type: a
+                // `class-string<Foo>` names `Foo` just as `Foo::class` does.
+                if let Some(arg) = arg_text
+                    && let Some(resolve) = tpl.arg_type_resolver
+                    && let Some(arg_ty) = resolve(arg)
+                    && let Some(inner) = class_string_inner_classes(&arg_ty)
+                {
+                    if concrete_class_string_bound.is_some() {
+                        let all_satisfy = inner.iter().all(|ty| match ty.kind() {
+                            TypeKind::Named(name) => satisfies_bound(name.as_str()),
+                            _ => false,
+                        });
+                        return choose_branch(all_satisfy);
+                    }
+                    let bound = if inner.len() == 1 {
+                        inner.into_iter().next().unwrap()
+                    } else {
+                        PhpType::union(inner)
+                    };
+                    return Some(substitute_bound(bound));
                 }
                 // Argument isn't a ::class literal or resolvable variable → try else branch
                 resolve_conditional_with_text_args_and_defaults(
@@ -1491,6 +1515,34 @@ fn named_or_union(names: Vec<String>) -> PhpType {
     }
 }
 
+/// The classes a resolved argument type names as `class-string<X>`, or
+/// `None` unless every member of it is such a class-string.
+///
+/// Stricter than the template-binding unwrap: a bare `class-string` names
+/// no class to decide a bound against, and an object or plain `string`
+/// argument is not a class-string at all.
+fn class_string_inner_classes(ty: &PhpType) -> Option<Vec<PhpType>> {
+    let mut inner: Vec<PhpType> = Vec::new();
+    let mut push = |member: &PhpType| match member.kind() {
+        TypeKind::ClassString(Some(class)) => {
+            if !inner.contains(class) {
+                inner.push(class.clone());
+            }
+            Some(())
+        }
+        _ => None,
+    };
+    match ty.kind() {
+        TypeKind::Union(members) => {
+            for member in members {
+                push(member)?;
+            }
+        }
+        _ => push(ty)?,
+    }
+    (!inner.is_empty()).then_some(inner)
+}
+
 /// If `name` is `"self"`, `"static"`, or `"parent"`, substitute the
 /// calling-site class name so that the resolved type is concrete rather
 /// than relative to the method-owner class. Returns `None` for any other
@@ -1508,6 +1560,10 @@ fn resolve_self_keyword(name: &str, calling_class_name: Option<&str>) -> Option<
 /// A default like `self::EXCEPTION_ON_INVALID_REFERENCE` is written inside
 /// the method that declares the parameter, so `self` names that class, not
 /// whichever class the omitted argument is read back against downstream.
+///
+/// The class is written fully qualified: the text is read back as source at
+/// the call site, where an unprefixed `Vendor\Container` would be qualified
+/// against the caller's namespace.
 fn resolve_default_self_keyword<'a>(
     text: &'a str,
     declaring_class_name: Option<&str>,
@@ -1516,7 +1572,7 @@ fn resolve_default_self_keyword<'a>(
         return Cow::Borrowed(text);
     };
     match resolve_self_keyword(class_part.trim(), declaring_class_name) {
-        Some(resolved) => Cow::Owned(format!("{resolved}::{rest}")),
+        Some(resolved) => Cow::Owned(format!("\\{}::{rest}", resolved.trim_start_matches('\\'))),
         None => Cow::Borrowed(text),
     }
 }
@@ -1882,6 +1938,9 @@ pub fn resolve_conditional_from_values(
 /// has to actually resolve: an ordinary string argument must keep falling
 /// through to the conditional's else branch rather than being read as the name
 /// of a class that does not exist.
+///
+/// A string names a class by its FQN at runtime, whatever namespace the call
+/// is written in, so it is looked up as a resolved name.
 fn class_named_by_string(
     name: &str,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
@@ -1889,7 +1948,7 @@ fn class_named_by_string(
     if name.is_empty() {
         return None;
     }
-    class_loader(name).map(|cls| cls.fqn().to_string())
+    crate::class_lookup::load_resolved_name(name, class_loader).map(|cls| cls.fqn().to_string())
 }
 
 /// [`class_named_by_string`] for the text-argument path, where the argument is
@@ -2093,8 +2152,12 @@ mod tests {
             param_with_default("$mode", "self::EXCEPTION_ON_INVALID_REFERENCE"),
         ];
         let loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>> = &|_| None;
+        // Fully qualified, so a call site inside a namespace does not read
+        // the declaring class relative to its own.
         let resolver = |t: &str| match t.trim() {
-            "ContainerInterface::EXCEPTION_ON_INVALID_REFERENCE" => Some(PhpType::literal_int("1")),
+            "\\Vendor\\Di\\ContainerInterface::EXCEPTION_ON_INVALID_REFERENCE" => {
+                Some(PhpType::literal_int("1"))
+            }
             _ => None,
         };
         let tpl = TemplateContext {
@@ -2113,7 +2176,8 @@ mod tests {
             None,
             ConditionalClassContext {
                 calling: Some("App\\Controller"),
-                declaring: Some("ContainerInterface"),
+                declaring: Some("Vendor\\Di\\ContainerInterface"),
+                written_class: None,
             },
             loader,
             &tpl,

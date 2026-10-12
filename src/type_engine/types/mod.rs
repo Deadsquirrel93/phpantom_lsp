@@ -2,6 +2,8 @@
 ///
 /// This group contains modules related to type resolution:
 /// - **aliases**: expanding `@phpstan-type` aliases into member signatures
+/// - **docblock_narrowing**: keeping a docblock class only where it narrows
+///   the native hint, which takes the class hierarchy
 /// - **resolution**: Type-hint string to `ClassInfo` mapping (unions,
 ///   intersections, generics, type aliases, object shapes, property types)
 /// - **narrowing**: instanceof / assert / custom type guard narrowing
@@ -15,5 +17,6 @@ pub mod aliases;
 pub mod call_site_returns;
 pub mod conditional;
 pub mod const_fold;
+pub mod docblock_narrowing;
 pub mod narrowing;
 pub mod resolution;

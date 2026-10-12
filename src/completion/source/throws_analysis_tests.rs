@@ -710,7 +710,7 @@ fn test_parse_param_type_map_fqn() {
         map,
         vec![(
             "$service".to_string(),
-            PhpType::named(atom("App\\Services\\BusinessCentralService"))
+            PhpType::named(atom("\\App\\Services\\BusinessCentralService"))
         ),]
     );
 }
@@ -856,6 +856,7 @@ fn make_class_with_throws(name: &str, methods: Vec<(&str, Vec<&str>)>) -> Arc<Cl
         implements_generics: Vec::new(),
         use_generics: Vec::new(),
         type_aliases: Default::default(),
+        unverified_doc_types: Default::default(),
         trait_precedences: Vec::new(),
         trait_aliases: Vec::new(),
         class_docblock: None,
@@ -888,7 +889,7 @@ fn test_find_cross_file_propagated_throws_basic() {
     );
 
     let class_loader = |name: &str| -> Option<Arc<ClassInfo>> {
-        if name == "BusinessCentralService" {
+        if name.trim_start_matches('\\') == "BusinessCentralService" {
             Some(bc_class.clone())
         } else {
             None
@@ -904,7 +905,10 @@ fn test_find_cross_file_propagated_throws_basic() {
         file_namespace: &file_namespace,
     };
     let results = find_cross_file_propagated_throws(body, signature, file_content, &ctx);
-    let names: Vec<String> = results.iter().map(|t| t.type_name.to_string()).collect();
+    let names: Vec<String> = results
+        .iter()
+        .map(|t| t.type_name.to_string().trim_start_matches('\\').to_string())
+        .collect();
     assert_eq!(
         names,
         vec![
@@ -913,6 +917,41 @@ fn test_find_cross_file_propagated_throws_basic() {
             "RuntimeException",
             "RandomException",
         ]
+    );
+}
+
+/// A parameter's class hint is resolved through the file's imports and
+/// namespace exactly once, and a leading `\` keeps it exact.
+#[test]
+fn test_find_cross_file_propagated_throws_namespaced_param_hints() {
+    let body = "$a->run();\n$b->run();\n$c->run();";
+    let signature = "handle(Svc $a, Local $b, \\Other $c): void";
+
+    let svc = make_class_with_throws("Svc", vec![("run", vec!["SvcException"])]);
+    let local = make_class_with_throws("Local", vec![("run", vec!["LocalException"])]);
+    let other = make_class_with_throws("Other", vec![("run", vec!["OtherException"])]);
+    let class_loader = |name: &str| -> Option<Arc<ClassInfo>> {
+        match name.trim_start_matches('\\') {
+            "Lib\\Svc" => Some(svc.clone()),
+            "App\\Local" => Some(local.clone()),
+            "Other" => Some(other.clone()),
+            _ => None,
+        }
+    };
+
+    let use_map = HashMap::from([("Svc".to_string(), "Lib\\Svc".to_string())]);
+    let file_namespace = Some("App".to_string());
+    let ctx = ThrowsContext {
+        class_loader: &class_loader,
+        function_loader: None,
+        use_map: &use_map,
+        file_namespace: &file_namespace,
+    };
+    let results = find_cross_file_propagated_throws(body, signature, "", &ctx);
+    let names: Vec<String> = results.iter().map(|t| t.type_name.to_string()).collect();
+    assert_eq!(
+        names,
+        vec!["\\SvcException", "\\LocalException", "\\OtherException"]
     );
 }
 
@@ -997,7 +1036,7 @@ fn test_find_cross_file_propagated_throws_multiple_calls() {
     );
 
     let class_loader = |name: &str| -> Option<Arc<ClassInfo>> {
-        if name == "MyService" {
+        if name.trim_start_matches('\\') == "MyService" {
             Some(svc_class.clone())
         } else {
             None
@@ -1013,7 +1052,10 @@ fn test_find_cross_file_propagated_throws_multiple_calls() {
         file_namespace: &file_namespace,
     };
     let results = find_cross_file_propagated_throws(body, signature, file_content, &ctx);
-    let names: Vec<String> = results.iter().map(|t| t.type_name.to_string()).collect();
+    let names: Vec<String> = results
+        .iter()
+        .map(|t| t.type_name.to_string().trim_start_matches('\\').to_string())
+        .collect();
     assert_eq!(names, vec!["IOException", "NetworkException"]);
 }
 
@@ -1026,7 +1068,7 @@ fn test_find_cross_file_propagated_throws_deduplicates_calls() {
     let svc_class = make_class_with_throws("MyService", vec![("doStuff", vec!["SomeException"])]);
 
     let class_loader = |name: &str| -> Option<Arc<ClassInfo>> {
-        if name == "MyService" {
+        if name.trim_start_matches('\\') == "MyService" {
             Some(svc_class.clone())
         } else {
             None
@@ -1042,7 +1084,10 @@ fn test_find_cross_file_propagated_throws_deduplicates_calls() {
         file_namespace: &file_namespace,
     };
     let results = find_cross_file_propagated_throws(body, signature, file_content, &ctx);
-    let names: Vec<String> = results.iter().map(|t| t.type_name.to_string()).collect();
+    let names: Vec<String> = results
+        .iter()
+        .map(|t| t.type_name.to_string().trim_start_matches('\\').to_string())
+        .collect();
     assert_eq!(
         names,
         vec!["SomeException"],
@@ -1059,7 +1104,7 @@ fn test_find_cross_file_propagated_throws_method_without_throws() {
     let svc_class = make_class_with_throws("MyService", vec![("safeMethod", vec![])]);
 
     let class_loader = |name: &str| -> Option<Arc<ClassInfo>> {
-        if name == "MyService" {
+        if name.trim_start_matches('\\') == "MyService" {
             Some(svc_class.clone())
         } else {
             None
@@ -1090,7 +1135,7 @@ fn test_find_cross_file_propagated_throws_static_method_call() {
     );
 
     let class_loader = |name: &str| -> Option<Arc<ClassInfo>> {
-        if name == "BusinessCentralService" {
+        if name.trim_start_matches('\\') == "BusinessCentralService" {
             Some(bc_class.clone())
         } else {
             None
@@ -1106,7 +1151,10 @@ fn test_find_cross_file_propagated_throws_static_method_call() {
         file_namespace: &file_namespace,
     };
     let results = find_cross_file_propagated_throws(body, signature, file_content, &ctx);
-    let names: Vec<String> = results.iter().map(|t| t.type_name.to_string()).collect();
+    let names: Vec<String> = results
+        .iter()
+        .map(|t| t.type_name.to_string().trim_start_matches('\\').to_string())
+        .collect();
     assert_eq!(names, vec!["ValidationException"]);
 }
 
@@ -1164,11 +1212,12 @@ fn test_find_cross_file_propagated_throws_function_call() {
         is_pure: false,
         is_impure: false,
         reads_func_args: false,
+        unverified_doc_types: Default::default(),
     };
 
     let class_loader = |_name: &str| -> Option<Arc<ClassInfo>> { None };
     let function_loader = move |name: &str, _offset: u32| -> Option<FunctionInfo> {
-        if name == "riskyFunction" {
+        if name.trim_start_matches('\\') == "riskyFunction" {
             Some(func_info.clone())
         } else {
             None
@@ -1184,7 +1233,10 @@ fn test_find_cross_file_propagated_throws_function_call() {
         file_namespace: &file_namespace,
     };
     let results = find_cross_file_propagated_throws(body, signature, file_content, &ctx);
-    let names: Vec<String> = results.iter().map(|t| t.type_name.to_string()).collect();
+    let names: Vec<String> = results
+        .iter()
+        .map(|t| t.type_name.to_string().trim_start_matches('\\').to_string())
+        .collect();
     assert_eq!(names, vec!["DatabaseException"]);
 }
 
@@ -1200,7 +1252,7 @@ fn test_find_cross_file_propagated_throws_new_constructor() {
     );
 
     let class_loader = |name: &str| -> Option<Arc<ClassInfo>> {
-        if name == "BusinessCentralClient" {
+        if name.trim_start_matches('\\') == "BusinessCentralClient" {
             Some(bc_class.clone())
         } else {
             None
@@ -1216,7 +1268,10 @@ fn test_find_cross_file_propagated_throws_new_constructor() {
         file_namespace: &file_namespace,
     };
     let results = find_cross_file_propagated_throws(body, signature, file_content, &ctx);
-    let names: Vec<String> = results.iter().map(|t| t.type_name.to_string()).collect();
+    let names: Vec<String> = results
+        .iter()
+        .map(|t| t.type_name.to_string().trim_start_matches('\\').to_string())
+        .collect();
     assert_eq!(names, vec!["ConnectionException"]);
 }
 
@@ -1269,7 +1324,7 @@ fn test_find_cross_file_propagated_throws_mixed_patterns() {
     );
 
     let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
-        match name {
+        match name.trim_start_matches('\\') {
             "MyService" => Some(svc_class.clone()),
             "BusinessCentralService" => Some(bc_class.clone()),
             "HttpClient" => Some(http_class.clone()),
@@ -1302,10 +1357,11 @@ fn test_find_cross_file_propagated_throws_mixed_patterns() {
         is_pure: false,
         is_impure: false,
         reads_func_args: false,
+        unverified_doc_types: Default::default(),
     };
 
     let function_loader = move |name: &str, _offset: u32| -> Option<FunctionInfo> {
-        if name == "helperFunction" {
+        if name.trim_start_matches('\\') == "helperFunction" {
             Some(func_info.clone())
         } else {
             None
@@ -1321,7 +1377,10 @@ fn test_find_cross_file_propagated_throws_mixed_patterns() {
         file_namespace: &file_namespace,
     };
     let results = find_cross_file_propagated_throws(body, signature, file_content, &ctx);
-    let names: Vec<String> = results.iter().map(|t| t.type_name.to_string()).collect();
+    let names: Vec<String> = results
+        .iter()
+        .map(|t| t.type_name.to_string().trim_start_matches('\\').to_string())
+        .collect();
     assert!(
         names.contains(&"SendException".to_string()),
         "Should propagate from $service->sendData(), got: {:?}",
@@ -1371,7 +1430,7 @@ fn test_find_uncaught_with_class_loader_catches_cross_file() {
     );
 
     let class_loader = |name: &str| -> Option<Arc<ClassInfo>> {
-        if name == "BusinessCentralService" {
+        if name.trim_start_matches('\\') == "BusinessCentralService" {
             Some(bc_class.clone())
         } else {
             None
@@ -1427,7 +1486,7 @@ fn test_extract_throws_tags_with_fqn() {
     let tags = crate::docblock::extract_throws_tags(docblock);
     assert_eq!(
         tags,
-        vec![PhpType::parse("App\\Exceptions\\CustomException")]
+        vec![PhpType::parse("\\App\\Exceptions\\CustomException")]
     );
 }
 

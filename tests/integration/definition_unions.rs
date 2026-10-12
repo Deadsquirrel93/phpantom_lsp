@@ -184,6 +184,7 @@ async fn test_goto_definition_union_return_type_standalone_function() {
                     is_pure: false,
                     is_impure: false,
                     reads_func_args: false,
+                    unverified_doc_types: Default::default(),
                 },
             ),
         );

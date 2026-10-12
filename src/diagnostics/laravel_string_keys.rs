@@ -555,13 +555,15 @@ impl Backend {
 
         let ctx = self.file_context_at(uri, span_start);
         let class_loader = self.class_loader(&ctx);
+        let resolved_class_loader = self.resolved_class_loader(&ctx);
         let function_loader = self.function_loader(&ctx);
         let resolution_ctx = crate::type_engine::subject_resolution::SubjectResolutionCtx {
             local_classes: &ctx.classes,
             use_map: &ctx.use_map,
             namespace: &ctx.namespace,
             content,
-            class_loader: &class_loader,
+            class_loader: &resolved_class_loader,
+            source_class_loader: &class_loader,
             backend: Some(self),
             function_loader: &function_loader,
         };
@@ -574,10 +576,7 @@ impl Backend {
         .top_level_class_names()
         .into_iter()
         .next()?;
-        // The resolved type carries the name as written, so run it back
-        // through the loader to canonicalize a short name against the file's
-        // imports before looking up the model's policy.
-        Some(class_loader(&name)?.fqn().to_string())
+        Some(resolved_class_loader(&name)?.fqn().to_string())
     }
 
     /// Whether `literal` names no template this project ships, as a

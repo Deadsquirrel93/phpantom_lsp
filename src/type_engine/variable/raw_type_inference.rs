@@ -533,16 +533,17 @@ fn infer_element_type<'b>(
         Expression::Instantiation(inst) => match inst.class {
             Expression::Identifier(ident) => {
                 let name = bytes_to_str(ident.value()).to_string();
-                let fqn = crate::util::resolve_source_class_name(
+                let fqn = crate::util::resolve_code_class_name(
                     &name,
                     ctx.current_class.file_namespace.as_deref(),
+                    ctx.source_imports,
                     ctx.all_classes,
-                    ctx.class_loader,
+                    ctx.source_class_loader,
                 );
                 Some(PhpType::named(atom(&fqn)))
             }
-            Expression::Self_(_) => Some(PhpType::named(atom(ctx.current_class.name.as_ref()))),
-            Expression::Static(_) => Some(PhpType::named(atom(ctx.current_class.name.as_ref()))),
+            Expression::Self_(_) => Some(PhpType::named(ctx.current_class.fqn())),
+            Expression::Static(_) => Some(PhpType::named(ctx.current_class.fqn())),
             _ => None,
         },
         Expression::Call(_) => {
@@ -589,7 +590,7 @@ fn infer_element_type<'b>(
             // could type.
             let annotated = || {
                 docblock::find_iterable_raw_type_in_source(ctx.content, offset, &var_text)
-                    .map(|t| crate::util::resolve_php_type_names(&t, ctx.class_loader))
+                    .map(|t| ctx.resolve_written_type(&t))
             };
             // Inside the forward walker the scope above was the only
             // narrowing-aware answer on offer: running the full pipeline
@@ -608,7 +609,7 @@ fn infer_element_type<'b>(
             let current_class = ctx
                 .all_classes
                 .iter()
-                .find(|c| c.name == ctx.current_class.name)
+                .find(|c| c.fqn() == ctx.current_class.fqn())
                 .map(|c| c.as_ref());
             crate::type_engine::variable::resolution::resolve_variable_php_type(
                 &var_text,
@@ -617,6 +618,8 @@ fn infer_element_type<'b>(
                 current_class,
                 ctx.all_classes,
                 ctx.class_loader,
+                ctx.source_class_loader,
+                ctx.source_imports,
                 ctx.backend,
                 ctx.loaders,
             )
@@ -668,7 +671,7 @@ impl ArrayFuncArgs for AstArrayFuncArgs<'_, '_, '_> {
         // class (`Support\Pen` behind a `use App\Support;`), and it is
         // compared against types that arrived fully qualified, so the
         // spelling is canonicalised on the way out.
-        let qualify = |ty: PhpType| crate::util::resolve_php_type_names(&ty, self.ctx.class_loader);
+        let qualify = |ty: PhpType| self.ctx.resolve_hint_type(&ty);
         match super::resolution::nth_arg_expr(self.args, index)? {
             Expression::Closure(closure) => closure
                 .return_type_hint
@@ -730,6 +733,7 @@ impl ArrayFuncArgs for AstArrayFuncArgs<'_, '_, '_> {
             param_index,
             subject,
             Some(&self.ctx.class_loader),
+            &self.ctx.written_class_names(),
         )
     }
 
@@ -927,6 +931,7 @@ fn infer_callback_return_type(
     // Create a synthetic context with the scope resolver.
     let body_offset = body_expr.span().start.offset;
     let infer_ctx = VarResolutionCtx {
+        source_imports: ctx.source_imports,
         backend: ctx.backend,
         loaders: ctx.loaders,
         resolved_class_cache: ctx.resolved_class_cache,
@@ -938,6 +943,7 @@ fn infer_callback_return_type(
             ctx.content,
             body_offset,
             ctx.class_loader,
+            ctx.source_class_loader,
         )
     };
 

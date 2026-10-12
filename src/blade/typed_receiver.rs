@@ -117,6 +117,7 @@ impl Backend {
 
         let file_ctx = self.file_context(uri);
         let class_loaders = self.class_loaders(&file_ctx);
+        let resolved_class_loaders = self.resolved_class_loaders(&file_ctx);
         let function_loaders = self.function_loaders(&file_ctx);
 
         with_parsed_program(content, "blade_typed_receiver", |program, content| {
@@ -132,12 +133,14 @@ impl Backend {
             for call in calls {
                 let offset = call.receiver.span().start.offset;
                 let class_loader = class_loaders.at(offset);
+                let resolved_class_loader = resolved_class_loaders.at(offset);
                 let function_loader = function_loaders.at(offset);
                 let function_loader_cl = |name: &str, offset: u32| function_loader(name, offset);
                 let current_class =
                     crate::class_lookup::find_class_at_offset(&file_ctx.classes, offset)
                         .unwrap_or(&default_class);
                 let var_ctx = VarResolutionCtx {
+                    source_imports: Some(file_ctx.use_map_at(offset)),
                     backend: Some(self),
                     loaders: Loaders::with_function(Some(&function_loader_cl)),
                     resolved_class_cache: Some(&self.resolved_class_cache),
@@ -149,6 +152,7 @@ impl Backend {
                         &file_ctx.classes,
                         content,
                         offset,
+                        resolved_class_loader,
                         class_loader,
                     )
                 };
@@ -161,12 +165,9 @@ impl Backend {
                     continue;
                 };
                 for site in call.sites {
-                    if site
-                        .receiver
-                        .fqns()
-                        .iter()
-                        .any(|fqn| crate::class_lookup::is_subtype_of_named(&ty, fqn, class_loader))
-                    {
+                    if site.receiver.fqns().iter().any(|fqn| {
+                        crate::class_lookup::is_subtype_of_named(&ty, fqn, resolved_class_loader)
+                    }) {
                         confirmed.push(site.to_span());
                     }
                 }

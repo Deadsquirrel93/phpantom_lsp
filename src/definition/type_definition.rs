@@ -45,6 +45,7 @@ impl Backend {
         let ctx = self.file_context_at(uri, offset);
         let current_class = find_class_at_offset(&ctx.classes, offset);
         let class_loader = self.class_loader(&ctx);
+        let resolved_class_loader = self.resolved_class_loader(&ctx);
         let function_loader = self.function_loader(&ctx);
         let laravel_macro_this_resolver = self.laravel_macro_this_resolver(&class_loader);
 
@@ -93,10 +94,12 @@ impl Backend {
                     content,
                     offset,
                     CtxLoaders::new(
+                        &resolved_class_loader,
                         &class_loader,
                         &function_loader,
                         &laravel_macro_this_resolver,
-                    ),
+                    )
+                    .with_imports(&ctx.use_map),
                 );
 
                 let source = self.symbol_map_source(uri, content)?;
@@ -109,14 +112,19 @@ impl Backend {
                 );
 
                 // Resolve the member's return type / property type.
-                self.resolve_member_type(&candidates, member_name, *is_method_call, &class_loader)
-                    .into_iter()
-                    .collect()
+                self.resolve_member_type(
+                    &candidates,
+                    member_name,
+                    *is_method_call,
+                    &resolved_class_loader,
+                )
+                .into_iter()
+                .collect()
             }
 
             SymbolKind::SelfStaticParent(ssp_kind) => match ssp_kind {
                 SelfStaticParentKind::Self_ | SelfStaticParentKind::Static => current_class
-                    .map(|cc| vec![PhpType::named(atom(cc.name.as_ref()))])
+                    .map(|cc| vec![PhpType::named(cc.fqn())])
                     .unwrap_or_default(),
                 SelfStaticParentKind::This => {
                     if let Some(override_cls) =
@@ -125,7 +133,7 @@ impl Backend {
                         vec![PhpType::named(override_cls.fqn())]
                     } else {
                         current_class
-                            .map(|cc| vec![PhpType::named(atom(cc.name.as_ref()))])
+                            .map(|cc| vec![PhpType::named(cc.fqn())])
                             .unwrap_or_default()
                     }
                 }
@@ -135,9 +143,11 @@ impl Backend {
                     .unwrap_or_default(),
             },
 
-            SymbolKind::ClassReference { name, .. } => {
-                // The type *is* the class itself.
-                vec![PhpType::named(atom(name))]
+            SymbolKind::ClassReference { name, is_fqn, .. } => {
+                // The type *is* the class itself, named as written.
+                return self
+                    .resolve_class_reference(uri, content, name, *is_fqn, offset)
+                    .map(|loc| vec![loc]);
             }
 
             SymbolKind::FunctionCall { name, .. } => self
@@ -271,8 +281,9 @@ impl Backend {
                     continue;
                 }
 
+                // Every type here is resolved, so its names are FQNs.
                 if let Some(loc) =
-                    self.resolve_class_reference(uri, content, &name, false, cursor_offset)
+                    self.resolve_class_reference(uri, content, &name, true, cursor_offset)
                 {
                     // Avoid duplicate locations.
                     if !locations
@@ -306,17 +317,21 @@ fn resolve_variable_type_names(
 ) -> Option<PhpType> {
     // $this resolves to the enclosing class.
     if name == "this" {
-        return current_class.map(|cc| PhpType::named(atom(cc.name.as_ref())));
+        return current_class.map(|cc| PhpType::named(cc.fqn()));
     }
 
     // Delegate to the unified pipeline.
+    let resolved_class_loader =
+        |name: &str| crate::class_lookup::load_resolved_name(name, class_loader);
     let resolved = crate::type_engine::variable::resolution::resolve_variable_php_type(
         name,
         content,
         cursor_offset,
         current_class,
         &ctx.classes,
+        &resolved_class_loader,
         class_loader,
+        Some(&ctx.use_map),
         backend,
         Loaders::with_function(Some(function_loader)),
     );

@@ -20,7 +20,7 @@ pub(super) fn exclude_classes_in_scope(
     let resolve = |hint: PhpType| {
         crate::type_engine::type_resolution::resolved_types_for_hint(
             hint,
-            &var_ctx.current_class.name,
+            &var_ctx.current_class.fqn(),
             var_ctx.all_classes,
             var_ctx.class_loader,
         )
@@ -177,6 +177,7 @@ pub(super) fn commit_chain_instanceof<'b>(
     ctx: &ForwardWalkCtx<'_>,
 ) -> Vec<String> {
     let scope_resolver = scope.snapshot_resolver();
+    let names = ctx.written_class_names();
 
     // Track which variables have been narrowed by instanceof across
     // `&&` operands so we can merge them, plus where each subject's
@@ -196,7 +197,8 @@ pub(super) fn commit_chain_instanceof<'b>(
     for (op_idx, operand) in operands.iter().enumerate() {
         for var_name in var_names {
             // Compound OR instanceof: `$x instanceof A || $x instanceof B`
-            if let Some(classes) = narrowing::try_extract_compound_or_instanceof(operand, var_name)
+            if let Some(classes) =
+                narrowing::try_extract_compound_or_instanceof(operand, var_name, &names)
                 && !classes.is_empty()
             {
                 let var_ctx = build_var_ctx(var_name, ctx, &scope_resolver);
@@ -284,14 +286,15 @@ pub(super) fn commit_chain_instanceof<'b>(
 
             // Single instanceof (including negated, is_a, get_class),
             // or a boolean that stands for one.
-            if let Some(extraction) =
-                narrowing::try_extract_instanceof_with_negation(operand, var_name).or_else(|| {
-                    alias_extractions[op_idx]
-                        .iter()
-                        .find(|a| a.subject == *var_name)
-                        .map(|a| a.extraction.clone())
-                })
-            {
+            if let Some(extraction) = narrowing::try_extract_instanceof_with_negation(
+                operand, var_name, &names,
+            )
+            .or_else(|| {
+                alias_extractions[op_idx]
+                    .iter()
+                    .find(|a| a.subject == *var_name)
+                    .map(|a| a.extraction.clone())
+            }) {
                 let var_ctx = build_var_ctx(var_name, ctx, &scope_resolver);
                 if extraction.negated {
                     // Negated instanceof: apply exclusion to the current

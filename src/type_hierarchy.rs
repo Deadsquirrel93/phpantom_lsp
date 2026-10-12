@@ -139,7 +139,7 @@ impl Backend {
 
         let item_uri = item.uri.as_str();
         let ctx = self.file_context(item_uri);
-        let class_loader = self.class_loader(&ctx);
+        let class_loader = self.resolved_class_loader(&ctx);
 
         // direct_only = true so only immediate children are returned;
         // the client walks the tree one level at a time.

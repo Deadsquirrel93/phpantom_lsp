@@ -591,8 +591,14 @@ fn emit_covers_reference(
     let member_start = file_offset + 2;
     let member_end = member_start + member.len() as u32;
     let kind = match default_class {
+        // A qualified default class is taken as fully qualified, the way
+        // `emit_see_reference` reads the tag's own class reference.
         Some(class) => SymbolKind::MemberAccess {
-            subject_text: SubjectText::owned(class.to_string()),
+            subject_text: SubjectText::owned(if class.contains('\\') && !class.starts_with('\\') {
+                format!("\\{class}")
+            } else {
+                class.to_string()
+            }),
             member_name: crate::atom::atom(member),
             is_static: true,
             is_method_call: false,
@@ -1260,6 +1266,8 @@ fn emit_see_reference(reference: &str, file_offset: u32, spans: &mut Vec<SymbolS
         );
 
         let member_start = file_offset + sep_pos as u32 + 2 - prefix_len;
+        // The subject keeps the leading `\` too: the resolver reads the bare
+        // name as relative to the file's namespace, as in code.
         let is_property = member_part.starts_with('$');
         let member_name = if is_property {
             &member_part[1..] // strip $
@@ -1272,7 +1280,7 @@ fn emit_see_reference(reference: &str, file_offset: u32, spans: &mut Vec<SymbolS
                 start: member_start,
                 end: member_end,
                 kind: SymbolKind::MemberAccess {
-                    subject_text: SubjectText::owned(clean_class.to_string()),
+                    subject_text: SubjectText::owned(class_part.to_string()),
                     member_name: crate::atom::atom(member_name),
                     is_static: true,
                     is_method_call: false,
@@ -1314,7 +1322,7 @@ fn emit_see_reference(reference: &str, file_offset: u32, spans: &mut Vec<SymbolS
             start: member_start,
             end: member_end,
             kind: SymbolKind::MemberAccess {
-                subject_text: SubjectText::owned(clean_class.to_string()),
+                subject_text: SubjectText::owned(class_part.to_string()),
                 member_name: crate::atom::atom(member_part),
                 is_static: false,
                 is_method_call: false,

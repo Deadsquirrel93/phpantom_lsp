@@ -17,6 +17,7 @@ use std::sync::Arc;
 /// - [`functions`]: Standalone function and `define()` constant extraction
 /// - [`use_statements`]: `use` statement and namespace extraction
 /// - [`ast_update`]: The `update_ast` orchestrator and name resolution
+/// - [`initializers`]: Qualifying the classes a constant initializer names
 /// - [`error_format`]: Human-readable formatting for Mago parse errors
 mod anonymous;
 mod ast_update;
@@ -24,6 +25,7 @@ mod attributes;
 mod classes;
 pub(crate) mod error_format;
 mod functions;
+mod initializers;
 mod use_statements;
 
 use crate::atom::{atom, bytes_to_str, last_segment};
@@ -774,6 +776,9 @@ struct CachedFile {
     namespaces: std::cell::OnceCell<crate::text_scan::NamespaceDecls>,
     /// The file's first-class callable assignments, collected on first use.
     fcc_assignments: std::cell::OnceCell<Vec<crate::signature_help::FccAssignment>>,
+    /// The template parameters and type aliases the file's docblocks
+    /// declare, collected on first use.
+    docblock_type_names: std::cell::OnceCell<std::collections::HashSet<String>>,
     /// Address and length of each borrowed copy of `content` a live
     /// [`ParseCacheGuard`] registered this file from.
     ///
@@ -793,6 +798,7 @@ impl CachedFile {
             parsed: std::cell::OnceCell::new(),
             namespaces: std::cell::OnceCell::new(),
             fcc_assignments: std::cell::OnceCell::new(),
+            docblock_type_names: std::cell::OnceCell::new(),
             aliases: RefCell::new(Vec::new()),
         })
     }
@@ -1191,6 +1197,23 @@ pub(crate) fn namespace_at_offset(content: &str, offset: usize) -> Option<&str> 
     }
 }
 
+/// Whether a docblock in `content` declares `name` as a template
+/// parameter or a type alias.
+///
+/// A file in the active parse cache collects its declared names once per
+/// pass, so a pass that checks every docblock name it cannot resolve does
+/// not rescan the file for each.  Other text is searched per call.
+pub(crate) fn declares_docblock_type_name(content: &str, name: &str) -> bool {
+    let cached = PARSE_CACHE.with(|cell| cell.borrow().as_ref().and_then(|c| c.find(content)));
+    match cached {
+        Some(file) => file
+            .docblock_type_names
+            .get_or_init(|| crate::util::docblock_declared_type_names(&file.content))
+            .contains(name),
+        None => crate::util::scan_declares_docblock_type_name(content, name),
+    }
+}
+
 /// Pass `content`'s first-class callable assignments (`$fn = target(...)`)
 /// to `f`.
 ///
@@ -1370,8 +1393,7 @@ pub(crate) fn extract_parameters(
                 // Resolve `ClassName::class` to its FQN so that
                 // downstream template substitution can find the class.
                 if let Some(class_name) = raw.strip_suffix("::class") {
-                    let fqn = resolve_default_class_name(class_name, doc_ctx);
-                    Some(format!("{}::class", fqn))
+                    Some(resolve_default_class_name(class_name, doc_ctx))
                 } else {
                     Some(raw)
                 }
@@ -1416,33 +1438,91 @@ pub(crate) fn param_default_is_null(
     }
 }
 
-/// Resolve a class name from a parameter default (`Foo::class`) to its FQN
-/// using the file's use-map and namespace from [`DocblockCtx`].
+/// Rewrite a parameter default `Foo::class` (given as `name`, the part
+/// before `::class`) to `\Fully\Qualified\Foo::class` using the file's
+/// use-map and namespace from [`DocblockCtx`].
+///
+/// The default is read back as source text at the call site, so the result
+/// keeps a leading `\`: an unprefixed `Vendor\Foo` would be qualified with
+/// the caller's namespace.  Without imports or a namespace to read it
+/// against (the class parse of `update_ast` passes neither) the default is
+/// left as written, for the qualification that follows the parse
+/// ([`qualify_param_default`]) to settle.
 fn resolve_default_class_name(name: &str, doc_ctx: Option<&DocblockCtx<'_>>) -> String {
-    // Already fully-qualified.
-    if let Some(stripped) = name.strip_prefix('\\') {
-        return stripped.to_string();
+    match doc_ctx {
+        Some(ctx) if !ctx.use_map.is_empty() || ctx.namespace.is_some() => {
+            qualify_class_default(name, &ctx.use_map, &ctx.namespace)
+        }
+        _ => format!("{name}::class"),
     }
-    let Some(ctx) = doc_ctx else {
-        return name.to_string();
-    };
-    // Check use-map (handles `use App\Application;` → "Application" → "App\Application").
-    if let Some(fqn) = ctx.use_map.get(name) {
-        return fqn.clone();
-    }
-    // If the name has a namespace prefix (e.g. `Sub\Foo`), check the first segment.
-    if let Some(first_seg) = name.split('\\').next()
-        && first_seg != name
-        && let Some(base) = ctx.use_map.get(first_seg)
+}
+
+/// Qualify a `Foo::class` default of `param` written against `use_map` and
+/// `namespace`; see [`resolve_default_class_name`].
+pub(crate) fn qualify_param_default(
+    param: &mut ParameterInfo,
+    use_map: &HashMap<String, String>,
+    namespace: &Option<String>,
+) {
+    if let Some(default) = &param.default_value
+        && let Some(name) = default.strip_suffix("::class")
+        && !name.starts_with('\\')
     {
-        let rest = &name[first_seg.len() + 1..];
-        return format!("{}\\{}", base, rest);
+        param.default_value = Some(qualify_class_default(name, use_map, namespace));
     }
-    // Prepend file namespace if present.
-    if let Some(ref ns) = ctx.namespace {
-        return format!("{}\\{}", ns, name);
+}
+
+/// Rewrite a `self::class` or `parent::class` default of `param` to the
+/// class it names in the declaration, `self_fqn` or `parent_fqn`.  The
+/// call site reads the default as text, where the keyword would name the
+/// caller's class.  A trait passes `None` for both: there the keywords name
+/// whichever class uses it.
+pub(crate) fn qualify_param_default_keyword(
+    param: &mut ParameterInfo,
+    self_fqn: Option<&str>,
+    parent_fqn: Option<&str>,
+) {
+    let Some(name) = param
+        .default_value
+        .as_deref()
+        .and_then(|d| d.strip_suffix("::class"))
+    else {
+        return;
+    };
+    let target = if name.eq_ignore_ascii_case("self") {
+        self_fqn
+    } else if name.eq_ignore_ascii_case("parent") {
+        parent_fqn
+    } else {
+        None
+    };
+    if let Some(fqn) = target {
+        param.default_value = Some(format!("\\{}::class", fqn.trim_start_matches('\\')));
     }
-    name.to_string()
+}
+
+/// `\Fully\Qualified\Foo::class` for a `Foo::class` default written against
+/// `use_map` and `namespace`; see [`resolve_default_class_name`].  `self`,
+/// `static` and `parent` are left as written.
+fn qualify_class_default(
+    name: &str,
+    use_map: &HashMap<String, String>,
+    namespace: &Option<String>,
+) -> String {
+    if name.starts_with('\\') || crate::class_lookup::is_class_keyword(name) {
+        return format!("{name}::class");
+    }
+    let (first_seg, rest) = match name.find('\\') {
+        Some(pos) => (&name[..pos], &name[pos..]),
+        None => (name, ""),
+    };
+    if let Some(base) = crate::util::lookup_import(use_map, first_seg) {
+        return format!("\\{base}{rest}::class");
+    }
+    match namespace {
+        Some(ns) => format!("\\{ns}\\{name}::class"),
+        None => format!("\\{name}::class"),
+    }
 }
 
 /// Extract visibility from a set of modifiers.
@@ -1532,6 +1612,26 @@ impl Backend {
     /// Returns a Vec of ClassInfo for all classes found in the file.
     pub fn parse_php(&self, content: &str) -> Vec<ClassInfo> {
         Self::parse_php_versioned(content, None)
+    }
+
+    /// [`parse_php`](Self::parse_php) with the names each class declares
+    /// resolved against its `namespace` block, the way an indexed file's
+    /// classes are.  For re-parsing patched content whose classes the type
+    /// engine reads in place of the file's own.
+    pub(crate) fn parse_php_resolved(&self, content: &str) -> Vec<ClassInfo> {
+        let _parse_guard = with_parse_cache(content);
+        let use_map = self.parse_use_statements(content);
+        let namespace = self.parse_namespace(content);
+        let (mut classes, blocks) = Self::parse_php_classes_by_block(content, None);
+        Self::resolve_parent_class_names_by_block(&mut classes, &blocks, &use_map, &namespace);
+        classes
+            .into_iter()
+            .map(|(mut cls, ns, _)| {
+                cls.file_namespace = ns.as_deref().map(atom);
+                cls.cache_fqn();
+                cls
+            })
+            .collect()
     }
 
     /// Version-aware variant of [`parse_php`].

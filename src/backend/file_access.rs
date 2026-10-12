@@ -157,8 +157,8 @@ impl Backend {
         self.symbols.uri_classes_index.read().get(uri).cloned()
     }
 
-    /// The classes `uri` declares, with the type aliases they import linked
-    /// into their members.
+    /// The classes `uri` declares, linked the way the class loader links a
+    /// class it loads (see [`link_loaded_class`](Self::link_loaded_class)).
     ///
     /// The file's own classes are found in this list before the class
     /// loader is asked, so they have to be linked here the way the loader
@@ -172,8 +172,8 @@ impl Backend {
             .cloned()
             .unwrap_or_default();
         for class in &mut classes {
-            if crate::type_engine::types::aliases::has_imported_type_aliases(class) {
-                *class = self.link_imported_type_aliases(Arc::clone(class));
+            if crate::resolution::needs_linking(class) {
+                *class = self.link_loaded_class(Arc::clone(class));
             }
         }
         classes

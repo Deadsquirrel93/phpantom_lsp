@@ -145,6 +145,8 @@ impl Backend {
         let current_class = find_class_at_offset(&ctx.classes, cursor_offset).cloned();
 
         let class_loader = self.class_loader(&ctx);
+
+        let resolved_class_loader = self.resolved_class_loader(&ctx);
         let function_loader = self.function_loader(&ctx);
         let laravel_macro_this_resolver = self.laravel_macro_this_resolver(&class_loader);
 
@@ -157,10 +159,12 @@ impl Backend {
             content,
             cursor_offset,
             CtxLoaders::new(
+                &resolved_class_loader,
                 &class_loader,
                 &function_loader,
                 &laravel_macro_this_resolver,
-            ),
+            )
+            .with_imports(&ctx.use_map),
         );
         let candidates = ResolvedType::into_arced_classes(
             crate::type_engine::resolver::resolve_target_classes(subject, access_kind, &rctx),
@@ -180,7 +184,8 @@ impl Backend {
             // find_declaring_class needs the raw (unmerged) class so it
             // can trace the member to the actual declaring class through
             // the real inheritance/mixin chain.
-            let raw_class = Self::reload_raw_class(target_class, &ctx.classes, &class_loader);
+            let raw_class =
+                Self::reload_raw_class(target_class, &ctx.classes, &resolved_class_loader);
             let lookup_class = raw_class.as_ref().unwrap_or(target_class);
 
             // Check if the member name is a trait `as` alias on this class.
@@ -206,13 +211,13 @@ impl Backend {
                     Self::find_declaring_in_traits(
                         &target_class.used_traits,
                         &effective_name,
-                        &class_loader,
+                        &resolved_class_loader,
                     )
                     .map(|(_, fqn)| fqn)
                 });
 
                 if let Some(ref trait_name) = source_trait_name
-                    && let Some(trait_info) = class_loader(trait_name)
+                    && let Some(trait_info) = resolved_class_loader(trait_name)
                     && Self::classify_member(&trait_info, &effective_name, access_hint).is_some()
                     && let Some(location) = self.member_position_location(
                         trait_name,
@@ -231,13 +236,16 @@ impl Backend {
             // When the property name matches a timestamp column,
             // jump straight to the CREATED_AT / UPDATED_AT constant.
             // Base resolution sees a `CREATED_AT` a parent model overrides.
-            if extends_eloquent_model(lookup_class, &class_loader)
+            if extends_eloquent_model(lookup_class, &resolved_class_loader)
                 && let Some(const_name) = Self::timestamp_property_to_constant(
-                    &crate::virtual_members::resolve_class_base_cached(lookup_class, &class_loader),
+                    &crate::virtual_members::resolve_class_base_cached(
+                        lookup_class,
+                        &resolved_class_loader,
+                    ),
                     &effective_name,
                 )
                 && let Some((const_class, const_fqn)) =
-                    Self::find_declaring_class(lookup_class, const_name, &class_loader)
+                    Self::find_declaring_class(lookup_class, const_name, &resolved_class_loader)
                 && let Some(location) = self.member_position_location(
                     &const_fqn,
                     uri,
@@ -259,7 +267,7 @@ impl Backend {
                 target_class,
                 lookup_class,
                 &effective_name,
-                &class_loader,
+                &resolved_class_loader,
                 Some(&self.resolved_class_cache),
             )
             .unwrap_or_else(|| {
@@ -293,7 +301,7 @@ impl Backend {
             // candidate before ever reaching the fallback below.  Check
             // the array entry here, before that early-exit, so that GTD on
             // $dates/$casts etc. still jumps to the correct string literal.
-            if extends_eloquent_model(lookup_class, &class_loader)
+            if extends_eloquent_model(lookup_class, &resolved_class_loader)
                 && let Some(location) = self.eloquent_array_entry_location(
                     &declaring_fqn,
                     uri,
@@ -315,7 +323,7 @@ impl Backend {
             // in the relevant Eloquent array ($fillable, $casts, etc.).
             // A real method of that name, such as a `scopeWhereEmail`
             // scope, is what Laravel calls instead, so it wins.
-            if extends_eloquent_model(lookup_class, &class_loader)
+            if extends_eloquent_model(lookup_class, &resolved_class_loader)
                 && Self::classify_member(&declaring_class, &search_name, access_hint).is_none()
                 && let Some(column) = where_property_method_to_column(&effective_name)
                 && let Some(location) = self.eloquent_array_entry_location(
@@ -375,7 +383,7 @@ impl Backend {
             // $fillable, $guarded, $hidden, $visible, and $appends don't
             // have a method or property declaration.  Jump to the string
             // literal entry inside the array property instead.
-            if extends_eloquent_model(lookup_class, &class_loader)
+            if extends_eloquent_model(lookup_class, &resolved_class_loader)
                 && let Some(location) = self.eloquent_array_entry_location(
                     &declaring_fqn,
                     uri,
@@ -395,14 +403,15 @@ impl Backend {
         // and try the original (non-iterating) logic so we at least get
         // partial results when possible.
         let target_class = &candidates[0];
-        let raw_fallback = Self::reload_raw_class(target_class, &ctx.classes, &class_loader);
+        let raw_fallback =
+            Self::reload_raw_class(target_class, &ctx.classes, &resolved_class_loader);
         let fallback_class = raw_fallback.as_ref().unwrap_or(target_class);
 
         let (effective_name, alias_trait) = Self::resolve_trait_alias(target_class, member_name);
 
         // Direct trait lookup for aliased members in the fallback path.
         if let Some(ref trait_name) = alias_trait
-            && let Some(ref trait_info) = class_loader(trait_name)
+            && let Some(ref trait_info) = resolved_class_loader(trait_name)
             && let Some(location) = self.member_position_location(
                 trait_name,
                 uri,
@@ -420,13 +429,13 @@ impl Backend {
             target_class,
             fallback_class,
             &effective_name,
-            &class_loader,
+            &resolved_class_loader,
             Some(&self.resolved_class_cache),
         ) else {
             // Last resort: Eloquent array entry (virtual properties) and
             // where{Property} method mapping.
-            if extends_eloquent_model(fallback_class, &class_loader) {
-                let fqn = fallback_class.name.to_string();
+            if extends_eloquent_model(fallback_class, &resolved_class_loader) {
+                let fqn = fallback_class.fqn().to_string();
                 let bounds = (
                     fallback_class.start_offset as usize,
                     fallback_class.end_offset as usize,

@@ -24,7 +24,7 @@ use crate::types::{ClassInfo, ParameterInfo, ResolvedType};
 
 use crate::Backend;
 use crate::type_engine::call_resolution::OutParamCallee;
-use crate::type_engine::resolver::{Loaders, VarResolutionCtx};
+use crate::type_engine::resolver::{Loaders, SourceImports, VarResolutionCtx};
 
 // ─── Re-entry guards ───────────────────────────────────────────────────────
 //
@@ -178,12 +178,8 @@ pub(in crate::type_engine) fn build_var_resolver_from_ctx<'a>(
     move |var_name: &str| -> Vec<String> {
         super::class_string_resolution::resolve_class_string_targets(
             var_name,
-            ctx.current_class,
-            ctx.all_classes,
-            ctx.content,
             ctx.cursor_offset,
-            ctx.class_loader,
-            ctx.backend,
+            ctx,
         )
         .iter()
         .map(|c| c.fqn().to_string())
@@ -240,7 +236,7 @@ pub(super) fn enrich_builder_type_in_scope(
 
     Some(PhpType::generic(
         type_name,
-        vec![PhpType::named(atom(current_class.name.as_ref()))],
+        vec![PhpType::named(current_class.fqn())],
     ))
 }
 
@@ -258,6 +254,8 @@ pub(crate) fn resolve_variable_types(
     content: &str,
     cursor_offset: u32,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    source_class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    source_imports: SourceImports<'_>,
     backend: Option<&Backend>,
     loaders: Loaders<'_>,
 ) -> Vec<ResolvedType> {
@@ -314,6 +312,8 @@ pub(crate) fn resolve_variable_types(
             content,
             cursor_offset,
             class_loader,
+            source_class_loader,
+            source_imports,
             backend,
             loaders,
         )
@@ -336,11 +336,14 @@ pub(crate) fn resolve_variable_types_in_program(
     content: &str,
     cursor_offset: u32,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    source_class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    source_imports: SourceImports<'_>,
     backend: Option<&Backend>,
     loaders: Loaders<'_>,
 ) -> Vec<ResolvedType> {
     let active_cache = crate::virtual_members::active_resolved_class_cache();
     let ctx = VarResolutionCtx {
+        source_imports,
         backend,
         loaders,
         resolved_class_cache: active_cache,
@@ -351,6 +354,7 @@ pub(crate) fn resolve_variable_types_in_program(
             content,
             cursor_offset,
             class_loader,
+            source_class_loader,
         )
     };
 
@@ -383,6 +387,8 @@ pub(crate) fn resolve_variable_php_type(
     current_class: Option<&ClassInfo>,
     all_classes: &[Arc<ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    source_class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    source_imports: SourceImports<'_>,
     backend: Option<&Backend>,
     loaders: Loaders<'_>,
 ) -> Option<PhpType> {
@@ -398,7 +404,14 @@ pub(crate) fn resolve_variable_php_type(
         docblock::find_var_raw_type_in_source(content, cursor_offset as usize, &prefixed)
         && !is_cursor_in_self_assignment_rhs(content, cursor_offset as usize, &prefixed)
     {
-        Some(crate::util::resolve_php_type_names(&var_type, class_loader))
+        Some(crate::util::resolve_source_php_type_names(
+            &var_type,
+            current_class.and_then(|c| c.file_namespace.as_deref()),
+            source_imports,
+            content,
+            all_classes,
+            source_class_loader,
+        ))
     } else {
         None
     };
@@ -420,6 +433,8 @@ pub(crate) fn resolve_variable_php_type(
         content,
         cursor_offset,
         class_loader,
+        source_class_loader,
+        source_imports,
         backend,
         loaders,
     );
@@ -435,11 +450,21 @@ pub(crate) fn resolve_variable_php_type(
     //    and check if the cursor is on a parameter with a type hint.
     let param_type = with_parsed_program(content, "resolve_var_param_site", |program, _| {
         let stmts: Vec<&Statement> = program.statements.iter().collect();
-        find_param_type_at_cursor(&stmts, &prefixed, cursor_offset, content)
+        find_param_at_cursor(&stmts, &prefixed, cursor_offset, content)
+            .and_then(|site| {
+                site.settled_type(effective_class, content, class_loader, source_class_loader)
+            })
             .or_else(|| find_catch_var_type_at_cursor(&stmts, &prefixed, cursor_offset))
     });
-    if param_type.is_some() {
-        return param_type;
+    if let Some(written) = param_type {
+        return Some(crate::util::resolve_source_php_type_names(
+            &written,
+            effective_class.file_namespace.as_deref(),
+            source_imports,
+            content,
+            all_classes,
+            source_class_loader,
+        ));
     }
 
     // Fall back to the @var override.
@@ -481,24 +506,23 @@ fn is_cursor_in_self_assignment_rhs(content: &str, cursor_offset: usize, var_nam
     false
 }
 
-/// Check if the cursor is on a parameter definition and return its type.
+/// Check if the cursor is on a parameter definition and return it.
 ///
 /// Walks namespaces, classes, and functions to find a parameter list
 /// that contains `cursor_offset` with a parameter matching `var_name`.
-fn find_param_type_at_cursor(
+fn find_param_at_cursor(
     stmts: &[&Statement<'_>],
     var_name: &str,
     cursor_offset: u32,
     content: &str,
-) -> Option<PhpType> {
+) -> Option<ParamSite> {
     use mago_span::HasSpan;
 
     for stmt in stmts {
         match stmt {
             Statement::Namespace(ns) => {
                 let inner: Vec<&Statement> = ns.statements().iter().collect();
-                if let Some(t) = find_param_type_at_cursor(&inner, var_name, cursor_offset, content)
-                {
+                if let Some(t) = find_param_at_cursor(&inner, var_name, cursor_offset, content) {
                     return Some(t);
                 }
             }
@@ -587,7 +611,7 @@ fn check_param_list(
     cursor_offset: u32,
     content: &str,
     method_start_offset: usize,
-) -> Option<PhpType> {
+) -> Option<ParamSite> {
     use mago_span::HasSpan;
 
     let span = param_list.span();
@@ -595,25 +619,57 @@ fn check_param_list(
         return None;
     }
 
-    for param in param_list.parameters.iter() {
-        let pname = bytes_to_str(param.variable.name);
-        if pname != var_name {
-            continue;
-        }
+    let param = param_list
+        .parameters
+        .iter()
+        .find(|param| bytes_to_str(param.variable.name) == var_name)?;
+    let native = param.hint.as_ref().map(|h| extract_hint_type(h));
+    let docblock = declared_param_docblock_type(content, method_start_offset, var_name);
+    (native.is_some() || docblock.is_some()).then_some(ParamSite {
+        native,
+        docblock,
+        decl_start: method_start_offset,
+    })
+}
 
-        let native_type = param.hint.as_ref().map(|h| extract_hint_type(h));
+/// A parameter in its declaration: the native hint and the `@param` type,
+/// both as written, and where the declaration starts.
+struct ParamSite {
+    native: Option<PhpType>,
+    docblock: Option<PhpType>,
+    decl_start: usize,
+}
 
-        let docblock_type = declared_param_docblock_type(content, method_start_offset, pname);
-
+impl ParamSite {
+    /// The type the parameter holds, the docblock's where it may stand in
+    /// for the native hint (see [`param_docblock_narrows_hint`]).
+    fn settled_type(
+        self,
+        current_class: &ClassInfo,
+        content: &str,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        source_class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    ) -> Option<PhpType> {
         let effective =
-            docblock::resolve_effective_type_typed(native_type.as_ref(), docblock_type.as_ref());
-
-        if effective.is_some() {
-            return effective;
+            docblock::resolve_effective_type_typed(self.native.as_ref(), self.docblock.as_ref());
+        match (effective, self.native) {
+            (Some(settled), Some(written))
+                if settled != written
+                    && !param_docblock_narrows_hint(
+                        &crate::util::resolve_php_type_names(&settled, source_class_loader),
+                        &written,
+                        self.decl_start,
+                        current_class,
+                        content,
+                        class_loader,
+                        source_class_loader,
+                    ) =>
+            {
+                Some(written)
+            }
+            (effective, _) => effective,
         }
-        return native_type;
     }
-    None
 }
 
 /// Check if the cursor is on a catch variable binding and return its type.
@@ -728,6 +784,8 @@ pub(in crate::type_engine) fn resolve_variable_in_statements<'b>(
                 content: ctx.content,
                 cursor_offset: u32::MAX,
                 class_loader: ctx.class_loader,
+                source_class_loader: ctx.source_class_loader,
+                source_imports: ctx.source_imports,
                 backend: ctx.backend,
                 loaders: ctx.loaders,
                 resolved_class_cache: ctx.resolved_class_cache,
@@ -883,6 +941,8 @@ pub(in crate::type_engine) fn resolve_variable_in_statements<'b>(
             content: ctx.content,
             cursor_offset: ctx.cursor_offset,
             class_loader: ctx.class_loader,
+            source_class_loader: ctx.source_class_loader,
+            source_imports: ctx.source_imports,
             backend: ctx.backend,
             loaders: ctx.loaders,
             resolved_class_cache: ctx.resolved_class_cache,
@@ -1145,7 +1205,8 @@ fn try_resolve_in_function(
     // own `{` and does NOT get confused by intermediate `{`/`}`
     // from nested control-flow.
     let enclosing_ret =
-        crate::docblock::find_enclosing_return_type(ctx.content, (body_start + 1) as usize);
+        crate::docblock::find_enclosing_return_type(ctx.content, (body_start + 1) as usize)
+            .map(|ty| ctx.resolve_written_type(&ty));
 
     // ── Forward walker (sole resolver) ──
     let fw_ctx = super::forward_walk::ForwardWalkCtx {
@@ -1154,6 +1215,8 @@ fn try_resolve_in_function(
         content: ctx.content,
         cursor_offset: ctx.cursor_offset,
         class_loader: ctx.class_loader,
+        source_class_loader: ctx.source_class_loader,
+        source_imports: ctx.source_imports,
         backend: ctx.backend,
         loaders: ctx.loaders,
         resolved_class_cache: ctx.resolved_class_cache,
@@ -1302,7 +1365,8 @@ fn resolve_variable_in_members<'b>(
                     let enclosing_ret = crate::docblock::find_enclosing_return_type(
                         ctx.content,
                         (blk_start + 1) as usize,
-                    );
+                    )
+                    .map(|ty| ctx.resolve_written_type(&ty));
 
                     let fw_ctx = super::forward_walk::ForwardWalkCtx {
                         current_class: ctx.current_class,
@@ -1310,6 +1374,8 @@ fn resolve_variable_in_members<'b>(
                         content: ctx.content,
                         cursor_offset: ctx.cursor_offset,
                         class_loader: ctx.class_loader,
+                        source_class_loader: ctx.source_class_loader,
+                        source_imports: ctx.source_imports,
                         backend: ctx.backend,
                         loaders: ctx.loaders,
                         resolved_class_cache: ctx.resolved_class_cache,
@@ -1379,6 +1445,8 @@ fn resolve_variable_in_property_hooks(
             content: ctx.content,
             cursor_offset: ctx.cursor_offset,
             class_loader: ctx.class_loader,
+            source_class_loader: ctx.source_class_loader,
+            source_imports: ctx.source_imports,
             backend: ctx.backend,
             loaders: ctx.loaders,
             resolved_class_cache: ctx.resolved_class_cache,
@@ -1435,6 +1503,8 @@ fn resolve_abstract_method_param(
             content: ctx.content,
             cursor_offset: ctx.cursor_offset,
             class_loader: ctx.class_loader,
+            source_class_loader: ctx.source_class_loader,
+            source_imports: ctx.source_imports,
             backend: ctx.backend,
             loaders: ctx.loaders,
             resolved_class_cache: ctx.resolved_class_cache,
@@ -1481,6 +1551,7 @@ pub(super) fn substitute_template_param_bounds(
     ty: PhpType,
     content: &str,
     method_start_offset: usize,
+    resolve_written_type: &dyn Fn(&PhpType) -> PhpType,
 ) -> PhpType {
     // Quick check: only act when the type contains at least one bare
     // identifier that could be a template parameter.  This avoids the
@@ -1502,7 +1573,7 @@ pub(super) fn substitute_template_param_bounds(
         return ty;
     }
 
-    let subs = bounded_template_markers(bounds);
+    let subs = bounded_template_markers(bounds, resolve_written_type);
     if subs.is_empty() {
         return ty;
     }
@@ -1515,28 +1586,38 @@ pub(super) fn substitute_template_param_bounds(
 pub(crate) fn declaration_template_markers(
     content: &str,
     decl_start: usize,
+    resolve_written_type: &dyn Fn(&PhpType) -> PhpType,
 ) -> Option<std::sync::Arc<std::collections::HashMap<String, PhpType>>> {
     let docblock = extract_preceding_docblock(content.get(..decl_start)?)?;
     if !docblock.contains("template") {
         return None;
     }
-    let markers = bounded_template_markers(docblock::extract_template_params_with_bounds(docblock));
+    let markers = bounded_template_markers(
+        docblock::extract_template_params_with_bounds(docblock),
+        resolve_written_type,
+    );
     (!markers.is_empty()).then(|| std::sync::Arc::new(markers))
 }
 
 /// The [`TemplateParam`](crate::php_type::TypeKind::TemplateParam) each
 /// bounded template in `bounds` stands for, keyed by its name.
 ///
+/// The bounds are read from the docblock as written, so each one goes
+/// through `resolve_written_type` (the context's
+/// [`resolve_written_type`](crate::type_engine::resolver::VarResolutionCtx::resolve_written_type))
+/// before it stands for a class.
+///
 /// A bound naming another of the declaration's templates (`@template U of
 /// T`) reads through to that template's own bound, so `U` still resolves
 /// to a class.
 fn bounded_template_markers(
     bounds: Vec<(String, Option<PhpType>)>,
+    resolve_written_type: &dyn Fn(&PhpType) -> PhpType,
 ) -> std::collections::HashMap<String, PhpType> {
     let mut subs: std::collections::HashMap<String, PhpType> = bounds
         .into_iter()
         .filter_map(|(name, bound)| {
-            let bound = bound?;
+            let bound = resolve_written_type(&bound?);
             let marker = PhpType::template_param(crate::atom::atom(&name), bound);
             Some((name, marker))
         })
@@ -1567,6 +1648,47 @@ pub(super) fn references_method_template(
     extract_preceding_docblock(&content[..method_start_offset]).is_some_and(|docblock| {
         ty.references_any_template_param(&docblock::extract_template_params(docblock))
     })
+}
+
+/// Whether `settled`, the type a parameter's docblock settled over its native
+/// hint `written` (as written), may stand in for the hint: every class it
+/// names that the hint does not narrows the hint.
+///
+/// PHP enforces the hint, and loading the declaration makes the same call
+/// for its signature (see
+/// [`docblock_narrowing`](crate::type_engine::types::docblock_narrowing)),
+/// so the body sees the parameter the way its callers do.  The hint is
+/// resolved through `source_class_loader`, the way the docblock's names
+/// were, so that one spelling is one class on both sides.  `decl_start` is
+/// where the declaration starts, for the templates its docblock introduces.
+pub(super) fn param_docblock_narrows_hint(
+    settled: &PhpType,
+    written: &PhpType,
+    decl_start: usize,
+    current_class: &ClassInfo,
+    content: &str,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    source_class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> bool {
+    use crate::type_engine::types::docblock_narrowing;
+    if !docblock_narrowing::hint_names_classes(written) {
+        return true;
+    }
+    let native = crate::util::resolve_php_type_names(written, source_class_loader);
+    let declared_templates = std::cell::OnceCell::new();
+    let not_a_class = |name: &str| {
+        current_class.template_params.iter().any(|t| t == name)
+            || current_class.type_aliases.keys().any(|alias| alias == name)
+            || declared_templates
+                .get_or_init(|| {
+                    extract_preceding_docblock(&content[..decl_start])
+                        .map(docblock::extract_template_params)
+                        .unwrap_or_default()
+                })
+                .iter()
+                .any(|t| t == name)
+    };
+    docblock_narrowing::narrows_native(settled, &native, &not_a_class, class_loader)
 }
 
 /// Check whether a `PhpType` tree may contain a bare template parameter
@@ -1602,6 +1724,7 @@ pub(super) fn substitute_class_string_template_bounds(
     ty: PhpType,
     content: &str,
     method_start_offset: usize,
+    resolve_written_type: &dyn Fn(&PhpType) -> PhpType,
 ) -> PhpType {
     // Only act on class-string<T> where the inner type is a simple name
     // (i.e. a potential template parameter).
@@ -1628,7 +1751,7 @@ pub(super) fn substitute_class_string_template_bounds(
     };
 
     let bounds = docblock::extract_template_params_with_bounds(docblock);
-    match bounded_template_markers(bounds).remove(tpl_name.as_str()) {
+    match bounded_template_markers(bounds, resolve_written_type).remove(tpl_name.as_str()) {
         Some(marker) => PhpType::class_string(Some(marker)),
         None => ty,
     }
@@ -1727,16 +1850,17 @@ pub(crate) fn extract_native_type_from_rhs<'b>(
         Expression::Instantiation(inst) => match inst.class {
             Expression::Identifier(ident) => {
                 let name = bytes_to_str(ident.value()).to_string();
-                let fqn = crate::util::resolve_source_class_name(
+                let fqn = crate::util::resolve_code_class_name(
                     &name,
                     ctx.current_class.file_namespace.as_deref(),
+                    ctx.source_imports,
                     ctx.all_classes,
-                    ctx.class_loader,
+                    ctx.source_class_loader,
                 );
                 Some(PhpType::named(atom(&fqn)))
             }
-            Expression::Self_(_) => Some(PhpType::named(atom(ctx.current_class.name.as_ref()))),
-            Expression::Static(_) => Some(PhpType::named(atom(ctx.current_class.name.as_ref()))),
+            Expression::Self_(_) => Some(PhpType::named(ctx.current_class.fqn())),
+            Expression::Static(_) => Some(PhpType::named(ctx.current_class.fqn())),
             _ => None,
         },
         // Function / method calls → look up the return type.
@@ -1759,13 +1883,13 @@ pub(crate) fn extract_native_type_from_rhs<'b>(
                     && let ClassLikeMemberSelector::Identifier(ident) = &method_call.method
                 {
                     let method_name = bytes_to_str(ident.value).to_string();
-                    ctx.all_classes
-                        .iter()
-                        .find(|c| c.name == ctx.current_class.name)
-                        .and_then(|cls| {
+                    let current = ctx.current_class.fqn();
+                    crate::class_lookup::find_class_by_fqn(ctx.all_classes, &current).and_then(
+                        |cls| {
                             cls.get_method(&method_name)
                                 .and_then(|m| m.return_type.clone())
-                        })
+                        },
+                    )
                 } else {
                     None
                 }
@@ -1773,19 +1897,18 @@ pub(crate) fn extract_native_type_from_rhs<'b>(
             Call::StaticMethod(static_call) => {
                 let class_name = match static_call.class {
                     Expression::Self_(_) | Expression::Static(_) => {
-                        Some(ctx.current_class.name.to_string())
+                        Some(ctx.current_class.fqn().to_string())
                     }
-                    Expression::Identifier(ident) => Some(bytes_to_str(ident.value()).to_string()),
+                    Expression::Identifier(ident) => {
+                        Some(ctx.resolve_written_class(bytes_to_str(ident.value())))
+                    }
                     _ => None,
                 };
                 if let Some(cls_name) = class_name
                     && let ClassLikeMemberSelector::Identifier(ident) = &static_call.method
                 {
                     let method_name = bytes_to_str(ident.value).to_string();
-                    let owner = ctx
-                        .all_classes
-                        .iter()
-                        .find(|c| c.name == cls_name)
+                    let owner = crate::class_lookup::find_class_by_fqn(ctx.all_classes, &cls_name)
                         .cloned()
                         .or_else(|| (ctx.class_loader)(&cls_name));
                     owner.and_then(|o| {
@@ -1879,7 +2002,7 @@ pub(in crate::type_engine) fn resolve_arg_raw_type<'b>(
         let offset = arg_expr.span().start.offset as usize;
         let from_docblock =
             docblock::find_iterable_raw_type_in_source(ctx.content, offset, &var_text)
-                .map(|t| crate::util::resolve_php_type_names(&t, ctx.class_loader));
+                .map(|t| ctx.resolve_written_type(&t));
 
         // The scope the forward walker recorded for this position, from
         // whichever of its two channels is live.  Both are map reads,
@@ -1916,6 +2039,8 @@ pub(in crate::type_engine) fn resolve_arg_raw_type<'b>(
                 ctx.content,
                 offset as u32,
                 ctx.class_loader,
+                ctx.source_class_loader,
+                ctx.source_imports,
                 ctx.backend,
                 ctx.loaders,
             )
@@ -2058,7 +2183,7 @@ pub(super) fn try_apply_pass_by_reference_type(
             );
             let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
                 &out_hint,
-                &ctx.current_class.name,
+                &ctx.current_class.fqn(),
                 ctx.all_classes,
                 ctx.class_loader,
             );
@@ -2133,7 +2258,8 @@ fn try_resolve_static_method_params<'a>(
         static_call.class,
         ctx.current_class,
         ctx.all_classes,
-        ctx.class_loader,
+        ctx.source_class_loader,
+        ctx.source_imports,
     )?;
 
     let cls = (ctx.class_loader)(&class_name)?;
@@ -2158,7 +2284,8 @@ fn try_resolve_constructor_params<'a>(
         inst.class,
         ctx.current_class,
         ctx.all_classes,
-        ctx.class_loader,
+        ctx.source_class_loader,
+        ctx.source_imports,
     )?;
 
     let args = inst.argument_list.as_ref()?;

@@ -36,6 +36,7 @@ fn empty_function(name: &str) -> FunctionInfo {
         is_pure: false,
         is_impure: false,
         reads_func_args: false,
+        unverified_doc_types: Default::default(),
     }
 }
 

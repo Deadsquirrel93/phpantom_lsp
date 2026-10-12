@@ -242,6 +242,7 @@ mod tests {
             implements_generics: Vec::new(),
             use_generics: Vec::new(),
             type_aliases: Default::default(),
+            unverified_doc_types: Default::default(),
             trait_precedences: Vec::new(),
             trait_aliases: Vec::new(),
             class_docblock: None,

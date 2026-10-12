@@ -230,6 +230,7 @@ fn patch_iterator_iterator(class: &mut ClassInfo) {
     // hides the generic type.  PHPStan's stubs override these.
     patch_method_return_type(class, "current", PhpType::named(atom("TValue")));
     patch_method_return_type(class, "key", PhpType::named(atom("TKey")));
+    patch_inner_iterator_return_type(class);
 
     // Patch the constructor: add template binding TIterator → $iterator
     // so that `new IteratorIterator(new Subject())` infers TIterator = Subject.
@@ -322,6 +323,24 @@ fn patch_filter_iterator(class: &mut ClassInfo) {
     patch_iterator_iterator_subclass(class, "IteratorIterator");
     patch_method_return_type(class, "current", PhpType::named(atom("TValue")));
     patch_method_return_type(class, "key", PhpType::named(atom("TKey")));
+    patch_inner_iterator_return_type(class);
+}
+
+/// Type `getInnerIterator()` as `Iterator<TKey, TValue>`, the return
+/// PHPStan's stub gives `OuterIterator::getInnerIterator()`.
+///
+/// phpstorm-stubs redeclare the method as `?Iterator` on `IteratorIterator`
+/// and `FilterIterator`, so the inner iterator's elements would otherwise
+/// be `mixed` however the wrapper is parameterised.
+fn patch_inner_iterator_return_type(class: &mut ClassInfo) {
+    patch_method_return_type(
+        class,
+        "getInnerIterator",
+        PhpType::generic(
+            "Iterator",
+            vec![PhpType::named(atom("TKey")), PhpType::named(atom("TValue"))],
+        ),
+    );
 }
 
 /// Patch `NoRewindIterator` with template params inherited from `IteratorIterator`.

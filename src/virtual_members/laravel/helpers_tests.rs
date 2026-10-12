@@ -46,6 +46,7 @@ fn indirect_child_of_model() {
     let model = make_class("Illuminate\\Database\\Eloquent\\Model");
 
     let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+        let name = name.strip_prefix('\\').unwrap_or(name);
         match name {
             "App\\Models\\User" => Some(Arc::new(base.clone())),
             "Illuminate\\Database\\Eloquent\\Model" => Some(Arc::new(model.clone())),

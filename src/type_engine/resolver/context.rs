@@ -179,6 +179,10 @@ pub(crate) type ScopeContainsResolverFn<'a> = Option<&'a dyn Fn(&str) -> bool>;
 /// Optional Laravel macro callback `$this` resolver.
 pub(crate) type LaravelMacroThisResolverFn<'a> = Option<&'a dyn Fn(&str) -> Option<Arc<ClassInfo>>>;
 
+/// The `use` imports (alias → FQN) of the namespace block being resolved,
+/// when the caller has a file context to read them from.
+pub(crate) type SourceImports<'a> = Option<&'a HashMap<String, String>>;
+
 /// Bundles optional cross-file loader callbacks so they can be threaded
 /// through the resolution chain as a single argument instead of one
 /// parameter per loader.
@@ -283,8 +287,19 @@ pub(crate) struct ResolutionCtx<'a> {
     pub content: &'a str,
     /// Byte offset of the cursor in `content`.
     pub cursor_offset: u32,
-    /// Cross-file class resolution callback.
+    /// Cross-file class resolution callback for already-resolved names.
     pub class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    /// Cross-file class resolution callback for names as written in
+    /// source (`new Foo`, `Foo::bar()`, `@var Foo`), which resolves them
+    /// through the file's imports.  [`class_loader`](Self::class_loader)
+    /// is for already-resolved names, where a bare `Redis` is the global
+    /// class even when the file imports another `Redis`.
+    pub source_class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    /// The `use` imports of the namespace block the cursor is in, which
+    /// [`resolve_code_class_name`](crate::util::resolve_code_class_name)
+    /// qualifies a written name no class answers to with.  `None` where
+    /// no file context exists.
+    pub source_imports: SourceImports<'a>,
     /// The server state the type engine consults for answers that need
     /// the whole project rather than the current file: inferring a
     /// method's return type from its body, the model configured for an
@@ -337,8 +352,83 @@ pub(crate) struct ResolutionCtx<'a> {
 /// have to outlive the context they are handed to.
 pub(crate) struct CtxLoaders<'a> {
     pub class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    /// See [`ResolutionCtx::source_class_loader`].
+    pub source_class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    /// See [`ResolutionCtx::source_imports`].
+    pub source_imports: SourceImports<'a>,
     pub function_loader: FunctionLoaderFn<'a>,
     pub laravel_macro_this_resolver: LaravelMacroThisResolverFn<'a>,
+}
+
+impl<'a> ResolutionCtx<'a> {
+    /// Qualify the class names of a type written in this file; see
+    /// [`VarResolutionCtx::resolve_written_type`].
+    pub(crate) fn resolve_written_type(&self, ty: &PhpType) -> PhpType {
+        let (namespace, local_classes) = self.written_scope();
+        crate::util::resolve_source_php_type_names(
+            ty,
+            namespace,
+            self.source_imports,
+            self.content,
+            local_classes,
+            self.source_class_loader,
+        )
+    }
+
+    /// Qualify the class names of a native type hint written in this file;
+    /// see [`resolve_code_php_type_names`](crate::util::resolve_code_php_type_names).
+    pub(crate) fn resolve_hint_type(&self, ty: &PhpType) -> PhpType {
+        let (namespace, local_classes) = self.written_scope();
+        crate::util::resolve_code_php_type_names(
+            ty,
+            namespace,
+            self.source_imports,
+            local_classes,
+            self.source_class_loader,
+        )
+    }
+
+    /// Resolve a class name written in this file to its FQN; see
+    /// [`resolve_code_class_name`](crate::util::resolve_code_class_name).
+    /// `self`, `static` and `parent` name the class the code is in.
+    pub(crate) fn resolve_written_class(&self, name: &str) -> String {
+        if let Some(fqn) = crate::class_lookup::resolve_class_keyword(name, self.current_class) {
+            return fqn;
+        }
+        let (namespace, local_classes) = self.written_scope();
+        crate::util::resolve_code_class_name(
+            name,
+            namespace,
+            self.source_imports,
+            local_classes,
+            self.source_class_loader,
+        )
+    }
+
+    /// Resolves the class names a narrowing check writes (`instanceof`,
+    /// `Foo::class`) by the same rule as [`Self::resolve_written_class`].
+    pub(in crate::type_engine) fn written_class_names(
+        &self,
+    ) -> crate::type_engine::types::narrowing::WrittenClassNames<'a> {
+        let (namespace, local_classes) = self.written_scope();
+        crate::type_engine::types::narrowing::WrittenClassNames::new(
+            local_classes,
+            self.source_class_loader,
+            namespace,
+            self.source_imports,
+        )
+    }
+
+    /// The namespace a written name is read in, and the file's classes to
+    /// match it against.  Outside a class the namespace is the one in force
+    /// at the cursor.
+    fn written_scope(&self) -> (Option<&'a str>, &'a [Arc<ClassInfo>]) {
+        let namespace = match self.current_class {
+            Some(cls) => cls.file_namespace.as_deref(),
+            None => crate::parser::namespace_at_offset(self.content, self.cursor_offset as usize),
+        };
+        (namespace, self.all_classes)
+    }
 }
 
 impl<'a> CtxLoaders<'a> {
@@ -346,11 +436,14 @@ impl<'a> CtxLoaders<'a> {
     /// them.
     pub(crate) fn new(
         class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        source_class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
         function_loader: &'a dyn Fn(&str, u32) -> Option<FunctionInfo>,
         laravel_macro_this_resolver: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     ) -> Self {
         Self {
             class_loader,
+            source_class_loader,
+            source_imports: None,
             function_loader: Some(function_loader),
             laravel_macro_this_resolver: Some(laravel_macro_this_resolver),
         }
@@ -360,12 +453,25 @@ impl<'a> CtxLoaders<'a> {
     /// cannot reach a macro closure body.
     pub(crate) fn without_macro_this(
         class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        source_class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
         function_loader: &'a dyn Fn(&str, u32) -> Option<FunctionInfo>,
     ) -> Self {
         Self {
             class_loader,
+            source_class_loader,
+            source_imports: None,
             function_loader: Some(function_loader),
             laravel_macro_this_resolver: None,
+        }
+    }
+
+    /// The `use` imports the source class loader was built from, so a
+    /// class name written in code that no class answers to is still
+    /// qualified the way PHP reads it.
+    pub(crate) fn with_imports(self, imports: &'a HashMap<String, String>) -> Self {
+        Self {
+            source_imports: Some(imports),
+            ..self
         }
     }
 }
@@ -386,6 +492,10 @@ pub(crate) struct VarResolutionCtx<'a> {
     pub content: &'a str,
     pub cursor_offset: u32,
     pub class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    /// See [`ResolutionCtx::source_class_loader`].
+    pub source_class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    /// See [`ResolutionCtx::source_imports`].
+    pub source_imports: SourceImports<'a>,
     /// See [`ResolutionCtx::backend`].
     pub backend: Option<&'a Backend>,
     /// Cross-file loader callbacks (function loader, constant loader).
@@ -457,7 +567,7 @@ impl<'a> VarResolutionCtx<'a> {
     /// ```ignore
     /// VarResolutionCtx {
     ///     backend: Some(backend),
-    ///     ..VarResolutionCtx::new("", class, classes, content, offset, &loader)
+    ///     ..VarResolutionCtx::new("", class, classes, content, offset, &loader, &loader)
     /// }
     /// ```
     pub(crate) fn new(
@@ -467,6 +577,7 @@ impl<'a> VarResolutionCtx<'a> {
         content: &'a str,
         cursor_offset: u32,
         class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        source_class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     ) -> Self {
         Self {
             var_name,
@@ -475,6 +586,8 @@ impl<'a> VarResolutionCtx<'a> {
             content,
             cursor_offset,
             class_loader,
+            source_class_loader,
+            source_imports: None,
             backend: None,
             loaders: Loaders::default(),
             resolved_class_cache: None,
@@ -486,6 +599,62 @@ impl<'a> VarResolutionCtx<'a> {
             scope_proofs: None,
             expr_types: None,
         }
+    }
+
+    /// Resolves the classes a check names as written in this file.
+    pub(in crate::type_engine) fn written_class_names(
+        &self,
+    ) -> crate::type_engine::types::narrowing::WrittenClassNames<'a> {
+        crate::type_engine::types::narrowing::WrittenClassNames::new(
+            self.all_classes,
+            self.source_class_loader,
+            self.current_class.file_namespace.as_deref(),
+            self.source_imports,
+        )
+    }
+
+    /// Qualify the class names of a type written in this file (a native
+    /// hint, a docblock read inside the body); see
+    /// [`resolve_source_php_type_names`](crate::util::resolve_source_php_type_names).
+    pub(crate) fn resolve_written_type(&self, ty: &PhpType) -> PhpType {
+        crate::util::resolve_source_php_type_names(
+            ty,
+            self.current_class.file_namespace.as_deref(),
+            self.source_imports,
+            self.content,
+            self.all_classes,
+            self.source_class_loader,
+        )
+    }
+
+    /// Qualify the class names of a native type hint written in this file;
+    /// see [`resolve_code_php_type_names`](crate::util::resolve_code_php_type_names).
+    pub(crate) fn resolve_hint_type(&self, ty: &PhpType) -> PhpType {
+        crate::util::resolve_code_php_type_names(
+            ty,
+            self.current_class.file_namespace.as_deref(),
+            self.source_imports,
+            self.all_classes,
+            self.source_class_loader,
+        )
+    }
+
+    /// Resolve a class name written in this file to its FQN; see
+    /// [`resolve_code_class_name`](crate::util::resolve_code_class_name).
+    /// `self`, `static` and `parent` name the class the code is in.
+    pub(crate) fn resolve_written_class(&self, name: &str) -> String {
+        if let Some(fqn) =
+            crate::class_lookup::resolve_class_keyword(name, Some(self.current_class))
+        {
+            return fqn;
+        }
+        crate::util::resolve_code_class_name(
+            name,
+            self.current_class.file_namespace.as_deref(),
+            self.source_imports,
+            self.all_classes,
+            self.source_class_loader,
+        )
     }
 
     /// The type the forward walker recorded for `expr` where it ran, if
@@ -507,6 +676,8 @@ impl<'a> VarResolutionCtx<'a> {
             content: self.content,
             cursor_offset: self.cursor_offset,
             class_loader: self.class_loader,
+            source_class_loader: self.source_class_loader,
+            source_imports: self.source_imports,
             backend: self.backend,
             laravel_macro_this_resolver: None,
             function_loader: self.loaders.function_loader,

@@ -82,7 +82,7 @@ pub(super) fn resolve_rhs_array_access<'b>(
         scope_result
             .or_else(|| {
                 docblock::find_iterable_raw_type_in_source(ctx.content, access_offset, &base_var)
-                    .map(|t| crate::util::resolve_php_type_names(&t, ctx.class_loader))
+                    .map(|t| ctx.resolve_written_type(&t))
             })
             .or_else(|| {
                 let resolved = resolve_var_types(&base_var, ctx, access_offset as u32);
@@ -116,7 +116,7 @@ pub(super) fn resolve_rhs_array_access<'b>(
     // underlying type (e.g. a `@phpstan-type` alias).
     if let Some(expanded) = crate::type_engine::type_resolution::resolve_type_alias_typed(
         &current,
-        &ctx.current_class.name,
+        &ctx.current_class.fqn(),
         ctx.all_classes,
         ctx.class_loader,
     ) {
@@ -141,7 +141,7 @@ pub(super) fn resolve_rhs_array_access<'b>(
         // alias (e.g. a shape value defined as another alias).
         if let Some(expanded) = crate::type_engine::type_resolution::resolve_type_alias_typed(
             &current,
-            &ctx.current_class.name,
+            &ctx.current_class.fqn(),
             ctx.all_classes,
             ctx.class_loader,
         ) {
@@ -151,7 +151,7 @@ pub(super) fn resolve_rhs_array_access<'b>(
 
     let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
         &current,
-        &ctx.current_class.name,
+        &ctx.current_class.fqn(),
         ctx.all_classes,
         ctx.class_loader,
     );
@@ -308,7 +308,7 @@ fn index_segment(
     // `OpeningHours extends DataCollection<string, Day>`.
     let class_element = crate::type_engine::type_resolution::type_hint_to_classes_typed(
         base,
-        ctx.current_class.map_or("", |cls| &cls.name),
+        &ctx.current_class.map(|cls| cls.fqn()).unwrap_or_default(),
         ctx.all_classes,
         ctx.class_loader,
     )

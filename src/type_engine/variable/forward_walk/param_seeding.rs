@@ -55,12 +55,30 @@ pub(crate) fn seed_params<'b>(
             if let Some((var_type, _name)) =
                 crate::docblock::find_inline_var_docblock(ctx.content, param_offset)
             {
-                let var_type = crate::util::resolve_php_type_names(&var_type, ctx.class_loader);
-                let effective = crate::docblock::resolve_effective_type_typed(
-                    native_type.as_ref(),
-                    Some(&var_type),
-                )
-                .unwrap_or(var_type);
+                let var_type = ctx.resolve_written_type(&var_type);
+                let native = native_type
+                    .as_ref()
+                    .map(|written| ctx.resolve_hint_type(written));
+                let effective =
+                    crate::docblock::resolve_effective_type_typed(native.as_ref(), Some(&var_type))
+                        .unwrap_or(var_type);
+                let effective = match (native_type.as_ref(), native) {
+                    (Some(written), Some(native))
+                        if effective != native
+                            && !super::super::resolution::param_docblock_narrows_hint(
+                                &effective,
+                                written,
+                                method_span_start as usize,
+                                ctx.current_class,
+                                ctx.content,
+                                ctx.class_loader,
+                                ctx.source_class_loader,
+                            ) =>
+                    {
+                        native
+                    }
+                    _ => effective,
+                };
 
                 let results = ctx.resolved_types_for(effective);
 
@@ -131,7 +149,7 @@ fn seed_from_call_site(
 
     let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
         arg_type,
-        &ctx.current_class.name,
+        &ctx.current_class.fqn(),
         ctx.all_classes,
         ctx.class_loader,
     );
@@ -186,7 +204,7 @@ fn seed_implicit_set_value(
         return;
     };
 
-    let hint_type = extract_hint_type(hint);
+    let hint_type = ctx.resolve_hint_type(&extract_hint_type(hint));
 
     scope.seed("$value", ctx.resolved_types_for(hint_type));
 }
@@ -222,12 +240,12 @@ fn finish_constant_operands(ty: &PhpType, ctx: &ForwardWalkCtx<'_>) -> Option<Ph
 pub(crate) fn resolve_docblock_param_type(raw: &PhpType, ctx: &ForwardWalkCtx<'_>) -> PhpType {
     let expanded = crate::type_engine::type_resolution::expand_nested_type_aliases(
         raw,
-        &ctx.current_class.name,
+        &ctx.current_class.fqn(),
         ctx.all_classes,
         ctx.class_loader,
     );
     let raw = expanded.as_ref().unwrap_or(raw);
-    let resolved = crate::util::resolve_php_type_names(raw, ctx.class_loader);
+    let resolved = ctx.resolve_written_type(raw);
     let resolved = bind_enclosing_self(&resolved, ctx).unwrap_or(resolved);
     finish_constant_operands(&resolved, ctx).unwrap_or(resolved)
 }
@@ -290,7 +308,8 @@ pub(crate) fn resolve_param_type(
     // A method's own declaration records the same hint fully qualified
     // against its namespace block's imports, which the file-wide class
     // loader cannot do when blocks reuse a short name.  That is also the
-    // form the declarations it is compared against below record.
+    // form the declarations it is compared against below record.  A
+    // closure has no declaration, so its hint is qualified here.
     let raw_native = written_native
         .as_ref()
         .and_then(|_| {
@@ -302,7 +321,11 @@ pub(crate) fn resolve_param_type(
                 .find(|p| p.name == pname)?;
             own.native_type_hint.clone()
         })
-        .or(written_native);
+        .or_else(|| {
+            written_native
+                .as_ref()
+                .map(|hint| ctx.resolve_hint_type(hint))
+        });
     // A `null` default makes the parameter accept null whatever its type
     // says (`bool $a = null` is `?bool`).
     let default_is_null = crate::parser::param_default_is_null(param);
@@ -345,6 +368,7 @@ pub(crate) fn resolve_param_type(
             t,
             ctx.content,
             method_span_start as usize,
+            &|ty| ctx.resolve_written_type(ty),
         )
     });
 
@@ -403,6 +427,25 @@ pub(crate) fn resolve_param_type(
             ty
         }
     });
+    let effective_type = match effective_type {
+        Some(settled)
+            if native_for_effective.as_ref() != Some(&settled)
+                && written_native.as_ref().is_some_and(|written| {
+                    !super::super::resolution::param_docblock_narrows_hint(
+                        &settled,
+                        written,
+                        method_span_start as usize,
+                        ctx.current_class,
+                        ctx.content,
+                        ctx.class_loader,
+                        ctx.source_class_loader,
+                    )
+                }) =>
+        {
+            native_for_effective.clone()
+        }
+        effective => effective,
+    };
 
     // Substitute method-level template params with their bounds.
     let effective_type = effective_type.map(|ty| {
@@ -410,6 +453,7 @@ pub(crate) fn resolve_param_type(
             ty,
             ctx.content,
             method_span_start as usize,
+            &|ty| ctx.resolve_written_type(ty),
         );
         // Also substitute inside class-string<T> so that
         // `class-string<T>` with `@template T of Foo` becomes
@@ -418,6 +462,7 @@ pub(crate) fn resolve_param_type(
             ty,
             ctx.content,
             method_span_start as usize,
+            &|ty| ctx.resolve_written_type(ty),
         )
     });
 
@@ -426,7 +471,7 @@ pub(crate) fn resolve_param_type(
         .map(|ty| {
             crate::type_engine::type_resolution::type_hint_to_classes_typed(
                 ty,
-                &ctx.current_class.name,
+                &ctx.current_class.fqn(),
                 ctx.all_classes,
                 ctx.class_loader,
             )
@@ -444,7 +489,7 @@ pub(crate) fn resolve_param_type(
     {
         let inner_resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
             inner,
-            &ctx.current_class.name,
+            &ctx.current_class.fqn(),
             ctx.all_classes,
             ctx.class_loader,
         );
@@ -479,7 +524,7 @@ pub(crate) fn resolve_param_type(
         let parsed_docblock = rdt.clone();
         let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
             &parsed_docblock,
-            &ctx.current_class.name,
+            &ctx.current_class.fqn(),
             ctx.all_classes,
             ctx.class_loader,
         );
@@ -491,7 +536,7 @@ pub(crate) fn resolve_param_type(
                 build_type_string_only_result(
                     raw_docblock_type.as_ref(),
                     type_for_resolution,
-                    ctx.content,
+                    ctx,
                     method_span_start as usize,
                 )
             })
@@ -502,7 +547,7 @@ pub(crate) fn resolve_param_type(
             build_type_string_only_result(
                 raw_docblock_type.as_ref(),
                 type_for_resolution,
-                ctx.content,
+                ctx,
                 method_span_start as usize,
             )
         })
@@ -693,7 +738,7 @@ pub(crate) fn try_resolve_from_merged_class(
     // as the source docblock is, and for a method it is the one that wins.
     let expanded = crate::type_engine::type_resolution::expand_nested_type_aliases(
         declared,
-        &ctx.current_class.name,
+        &ctx.current_class.fqn(),
         ctx.all_classes,
         ctx.class_loader,
     );
@@ -705,7 +750,7 @@ pub(crate) fn try_resolve_from_merged_class(
 
     let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
         hint,
-        &ctx.current_class.name,
+        &ctx.current_class.fqn(),
         ctx.all_classes,
         ctx.class_loader,
     );
@@ -728,7 +773,7 @@ pub(crate) fn try_resolve_from_merged_class(
 pub(crate) fn build_type_string_only_result(
     raw_docblock_type: Option<&PhpType>,
     type_for_resolution: Option<&PhpType>,
-    content: &str,
+    ctx: &ForwardWalkCtx<'_>,
     method_span_start: usize,
 ) -> Vec<ResolvedType> {
     let best_type = if let Some(rdt) = raw_docblock_type {
@@ -739,8 +784,9 @@ pub(crate) fn build_type_string_only_result(
     if let Some(mut parsed) = best_type {
         parsed = super::super::resolution::substitute_class_string_template_bounds(
             parsed,
-            content,
+            ctx.content,
             method_span_start,
+            &|ty| ctx.resolve_written_type(ty),
         );
         vec![ResolvedType::from_type_string(parsed)]
     } else {

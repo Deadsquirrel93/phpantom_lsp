@@ -773,7 +773,8 @@ pub(crate) fn try_chained_array_access_with_candidates<'a>(
     all_classes: &[Arc<ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<PhpType> {
-    let current_class_name = current_class.map(|c| c.name.as_str()).unwrap_or("");
+    let current_class_fqn = current_class.map(ClassInfo::fqn);
+    let current_class_name = current_class_fqn.as_deref().unwrap_or("");
 
     for candidate in candidates {
         if let Some(result) = walk_array_segments(

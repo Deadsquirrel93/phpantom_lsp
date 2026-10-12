@@ -486,8 +486,7 @@ impl Backend {
         let Some(enclosing) = find_class_at_offset(&local_classes, cursor_offset) else {
             return false;
         };
-        let (use_map, namespace) = self.use_map_and_namespace_at(uri, cursor_offset);
-        let class_loader = self.class_loader_with(&local_classes, &use_map, &namespace);
+        let class_loader = self.resolved_class_loader_with(&local_classes);
         let resolved =
             resolve_class_fully_cached(enclosing, &class_loader, &self.resolved_class_cache);
         resolved

@@ -1351,6 +1351,32 @@ class Drawer {
     );
 }
 
+/// A `@param` naming a class that does not narrow the native one loses to
+/// it at the parameter definition site too, as everywhere else.
+#[test]
+fn hover_parameter_definition_ignores_docblock_class_not_narrowing_native() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+namespace App;
+class Base {}
+class Other {}
+class Service {
+    /** @param Other $b */
+    public function handle(Base $b): void {}
+}
+"#;
+
+    let hover =
+        hover_at(&backend, uri, content, 6, 33).expect("hover should be active on parameter $b");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("Base") && !text.contains("Other"),
+        "hover should show the native class: {}",
+        text
+    );
+}
+
 #[test]
 fn hover_parameter_definition_standalone_function() {
     let backend = create_test_backend();
@@ -1988,6 +2014,124 @@ class Child extends Base {
     let text = hover_text(&hover);
     assert!(text.contains("parent"), "should mention parent: {}", text);
     assert!(text.contains("Base"), "should resolve to Base: {}", text);
+}
+
+/// `parent` is the class the declaration stored, not whatever the file
+/// imports under the same short name.
+#[test]
+fn hover_parent_keyword_global_parent_shadowed_by_import() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+namespace {
+    /** The global base. */
+    class Base {}
+}
+namespace Lib {
+    /** The library base. */
+    class Base {}
+}
+namespace App {
+    use Lib\Base;
+    class Child extends \Base {
+        public function hello(): void {
+            parent::class;
+        }
+    }
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 13, 13).expect("expected hover");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("The global base."),
+        "should resolve to \\Base: {}",
+        text
+    );
+}
+
+/// The type `id(Foo::BAR)` binds its template to inside `namespace App`,
+/// where `Foo` is a global class and `imports` is the block's `use` list.
+fn template_bound_by_global_class_constant(imports: &str) -> String {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = format!(
+        r#"<?php
+namespace {{
+    class Foo {{ const BAR = 'global'; }}
+}}
+namespace App {{
+    {imports}
+    /**
+     * @template T
+     * @param T $value
+     * @return T
+     */
+    function id($value) {{ return $value; }}
+    $result = id(Foo::BAR);
+    $result;
+}}
+"#
+    );
+    let hover = hover_at(&backend, uri, &content, 13, 6).expect("expected hover");
+    hover_text(&hover).to_string()
+}
+
+/// An unimported `Foo` inside a namespace is `App\Foo`, so the global
+/// class's constant does not bind the template.
+#[test]
+fn hover_template_bound_by_unimported_global_class_constant() {
+    let imported = template_bound_by_global_class_constant("use Foo;");
+    assert!(
+        imported.contains("'global'"),
+        "`use Foo;` names the global class: {imported}"
+    );
+    let unimported = template_bound_by_global_class_constant("");
+    assert!(
+        !unimported.contains("'global'"),
+        "`Foo` is `App\\Foo` without an import: {unimported}"
+    );
+}
+
+/// Hovering a class name written in code or a docblock shows the class PHP
+/// reads it as: the import, else the current namespace's, never a global
+/// class of the same short name.
+#[test]
+fn hover_class_reference_resolves_in_the_current_namespace() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+namespace {
+    /** The global foo. */
+    class Foo {}
+    /** The global bar. */
+    class Bar {}
+}
+namespace App {
+    /** The app foo. */
+    class Foo {}
+    /** @var Foo $f */
+    $f = new Foo();
+    Bar::class;
+    \Bar::class;
+}
+"#;
+    let text = |line, col| {
+        hover_at(&backend, uri, content, line, col)
+            .map(|h| hover_text(&h).to_string())
+            .unwrap_or_default()
+    };
+    let docblock = text(10, 14);
+    assert!(docblock.contains("The app foo."), "@var Foo: {docblock}");
+    let code = text(11, 15);
+    assert!(code.contains("The app foo."), "new Foo: {code}");
+    let unimported = text(12, 5);
+    assert!(
+        !unimported.contains("The global bar."),
+        "`Bar` is the missing App\\Bar: {unimported}"
+    );
+    let qualified = text(13, 6);
+    assert!(qualified.contains("The global bar."), "\\Bar: {qualified}");
 }
 
 // ─── Function call hover ────────────────────────────────────────────────────
@@ -9507,6 +9651,43 @@ function test() {
 }
 
 #[test]
+fn hover_inherited_class_constant_reads_self_and_parent_on_declaring_class() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class G { const X = 1; }
+trait T { const TB = self::TA; }
+interface I { const IA = 1; const IB = self::IA; }
+class P extends G implements I { use T; const A = 1; const B = self::A; const X = 2; const Y = parent::X; const N = self::class; const TA = 1; }
+class C extends P { const A = 2; const TA = 2; const IA = 2; }
+function test() {
+    $b = C::B;
+    $y = C::Y;
+    $n = C::N;
+    $t = C::TB;
+    $i = C::IB;
+    echo $b, $y, $n, $t, $i;
+}
+"#;
+
+    for (var, expected) in [
+        ("$b", "1"),
+        ("$y", "1"),
+        ("$n", "class-string<P>"),
+        ("$t", "1"),
+        ("$i", "1"),
+    ] {
+        let col = content.lines().nth(12).unwrap().find(var).unwrap() as u32 + 1;
+        let hover = hover_at(&backend, uri, content, 12, col).expect("expected hover");
+        let text = hover_text(&hover);
+        assert!(
+            text.contains(&format!("{var} = {expected}\n")),
+            "{var} should be {expected}, got: {text}"
+        );
+    }
+}
+
+#[test]
 fn hover_variable_assigned_from_typed_class_constant_keeps_literal() {
     let backend = create_test_backend();
     let uri = "file:///test.php";
@@ -11914,6 +12095,180 @@ class Sub extends Base {
         "string constant via parent:: should resolve to its value, got: {}",
         text_y
     );
+}
+
+// ─── Class constant initializers read from another file ───────────────
+
+/// A class named in a constant's initializer is the one the declaring
+/// file imports, not the one the reading file imports under the same
+/// short name.
+#[test]
+fn hover_constant_initializer_names_classes_through_the_declaring_files_imports() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "Vendor\\": "src/Vendor/", "Other\\": "src/Other/", "Lib\\": "src/Lib/" } } }"#,
+        &[
+            (
+                "src/Vendor/Defaults.php",
+                "<?php\nnamespace Vendor;\n\nclass Defaults\n{\n    const MODE = 'strict';\n}\n",
+            ),
+            (
+                "src/Other/Defaults.php",
+                "<?php\nnamespace Other;\n\nclass Defaults\n{\n    const MODE = 'other';\n}\n",
+            ),
+            (
+                "src/Lib/Settings.php",
+                "<?php\nnamespace Lib;\n\nuse Vendor\\Defaults;\n\nclass Settings\n{\n    const MODE = Defaults::MODE;\n    const MODES = [Defaults::MODE];\n    const SOURCES = [Defaults::class];\n    const SOURCE = Defaults::class;\n}\n",
+            ),
+        ],
+    );
+    let uri = "file:///run.php";
+    let content = r#"<?php
+namespace App;
+
+use Other\Defaults;
+
+function test(): void {
+    $mode = \Lib\Settings::MODE;
+    $mode;
+    $modes = \Lib\Settings::MODES;
+    $modes;
+    $sources = \Lib\Settings::SOURCES;
+    $sources;
+    $source = \Lib\Settings::SOURCE;
+    $sourceMode = $source::MODE;
+    $sourceMode;
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 7, 6).expect("expected hover on $mode");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("'strict'") && !text.contains("'other'"),
+        "`Defaults` is the `Vendor\\Defaults` that `Lib\\Settings` imports, got: {text}"
+    );
+
+    let hover = hover_at(&backend, uri, content, 9, 6).expect("expected hover on $modes");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("'strict'") && !text.contains("'other'"),
+        "an array element names the declaring file's `Defaults` too, got: {text}"
+    );
+
+    let hover = hover_at(&backend, uri, content, 11, 6).expect("expected hover on $sources");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains(r"'Vendor\\Defaults'") && !text.contains("Other"),
+        "`Defaults::class` is the declaring file's `Defaults`, got: {text}"
+    );
+
+    let hover = hover_at(&backend, uri, content, 14, 6).expect("expected hover on $sourceMode");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("'strict'") && !text.contains("'other'"),
+        "a bare `Defaults::class` names the declaring file's `Defaults` too, got: {text}"
+    );
+
+    // The constant itself shows which `Defaults` it reads.
+    let hover = hover_at(&backend, uri, content, 6, 28).expect("expected hover on MODE");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains(r"const MODE = \Vendor\Defaults::MODE;"),
+        "the initializer names the class fully qualified, got: {text}"
+    );
+}
+
+/// An inherited constant's initializer is read in the namespace of the
+/// class that declares it, not of the class it is read through.
+#[test]
+fn hover_inherited_constant_initializer_names_classes_in_the_parents_namespace() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "Lib\\": "src/Lib/", "App\\": "src/App/" } } }"#,
+        &[
+            (
+                "src/Lib/Labels.php",
+                "<?php\nnamespace Lib;\n\nclass Labels\n{\n    const DEFAULT = 'lib';\n}\n",
+            ),
+            (
+                "src/Lib/Base.php",
+                "<?php\nnamespace Lib;\n\nclass Base\n{\n    const LABEL = Labels::DEFAULT;\n}\n",
+            ),
+            (
+                "src/App/Labels.php",
+                "<?php\nnamespace App;\n\nclass Labels\n{\n    const DEFAULT = 'app';\n}\n",
+            ),
+            (
+                "src/App/Child.php",
+                "<?php\nnamespace App;\n\nclass Child extends \\Lib\\Base {}\n",
+            ),
+        ],
+    );
+    let uri = "file:///run.php";
+    let content = r#"<?php
+namespace App;
+
+function test(): void {
+    $label = Child::LABEL;
+    $label;
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 5, 6).expect("expected hover on $label");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("'lib'") && !text.contains("'app'"),
+        "`Labels` in `Lib\\Base` is `Lib\\Labels`, got: {text}"
+    );
+}
+
+/// A constant initialized to `Foo::class` holds that class's name, as
+/// `$x = Foo::class;` does in code, however the class is named.
+#[test]
+fn hover_class_constant_initialized_to_class_name() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Defaults {}
+enum Suit { case Hearts; }
+class Base {}
+class Settings extends Base {
+    const SOURCE = Defaults::class;
+    const KIND = Suit::class;
+    const MINE = self::class;
+    const BASE = parent::class;
+    const GONE = Missing::class;
+}
+
+function test(): void {
+    $source = Settings::SOURCE;
+    $source;
+    $kind = Settings::KIND;
+    $kind;
+    $mine = Settings::MINE;
+    $mine;
+    $base = Settings::BASE;
+    $base;
+    $gone = Settings::GONE;
+    $gone;
+}
+"#;
+
+    for (line, var, expected) in [
+        (14, "$source", "class-string<Defaults>"),
+        // An enum's `::class` is its name, not one of its cases.
+        (16, "$kind", "class-string<Suit>"),
+        (18, "$mine", "class-string<Settings>"),
+        (20, "$base", "class-string<Base>"),
+        // PHP names a class without loading it.
+        (22, "$gone", "class-string<Missing>"),
+    ] {
+        let hover = hover_at(&backend, uri, content, line, 6)
+            .unwrap_or_else(|| panic!("expected hover on {var}"));
+        let text = hover_text(&hover);
+        assert!(
+            text.contains(&format!("{var} = {expected}")),
+            "{var} should be {expected}, got: {text}"
+        );
+    }
 }
 
 // ─── instanceof on nullable strips null ───────────────────────────────

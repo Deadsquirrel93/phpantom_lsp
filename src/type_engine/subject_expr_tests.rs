@@ -390,10 +390,12 @@ fn parse_new_expression_no_parens() {
 
 #[test]
 fn parse_new_expression_fqn() {
+    // The leading `\` marks an explicit global reference, so it survives
+    // for the resolver to honour.
     assert_eq!(
         SubjectExpr::parse("(new \\App\\Builder())"),
         SubjectExpr::NewExpr {
-            class_name: "App\\Builder".to_string(),
+            class_name: "\\App\\Builder".to_string(),
         }
     );
 }

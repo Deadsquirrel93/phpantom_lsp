@@ -446,10 +446,8 @@ fn call_node_invalidations<'b>(
             // A constructor that returns nothing is still not read as
             // changing its arguments: building an object from them is what
             // it is for.  Only a declared `@impure` says otherwise.
-            let impure = static_receiver_class_names(inst.class, ctx)
-                .iter()
-                .filter_map(|name| (ctx.class_loader)(name))
-                .any(|cls| declared_purity(&cls, "__construct", ctx) == Some(false));
+            let impure = static_receiver_class(inst.class, ctx)
+                .is_some_and(|cls| declared_purity(&cls, "__construct", ctx) == Some(false));
             if impure {
                 push_argument_invalidations(args, scope, out);
             }
@@ -1108,14 +1106,10 @@ fn static_call_effect(
     method_name: &str,
     ctx: &ForwardWalkCtx<'_>,
 ) -> (CallEffect, bool) {
-    let classes: Vec<Arc<crate::types::ClassInfo>> = static_receiver_class_names(class, ctx)
-        .iter()
-        .filter_map(|name| (ctx.class_loader)(name))
-        .collect();
-    let Some(cls) = classes.first() else {
+    let Some(cls) = static_receiver_class(class, ctx) else {
         return (CallEffect::Unknown, false);
     };
-    class_method_effect(cls, method_name, ctx)
+    class_method_effect(&cls, method_name, ctx)
 }
 
 /// [`method_call_effect`] for one class, plus whether the method is static.
@@ -1271,6 +1265,24 @@ pub(crate) fn static_receiver_class_names(
         Expression::Parenthesized(inner) => static_receiver_class_names(inner.expression, ctx),
         _ => Vec::new(),
     }
+}
+
+/// The class a static receiver (`Foo::`, `self::`, `new Foo`) names.
+fn static_receiver_class(
+    expr: &Expression<'_>,
+    ctx: &ForwardWalkCtx<'_>,
+) -> Option<Arc<crate::types::ClassInfo>> {
+    if let Expression::Parenthesized(inner) = expr {
+        return static_receiver_class(inner.expression, ctx);
+    }
+    let name = crate::class_lookup::class_expression_name(
+        expr,
+        ctx.current_class,
+        ctx.all_classes,
+        ctx.source_class_loader,
+        ctx.source_imports,
+    )?;
+    (ctx.class_loader)(&name)
 }
 
 pub(crate) fn class_name_matches_receiver(name: &[u8], receiver_names: &[String]) -> bool {

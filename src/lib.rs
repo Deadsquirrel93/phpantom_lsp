@@ -349,8 +349,8 @@ pub use virtual_members::resolve_class_fully;
 /// - `completion::builder` — module-level `build_completion_items`, `build_method_label`
 /// - [`composer`] — PSR-4 autoload mapping and class file resolution
 /// - `server` — `impl LanguageServer` (initialize, completion, did_open, …)
-/// - `resolution` — `find_or_load_class`, `find_or_load_function`, `resolve_class_name`,
-///   `resolve_function_name`
+/// - `resolution` — `find_or_load_class`, `find_or_load_function`, the source and
+///   resolved class loaders, `resolve_function_name`
 /// - `inheritance` — `resolve_class_with_inheritance` (base resolution), trait/parent merging
 /// - `virtual_members` — `resolve_class_fully` (base resolution + virtual member providers),
 ///   `VirtualMemberProvider` trait, merge logic, provider registry

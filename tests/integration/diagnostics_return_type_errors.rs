@@ -5331,3 +5331,53 @@ function locate(string $name): ?array {
         "`Trap::$files` is a string[], not a Trap, got: {diags:?}"
     );
 }
+
+/// A docblock class that is neither the native class nor a subclass of it
+/// does not replace the native return type, which PHP enforces.
+#[test]
+fn docblock_class_that_does_not_narrow_the_native_class_loses_to_it() {
+    let php = r#"<?php
+namespace App\Support;
+
+class Clock
+{
+    /** @return DateTimeImmutable */
+    public function now(): \DateTimeImmutable
+    {
+        return new \DateTimeImmutable();
+    }
+}
+"#;
+    let diags = collect_diagnostics_with(
+        &create_test_backend_with_full_stubs(),
+        php,
+        Backend::collect_return_type_diagnostics,
+    );
+    assert!(
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
+        "`App\\Support\\DateTimeImmutable` does not exist, so the native hint stands, got: {diags:?}"
+    );
+}
+
+/// The same for a function.
+#[test]
+fn docblock_class_that_does_not_narrow_a_functions_native_class_loses_to_it() {
+    let php = r#"<?php
+namespace App\Support;
+
+/** @return DateTimeImmutable */
+function now(): \DateTimeImmutable
+{
+    return new \DateTimeImmutable();
+}
+"#;
+    let diags = collect_diagnostics_with(
+        &create_test_backend_with_full_stubs(),
+        php,
+        Backend::collect_return_type_diagnostics,
+    );
+    assert!(
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
+        "`App\\Support\\DateTimeImmutable` does not exist, so the native hint stands, got: {diags:?}"
+    );
+}

@@ -58,6 +58,7 @@ impl Backend {
         let file_ctx = self.file_context(uri);
         let _parse_guard = with_parse_cache(content);
         let class_loaders = self.class_loaders(&file_ctx);
+        let resolved_class_loaders = self.resolved_class_loaders(&file_ctx);
         let function_loaders = self.function_loaders(&file_ctx);
         let constant_loaders = file_ctx.per_block(|use_map, namespace| {
             self.constant_loader_with(file_ctx.resolved_names.as_deref(), use_map, namespace)
@@ -89,6 +90,7 @@ impl Backend {
                     let loaders = owned_loaders.loaders();
 
                     let var_ctx = VarResolutionCtx {
+                        source_imports: Some(file_ctx.use_map_at(subject_offset)),
                         backend: Some(self),
                         loaders,
                         resolved_class_cache: Some(&self.resolved_class_cache),
@@ -98,6 +100,7 @@ impl Backend {
                             &file_ctx.classes,
                             content,
                             subject_offset,
+                            resolved_class_loaders.at(subject_offset),
                             class_loaders.at(subject_offset),
                         )
                     };

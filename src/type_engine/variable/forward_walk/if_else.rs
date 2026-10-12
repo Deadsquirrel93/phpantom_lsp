@@ -643,6 +643,8 @@ pub(crate) fn branch_exits_stmts<'s>(
         current_class: ctx.current_class,
         all_classes: ctx.all_classes,
         class_loader: ctx.class_loader,
+        source_class_loader: ctx.source_class_loader,
+        source_imports: ctx.source_imports,
         function_loader: ctx.loaders.function_loader,
         resolved_class_cache: ctx.resolved_class_cache,
         var_types: Some(&var_types),

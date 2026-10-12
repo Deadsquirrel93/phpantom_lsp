@@ -534,11 +534,15 @@ pub(crate) fn default_type_args(class: &ClassInfo) -> Vec<PhpType> {
 /// (`parent::get()`) sees `@extends Foo<Dog>`'s `Dog` where the parent
 /// says `T`.  `None` when the child does not extend `parent` generically.
 pub(crate) fn extends_type_args(child: &ClassInfo, parent: &ClassInfo) -> Option<Vec<PhpType>> {
-    let parent_short = crate::util::short_name(&parent.name);
+    let parent_fqn = parent.fqn();
     child
         .extends_generics
         .iter()
-        .find(|(name, _)| crate::util::short_name(name) == parent_short)
+        .find(|(name, _)| {
+            name.strip_prefix('\\')
+                .unwrap_or(name)
+                .eq_ignore_ascii_case(&parent_fqn)
+        })
         .map(|(_, args)| args.clone())
 }
 

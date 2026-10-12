@@ -28,8 +28,10 @@ pub(crate) struct SubjectResolutionCtx<'a> {
     pub namespace: &'a Option<String>,
     /// File content.
     pub content: &'a str,
-    /// Class loader.
+    /// Class loader for already-resolved names.
     pub class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    /// See [`ResolutionCtx::source_class_loader`](crate::type_engine::resolver::ResolutionCtx::source_class_loader).
+    pub source_class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     /// Server state for project-wide answers.  See
     /// [`ResolutionCtx::backend`](crate::type_engine::resolver::ResolutionCtx::backend).
     pub backend: Option<&'a crate::Backend>,
@@ -84,6 +86,8 @@ pub(crate) fn resolve_subject_type(
                     current_class,
                     ctx.local_classes,
                     ctx.class_loader,
+                    ctx.source_class_loader,
+                    Some(ctx.use_map),
                     ctx.backend,
                     Loaders::with_function(Some(ctx.function_loader)),
                 );
@@ -100,6 +104,8 @@ pub(crate) fn resolve_subject_type(
                 content: ctx.content,
                 cursor_offset: access_offset,
                 class_loader: ctx.class_loader,
+                source_class_loader: ctx.source_class_loader,
+                source_imports: Some(ctx.use_map),
                 backend: ctx.backend,
                 laravel_macro_this_resolver: None,
                 resolved_class_cache: ctx.backend.map(|b| &b.resolved_class_cache),

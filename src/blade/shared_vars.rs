@@ -210,6 +210,7 @@ impl Backend {
             );
             let namespace = file_namespace(program).or_else(|| file_ctx.namespace.clone());
             let class_loader = self.class_loader_with(&file_ctx.classes, &use_map, &namespace);
+            let resolved_class_loader = self.resolved_class_loader_with(&file_ctx.classes);
 
             let mut found: Vec<(u32, &Expression<'_>)> = Vec::new();
             let walker = ExpressionAtOffsetWalker { offsets };
@@ -226,6 +227,7 @@ impl Backend {
                     let current_class = enclosing.unwrap_or(&default_class);
                     let loaders = Loaders::with_function(Some(&function_loader_cl));
                     let var_ctx = VarResolutionCtx {
+                        source_imports: Some(&use_map),
                         backend: Some(self),
                         loaders,
                         resolved_class_cache: Some(&self.resolved_class_cache),
@@ -235,6 +237,7 @@ impl Backend {
                             &file_ctx.classes,
                             content,
                             offset,
+                            &resolved_class_loader,
                             &class_loader,
                         )
                     };
@@ -243,7 +246,7 @@ impl Backend {
                             expr, &var_ctx,
                         )
                         .unwrap_or_else(PhpType::mixed);
-                    let ty = ty.resolve_names(&|name: &str| match class_loader(name) {
+                    let ty = ty.resolve_names(&|name: &str| match resolved_class_loader(name) {
                         Some(class) => format!("\\{}", class.fqn()),
                         None => name.to_string(),
                     });

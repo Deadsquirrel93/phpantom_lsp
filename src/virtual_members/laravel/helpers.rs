@@ -43,7 +43,7 @@ pub(in crate::virtual_members::laravel) fn walks_parent_chain(
         if predicate(parent_name) {
             return true;
         }
-        match class_loader(parent_name) {
+        match crate::class_lookup::load_resolved_name(parent_name, class_loader) {
             Some(parent) => {
                 current_parent = parent.parent_class;
             }

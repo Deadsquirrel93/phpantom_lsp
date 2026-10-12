@@ -317,6 +317,7 @@ fn check_expression_for_property_assignment(expr: &Expression<'_>, ctx: &mut Pro
 
     let site = assign.rhs.span().start.offset;
     let class_loader = ctx.type_ctx.class_loader_at(site);
+    let resolved_class_loader = ctx.type_ctx.resolved_class_loader_at(site);
 
     // Resolve `self`/`static`/`parent`/`$this` in the declared property
     // type, then expand any remaining short class names to their
@@ -330,7 +331,7 @@ fn check_expression_for_property_assignment(expr: &Expression<'_>, ctx: &mut Pro
             if name.contains("__anonymous@") {
                 return name.to_string();
             }
-            if let Some(cls) = class_loader(name) {
+            if let Some(cls) = resolved_class_loader(name) {
                 cls.fqn().to_string()
             } else {
                 name.to_string()
@@ -349,6 +350,7 @@ fn check_expression_for_property_assignment(expr: &Expression<'_>, ctx: &mut Pro
     let loaders = owned_loaders.loaders();
 
     let var_ctx = VarResolutionCtx {
+        source_imports: Some(ctx.type_ctx.file_ctx.use_map_at(site)),
         backend: Some(ctx.backend),
         loaders,
         resolved_class_cache: Some(&ctx.backend.resolved_class_cache),
@@ -358,6 +360,7 @@ fn check_expression_for_property_assignment(expr: &Expression<'_>, ctx: &mut Pro
             &ctx.file_ctx.classes,
             ctx.content,
             rhs_start as u32,
+            resolved_class_loader,
             class_loader,
         )
     };
@@ -377,7 +380,7 @@ fn check_expression_for_property_assignment(expr: &Expression<'_>, ctx: &mut Pro
         if name.contains("__anonymous@") {
             return name.to_string();
         }
-        if let Some(cls) = class_loader(name) {
+        if let Some(cls) = resolved_class_loader(name) {
             cls.fqn().to_string()
         } else {
             name.to_string()
@@ -435,7 +438,7 @@ impl Backend {
                 if is_type_compatible(
                     &assignment.rhs_type,
                     &assignment.declared_type,
-                    ctx.class_loader_at(assignment.start as u32),
+                    ctx.resolved_class_loader_at(assignment.start as u32),
                     ctx.strict_types,
                 ) {
                     return None;

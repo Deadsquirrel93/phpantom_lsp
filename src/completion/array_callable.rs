@@ -219,11 +219,13 @@ impl Backend {
 
         let class_loader = self.class_loader(ctx);
 
+        let resolved_class_loader = self.resolved_class_loader(ctx);
+
         // Resolve the subject to a ClassInfo.
         let class_info = if ac_ctx.is_static {
             // `Class::class` — resolve the class name to FQN and load.
-            let fqn = resolve_class_name_to_fqn(self, &ac_ctx.subject, ctx)?;
-            class_loader(&fqn)?
+            let fqn = resolve_class_name_to_fqn(self, &ac_ctx.subject, ctx);
+            resolved_class_loader(&fqn)?
         } else {
             // Variable — resolve its type.
             let cursor_offset = position_to_offset(content, position);
@@ -250,14 +252,16 @@ impl Backend {
                     &ctx.classes,
                     content,
                     cursor_offset,
+                    &resolved_class_loader,
                     &class_loader,
+                    Some(&ctx.use_map),
                     Some(self),
                     crate::type_engine::resolver::Loaders::default(),
                 );
                 let mut resolved_class = None;
                 for rt in &results {
                     if let Some(base) = rt.type_string.base_name()
-                        && let Some(cls) = class_loader(base)
+                        && let Some(cls) = resolved_class_loader(base)
                     {
                         resolved_class = Some(cls);
                         break;
@@ -285,7 +289,7 @@ impl Backend {
             &candidates,
             AccessKind::Arrow,
             current_class,
-            &class_loader,
+            &resolved_class_loader,
             &self.resolved_class_cache,
             uri,
         );
@@ -325,30 +329,21 @@ impl Backend {
     }
 }
 
-/// Resolve a short/relative class name to FQN using use statements
-/// and the namespace from the file context.
+/// Resolve a class name written in the file (`Foo` in `[Foo::class, '…']`)
+/// to its FQN by PHP's rule for names in code: the file's imports, else its
+/// namespace.
 pub(super) fn resolve_class_name_to_fqn(
     backend: &Backend,
     name: &str,
     ctx: &FileContext,
-) -> Option<String> {
-    let clean = name.trim_start_matches('\\');
-    if let Some(fqn) = ctx.use_map.get(clean) {
-        return Some(fqn.clone());
-    }
-    if clean.contains('\\') {
-        return Some(clean.to_string());
-    }
-    if let Some(ref ns) = ctx.namespace {
-        let fqn = format!("{}\\{}", ns, clean);
-        if backend.find_or_load_class(&fqn).is_some() {
-            return Some(fqn);
-        }
-    }
-    if backend.find_or_load_class(clean).is_some() {
-        return Some(clean.to_string());
-    }
-    None
+) -> String {
+    crate::util::resolve_code_class_name(
+        name,
+        ctx.namespace.as_deref(),
+        Some(&ctx.use_map),
+        &ctx.classes,
+        &backend.class_loader(ctx),
+    )
 }
 
 // ─── Tests ──────────────────────────────────────────────────────────────────

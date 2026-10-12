@@ -5947,27 +5947,162 @@ fn static_call_same_namespace_class_wins_over_global_class() {
     );
 }
 
-/// The global fallback still works for static calls: with no same-namespace
-/// class, `B::z()` resolves to the global `B`, and a missing method is
-/// flagged there.
+/// A class name in code never falls back to the global scope: with no
+/// same-namespace class and no import, `B::missing()` inside
+/// `namespace Src` names `Src\B`, which does not exist, so no member of
+/// the global `B` is checked against it.
 #[test]
-fn static_call_falls_back_to_global_class_when_no_same_namespace_class() {
+fn static_call_does_not_fall_back_to_global_class_when_no_same_namespace_class() {
     let composer_json = r#"{"autoload": {"psr-4": {"Src\\": "src/"}}}"#;
 
     let (backend, _dir) =
         create_psr4_workspace_with_stubs(composer_json, &[], &[("B", GLOBAL_B_STUB)]);
 
     let uri = "file:///consumer.php";
-    let text = "<?php\nnamespace Src;\nclass A {\n    public static function y(): void {\n        B::z();\n        B::missing();\n    }\n}\n";
+    let text = "<?php\nnamespace Src;\nclass A {\n    public static function y(): void {\n        B::missing();\n    }\n}\n";
+
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("missing")),
+        "`B::missing()` names `Src\\B`, not the global `B`, got: {diags:?}"
+    );
+}
+
+/// `use B;` imports the global class, so `B::missing()` inside a namespace
+/// resolves to it and is flagged there.
+#[test]
+fn static_call_resolves_global_class_imported_by_use() {
+    let composer_json = r#"{"autoload": {"psr-4": {"Src\\": "src/"}}}"#;
+
+    let (backend, _dir) =
+        create_psr4_workspace_with_stubs(composer_json, &[], &[("B", GLOBAL_B_STUB)]);
+
+    let uri = "file:///consumer.php";
+    let text = "<?php\nnamespace Src;\nuse B;\nclass A {\n    public static function y(): void {\n        B::z();\n        B::missing();\n    }\n}\n";
 
     let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
     assert!(
         !diags.iter().any(|d| d.message.contains("'z'")),
-        "`B::z()` must fall back to the global `B` where `z()` exists, got: {diags:?}"
+        "`B::z()` must resolve to the imported global `B`, got: {diags:?}"
     );
     assert!(
         diags.iter().any(|d| d.message.contains("missing")),
-        "`B::missing()` must be flagged on the global `B`, got: {diags:?}"
+        "`B::missing()` must be flagged on the imported global `B`, got: {diags:?}"
+    );
+}
+
+static GLOBAL_C_STUB: &str = "<?php\nclass C {\n    public function z(): void {}\n}\n";
+
+/// Run the unknown-member collector over `body` placed in a method of a
+/// class in `namespace Src`, with a global `C` (declaring `z()`) and no
+/// `Src\C`.
+fn diagnostics_in_src_namespace(imports: &str, body: &str) -> Vec<Diagnostic> {
+    let composer_json = r#"{"autoload": {"psr-4": {"Src\\": "src/"}}}"#;
+    let (backend, _dir) =
+        create_psr4_workspace_with_stubs(composer_json, &[], &[("C", GLOBAL_C_STUB)]);
+    let text = format!(
+        "<?php\nnamespace Src;\n{imports}\nclass A {{\n    public function y(mixed $x): void {{\n{body}\n    }}\n}}\n"
+    );
+    unknown_member_diagnostics_with_scope_cache(&backend, "file:///consumer.php", &text)
+}
+
+/// Whether a diagnostic flags `missing()` against the global `C`.
+fn flags_missing_on_global_c(diags: &[Diagnostic]) -> bool {
+    diags
+        .iter()
+        .any(|d| d.message.contains("'missing'") && !d.message.contains("Src\\C"))
+}
+
+/// `new C()` inside `namespace Src` names `Src\C`, never the global `C`.
+#[test]
+fn instantiation_does_not_fall_back_to_global_class() {
+    let diags = diagnostics_in_src_namespace("", "        $c = new C();\n        $c->missing();");
+    assert!(
+        !flags_missing_on_global_c(&diags),
+        "`new C()` names `Src\\C`, not the global `C`, got: {diags:?}"
+    );
+}
+
+/// `use C;` imports the global class, so `new C()` is checked against it.
+#[test]
+fn instantiation_resolves_global_class_imported_by_use() {
+    let diags = diagnostics_in_src_namespace(
+        "use C;",
+        "        $c = new C();\n        $c->z();\n        $c->missing();",
+    );
+    assert!(
+        !diags.iter().any(|d| d.message.contains("'z'")),
+        "`new C()` must resolve to the imported global `C`, got: {diags:?}"
+    );
+    assert!(
+        flags_missing_on_global_c(&diags),
+        "`missing()` must be flagged on the imported global `C`, got: {diags:?}"
+    );
+}
+
+/// `new \C()` is an explicit global reference.
+#[test]
+fn instantiation_with_leading_backslash_reaches_global_class() {
+    let diags = diagnostics_in_src_namespace("", "        $c = new \\C();\n        $c->missing();");
+    assert!(
+        flags_missing_on_global_c(&diags),
+        "`new \\C()` must resolve to the global `C`, got: {diags:?}"
+    );
+}
+
+/// `$x instanceof C` inside `namespace Src` narrows to `Src\C`, never the
+/// global `C`.
+#[test]
+fn instanceof_does_not_fall_back_to_global_class() {
+    let diags = diagnostics_in_src_namespace(
+        "",
+        "        if ($x instanceof C) {\n            $x->missing();\n        }",
+    );
+    assert!(
+        !flags_missing_on_global_c(&diags),
+        "`instanceof C` names `Src\\C`, not the global `C`, got: {diags:?}"
+    );
+}
+
+/// `use C;` imports the global class, so `instanceof C` narrows to it.
+#[test]
+fn instanceof_resolves_global_class_imported_by_use() {
+    let diags = diagnostics_in_src_namespace(
+        "use C;",
+        "        if ($x instanceof C) {\n            $x->missing();\n        }",
+    );
+    assert!(
+        flags_missing_on_global_c(&diags),
+        "`instanceof C` must narrow to the imported global `C`, got: {diags:?}"
+    );
+}
+
+/// A docblock name follows the same rule as code: `@var C` inside
+/// `namespace Src` names `Src\C`, never the global `C`.
+#[test]
+fn inline_var_does_not_fall_back_to_global_class() {
+    let diags =
+        diagnostics_in_src_namespace("", "        /** @var C $x */\n        $x->missing();");
+    assert!(
+        !flags_missing_on_global_c(&diags),
+        "`@var C` names `Src\\C`, not the global `C`, got: {diags:?}"
+    );
+}
+
+/// `use C;` imports the global class, so `@var C` names it.
+#[test]
+fn inline_var_resolves_global_class_imported_by_use() {
+    let diags = diagnostics_in_src_namespace(
+        "use C;",
+        "        /** @var C $x */\n        $x->z();\n        $x->missing();",
+    );
+    assert!(
+        !diags.iter().any(|d| d.message.contains("'z'")),
+        "`@var C` must resolve to the imported global `C`, got: {diags:?}"
+    );
+    assert!(
+        flags_missing_on_global_c(&diags),
+        "`missing()` must be flagged on the imported global `C`, got: {diags:?}"
     );
 }
 
@@ -6205,10 +6340,12 @@ fn leading_backslash_qualified_name_reaches_global_namespace() {
     );
 }
 
-/// With no same-namespace match, a relative qualified name still resolves
-/// against the global namespace, so members it does not declare are flagged.
+/// A relative qualified name never falls back to the global namespace:
+/// with no `Site\View\Event`, `new View\Event()` inside `namespace Site`
+/// still names that class, not the global `View\Event`, so none of the
+/// latter's members are checked against it.
 #[test]
-fn relative_qualified_name_falls_back_to_global_namespace() {
+fn relative_qualified_name_does_not_fall_back_to_global_namespace() {
     let composer_json = r#"{"autoload": {"psr-4": {"Site\\": "src/", "": "global/"}}}"#;
     let global_view_event =
         "<?php\nnamespace View;\nclass Event {\n    public function globalViewOnly(): void {}\n}\n";
@@ -6220,17 +6357,16 @@ fn relative_qualified_name_falls_back_to_global_namespace() {
     );
 
     let uri = "file:///consumer.php";
-    let text = "<?php\nnamespace Site;\nclass Consumer {\n    public function run(): void {\n        $e = new View\\Event();\n        $e->globalViewOnly();\n        $e->missingMethod();\n    }\n}\n";
+    let text = "<?php\nnamespace Site;\nclass Consumer {\n    public function run(): void {\n        $e = new View\\Event();\n        $e->missingMethod();\n    }\n}\n";
 
     let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
     assert!(
-        !diags.iter().any(|d| d.message.contains("globalViewOnly")),
-        "with no Site\\View\\Event, `new View\\Event()` must fall back to the \
-         global View\\Event, got: {diags:?}"
-    );
-    assert!(
-        diags.iter().any(|d| d.message.contains("missingMethod")),
-        "the global View\\Event has no `missingMethod()`, got: {diags:?}"
+        diags
+            .iter()
+            .filter(|d| d.message.contains("missingMethod"))
+            .all(|d| d.message.contains("Site\\View\\Event")),
+        "`new View\\Event()` names `Site\\View\\Event`, not the global \
+         `View\\Event`, got: {diags:?}"
     );
 }
 
@@ -14578,14 +14714,15 @@ class Service
 }
 
 /// A `use X as Y` target is always fully qualified, so it must not be
-/// re-resolved through an earlier import that shares the short name of `X`.
+/// re-resolved through an earlier import that shares the short name of `X`,
+/// and a bare `X` still resolves through that earlier import.
 #[test]
 fn aliased_import_is_not_resolved_through_same_short_name_import() {
     let (backend, _dir) = create_psr4_workspace(
         r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
         &[(
             "src/Facades/Redis.php",
-            "<?php\nnamespace App\\Facades;\nclass Redis {}\n",
+            "<?php\nnamespace App\\Facades;\nclass Redis {\n    public static function connection(string $name): void {}\n    public function facadeOnly(): void {}\n}\n",
         )],
     );
     backend.update_ast(
@@ -14604,6 +14741,130 @@ final class Svc {
     public function a(PhpRedis $r): void {
         $x = PhpRedis::OPT_PREFIX;
         $r->select(1);
+    }
+
+    public function b(Redis $f): void {
+        Redis::connection('cache');
+        $f->facadeOnly();
+    }
+}
+"#;
+
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+}
+
+/// A fully qualified `\X` is the global class even when an import claims the
+/// short name `X`, wherever the resolved name is looked up again.
+#[test]
+fn fully_qualified_global_class_ignores_same_short_name_import() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[(
+            "src/Facades/Redis.php",
+            "<?php\nnamespace App\\Facades;\nclass Redis {\n    public static function connection(string $name): void {}\n}\n",
+        )],
+    );
+    backend.update_ast(
+        "file:///redis.php",
+        "<?php\nclass Redis {\n    const OPT_PREFIX = 2;\n    public function select(int $db): void {}\n}\n",
+    );
+
+    let uri = "file:///fq_vs_import.php";
+    let text = r#"<?php
+namespace App;
+
+use App\Facades\Redis;
+
+final class Svc {
+    public function c(\Redis $g): \Redis {
+        $y = \Redis::OPT_PREFIX;
+        $g->select(1);
+        $this->c($g)->select(2);
+        (new \Redis())->select(3);
+        Redis::connection('cache');
+        return $g;
+    }
+}
+"#;
+
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+}
+
+/// A short name written in source resolves through its import even when a
+/// global class shares the short name, in every position a class is named.
+#[test]
+fn source_class_names_resolve_through_import_over_global_class() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[(
+            "src/Facades/Redis.php",
+            "<?php\nnamespace App\\Facades;\nclass Redis extends \\Exception {\n    public function facadeOnly(): void {}\n}\n",
+        )],
+    );
+    backend.update_ast(
+        "file:///redis.php",
+        "<?php\nclass Redis {\n    public function select(int $db): void {}\n}\n",
+    );
+
+    let uri = "file:///source_names.php";
+    let text = r#"<?php
+namespace App;
+
+use App\Facades\Redis;
+
+final class Svc {
+    public function c(object $o): void {
+        (new Redis())->facadeOnly();
+        $n = new Redis();
+        $n->facadeOnly();
+        if ($o instanceof Redis) { $o->facadeOnly(); }
+        try {} catch (Redis $e) { $e->facadeOnly(); }
+        /** @var Redis $v */
+        $v = $o;
+        $v->facadeOnly();
+        $cls = Redis::class;
+        $w = new $cls();
+        $w->facadeOnly();
+    }
+}
+"#;
+
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+}
+
+/// A closure's parameter and return hints are written in source too, so a
+/// short name in them resolves through its import over a global class.
+#[test]
+fn closure_hints_resolve_through_import_over_global_class() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[(
+            "src/Facades/Redis.php",
+            "<?php\nnamespace App\\Facades;\nclass Redis {\n    public function facadeOnly(): void {}\n}\n",
+        )],
+    );
+    backend.update_ast(
+        "file:///redis.php",
+        "<?php\nclass Redis {\n    public function select(int $db): void {}\n}\n",
+    );
+
+    let uri = "file:///closure_hints.php";
+    let text = r#"<?php
+namespace App;
+
+use App\Facades\Redis;
+
+final class Svc {
+    public function c(Redis $f): void {
+        $byClosure = function (Redis $r): void {
+            $r->facadeOnly();
+        };
+        $byArrow = fn (Redis $r) => $r->facadeOnly();
+        (function (): Redis { return new Redis(); })()->facadeOnly();
+        (fn (): Redis => new Redis())()->facadeOnly();
     }
 }
 "#;
@@ -14667,4 +14928,887 @@ function run(): void {
         .insert(uri.to_string(), std::sync::Arc::new(text.to_string()));
     let messages = slow_diagnostic_messages(&backend, uri, text, "unknown_member");
     assert_eq!(messages, ["Method 'nope' not found on class 'Box'"]);
+}
+
+/// `Foo::class` passed to a `class-string<T>` parameter binds `T` to the
+/// class the file's imports name, not a global class of the same short name.
+#[test]
+fn class_string_argument_binds_template_through_import() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "Faker\\": "faker/", "App\\": "src/" } } }"#,
+        &[
+            (
+                "faker/Generator.php",
+                "<?php\nnamespace Faker;\nclass Generator {\n    public function randomFloat(): float { return 1.0; }\n}\n",
+            ),
+            (
+                "src/Container.php",
+                "<?php\nnamespace App;\nclass Container {\n    /**\n     * @template T\n     * @param class-string<T> $abstract\n     * @return T\n     */\n    public function make(string $abstract): mixed { return new $abstract(); }\n}\n",
+            ),
+        ],
+    );
+
+    backend.update_ast(
+        "file:///generator.php",
+        "<?php\nfinal class Generator {\n    public function current(): mixed { return null; }\n}\n",
+    );
+
+    let uri = "file:///make.php";
+    let text = r#"<?php
+namespace Tests;
+
+use App\Container;
+use Faker\Generator;
+
+final class OrderTest {
+    public function run(Container $app): void {
+        $faker = $app->make(Generator::class);
+        $faker->randomFloat();
+    }
+}
+"#;
+
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+}
+
+/// A narrowing target that is already resolved (an `@phpstan-assert` type,
+/// the classes of an `in_array` haystack, the class a dynamic `instanceof`
+/// reads off a value) must not go through the file's imports a second
+/// time: `\Node` resolved to the global class stays the global class even
+/// though the file imports a `Lib\Node` of the same short name.
+#[test]
+fn resolved_narrowing_target_is_not_resolved_again_through_imports() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+namespace {
+    class Node { public function globalOnly(): void {} }
+}
+
+namespace Lib {
+    class Node {}
+}
+
+namespace App {
+    use Lib\Node;
+
+    /**
+     * @template T of object
+     * @param class-string<T> $class
+     * @phpstan-assert T $x
+     */
+    function assertInstance(string $class, mixed $x): void {}
+
+    function run(mixed $v, mixed $w, mixed $y, \Node $n): void {
+        assertInstance(\Node::class, $v);
+        $v->globalOnly();
+        if (in_array($w, [new \Node()], true)) {
+            $w->globalOnly();
+        }
+        if ($y instanceof $n) {
+            $y->globalOnly();
+        }
+        if ($y instanceof \Node) {
+            $y->globalOnly();
+        }
+        if (is_a($y, \Node::class)) {
+            $y->globalOnly();
+        }
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "every narrowing names the global Node, got: {diags:?}",
+    );
+}
+
+/// A class an `instanceof` names as written resolves through the file's
+/// imports, and the else branch excludes that same class.
+#[test]
+fn written_instanceof_target_resolves_through_imports() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+namespace {
+    class Node {}
+}
+
+namespace Lib {
+    class Node { public function libOnly(): void {} }
+    class Other { public function otherOnly(): void {} }
+}
+
+namespace App {
+    use Lib\Node;
+    use Lib\Other;
+
+    /** @param list<object> $items */
+    function run(mixed $v, Node|Other $u, object $o, array $items): void {
+        if ($v instanceof Node) {
+            $v->libOnly();
+        }
+        if (get_class($v) === Node::class) {
+            $v->libOnly();
+        }
+        $isNode = $v instanceof Node;
+        if ($isNode) {
+            $v->libOnly();
+        }
+        $r = match ($o::class) {
+            Node::class => $o->libOnly(),
+            default => null,
+        };
+        foreach (array_filter($items, fn ($i) => $i instanceof Node) as $item) {
+            $item->libOnly();
+        }
+        if ($u instanceof Node) {
+            return;
+        }
+        $u->otherOnly();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "every check names the imported Lib\\Node, got: {diags:?}",
+    );
+}
+
+/// An unimported class name written in code or a docblock means the class
+/// of the current namespace, never a global class of the same short name.
+#[test]
+fn unimported_written_name_resolves_in_the_current_namespace() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+namespace {
+    class Foo extends \Exception { public function globalOnly(): void {} }
+}
+
+namespace App {
+    class Foo extends \Exception { public function appOnly(): void {} }
+
+    /**
+     * @template T of object
+     * @param class-string<T> $class
+     * @return T
+     */
+    function make(string $class): object { return new $class(); }
+
+    function run(mixed $v, object $o): void {
+        try {
+        } catch (Foo $e) {
+            $e->appOnly();
+        }
+        $f = fn (Foo $x) => $x->appOnly();
+        $g = function (Foo $x): void { $x->appOnly(); };
+        $h = fn (): Foo => new Foo();
+        $h()->appOnly();
+        if (is_a($v, Foo::class)) {
+            $v->appOnly();
+        }
+        if (get_class($o) === Foo::class) {
+            $o->appOnly();
+        }
+        $r = match ($o::class) {
+            Foo::class => $o->appOnly(),
+            default => null,
+        };
+        make(Foo::class)->appOnly();
+        /** @var Foo $d */
+        $d = $v;
+        $d->appOnly();
+    }
+}
+
+namespace {
+    function runGlobal(mixed $v): void {
+        try {
+        } catch (Foo $e) {
+            $e->globalOnly();
+        }
+        $f = fn (Foo $x) => $x->globalOnly();
+        /** @var Foo $d */
+        $d = $v;
+        $d->globalOnly();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "every name resolves in its own namespace, got: {diags:?}",
+    );
+}
+
+/// An imported global class is the one an unqualified name means, even
+/// when the current namespace declares a class of the same short name in
+/// another file.
+#[test]
+fn imported_global_class_wins_over_the_current_namespace() {
+    let backend = create_test_backend();
+    backend.update_ast(
+        "file:///app_foo.php",
+        "<?php\nnamespace App;\nclass Foo extends \\Exception { public function appOnly(): void {} }\n",
+    );
+    let uri = "file:///test.php";
+    let text = r#"<?php
+namespace {
+    class Foo extends \Exception { public function globalOnly(): void {} }
+}
+
+namespace App {
+    use Foo;
+
+    function run(mixed $v): void {
+        try {
+        } catch (Foo $e) {
+            $e->globalOnly();
+        }
+        $f = fn (Foo $x) => $x->globalOnly();
+        /** @var Foo $d */
+        $d = $v;
+        $d->globalOnly();
+        if (is_a($v, Foo::class)) {
+            $v->globalOnly();
+        }
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "every name resolves through the import, got: {diags:?}",
+    );
+}
+
+/// A class name in code with no class in the current namespace names
+/// nothing: it does not fall back to a global class of the same short name.
+#[test]
+fn unimported_code_name_does_not_fall_back_to_a_global_class() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+namespace {
+    class Bar extends \Exception { public function globalOnly(): void {} }
+}
+
+namespace App {
+    function take(): void {
+        try {
+        } catch (Bar $b) {
+            $b->globalOnly();
+        }
+        $f = fn (Bar $x) => $x->globalOnly();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert_eq!(diags.len(), 2, "got: {diags:?}");
+    assert!(
+        diags.iter().all(|d| d
+            .message
+            .contains("subject type 'App\\Bar' could not be resolved")),
+        "`Bar` names the missing App\\Bar, got: {diags:?}",
+    );
+}
+
+/// An omitted argument whose default is `self::CONSTANT` decides a
+/// conditional return against the declaring interface, even when the call
+/// sits in another namespace: the rewritten `self` is read there as the
+/// fully qualified interface, not relative to the caller's namespace.
+#[test]
+fn omitted_self_constant_default_decides_return_from_another_namespace() {
+    let backend = create_test_backend();
+    backend.update_ast(
+        "file:///psr.php",
+        r#"<?php
+namespace Psr\Container;
+
+interface ContainerInterface
+{
+    /** @return mixed */
+    public function get(string $id);
+}
+"#,
+    );
+    backend.update_ast(
+        "file:///di.php",
+        r#"<?php
+namespace Vendor\Di;
+
+use Psr\Container\ContainerInterface as PsrContainerInterface;
+
+interface ContainerInterface extends PsrContainerInterface
+{
+    public const EXCEPTION_ON_INVALID_REFERENCE = 1;
+    public const NULL_ON_INVALID_REFERENCE = 2;
+
+    /**
+     * @template C of object
+     * @template B of self::*_REFERENCE
+     * @param string|class-string<C> $id
+     * @param B $invalidBehavior
+     * @return ($id is class-string<C> ? (B is 0|1 ? C|object : C|object|null) : (B is 0|1 ? object : object|null))
+     */
+    public function get(string $id, int $invalidBehavior = self::EXCEPTION_ON_INVALID_REFERENCE): ?object;
+}
+"#,
+    );
+    let uri = "file:///test.php";
+    let text = r#"<?php
+namespace App\Tests;
+
+use Vendor\Di\ContainerInterface;
+
+class Svc
+{
+    public function run(): void {}
+}
+
+class Consumer
+{
+    public function test(ContainerInterface $c): void
+    {
+        $svc = $c->get(Svc::class);
+        $svc->run();
+        $svc->missing();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.iter().any(|d| d.message.contains("'missing'")),
+        "`get(Svc::class)` must resolve to `Svc`, got: {diags:?}",
+    );
+    assert!(
+        !diags.iter().any(|d| d.message.contains("'run'")),
+        "`run()` exists on `Svc`, got: {diags:?}",
+    );
+}
+
+/// An omitted `Foo::class` default binds a template to the class the
+/// declaring file names, whether `Foo` is imported there or lives in its
+/// namespace, and whatever namespace the call sits in.
+#[test]
+fn omitted_class_default_binds_template_from_another_namespace() {
+    let backend = create_test_backend();
+    backend.update_ast(
+        "file:///factory.php",
+        r#"<?php
+namespace Lib;
+
+use Other\Imported;
+
+class Svc { public function run(): void {} }
+
+class Factory
+{
+    /**
+     * @template T of object
+     * @param class-string<T> $class
+     * @return T
+     */
+    public function make(string $class = Svc::class): object { return new $class(); }
+
+    /**
+     * @template T of object
+     * @param class-string<T> $class
+     * @return T
+     */
+    public function imported(string $class = Imported::class): object { return new $class(); }
+}
+"#,
+    );
+    backend.update_ast(
+        "file:///imported.php",
+        "<?php\nnamespace Other;\nclass Imported { public function importedOnly(): void {} }\n",
+    );
+    backend.update_ast(
+        "file:///helpers.php",
+        r#"<?php
+use Lib\Svc;
+
+/**
+ * @template T of object
+ * @param class-string<T> $class
+ * @return T
+ */
+function make_svc(string $class = Svc::class): object { return new $class(); }
+"#,
+    );
+    let uri = "file:///run.php";
+    let text = r#"<?php
+namespace App;
+
+function run(\Lib\Factory $f): void {
+    $f->make()->run();
+    $f->make()->missing();
+    $f->imported()->importedOnly();
+    make_svc()->run();
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert_eq!(diags.len(), 1, "got: {diags:?}");
+    assert!(
+        diags[0].message.contains("'missing'") && diags[0].message.contains("Lib\\Svc"),
+        "`make()` must resolve to `Lib\\Svc`, got: {diags:?}",
+    );
+}
+
+/// An omitted `self::class` or `parent::class` default binds a template to
+/// the declaring class or its parent, not to the class the call is written
+/// in.
+#[test]
+fn omitted_self_class_default_binds_template_to_declaring_class() {
+    let backend = create_test_backend();
+    backend.update_ast(
+        "file:///factory.php",
+        r#"<?php
+namespace Lib;
+
+class Base
+{
+    public function baseOnly(): void {}
+}
+
+class Factory extends Base
+{
+    /**
+     * @template T of object
+     * @param class-string<T> $class
+     * @return T
+     */
+    public function make(string $class = self::class): object { return new $class(); }
+
+    /**
+     * @template T of object
+     * @param class-string<T> $class
+     * @return T
+     */
+    public function makeParent(string $class = parent::class): object { return new $class(); }
+
+    public function libOnly(): void {}
+}
+"#,
+    );
+    let uri = "file:///run.php";
+    let text = r#"<?php
+namespace App;
+
+class Base {}
+
+class Consumer extends Base
+{
+    public function run(\Lib\Factory $f): void
+    {
+        $f->make()->libOnly();
+        $f->make()->missing();
+        $f->makeParent()->baseOnly();
+        $f->makeParent()->missingOnParent();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert_eq!(diags.len(), 2, "got: {diags:?}");
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("'missing'") && d.message.contains("Lib\\Factory")),
+        "`make()` must resolve to `Lib\\Factory`, got: {diags:?}",
+    );
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("'missingOnParent'") && d.message.contains("Lib\\Base")),
+        "`makeParent()` must resolve to `Lib\\Base`, got: {diags:?}",
+    );
+}
+
+/// `new parent()` and `parent::class` name the parent the `extends` clause
+/// resolved, a global class here, not the namespace's class of the same
+/// short name.
+#[test]
+fn parent_keyword_names_global_parent_next_to_same_named_namespace_class() {
+    let backend = create_test_backend();
+    backend.update_ast(
+        "file:///base.php",
+        "<?php\nclass Base { public function baseOnly(): void {} }\n",
+    );
+    let uri = "file:///child.php";
+    let text = r#"<?php
+namespace App;
+
+class Base { public function appOnly(): void {} }
+
+class Child extends \Base
+{
+    public function run(): void
+    {
+        $p = new parent();
+        $p->baseOnly();
+        $p->missingOnNew();
+        $c = parent::class;
+        $o = new $c();
+        $o->baseOnly();
+        $o->missingOnClassString();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("'baseOnly'")),
+        "`parent` is the global `Base`, got: {diags:?}",
+    );
+    for missing in ["'missingOnNew'", "'missingOnClassString'"] {
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.message.contains(missing) && !d.message.contains("App\\Base")),
+            "{missing} must be flagged on the global `Base`, got: {diags:?}",
+        );
+    }
+}
+
+/// A promoted constructor parameter with an inline `@var` that does not
+/// narrow its native hint keeps the hint, read through the file's imports.
+#[test]
+fn promoted_param_with_wider_inline_var_keeps_imported_native_hint() {
+    let backend = create_test_backend();
+    backend.update_ast(
+        "file:///money.php",
+        "<?php\nnamespace Lib;\nclass Money { public function amount(): int { return 0; } }\n",
+    );
+    let uri = "file:///promoted.php";
+    let text = r#"<?php
+namespace App;
+
+use Lib\Money;
+
+class Wallet
+{
+    public function __construct(/** @var object */ private Money $money)
+    {
+        $money->amount();
+        $money->missing();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("'amount'")),
+        "`$money` is `Lib\\Money`, got: {diags:?}",
+    );
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("'missing'") && d.message.contains("Lib\\Money")),
+        "`missing()` must be flagged on `Lib\\Money`, got: {diags:?}",
+    );
+}
+
+/// Import aliases are case-insensitive, like class names: `use Lib\Money;`
+/// answers to `money` too.
+#[test]
+fn import_alias_matches_case_insensitively() {
+    let backend = create_test_backend();
+    backend.update_ast(
+        "file:///money.php",
+        "<?php\nnamespace Lib;\nclass Money { public function amount(): int { return 0; } }\n",
+    );
+    let uri = "file:///use.php";
+    let text = r#"<?php
+namespace App;
+
+use Lib\Money;
+
+class Wallet
+{
+    public function run(): void
+    {
+        $m = new money();
+        $m->amount();
+        $m->missing();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("'amount'")),
+        "`money` is the imported `Lib\\Money`, got: {diags:?}",
+    );
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("'missing'") && d.message.contains("Lib\\Money")),
+        "`missing()` must be flagged on `Lib\\Money`, got: {diags:?}",
+    );
+}
+
+/// Inside the body, a parameter whose docblock class does not narrow the
+/// native class holds the native class, as its callers see it.
+#[test]
+fn param_docblock_class_not_narrowing_native_class_leaves_body_the_native_class() {
+    let backend = create_test_backend();
+    let php = r#"<?php
+namespace App;
+
+class Base { public function baseOnly(): void {} }
+class Other { public function otherOnly(): void {} }
+
+class Service {
+    public function __construct(
+        /** @var Other */
+        public Base $promoted,
+    ) {
+        $promoted->baseOnly();
+    }
+
+    /** @param Other $b */
+    public function handle(Base $b): void {
+        $b->baseOnly();
+    }
+}
+
+/** @param Other $b */
+function handle(Base $b): void {
+    $b->baseOnly();
+}
+
+/** @param Other $b */
+$closure = function (Base $b): void {
+    $b->baseOnly();
+};
+"#;
+    let diags = unknown_member_diagnostics(&backend, "file:///test.php", php);
+    assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+}
+
+/// A parameter whose docblock names a subclass of the native class, or a
+/// template, keeps that type inside the body.
+#[test]
+fn param_docblock_subclass_or_template_still_refines_body() {
+    let backend = create_test_backend();
+    let php = r#"<?php
+namespace App;
+
+class Base {}
+class Sub extends Base { public function subOnly(): void {} }
+
+/** @template T of Sub */
+class Service {
+    /** @param Sub $b */
+    public function handle(Base $b): void {
+        $b->subOnly();
+    }
+
+    /** @param T $b */
+    public function bound(Base $b): void {
+        $b->subOnly();
+    }
+}
+
+/**
+ * @template U of Sub
+ * @param U $b
+ */
+function handle(Base $b): void {
+    $b->subOnly();
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, "file:///test.php", php);
+    assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+}
+
+/// A short name shared by classes in several namespace blocks of one file
+/// resolves to the class the file imports, not the first block's class.
+#[test]
+fn imported_short_name_shared_across_namespace_blocks() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+namespace Lib {
+    class Node extends \Exception { public function libOnly(): void {} }
+    function make(): Node { return new Node(); }
+}
+
+namespace Other {
+    class Node extends \Exception { public function otherOnly(): void {} }
+    function make(): Node { return new Node(); }
+}
+
+namespace App {
+    use Other\Node;
+
+    final class Runner {
+        public function run(object $o): void {
+            if ($o instanceof Node) {
+                $o->otherOnly();
+            }
+            try {
+                $this->run($o);
+            } catch (Node $e) {
+                $e->otherOnly();
+            }
+            $n = \Other\make();
+            $n->otherOnly();
+        }
+    }
+
+    function run(object $o): void {
+        if ($o instanceof Node) {
+            $o->otherOnly();
+        }
+        try {
+            run($o);
+        } catch (Node $e) {
+            $e->otherOnly();
+        }
+        $n = \Other\make();
+        $n->otherOnly();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "every Node is Other\\Node, got: {diags:?}"
+    );
+}
+
+/// A resolved global name stays the global class inside a namespace that
+/// declares a class of the same short name.
+#[test]
+fn resolved_global_name_beside_same_named_namespace_class() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+namespace {
+    class Node extends \Exception { public function globalOnly(): void {} }
+}
+
+namespace App {
+    class Node { public function appOnly(): void {} }
+
+    final class Runner {
+        public \Node $prop;
+
+        public function hint(\Node $n): void {
+            $n->globalOnly();
+            $this->prop->globalOnly();
+        }
+
+        public function narrow(object $o): void {
+            if ($o instanceof \Node) {
+                $o->globalOnly();
+            }
+            try {
+                $this->narrow($o);
+            } catch (\Node $e) {
+                $e->globalOnly();
+            }
+        }
+
+        /** @return \Node */
+        public function doc() { return new \Node(); }
+
+        public function viaDoc(): void {
+            $this->doc()->globalOnly();
+        }
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "every \\Node is the global class, got: {diags:?}"
+    );
+}
+
+/// A generic class named without its type arguments has them erased to
+/// their bounds, so a variable assigned from one of its methods holds
+/// `mixed` rather than the template parameter's name.
+#[test]
+fn bare_generic_receiver_erases_template_return() {
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+namespace App;
+
+function run(\Iterator $it): bool {
+    $cur = $it->current();
+    return $cur->isDir();
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+}
+
+/// A `FilterIterator` subclass reads its inner iterator's elements as the
+/// type its `@extends` tag gives, even when the subclass shares the short
+/// name `Iterator` with the global interface.
+#[test]
+fn filter_iterator_inner_iterator_keeps_element_type() {
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+namespace App;
+
+use FilterIterator;
+use SplFileInfo;
+
+/**
+ * @extends FilterIterator<int, SplFileInfo, \Iterator<int, SplFileInfo>>
+ */
+class Iterator extends FilterIterator
+{
+    public function accept(): bool
+    {
+        $cur = $this->getInnerIterator()->current();
+        $cur->isDir();
+        return $this->getInnerIterator()->current()->missing();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    let messages: Vec<&str> = diags.iter().map(|d| d.message.as_str()).collect();
+    assert_eq!(
+        messages,
+        ["Method 'missing' not found on class 'SplFileInfo'"],
+        "the inner iterator yields SplFileInfo",
+    );
+}
+
+/// Outside any class, a class named in code inside a namespace still never
+/// falls back to a global class of the same short name.
+#[test]
+fn top_level_code_does_not_fall_back_to_global_class() {
+    let backend = create_test_backend();
+    backend.update_ast(
+        "file:///base.php",
+        "<?php\nclass Base { public static function make(): static { return new static(); } }\n",
+    );
+    let uri = "file:///top.php";
+    let text = r#"<?php
+namespace App;
+
+function run(): void {
+    Base::missingInFunction();
+    $b = new Base();
+    $b->missingOnInstance();
+}
+
+Base::missingAtTopLevel();
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        !diags
+            .iter()
+            .any(|d| d.message.contains("'missing") && !d.message.contains("App\\Base")),
+        "`Base` names `App\\Base`, not the global `Base`, got: {diags:?}",
+    );
 }

@@ -259,8 +259,9 @@ pub(crate) fn resolve_out_type_for_call(
         &text_args,
         var_resolver,
         ConditionalClassContext {
-            calling: resolution_ctx.current_class.map(|c| c.name.as_str()),
+            calling: resolution_ctx.current_class.map(|c| c.fqn().as_str()),
             declaring: declaring_fqn.as_deref(),
+            written_class: Some(&|name: &str| resolution_ctx.resolve_written_class(name)),
         },
         resolution_ctx.class_loader,
         &tpl,
@@ -319,6 +320,7 @@ fn read_out_type(
     let namespace = file_ctx.namespace_at(name_offset);
     let use_map = file_ctx.use_map_at(name_offset);
     let class_loader = backend.class_loader_with(&file_ctx.classes, use_map, namespace);
+    let resolved_class_loader = backend.resolved_class_loader_with(&file_ctx.classes);
     let function_loader =
         backend.function_loader_with(file_ctx.resolved_names.as_deref(), use_map, namespace);
 
@@ -357,7 +359,9 @@ fn read_out_type(
         let exit_ctx = crate::type_engine::types::narrowing::ExitCtx {
             current_class,
             all_classes: &file_ctx.classes,
-            class_loader: &class_loader,
+            class_loader: &resolved_class_loader,
+            source_class_loader: &class_loader,
+            source_imports: Some(use_map),
             function_loader: loaders.function_loader,
             resolved_class_cache: crate::virtual_members::active_resolved_class_cache(),
             var_types: None,
@@ -384,7 +388,9 @@ fn read_out_type(
                     &file_ctx.classes,
                     content,
                     exit,
+                    &resolved_class_loader,
                     &class_loader,
+                    Some(use_map),
                     Some(backend),
                     loaders,
                 )

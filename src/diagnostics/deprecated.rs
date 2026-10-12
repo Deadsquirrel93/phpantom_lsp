@@ -87,6 +87,7 @@ impl Backend {
         let local_classes = &ctx.file.classes;
 
         let class_loaders = self.class_loaders(&ctx.file);
+        let resolved_class_loaders = self.resolved_class_loaders(&ctx.file);
         let function_loaders = self.function_loaders(&ctx.file);
         let laravel_macro_this_resolvers =
             class_loaders.map(|class_loader| self.laravel_macro_this_resolver(class_loader));
@@ -107,6 +108,7 @@ impl Backend {
             let file_use_map = ctx.file.use_map_at(span.start);
             let file_namespace = ctx.file.namespace_at(span.start);
             let class_loader = class_loaders.at(span.start);
+            let resolved_class_loader = resolved_class_loaders.at(span.start);
             match &span.kind {
                 // ── Class references (type hints, new Foo, extends, etc.) ─
                 SymbolKind::ClassReference {
@@ -141,7 +143,7 @@ impl Backend {
                         && !is_within_deprecated_scope(
                             self,
                             local_classes,
-                            class_loader,
+                            resolved_class_loader,
                             cache,
                             content,
                             span.start,
@@ -179,7 +181,8 @@ impl Backend {
                             use_map: file_use_map,
                             namespace: file_namespace,
                             content,
-                            class_loader,
+                            class_loader: resolved_class_loader,
+                            source_class_loader: class_loader,
                             backend: Some(self),
                             function_loader,
                         };
@@ -226,10 +229,12 @@ impl Backend {
                                         content,
                                         span.start,
                                         CtxLoaders::new(
+                                            resolved_class_loader,
                                             class_loader,
                                             function_loader,
                                             laravel_macro_this_resolvers.at(span.start),
-                                        ),
+                                        )
+                                        .with_imports(file_use_map),
                                     )
                                 };
 
@@ -254,7 +259,8 @@ impl Backend {
                     // Builder<Model>).  The FQN-keyed cache cannot
                     // distinguish between generic instantiations, so a
                     // cached entry may lack these members.
-                    let resolved = resolve_class_fully_cached(&base_class, class_loader, cache);
+                    let resolved =
+                        resolve_class_fully_cached(&base_class, resolved_class_loader, cache);
 
                     if *is_method_call {
                         // Check method deprecation — try base_class first
@@ -266,7 +272,7 @@ impl Backend {
                             && !is_within_deprecated_scope(
                                 self,
                                 local_classes,
-                                class_loader,
+                                resolved_class_loader,
                                 cache,
                                 content,
                                 span.start,
@@ -300,7 +306,7 @@ impl Backend {
                             && !is_within_deprecated_scope(
                                 self,
                                 local_classes,
-                                class_loader,
+                                resolved_class_loader,
                                 cache,
                                 content,
                                 span.start,
@@ -331,7 +337,7 @@ impl Backend {
                             && !is_within_deprecated_scope(
                                 self,
                                 local_classes,
-                                class_loader,
+                                resolved_class_loader,
                                 cache,
                                 content,
                                 span.start,
@@ -375,7 +381,7 @@ impl Backend {
                         && !is_within_deprecated_scope(
                             self,
                             local_classes,
-                            class_loader,
+                            resolved_class_loader,
                             cache,
                             content,
                             span.start,

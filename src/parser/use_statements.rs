@@ -46,9 +46,9 @@ impl Backend {
             UseItems::TypedSequence(seq) => {
                 // `use function Foo\bar;` or `use const Foo\BAR;`
                 // Function and constant imports are included in the
-                // use_map so that `resolve_function_name` /
-                // `resolve_class_name` can find them.  Class resolution
-                // harmlessly ignores entries that don't match a class.
+                // use_map so that `resolve_function_name` can find them.
+                // Class resolution harmlessly ignores entries that don't
+                // match a class.
                 for item in seq.items.iter() {
                     Self::register_use_item(item, None, use_map);
                 }

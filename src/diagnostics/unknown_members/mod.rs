@@ -188,6 +188,7 @@ impl Backend {
         let local_classes = &ctx.file.classes;
 
         let class_loaders = self.class_loaders(&ctx.file);
+        let resolved_class_loaders = self.resolved_class_loaders(&ctx.file);
         let function_loaders = self.function_loaders(&ctx.file);
         let laravel_macro_this_resolvers =
             class_loaders.map(|class_loader| self.laravel_macro_this_resolver(class_loader));
@@ -269,6 +270,7 @@ impl Backend {
                     _ => continue,
                 };
             let class_loader = class_loaders.at(span.start);
+            let resolved_class_loader = resolved_class_loaders.at(span.start);
             let function_loader = function_loaders.at(span.start);
             let laravel_macro_this_resolver = laravel_macro_this_resolvers.at(span.start);
 
@@ -375,10 +377,12 @@ impl Backend {
                             content,
                             span.start,
                             CtxLoaders::new(
+                                resolved_class_loader,
                                 class_loader,
                                 function_loader,
                                 laravel_macro_this_resolver,
-                            ),
+                            )
+                            .with_imports(ctx.file.use_map_at(span.start)),
                         )
                     };
                     resolve_subject_outcome(subject_text, access_kind, &rctx)
@@ -526,7 +530,7 @@ impl Backend {
                         is_docblock_ref,
                         current_class,
                         subject_binds_scope,
-                        class_loader,
+                        resolved_class_loader,
                         resolved_cache,
                         content,
                         span.start,
@@ -552,10 +556,12 @@ impl Backend {
                                     content,
                                     span.start,
                                     CtxLoaders::new(
+                                        resolved_class_loader,
                                         class_loader,
                                         function_loader,
                                         laravel_macro_this_resolver,
-                                    ),
+                                    )
+                                    .with_imports(ctx.file.use_map_at(span.start)),
                                 )
                             };
                             let fresh = resolve_subject_outcome(subject_text, access_kind, &rctx);
@@ -570,7 +576,7 @@ impl Backend {
                                     is_docblock_ref,
                                     current_class,
                                     subject_binds_scope,
-                                    class_loader,
+                                    resolved_class_loader,
                                     resolved_cache,
                                     content,
                                     span.start,

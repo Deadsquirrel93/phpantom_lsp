@@ -28,8 +28,12 @@ pub(crate) struct ForwardWalkCtx<'a> {
     /// Byte offset of the cursor.  The walk stops when a statement's
     /// start offset reaches or exceeds this value.
     pub cursor_offset: u32,
-    /// Cross-file class resolution callback.
+    /// Cross-file class resolution callback for already-resolved names.
     pub class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    /// See [`ResolutionCtx::source_class_loader`](crate::type_engine::resolver::ResolutionCtx::source_class_loader).
+    pub source_class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    /// See [`ResolutionCtx::source_imports`](crate::type_engine::resolver::ResolutionCtx::source_imports).
+    pub source_imports: crate::type_engine::resolver::SourceImports<'a>,
     /// Server state for project-wide answers.  See
     /// [`ResolutionCtx::backend`](crate::type_engine::resolver::ResolutionCtx::backend).
     pub backend: Option<&'a crate::Backend>,
@@ -115,9 +119,64 @@ impl<'a> ForwardWalkCtx<'a> {
     pub(crate) fn resolved_types_for(&self, hint: PhpType) -> Vec<ResolvedType> {
         crate::type_engine::type_resolution::resolved_types_for_hint(
             hint,
-            &self.current_class.name,
+            &self.current_class.fqn(),
             self.all_classes,
             self.class_loader,
+        )
+    }
+
+    /// Qualify the class names of a type written in this file; see
+    /// [`VarResolutionCtx::resolve_written_type`].
+    pub(crate) fn resolve_written_type(&self, ty: &PhpType) -> PhpType {
+        crate::util::resolve_source_php_type_names(
+            ty,
+            self.current_class.file_namespace.as_deref(),
+            self.source_imports,
+            self.content,
+            self.all_classes,
+            self.source_class_loader,
+        )
+    }
+
+    /// Qualify the class names of a native type hint written in this file;
+    /// see [`resolve_code_php_type_names`](crate::util::resolve_code_php_type_names).
+    pub(crate) fn resolve_hint_type(&self, ty: &PhpType) -> PhpType {
+        crate::util::resolve_code_php_type_names(
+            ty,
+            self.current_class.file_namespace.as_deref(),
+            self.source_imports,
+            self.all_classes,
+            self.source_class_loader,
+        )
+    }
+
+    /// Resolve a class name written in this file to its FQN; see
+    /// [`resolve_code_class_name`](crate::util::resolve_code_class_name).
+    /// `self`, `static` and `parent` name the class the code is in.
+    pub(crate) fn resolve_written_class(&self, name: &str) -> String {
+        if let Some(fqn) =
+            crate::class_lookup::resolve_class_keyword(name, Some(self.current_class))
+        {
+            return fqn;
+        }
+        crate::util::resolve_code_class_name(
+            name,
+            self.current_class.file_namespace.as_deref(),
+            self.source_imports,
+            self.all_classes,
+            self.source_class_loader,
+        )
+    }
+
+    /// Resolves the classes a check names as written in this file.
+    pub(in crate::type_engine) fn written_class_names(
+        &self,
+    ) -> crate::type_engine::types::narrowing::WrittenClassNames<'a> {
+        crate::type_engine::types::narrowing::WrittenClassNames::new(
+            self.all_classes,
+            self.source_class_loader,
+            self.current_class.file_namespace.as_deref(),
+            self.source_imports,
         )
     }
 
@@ -135,6 +194,8 @@ impl<'a> ForwardWalkCtx<'a> {
             content: ctx.content,
             cursor_offset: ctx.cursor_offset,
             class_loader: ctx.class_loader,
+            source_class_loader: ctx.source_class_loader,
+            source_imports: ctx.source_imports,
             backend: ctx.backend,
             loaders: ctx.loaders,
             resolved_class_cache: ctx.resolved_class_cache,
@@ -159,6 +220,8 @@ impl<'a> ForwardWalkCtx<'a> {
             content: self.content,
             cursor_offset,
             class_loader: self.class_loader,
+            source_class_loader: self.source_class_loader,
+            source_imports: self.source_imports,
             backend: self.backend,
             loaders: self.loaders,
             resolved_class_cache: self.resolved_class_cache,
@@ -179,6 +242,8 @@ impl<'a> ForwardWalkCtx<'a> {
             content: self.content,
             cursor_offset: self.cursor_offset,
             class_loader: self.class_loader,
+            source_class_loader: self.source_class_loader,
+            source_imports: self.source_imports,
             backend: self.backend,
             loaders: self.loaders,
             resolved_class_cache: self.resolved_class_cache,
@@ -202,6 +267,8 @@ impl<'a> ForwardWalkCtx<'a> {
             content: self.content,
             cursor_offset: self.cursor_offset,
             class_loader: self.class_loader,
+            source_class_loader: self.source_class_loader,
+            source_imports: self.source_imports,
             backend: self.backend,
             loaders: self.loaders,
             resolved_class_cache: self.resolved_class_cache,
@@ -222,6 +289,7 @@ impl<'a> ForwardWalkCtx<'a> {
                 crate::type_engine::variable::resolution::declaration_template_markers(
                     self.content,
                     decl_start as usize,
+                    &|ty| self.resolve_written_type(ty),
                 ),
             enclosing_return_type: self.enclosing_return_type.clone(),
             top_level_scope: self.top_level_scope.clone(),
@@ -243,6 +311,8 @@ impl<'a> ForwardWalkCtx<'a> {
             content: self.content,
             cursor_offset: self.cursor_offset,
             class_loader: self.class_loader,
+            source_class_loader: self.source_class_loader,
+            source_imports: self.source_imports,
             backend: self.backend,
             laravel_macro_this_resolver: None,
             function_loader: self.loaders.function_loader,
@@ -269,6 +339,7 @@ impl<'a> ForwardWalkCtx<'a> {
         'a: 'b,
     {
         VarResolutionCtx {
+            source_imports: self.source_imports,
             backend: self.backend,
             loaders: self.loaders,
             resolved_class_cache: self.resolved_class_cache,
@@ -283,6 +354,7 @@ impl<'a> ForwardWalkCtx<'a> {
                 self.content,
                 cursor_offset,
                 self.class_loader,
+                self.source_class_loader,
             )
         }
     }

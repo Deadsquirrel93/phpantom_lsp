@@ -11,7 +11,7 @@ use crate::atom::bytes_to_str;
 use crate::parser::{extract_hint_type, with_parsed_program};
 use crate::php_type::PhpType;
 use crate::type_engine::resolver::Loaders;
-use crate::types::BlockClassLoaders;
+use crate::types::{BlockClassLoaders, BlockImports};
 use crate::types::{ClassInfo, ResolvedType};
 
 #[cfg(test)]
@@ -840,10 +840,10 @@ pub(crate) fn seed_closure_params(
         // type says (`bool $a = null` is `?bool`).
         let default_is_null = crate::parser::param_default_is_null(param);
         let accept_default = |ty: PhpType| if default_is_null { ty.or_null() } else { ty };
-        let native_type = param
-            .hint
+        let written_native = param.hint.as_ref().map(|h| extract_hint_type(h));
+        let native_type = written_native
             .as_ref()
-            .map(|h| accept_default(extract_hint_type(h)));
+            .map(|hint| accept_default(ctx.resolve_hint_type(hint)));
 
         // Check the `@param` docblock annotation, looking only in the
         // docblock attached to this closure/arrow function.
@@ -874,6 +874,25 @@ pub(crate) fn seed_closure_params(
                 ty
             }
         });
+        let effective_type = match effective_type {
+            Some(settled)
+                if native_type.as_ref() != Some(&settled)
+                    && written_native.as_ref().is_some_and(|written| {
+                        !super::super::resolution::param_docblock_narrows_hint(
+                            &settled,
+                            written,
+                            fn_span_start as usize,
+                            ctx.current_class,
+                            ctx.content,
+                            ctx.class_loader,
+                            ctx.source_class_loader,
+                        )
+                    }) =>
+            {
+                native_type.clone()
+            }
+            effective => effective,
+        };
 
         // Substitute method-level template params with their bounds.
         let effective_type = effective_type.map(|ty| {
@@ -881,11 +900,13 @@ pub(crate) fn seed_closure_params(
                 ty,
                 ctx.content,
                 fn_span_start as usize,
+                &|ty| ctx.resolve_written_type(ty),
             );
             super::super::resolution::substitute_class_string_template_bounds(
                 ty,
                 ctx.content,
                 fn_span_start as usize,
+                &|ty| ctx.resolve_written_type(ty),
             )
         });
 
@@ -910,7 +931,7 @@ pub(crate) fn seed_closure_params(
             let pi = inferred_for_idx.unwrap();
             let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
                 pi,
-                &ctx.current_class.name,
+                &ctx.current_class.fqn(),
                 ctx.all_classes,
                 ctx.class_loader,
             );
@@ -928,7 +949,7 @@ pub(crate) fn seed_closure_params(
         } else if let Some(ref eff) = effective_type {
             let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
                 eff,
-                &ctx.current_class.name,
+                &ctx.current_class.fqn(),
                 ctx.all_classes,
                 ctx.class_loader,
             );
@@ -938,7 +959,7 @@ pub(crate) fn seed_closure_params(
                     let inferred_resolved =
                         crate::type_engine::type_resolution::type_hint_to_classes_typed(
                             inferred,
-                            &ctx.current_class.name,
+                            &ctx.current_class.fqn(),
                             ctx.all_classes,
                             ctx.class_loader,
                         );
@@ -987,7 +1008,7 @@ pub(crate) fn seed_closure_params(
                     let doc_resolved =
                         crate::type_engine::type_resolution::type_hint_to_classes_typed(
                             parsed_dt,
-                            &ctx.current_class.name,
+                            &ctx.current_class.fqn(),
                             ctx.all_classes,
                             ctx.class_loader,
                         );
@@ -1010,7 +1031,7 @@ pub(crate) fn seed_closure_params(
             // callable signature.
             let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
                 inferred,
-                &ctx.current_class.name,
+                &ctx.current_class.fqn(),
                 ctx.all_classes,
                 ctx.class_loader,
             );
@@ -1054,10 +1075,13 @@ pub(crate) fn seed_closure_params(
 ///
 /// The caller must have activated the cache via
 /// [`with_diagnostic_scope_cache`] before calling this function.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn build_diagnostic_scopes(
     content: &str,
     local_classes: &[Arc<ClassInfo>],
     class_loaders: &BlockClassLoaders<'_>,
+    source_class_loaders: &BlockClassLoaders<'_>,
+    block_imports: &BlockImports<'_>,
     backend: Option<&crate::Backend>,
     loaders: Loaders<'_>,
     resolved_class_cache: Option<&crate::virtual_members::ResolvedClassCache>,
@@ -1080,6 +1104,8 @@ pub(crate) fn build_diagnostic_scopes(
         content,
         local_classes,
         class_loaders,
+        source_class_loaders,
+        block_imports,
         backend,
         loaders,
         resolved_class_cache,
@@ -1107,6 +1133,8 @@ pub(crate) fn build_diagnostic_scopes_for_offsets(
     content: &str,
     local_classes: &[Arc<ClassInfo>],
     class_loaders: &BlockClassLoaders<'_>,
+    source_class_loaders: &BlockClassLoaders<'_>,
+    block_imports: &BlockImports<'_>,
     backend: Option<&crate::Backend>,
     loaders: Loaders<'_>,
     resolved_class_cache: Option<&crate::virtual_members::ResolvedClassCache>,
@@ -1137,6 +1165,8 @@ pub(crate) fn build_diagnostic_scopes_for_offsets(
         content,
         local_classes,
         class_loaders,
+        source_class_loaders,
+        block_imports,
         backend,
         loaders,
         resolved_class_cache,
@@ -1156,6 +1186,8 @@ fn walk_file_for_scopes(
     content: &str,
     local_classes: &[Arc<ClassInfo>],
     class_loaders: &BlockClassLoaders<'_>,
+    source_class_loaders: &BlockClassLoaders<'_>,
+    block_imports: &BlockImports<'_>,
     backend: Option<&crate::Backend>,
     loaders: Loaders<'_>,
     resolved_class_cache: Option<&crate::virtual_members::ResolvedClassCache>,
@@ -1172,7 +1204,11 @@ fn walk_file_for_scopes(
         content,
         local_classes,
         class_loader: *class_loaders.at(0),
+        source_class_loader: *source_class_loaders.at(0),
+        source_imports: block_imports.at(0),
         class_loaders,
+        source_class_loaders,
+        block_imports,
         backend,
         loaders,
         resolved_class_cache,
@@ -1206,6 +1242,8 @@ pub(crate) fn walk_top_level_statements<'a, 'b: 'a>(
         content: diag_ctx.content,
         cursor_offset: u32::MAX,
         class_loader: diag_ctx.class_loader,
+        source_class_loader: diag_ctx.source_class_loader,
+        source_imports: Some(diag_ctx.source_imports),
         backend: diag_ctx.backend,
         loaders: diag_ctx.loaders,
         resolved_class_cache: diag_ctx.resolved_class_cache,
@@ -1236,6 +1274,8 @@ pub(crate) fn walk_top_level_statements<'a, 'b: 'a>(
                 // The block's own imports apply inside it, not the file's.
                 let block_ctx = DiagnosticWalkCtx {
                     class_loader: *diag_ctx.class_loaders.at(ns.span().start.offset),
+                    source_class_loader: *diag_ctx.source_class_loaders.at(ns.span().start.offset),
+                    source_imports: diag_ctx.block_imports.at(ns.span().start.offset),
                     ..*diag_ctx
                 };
                 walk_top_level_statements(ns.statements().iter(), &ns_class, &block_ctx);
@@ -1509,8 +1549,14 @@ pub(crate) struct DiagnosticWalkCtx<'a> {
     local_classes: &'a [Arc<ClassInfo>],
     /// The loader for the `namespace` block being walked.
     class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    /// The block's loader for names as written in source.
+    source_class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    /// The block's `use` imports.
+    source_imports: &'a std::collections::HashMap<String, String>,
     /// Every block's loader, to switch to at a block boundary.
     class_loaders: &'a BlockClassLoaders<'a>,
+    source_class_loaders: &'a BlockClassLoaders<'a>,
+    block_imports: &'a BlockImports<'a>,
     backend: Option<&'a crate::Backend>,
     loaders: Loaders<'a>,
     resolved_class_cache: Option<&'a crate::virtual_members::ResolvedClassCache>,
@@ -1557,6 +1603,8 @@ impl<'a> DiagnosticWalkCtx<'a> {
             content: self.content,
             cursor_offset: u32::MAX,
             class_loader: self.class_loader,
+            source_class_loader: self.source_class_loader,
+            source_imports: Some(self.source_imports),
             backend: self.backend,
             loaders: self.loaders,
             resolved_class_cache: self.resolved_class_cache,
@@ -1695,6 +1743,8 @@ pub(crate) fn walk_anonymous_class_member_bodies<'b>(
         content: ctx.content,
         cursor_offset: ctx.cursor_offset,
         class_loader: ctx.class_loader,
+        source_class_loader: ctx.source_class_loader,
+        source_imports: ctx.source_imports,
         backend: ctx.backend,
         loaders: ctx.loaders,
         resolved_class_cache: ctx.resolved_class_cache,

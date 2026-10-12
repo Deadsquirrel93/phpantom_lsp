@@ -749,9 +749,10 @@ pub(crate) fn rebind_extends_only_generics(
         // what the generic-free stand-in it is means anyway.
         let carry_binding = |name: &str| -> Option<Arc<ClassInfo>> {
             let loaded = class_loader(name)?;
+            let fqn = name.strip_prefix('\\').unwrap_or(name);
             if !intermediates
                 .iter()
-                .any(|between| between.eq_ignore_ascii_case(name))
+                .any(|between| between.eq_ignore_ascii_case(fqn))
             {
                 return Some(loaded);
             }

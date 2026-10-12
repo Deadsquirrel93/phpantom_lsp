@@ -310,7 +310,7 @@ impl Backend {
                     (t, file_ctx.classes.as_slice())
                 } else {
                     patched_classes_storage = self
-                        .parse_php(&patched)
+                        .parse_php_resolved(&patched)
                         .into_iter()
                         .map(Arc::new)
                         .collect::<Vec<_>>();
@@ -323,7 +323,7 @@ impl Backend {
                     return vec![];
                 }
                 patched_classes_storage = self
-                    .parse_php(&patched)
+                    .parse_php_resolved(&patched)
                     .into_iter()
                     .map(Arc::new)
                     .collect::<Vec<_>>();
@@ -349,9 +349,9 @@ impl Backend {
         };
 
         // Uses `effective_classes` which may be the patched classes when
-        // the original parse failed due to syntax errors.
-        let class_loader =
-            self.class_loader_with(effective_classes, &file_ctx.use_map, &file_ctx.namespace);
+        // the original parse failed due to syntax errors.  The shape's
+        // names are resolved, so is the alias source a lookup reaches.
+        let class_loader = self.resolved_class_loader_with(effective_classes);
 
         // If there are prefix keys (chained access), resolve through each
         // level of the shape to get the inner type. Each hop may itself be
@@ -565,11 +565,19 @@ impl Backend {
         // 1. Direct @var / @param annotation on the variable.
         let current_class = find_class_at_offset(&file_ctx.classes, cursor_offset as u32);
         let class_loader = self.class_loader(file_ctx);
+        let resolved_class_loader = self.resolved_class_loader(file_ctx);
 
         if let Some(raw) =
             docblock::find_iterable_raw_type_in_source(content, cursor_offset, var_name)
         {
-            return Some(crate::util::resolve_php_type_names(&raw, &class_loader));
+            return Some(crate::util::resolve_source_php_type_names(
+                &raw,
+                file_ctx.namespace_at(cursor_offset as u32).as_deref(),
+                Some(file_ctx.use_map_at(cursor_offset as u32)),
+                content,
+                &file_ctx.classes,
+                &class_loader,
+            ));
         }
 
         // 2. Unified variable resolver — handles array literals with
@@ -593,7 +601,9 @@ impl Backend {
             &file_ctx.classes,
             content,
             cursor_offset as u32,
+            &resolved_class_loader,
             &class_loader,
+            Some(&file_ctx.use_map),
             Some(self),
             Loaders {
                 function_loader: Some(&function_loader),

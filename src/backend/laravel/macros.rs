@@ -322,6 +322,7 @@ impl Backend {
     ) {
         let file_ctx = self.file_context(uri);
         let class_loaders = self.class_loaders(&file_ctx);
+        let resolved_class_loaders = self.resolved_class_loaders(&file_ctx);
         let function_loaders = self.function_loaders(&file_ctx);
         for reg in regs.iter_mut() {
             if reg.method.return_type.is_some() || reg.method.native_return_type.is_some() {
@@ -340,13 +341,20 @@ impl Backend {
                 continue;
             }
             let class_loader = class_loaders.at(reg.name_offset);
+            let resolved_class_loader = resolved_class_loaders.at(reg.name_offset);
             let function_loader = function_loaders.at(reg.name_offset);
             let laravel_macro_this_resolver = self.laravel_macro_this_resolver(class_loader);
             self.infer_macro_return_type(
                 reg,
                 content,
                 &file_ctx,
-                CtxLoaders::new(class_loader, function_loader, &laravel_macro_this_resolver),
+                CtxLoaders::new(
+                    resolved_class_loader,
+                    class_loader,
+                    function_loader,
+                    &laravel_macro_this_resolver,
+                )
+                .with_imports(file_ctx.use_map_at(reg.name_offset)),
             );
         }
     }
@@ -368,6 +376,7 @@ impl Backend {
         };
         let file_ctx = self.file_context_at(def_uri, reg.name_offset);
         let class_loader = self.class_loader(&file_ctx);
+        let resolved_class_loader = self.resolved_class_loader(&file_ctx);
         let function_loader = self.function_loader(&file_ctx);
         let laravel_macro_this_resolver = self.laravel_macro_this_resolver(&class_loader);
         self.infer_macro_return_type(
@@ -375,10 +384,12 @@ impl Backend {
             &content,
             &file_ctx,
             CtxLoaders::new(
+                &resolved_class_loader,
                 &class_loader,
                 &function_loader,
                 &laravel_macro_this_resolver,
-            ),
+            )
+            .with_imports(&file_ctx.use_map),
         );
     }
 

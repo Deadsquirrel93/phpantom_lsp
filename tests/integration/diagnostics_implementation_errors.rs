@@ -606,4 +606,26 @@ class Concrete {
         assert_eq!(diags.len(), 1, "Expected 1 diagnostic, got: {diags:?}");
         assert!(diags[0].message.contains("innerMethod()"));
     }
+
+    /// A stored parent is the class it names, not whatever the checking
+    /// file imports under the same short name.
+    #[test]
+    fn global_parent_shadowed_by_import() {
+        let php = r#"<?php
+namespace {
+    abstract class Base { abstract public function run(): void; }
+}
+namespace Lib {
+    abstract class Base { abstract public function other(): void; }
+}
+namespace App {
+    use Lib\Base;
+    class Impl extends \Base {
+        public function run(): void {}
+    }
+}
+"#;
+        let diags = collect(php);
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+    }
 }

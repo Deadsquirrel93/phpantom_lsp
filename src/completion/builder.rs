@@ -26,9 +26,11 @@ use crate::types::*;
 
 /// Return a user-friendly class name for display in completion item details.
 ///
-/// Anonymous classes have synthetic names like `__anonymous@156` which are
-/// meaningless to the user. This replaces them with `"anonymous class"`.
+/// The short name of a class FQN.  Anonymous classes have synthetic names
+/// like `__anonymous@156` which are meaningless to the user. This replaces
+/// them with `"anonymous class"`.
 fn display_class_name(name: &str) -> &str {
+    let name = crate::util::short_name(name);
     if name.starts_with("__anonymous@") {
         "anonymous class"
     } else {
@@ -286,9 +288,9 @@ pub(crate) fn build_method_label(method: &MethodInfo) -> String {
 ///   static properties, and constants — but excludes private members.
 /// - `Other` access: returns all members.
 ///
-/// Visibility filtering based on `current_class_name` and `is_self_or_ancestor`:
+/// Visibility filtering based on `current_class_fqn` and `is_self_or_ancestor`:
 /// - `None` (top-level code): only **public** members are shown.
-/// - `Some(name)` where `name == target_class.name`: all members are shown
+/// - `Some(fqn)` where `fqn` is the target class's FQN: all members are shown
 ///   (same-class access, e.g. `$this->`).
 /// - `is_self_or_ancestor == true`: **public** and **protected** members
 ///   are shown (the cursor is inside the target class or a subclass).
@@ -303,12 +305,13 @@ pub(crate) fn build_method_label(method: &MethodInfo) -> String {
 pub(crate) fn build_completion_items(
     target_class: &ClassInfo,
     access_kind: AccessKind,
-    current_class_name: Option<&str>,
+    current_class_fqn: Option<&str>,
     is_self_or_ancestor: bool,
     uri: &str,
 ) -> Vec<CompletionItem> {
     // Determine whether we are inside the same class as the target.
-    let same_class = current_class_name.is_some_and(|name| name == target_class.name);
+    let same_class =
+        current_class_fqn.is_some_and(|fqn| fqn.eq_ignore_ascii_case(&target_class.fqn()));
     let mut items: Vec<CompletionItem> = Vec::new();
 
     // Methods — filtered by static / instance and visibility. Magic
@@ -390,7 +393,7 @@ pub(crate) fn build_completion_items(
             .map(shorten_php_type);
 
         let data = serde_json::to_value(CompletionItemData {
-            class_name: target_class.name.to_string(),
+            class_name: target_class.fqn().to_string(),
             member_name: method.name.to_string(),
             kind: "method".to_string(),
             uri: uri.to_string(),
@@ -447,7 +450,7 @@ pub(crate) fn build_completion_items(
         let detail = property.type_hint.as_ref().map(shorten_php_type);
 
         let data = serde_json::to_value(CompletionItemData {
-            class_name: target_class.name.to_string(),
+            class_name: target_class.fqn().to_string(),
             member_name: property.name.to_string(),
             kind: "property".to_string(),
             uri: uri.to_string(),
@@ -490,7 +493,7 @@ pub(crate) fn build_completion_items(
                 .or_else(|| constant.type_hint.as_ref().map(shorten_php_type));
 
             let data = serde_json::to_value(CompletionItemData {
-                class_name: target_class.name.to_string(),
+                class_name: target_class.fqn().to_string(),
                 member_name: constant.name.to_string(),
                 kind: "constant".to_string(),
                 uri: uri.to_string(),
@@ -642,7 +645,7 @@ pub(crate) fn build_union_completion_items(
     cache: &crate::virtual_members::ResolvedClassCache,
     uri: &str,
 ) -> Vec<CompletionItem> {
-    let current_class_name = current_class.map(|cc| cc.name.as_str());
+    let current_class_fqn = current_class.map(ClassInfo::fqn);
     let num_candidates = candidates.len();
 
     // Track how many candidate classes contributed each label so we can
@@ -697,7 +700,7 @@ pub(crate) fn build_union_completion_items(
         let items = build_completion_items(
             &merged,
             effective_access,
-            current_class_name,
+            current_class_fqn.as_deref(),
             self_or_ancestor,
             uri,
         );
@@ -743,7 +746,7 @@ fn apply_declaring_class_label(
     };
 
     let declaring = find_declaring_class(owner, &data.member_name, &member_kind, class_loader);
-    let declaring_name = declaring.name.to_string();
+    let declaring_name = declaring.fqn().to_string();
     if declaring_name == data.class_name {
         return;
     }

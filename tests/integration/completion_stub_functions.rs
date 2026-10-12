@@ -363,6 +363,7 @@ async fn test_user_function_takes_precedence_over_stub() {
         is_pure: false,
         is_impure: false,
         reads_func_args: false,
+        unverified_doc_types: Default::default(),
     };
 
     {

@@ -59,6 +59,7 @@ fn register_namespaced_function(
                     is_pure: false,
                     is_impure: false,
                     reads_func_args: false,
+                    unverified_doc_types: Default::default(),
                 },
             ),
         );
@@ -98,6 +99,7 @@ fn register_global_function(backend: &phpantom_lsp::Backend, name: &str, uri: &s
                     is_pure: false,
                     is_impure: false,
                     reads_func_args: false,
+                    unverified_doc_types: Default::default(),
                 },
             ),
         );
@@ -854,6 +856,7 @@ async fn test_use_function_namespaced_detail_shows_signature() {
                     is_pure: false,
                     is_impure: false,
                     reads_func_args: false,
+                    unverified_doc_types: Default::default(),
                 },
             ),
         );
@@ -959,6 +962,7 @@ async fn test_deprecated_namespaced_function() {
                     is_pure: false,
                     is_impure: false,
                     reads_func_args: false,
+                    unverified_doc_types: Default::default(),
                 },
             ),
         );

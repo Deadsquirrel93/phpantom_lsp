@@ -254,6 +254,7 @@ pub(crate) fn eager_callback_arguments<'a>(
         let name = super::super::closure_resolution::static_receiver_class_name(
             receiver,
             Some(ctx.current_class),
+            &|name| ctx.resolve_written_class(name),
         )?;
         let owner = super::super::closure_resolution::find_owner_by_name(
             &name,

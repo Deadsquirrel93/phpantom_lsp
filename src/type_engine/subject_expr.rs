@@ -708,8 +708,8 @@ fn parse_callee(call_body: &str) -> SubjectExpr {
         && !call_body.contains("->")
         && let Some(class_name) = call_body
             .strip_prefix("new ")
-            .map(|s| s.trim().trim_start_matches('\\'))
-            .filter(|s| !s.is_empty())
+            .map(str::trim)
+            .filter(|s| !s.trim_start_matches('\\').is_empty())
     {
         // Strip trailing parens content if any (e.g. from `(new Foo(…))`)
         let clean = class_name
@@ -871,10 +871,13 @@ pub(crate) fn parse_new_expression_class(s: &str) -> Option<String> {
         }
     }
 
-    let class_name = rest[..end].trim_start_matches('\\');
-    if class_name.is_empty()
-        || class_name == "class"
-        || !class_name
+    // A leading `\` stays: it marks an explicit global reference, which
+    // resolving the bare name inside a namespace would lose.
+    let class_name = &rest[..end];
+    let bare = class_name.strip_prefix('\\').unwrap_or(class_name);
+    if bare.is_empty()
+        || bare == "class"
+        || !bare
             .chars()
             .all(|c| c.is_alphanumeric() || c == '_' || c == '\\')
     {

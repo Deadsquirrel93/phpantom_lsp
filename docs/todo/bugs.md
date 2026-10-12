@@ -37,7 +37,7 @@ No outstanding items.
 
 ## Narrowing
 
-### B552. A by-reference closure capture keeps the narrowing from where the closure was created
+#### B552. A by-reference closure capture keeps the narrowing from where the closure was created
 
 **Impact: Low · Complexity: Medium**
 
@@ -58,6 +58,60 @@ a ternary, `&&` or `match` branch. A by-reference capture should also
 carry every type the enclosing function assigns to the variable after the
 closure is created.
 
+#### B27. An offset on a receiver of an unknown class is not narrowed
+
+**Impact: Low · Complexity: Low**
+
+```php
+namespace App;
+
+/** @param ArrayAccess<int, ?object> $array */
+function run(ArrayAccess $array): void {
+    assert($array[1] === null);
+    // PHPStan: `$array[1]` is `null`. PHPantom: still `?object`.
+}
+```
+
+Unimported, `ArrayAccess` names `App\ArrayAccess`, which does not exist. An
+`assert()` or `if` on an offset of a receiver whose class is unknown narrows
+nothing, though the check says as much about the offset whatever the receiver
+is. PHPStan's `bug-13214.php` in `tests/phpstan_nsrt/` is skipped for this.
+
+**Where to change:** the offset narrowing in
+`src/type_engine/variable/forward_walk/cond_narrowing/` should key the
+narrowed offset by expression even when the receiver resolves to no class.
+
+#### B24. An `instanceof` branch leaves its class behind after the `if`
+
+**Impact: Medium · Complexity: Medium**
+
+```php
+namespace App;
+
+class Node { public function nodeOnly(): void {} }
+
+function run(object $o): void {
+    if ($o instanceof Node) {
+        $o->nodeOnly();
+    }
+    $o->anything(); // PHPantom: Method 'anything' not found on class 'App\Node'
+}
+```
+
+After the `if`, `$o` is the join of the branch that narrowed it to `Node` and
+the path that skipped the branch, where it is still `object`. `object|Node` is
+just `object`, which PHPantom does not check member access on, but the join
+keeps `Node` as a class of its own and the member check reports what `Node`
+lacks. A union where one interface member covers a narrowed subclass
+(`Countable` joined with `ArrayObject`) may show the same thing; not yet
+checked.
+
+**Where to change:** the branch merge in the forward walker
+(`src/type_engine/variable/forward_walk/`) should drop a class the other
+branch's type already contains, or the member check should treat a union
+member of `object` as covering the rest. Check which consumer reads the join
+before deciding.
+
 ## Array types
 
 No outstanding items.
@@ -72,36 +126,177 @@ No outstanding items.
 
 ## Templates
 
-No outstanding items.
+#### B23. A chained call drops a conditional return that tests a template bound by an omitted argument
 
-## Miscellaneous
+**Impact: Medium · Complexity: Medium**
 
-#### B8. `use X as Y` makes a bare `X` skip another import of the same short name
+```php
+interface ContainerInterface
+{
+    /**
+     * @template C of object
+     * @template B of int
+     * @param string|class-string<C> $id
+     * @param B $invalidBehavior
+     * @return ($id is class-string<C> ? (B is 0|1 ? C : C|null) : object)
+     */
+    public function get(string $id, int $invalidBehavior = 1): ?object;
+}
 
-**Impact: Low-Medium · Complexity: Medium**
+function run(ContainerInterface $c): void {
+    $svc = $c->get(Svc::class);
+    $svc->missing();                // reported against Svc
+    $c->get(Svc::class)->missing(); // PHPantom: not reported, the type is lost
+}
+```
+
+Assigned to a variable, the call resolves to `Svc`; called inline, it
+resolves to nothing, whether the omitted argument's default is a literal or a
+class constant. With the inner `B is 0|1` condition removed, both forms
+resolve. Symfony's `ContainerInterface::get()` has this shape, so
+`$container->get(Foo::class)->bar()` loses `Foo`.
+
+The cause is not pinned down yet. The assigned form resolves through the
+forward walker (`resolve_owner_method_call` in
+`src/type_engine/variable/rhs_resolution/calls.rs`) and the inline one through
+`resolve_method_return_types_with_args`
+(`src/type_engine/call_resolution/return_types.rs`). A `B is …` condition is
+decided by the argument that binds `B`, which
+`resolve_conditional_with_text_args_and_defaults`
+(`src/type_engine/types/conditional.rs`) finds through `tpl.bindings`, so a
+first thing to check is whether the inline path hands it the method's
+template bindings.
+
+## Name resolution
+
+#### B25. A docblock class name that no class answers to reads as a global class when the file declares a template of that name
+
+**Impact: Low · Complexity: Medium**
 
 ```php
 namespace App;
 
-use Illuminate\Support\Facades\Redis;
-use Redis as PhpRedis;
+/** @template Node */
+class Box {}
 
-Redis::connection('cache');
-// Method 'connection' not found on class 'Redis'
+class Walker {
+    public function run(): void {
+        /** @var Node $n */
+        $n = make();
+        $n->missing(); // PHPantom: Method 'missing' not found on class 'Node'
+    }
+}
 ```
 
-PHP resolves `Redis` through the first import, the facade. PHPantom
-resolves it to the global `\Redis` extension class.
+PHP reads `Node` in the `@var` as `App\Node`. `resolve_source_php_type_names`
+(`src/util.rs`) keeps a missed name as written when any docblock in the file
+declares it as a `@template` or type alias, since it may be one in scope
+there. The resolved loader then reads the bare `Node` as the global class.
+Checking the whole file rather than the declarations in scope is what lets
+`Box`'s template reach `Walker`.
 
-The same ambiguity lets an unqualified name inside a namespace fall back
-to a global class: with `trait T {}` in the global namespace, a bare `T`
-in `namespace App` loads it, where PHP only ever means `App\T`.
+**Where to change:** decide template and alias names from the declarations in
+scope at the name (the enclosing class's and function's `@template` tags and
+the class's aliases), and qualify every other miss with the namespace as
+`resolve_code_class_name` does.
 
-**Where to change:** `resolve_class_name` and `class_loader_with` in
-`src/resolution.rs` deliberately skip an import when another import's
-target is the bare name, because the loader cannot tell a name spelled
-in source (`Redis`, meaning the facade) from an already-resolved FQN
-(`Redis`, expanded from `PhpRedis`). The real fix is to stop feeding
-the loader a mix of the two: resolve `PhpRedis` to `\Redis` (or mark it
-as already qualified) before it reaches the use-map check, then drop
-the heuristic.
+#### B28. A `use function` or `use const` import can claim a class name
+
+**Impact: Low-Medium · Complexity: Medium**
+
+```php
+namespace App\Console;
+
+use function Laravel\Prompts\table;
+
+class Table {}
+
+$t = new Table(); // PHPantom: `Laravel\Prompts\table`, not `App\Console\Table`
+```
+
+The file's `use` map holds function and constant imports under their short
+name alongside class imports (`register_use_item` in
+`src/parser/use_statements.rs`), and class-name resolution cannot tell them
+apart. Since class imports match case-insensitively (`lookup_import` in
+`src/util.rs`), `Table` finds the `table` function import, and an import that
+claims a name is final, so the class is never looked up in the namespace. A
+`use const App\VERSION;` does the same to a class `Version`. When two keys
+differ only in case, which one answers depends on hash-map order. Other
+readers of the map treat every entry as a class too (class completion,
+`use_map.values()` in `completion/handler/class_constant.rs`).
+
+The same split leaves declarations case-sensitive: `resolve_name` in
+`src/parser/ast_update.rs` matches imports exactly, so with `use Lib\Money;`
+a hint `money $m` reads as `App\money` while `new money()` in a body reads as
+`Lib\Money`. Making it case-insensitive before function imports are split out
+would spread the collision above to every signature.
+
+**Where to change:** keep function and constant imports out of the class
+import table (a separate map per kind, as `mago-names` resolves them), then
+switch `resolve_name` to `lookup_import`.
+
+#### B26. A `key-of`/`value-of` operand in a callee's docblock is read through the caller's imports
+
+**Impact: Low · Complexity: Medium**
+
+```php
+namespace {
+    enum Suit: string { case Hearts = 'h'; }
+    /** @param value-of<Suit> $s */
+    function take(string $s): void {}
+}
+namespace App {
+    enum Suit: string { case Other = 'x'; }
+    function run(): void {
+        take('h'); // PHPantom: Argument 1 ($s) expects 'x', got 'h'
+    }
+}
+```
+
+`constant_operand_shape` and `enum_backing_values`
+(`src/type_engine/call_resolution/template_subs.rs`) resolve the class an
+operand names with the call site's source loader and namespace. Some operands
+arrive already qualified by the declaring file and some as written (a
+`key-of<Foo::BAR>` class constant is not qualified at parse time), so neither
+loader is right for all of them. Switching both to the resolved loader fixes
+the case above but breaks the `key-of` over class constant tests.
+
+**Where to change:** qualify the class names inside type-operator operands
+when the declaring file is parsed, as other docblock types are, then read
+them with the resolved loader.
+
+## Miscellaneous
+
+#### B17. Classes inside a phar sometimes go missing when the machine is busy
+
+**Impact: Low-Medium · Complexity: Medium**
+
+```sh
+for i in $(seq 12); do
+    phpantom_lsp analyze --project-root projects/bladestan --no-colour | tail -1 &
+done; wait
+```
+
+Bladestan's PHPStan dependency ships as `vendor/phpstan/phpstan/phpstan.phar`.
+On an idle machine `analyze` reports no errors for it, run after run. With a
+dozen runs side by side, roughly one in eight reports between 3 and 104
+errors, every one of them a `PHPStan\…` class from the phar that is "not
+found" (`PHPStan\Rules\Rule`, `PHPStan\Type\Type`, `PHPStan\Analyser\Error`,
+…) or a member access on one. Each failing run loses a different set of
+classes, and no class outside the phar ever goes missing. The failing runs
+finish as fast as the clean ones, in about two seconds, so the ten-second
+escape hatch in `ParseInflight::wait_until_released` (`src/resolution.rs`)
+is not what fires.
+
+The cause is not pinned down yet. `scan_phar_archive` in
+`src/indexing/scan.rs` registers each phar class under an
+`archive.phar!inner.php` sentinel path, and the phar branch of
+`parse_and_cache_file` in `src/resolution.rs` reads it back and caches the
+parse under a `phar://` URI. A lookup that fails on either leg is
+remembered in `class_not_found_cache` for the rest of the run. One ordering
+there is wrong regardless: `scan_phar_archive` publishes the archive's
+classes and clears the not-found caches before it stores the archive in
+`phar_archives`, so a lookup in between finds the class, cannot read it,
+and caches the miss. Nothing in `analyze` looks classes up while the
+autoload files are scanned, so that alone does not explain these runs, but
+any lookup that runs alongside the scan can hit it.

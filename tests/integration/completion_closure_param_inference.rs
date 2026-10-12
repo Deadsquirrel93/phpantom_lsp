@@ -1115,7 +1115,7 @@ async fn test_example_php_exact_layout_chunk_foreach() {
     let src = concat!(
         "<?php\n",                                                            // 0
         "namespace Demo {\n",                                                 // 1
-        "\n",                                                                 // 2
+        "use Illuminate\\Database\\Eloquent\\Collection;\n",                  // 2
         "class BlogAuthor extends \\Illuminate\\Database\\Eloquent\\Model\n", // 3
         "{\n",                                                                // 4
         "    public function posts(): mixed { return null; }\n",              // 5

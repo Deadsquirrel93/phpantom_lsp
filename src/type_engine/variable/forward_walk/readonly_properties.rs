@@ -142,6 +142,8 @@ fn constructor_narrowed_properties(
         content: ctx.content,
         cursor_offset: u32::MAX,
         class_loader: ctx.class_loader,
+        source_class_loader: ctx.source_class_loader,
+        source_imports: ctx.source_imports,
         backend: ctx.backend,
         loaders: ctx.loaders,
         resolved_class_cache: ctx.resolved_class_cache,

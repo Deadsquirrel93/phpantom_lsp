@@ -118,38 +118,23 @@ pub(crate) fn find_uncaught_throw_types_with_context(
         file_namespace: &Option<String>,
         class_loader: OptClassLoader<'_>,
     ) -> bool {
-        let exc_name = exc_type.base_name().unwrap_or("");
-        // Resolve exception type to FQN via class loader if available.
-        let exc_fqn = if let Some(loader) = class_loader {
-            loader(exc_name)
-                .map(|cls| cls.fqn().to_string())
-                .unwrap_or_else(|| exc_name.to_string())
-        } else {
-            exc_name.to_string()
-        };
+        // Already resolved by `normalize_throw_type`.
+        let exc_fqn = exc_type.base_name().unwrap_or("");
         catches.iter().any(|c| {
             offset > c.try_start
                 && offset < c.try_end
                 && c.type_names.iter().any(|ct| {
-                    let ct_name = ct.base_name().unwrap_or("");
-                    // Resolve the catch type to FQN
-                    let resolved_ct = crate::util::resolve_to_fqn(ct_name, use_map, file_namespace);
-                    // Also try through the class loader for root-namespace classes.
-                    let resolved_ct = if let Some(loader) = class_loader {
-                        loader(&resolved_ct)
-                            .or_else(|| loader(ct_name))
-                            .map(|cls| cls.fqn().to_string())
-                            .unwrap_or(resolved_ct)
-                    } else {
-                        resolved_ct
-                    };
+                    let resolved_ct = canonical_fqn(
+                        crate::util::resolve_to_fqn(&ct.to_string(), use_map, file_namespace),
+                        class_loader,
+                    );
                     // Check for Throwable/Exception (catches everything).
                     let resolved_lower = resolved_ct.to_ascii_lowercase();
                     if resolved_lower == "throwable" || resolved_lower == "exception" {
                         return true;
                     }
                     // Exact FQN comparison (case-insensitive)
-                    resolved_ct.eq_ignore_ascii_case(&exc_fqn)
+                    resolved_ct.eq_ignore_ascii_case(exc_fqn)
                 })
         })
     }
@@ -163,22 +148,21 @@ pub(crate) fn find_uncaught_throw_types_with_context(
         class_loader: OptClassLoader<'_>,
     ) -> Option<PhpType> {
         let raw = ty.to_string();
-        let trimmed = raw.trim_start_matches('\\');
-        if trimmed.is_empty() {
+        if raw.trim_start_matches('\\').is_empty() {
             None
         } else {
-            let resolved = crate::util::resolve_to_fqn(trimmed, use_map, file_namespace);
-            // Try the class loader for a canonical FQN.
-            let fqn = if let Some(loader) = class_loader {
-                loader(&resolved)
-                    .or_else(|| loader(trimmed))
-                    .map(|cls| cls.fqn().to_string())
-                    .unwrap_or(resolved)
-            } else {
-                resolved
-            };
-            Some(PhpType::named(atom(&fqn)))
+            let resolved = crate::util::resolve_to_fqn(&raw, use_map, file_namespace);
+            Some(PhpType::named(atom(&canonical_fqn(resolved, class_loader))))
         }
+    }
+
+    /// The declared spelling of the class `fqn` names, or `fqn` itself
+    /// when it cannot be loaded.
+    fn canonical_fqn(fqn: String, class_loader: OptClassLoader<'_>) -> String {
+        class_loader
+            .and_then(|loader| crate::class_lookup::load_resolved_name(&fqn, loader))
+            .map(|cls| cls.fqn().to_string())
+            .unwrap_or(fqn)
     }
 
     // Determine name-resolution context: use the ThrowsContext fields
@@ -422,11 +406,12 @@ pub(crate) fn parse_param_type_map(signature: &str) -> Vec<(String, PhpType)> {
             continue;
         }
 
-        // Clean the type: strip nullable wrapper and extract base name.
+        // Strip the nullable wrapper, keeping a class name as written (a
+        // leading `\` included) for the caller to resolve.
         let parsed = PhpType::parse(type_token);
         let non_null = parsed.non_null_type().unwrap_or_else(|| parsed.clone());
-        if let Some(name) = non_null.base_name() {
-            result.push((var_name.to_string(), PhpType::named(atom(name))));
+        if non_null.base_name().is_some() {
+            result.push((var_name.to_string(), non_null));
         } else {
             // Fallback for scalars and other non-class types.
             let cleaned_type = type_token.trim_start_matches('?').trim_start_matches('\\');
@@ -461,15 +446,13 @@ pub(crate) fn find_cross_file_propagated_throws(
     let param_map: Vec<(String, PhpType)> = raw_param_map
         .into_iter()
         .map(|(name, ty)| {
-            let resolved = if let Some(base) = ty.base_name() {
-                PhpType::named(atom(&crate::util::resolve_to_fqn(
-                    base,
-                    ctx.use_map,
-                    ctx.file_namespace,
-                )))
-            } else {
-                ty
-            };
+            // Resolve before taking the base name, which drops a leading `\`.
+            let resolved = ty
+                .resolve_names(&|name| {
+                    crate::util::resolve_to_fqn(name, ctx.use_map, ctx.file_namespace)
+                })
+                .base_name()
+                .map_or(ty, |base| PhpType::named(atom(base)));
             (name, resolved)
         })
         .collect();
@@ -514,18 +497,17 @@ pub(crate) fn find_cross_file_propagated_throws(
                 let class_name = &after_new[..name_end];
                 let after_name = after_new[name_end..].trim_start();
                 if !class_name.is_empty() && after_name.starts_with('(') {
-                    let clean = class_name.trim_start_matches('\\');
-                    // Resolve short class name to FQN before loading.
                     let resolved_class =
-                        crate::util::resolve_to_fqn(clean, ctx.use_map, ctx.file_namespace);
+                        crate::util::resolve_to_fqn(class_name, ctx.use_map, ctx.file_namespace);
                     let call_key = format!("new:{}", resolved_class);
                     if seen_calls.insert(call_key)
-                        && let Some(class_info) = class_loader(&resolved_class)
+                        && let Some(class_info) =
+                            crate::class_lookup::load_resolved_name(&resolved_class, class_loader)
                         && let Some(ctor) = class_info.get_method("__construct")
                     {
                         for exc_type in ctor.throws() {
                             results.push(ThrowInfo {
-                                type_name: exc_type.clone(),
+                                type_name: as_written_fqn(exc_type),
                                 offset: call_start,
                             });
                         }
@@ -627,13 +609,8 @@ pub(crate) fn find_cross_file_propagated_throws(
                     // Skip self::/static::/parent:: — handled by same-file propagation.
                     let ident_lower = ident.to_lowercase();
                     if ident_lower != "self" && ident_lower != "static" && ident_lower != "parent" {
-                        let clean_class = ident.trim_start_matches('\\');
-                        // Resolve short class name to FQN before loading.
-                        let resolved_class = crate::util::resolve_to_fqn(
-                            clean_class,
-                            ctx.use_map,
-                            ctx.file_namespace,
-                        );
+                        let resolved_class =
+                            crate::util::resolve_to_fqn(ident, ctx.use_map, ctx.file_namespace);
                         let call_key = format!("{}::{}", resolved_class, method_name);
                         if seen_calls.insert(call_key) {
                             collect_method_throws(
@@ -665,7 +642,7 @@ pub(crate) fn find_cross_file_propagated_throws(
                         {
                             for exc_type in &func_info.throws {
                                 results.push(ThrowInfo {
-                                    type_name: exc_type.clone(),
+                                    type_name: as_written_fqn(exc_type),
                                     offset: ident_start,
                                 });
                             }
@@ -700,16 +677,23 @@ pub(crate) fn collect_method_throws(
     offset: usize,
     results: &mut Vec<ThrowInfo>,
 ) {
-    if let Some(class_info) = class_loader(class_name)
+    if let Some(class_info) = crate::class_lookup::load_resolved_name(class_name, class_loader)
         && let Some(method_info) = class_info.get_method(method_name)
     {
         for exc_type in method_info.throws() {
             results.push(ThrowInfo {
-                type_name: exc_type.clone(),
+                type_name: as_written_fqn(exc_type),
                 offset,
             });
         }
     }
+}
+
+/// A declaration's already-resolved `@throws` type, spelled with a leading
+/// `\` so that reading it as source text in the caller's file
+/// ([`find_uncaught_throw_types_with_context`]) keeps it exact.
+fn as_written_fqn(ty: &PhpType) -> PhpType {
+    ty.resolve_names(&|name| format!("\\{}", name.trim_start_matches('\\')))
 }
 
 /// Check whether an identifier is a PHP keyword that should not be

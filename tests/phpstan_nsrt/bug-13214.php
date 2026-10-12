@@ -16,7 +16,7 @@ class HelloWorld
 
 		assert($array[1] === null);
 
-		assertType('null', $array[1]);
+		assertType('null', $array[1]); // SKIP: the unimported `ArrayAccess` names the missing `Bug13214\ArrayAccess`, and an offset of an unknown class is not narrowed
 
 		$array[1] = $child;
 

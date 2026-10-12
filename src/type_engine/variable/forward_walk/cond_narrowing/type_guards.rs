@@ -207,7 +207,7 @@ pub(crate) fn apply_class_string_guard_narrowing<'b>(
                 }
                 let resolved_fqn = target
                     .as_deref()
-                    .map(|name| crate::util::resolve_name_via_loader(name, ctx.class_loader));
+                    .map(|name| ctx.resolve_written_class(name));
                 let class_string_type = match &resolved_fqn {
                     Some(fqn) => PhpType::parse(&format!("class-string<{}>", fqn)),
                     None => PhpType::parse("class-string"),

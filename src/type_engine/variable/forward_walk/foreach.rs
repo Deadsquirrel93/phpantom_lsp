@@ -180,7 +180,7 @@ pub(crate) fn resolve_foreach_iterable_type_raw<'b>(
             foreach_offset,
             &var_name,
         )
-        .map(|t| crate::util::resolve_php_type_names(&t, ctx.class_loader))
+        .map(|t| ctx.resolve_written_type(&t))
         {
             return Some(docblock_type);
         }
@@ -319,7 +319,7 @@ pub(crate) fn process_foreach<'b>(
         if let Some(var_type) =
             crate::docblock::find_var_raw_type_in_source(ctx.content, foreach_offset, var_name)
         {
-            let php_type = crate::util::resolve_php_type_names(&var_type, ctx.class_loader);
+            let php_type = resolve_var_docblock_type(&var_type, ctx);
             // An explicit inline `@var` seeds an empty scope entry, and it
             // also refines a non-informative pre-existing type such as a
             // `mixed` closure/function parameter or a bare `array`.  Without
@@ -332,7 +332,7 @@ pub(crate) fn process_foreach<'b>(
                     crate::docblock::should_override_type_typed(&php_type, &rt.type_string)
                 });
             if should_apply {
-                let resolved = resolve_type_to_resolved_types(&php_type, ctx);
+                let resolved = ctx.resolved_types_for(php_type);
                 scope.set(var_name, resolved);
             }
         }
@@ -355,7 +355,7 @@ pub(crate) fn process_foreach<'b>(
                         base_var,
                     )
                 {
-                    let php_type = crate::util::resolve_php_type_names(&var_type, ctx.class_loader);
+                    let php_type = resolve_var_docblock_type(&var_type, ctx);
                     // As in the direct-variable branch: seed an unknown base
                     // variable, or refine a non-informative pre-existing type
                     // (e.g. a `mixed` parameter), but never clobber a more
@@ -366,7 +366,7 @@ pub(crate) fn process_foreach<'b>(
                             crate::docblock::should_override_type_typed(&php_type, &rt.type_string)
                         });
                     if should_apply {
-                        let resolved = resolve_type_to_resolved_types(&php_type, ctx);
+                        let resolved = ctx.resolved_types_for(php_type);
                         scope.set(base_var, resolved);
                     }
                 }
@@ -1251,7 +1251,7 @@ pub(crate) fn resolve_foreach_iterable_type<'b>(
     Some(
         crate::type_engine::type_resolution::resolve_type_alias_typed(
             &raw,
-            &ctx.current_class.name,
+            &ctx.current_class.fqn(),
             ctx.all_classes,
             ctx.class_loader,
         )
@@ -1306,7 +1306,7 @@ pub(crate) fn resolve_foreach_expr_via_subject<'b>(
         if rt.type_string.has_type_structure() {
             let expanded = crate::type_engine::type_resolution::resolve_type_alias_typed(
                 &rt.type_string,
-                &ctx.current_class.name,
+                &ctx.current_class.fqn(),
                 ctx.all_classes,
                 ctx.class_loader,
             )

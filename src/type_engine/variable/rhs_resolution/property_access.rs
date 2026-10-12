@@ -45,7 +45,8 @@ pub(super) fn resolve_rhs_property_access(
         return super::runtime_named_member_type();
     }
 
-    let current_class_name: &str = &ctx.current_class.name;
+    let current_class_fqn = ctx.current_class.fqn();
+    let current_class_name: &str = &current_class_fqn;
     let all_classes = ctx.all_classes;
     let class_loader = ctx.class_loader;
 
@@ -110,7 +111,8 @@ pub(super) fn resolve_rhs_property_access(
             cca.class,
             ctx.current_class,
             ctx.all_classes,
-            ctx.class_loader,
+            ctx.source_class_loader,
+            ctx.source_imports,
         ) {
             Some(class_name) => {
                 let resolved_name = class_name.strip_prefix('\\').unwrap_or(&class_name);
@@ -244,7 +246,8 @@ pub(super) fn resolve_rhs_property_access(
             spa.class,
             ctx.current_class,
             ctx.all_classes,
-            ctx.class_loader,
+            ctx.source_class_loader,
+            ctx.source_imports,
         );
         let prop_name = match &spa.property {
             Variable::Direct(dv) => {
@@ -321,7 +324,8 @@ pub(super) fn resolve_rhs_property_access(
                     cca.class,
                     ctx.current_class,
                     ctx.all_classes,
-                    class_loader,
+                    ctx.source_class_loader,
+                    ctx.source_imports,
                 )
                 && let Some(enum_cls) = class_loader(&enum_name)
                 && let Some(literal) =
@@ -366,7 +370,7 @@ pub(super) fn resolve_rhs_property_access(
                     // Look up the declared property type so we can
                     // verify the narrowed type is actually narrower.
                     let current_class_arc =
-                        all_classes.iter().find(|c| c.name == current_class_name);
+                        crate::class_lookup::find_class_by_fqn(all_classes, current_class_name);
                     let declared_type = current_class_arc.and_then(|cls| {
                         crate::inheritance::resolve_property_type_hint(
                             cls,
@@ -458,12 +462,11 @@ pub(super) fn resolve_rhs_property_access(
                 ResolvedType::into_arced_classes(resolved)
             };
             let owner_classes: Vec<Arc<ClassInfo>> = if receiver_is_this {
-                let mut owners: Vec<Arc<ClassInfo>> = all_classes
-                    .iter()
-                    .find(|c| c.name == current_class_name)
-                    .map(Arc::clone)
-                    .into_iter()
-                    .collect();
+                let mut owners: Vec<Arc<ClassInfo>> =
+                    crate::class_lookup::find_class_by_fqn(all_classes, current_class_name)
+                        .map(Arc::clone)
+                        .into_iter()
+                        .collect();
                 // Inside a trait `$this` is also whatever the trait's users
                 // are guaranteed to be, whose properties the trait's code
                 // reads like its own.  A private one stays out of reach:

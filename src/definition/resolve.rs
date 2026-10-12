@@ -485,22 +485,11 @@ impl Backend {
             return template_def_location(uri, content, &tpl_def);
         }
 
-        let mut candidates = if is_fqn {
-            // Already fully-qualified — use as-is.
+        let candidates = if is_fqn {
             vec![name.to_string()]
         } else {
-            let ctx = self.file_context(uri);
-            let fqn = ctx.resolve_name_at(name, cursor_offset);
-            let mut c = vec![fqn];
-            if name.contains('\\') && !c.contains(&name.to_string()) {
-                c.push(name.to_string());
-            }
-            c
+            vec![self.file_context(uri).resolve_name_at(name, cursor_offset)]
         };
-        // Always include the bare name as a last-resort candidate.
-        if !candidates.contains(&name.to_string()) {
-            candidates.push(name.to_string());
-        }
 
         // Same-file lookup.
         for fqn in &candidates {

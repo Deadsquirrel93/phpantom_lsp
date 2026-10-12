@@ -359,6 +359,110 @@ class context for resolution.
    if the expression is a `$variable`, scans backward for
    `$var = target(...)` and recursively resolves the underlying target.
 
+## Source Names and Resolved Names
+
+The same spelling can name different classes depending on where it was
+read. With `use App\Facades\Redis;` in `namespace App`, the written name
+`Redis` is the facade, while the resolved name `Redis` (from `\Redis`, or
+from `use Redis as PhpRedis;`) is the global class. Every name is one of
+two kinds, and each kind has one rule:
+
+- **Written names** are spelled in the file: in code (`new Foo`,
+  `Foo::bar()`, `Foo::class`, `instanceof Foo`, `catch (Foo $e)`, a type
+  hint) or in a docblock (`@var Foo`, `@param Foo`). They follow PHP's rule:
+  the block's imports, else the current namespace, and never a global class.
+  PHP falls back to the global namespace only for functions and constants,
+  and PHPStan, Psalm and Mago read docblock names the same way. The source
+  loader applies this rule. Resolve a name in code with
+  `util::resolve_code_class_name` (or the contexts' `resolve_written_class`),
+  a native hint with `resolve_hint_type`, and a docblock type with
+  `resolve_written_type`.
+- **Resolved names** (`ClassInfo::fqn()`, `parent_class`, stored member
+  types, any type the engine produced) are exactly the FQN they spell, so a
+  bare `Redis` is the global class. Look them up with the resolved loader
+  or `class_lookup::load_resolved_name`.
+
+A written name that no class answers to still has to come out as the FQN PHP
+reads it, or the resolved loader would later read the bare spelling as a
+global class. `resolve_code_class_name` qualifies it through the block's
+imports and namespace. A docblock name is qualified the same way unless a
+docblock anywhere in the file declares it as a template parameter or a type
+alias, in which case it keeps its spelling. Checking the whole file rather
+than the declarations in scope is filed in `docs/todo/bugs.md`.
+
+A declaration's own types are code-name qualified by the parser while
+their file's imports are in scope (`resolve_parent_class_names`,
+`parser/initializers.rs`), so every consumer sees them as resolved names:
+`extends`, `implements`, trait `use`, `@property` and `@method` tags,
+constant initializers and declared types, `@template` bounds and defaults,
+`@param-out` and `@phpstan-assert` types, and the effective type of every
+method, parameter, property and function (the docblock type when it wins
+over the native hint, else the native hint). A re-parse of patched content
+goes through `Backend::parse_php_resolved` for the same reason; `parse_php`
+leaves names as written. Some native hints kept alongside for display stay as
+written: `MethodInfo::native_return_type`, `PropertyInfo::native_type_hint`
+and a function parameter's `native_type_hint`. Qualify those before
+comparing them with anything.
+
+The parser decides whether a docblock type wins from the two types alone,
+which it cannot do where the docblock names a class the native hint does
+not: whether that class narrows the hint takes the class hierarchy. There it
+lets the docblock win and records the type with the hint qualified
+(`ClassInfo::unverified_doc_types`, `FunctionInfo::unverified_doc_types`).
+Loading the declaration puts the hint back unless the docblock class narrows
+it (`type_engine/types/docblock_narrowing.rs`): `Backend::link_loaded_class`
+for every class the loader returns and the open file's own classes, and
+`Backend::verify_function_doc_types` for a function. The forward walker reads
+a parameter's docblock again inside the body, and checks it the same way.
+
+The type engine contexts (`ResolutionCtx`, `VarResolutionCtx`,
+`ForwardWalkCtx`) carry two loaders and the imports:
+
+- **`source_class_loader`** (`Backend::class_loader_with`) applies the
+  written-name rule: a leading `\` is exact, otherwise the first segment
+  goes through the imports, else the name is qualified with the current
+  namespace. Hand it only written names: a resolved global `Exception` read
+  through it inside `namespace App` is `App\Exception`.
+- **`class_loader`** (`Backend::resolved_class_loader_with`) looks the
+  name up as an FQN, in the index and then among the caller's own classes
+  (a re-parse of patched content holds classes the index does not). A miss
+  is final: it is never retried against a file's imports or namespace.
+- **`source_imports`** is the block's `use` table, which
+  `resolve_code_class_name` qualifies a name no class answers to with. It is
+  `None` only where no file context exists; a miss then keeps its spelling.
+
+`class_lookup::load_resolved_name` looks a resolved name up as the explicit
+`\Name` with whichever loader it is given, so a source loader cannot read it
+through the imports. Every loader, a test's plain map included, has to accept
+that leading `\`. `resolve_class_fully` wraps its loader this way.
+
+Rules for code that touches names:
+
+1. **Resolve a name once, where it is read, by the rule for its kind,** then
+   carry the FQN. Never hand a resolved name back to anything that resolves
+   source text: the source loader, `resolve_code_class_name`,
+   `resolve_source_php_type_names`, or `resolve_arg_text_to_type`.
+2. **Text built from a resolved name gets a leading `\`.** Rewriting
+   `self::X` to `Foo\Bar::X`, or building `Foo\Bar::class`, produces source
+   text, and a reader inside `namespace App` qualifies an unprefixed
+   `Foo\Bar` as `App\Foo\Bar`. `qualify_class_keyword`, the initializer
+   qualifier and a `Foo::class` parameter default write `\Foo\Bar::X`.
+3. **Text written in another file is not read with the reader's loaders.**
+   A callee's parameter defaults, a constant's initializer and a parent's
+   docblock were written against their own file's imports. Qualify them when
+   that file is parsed, or resolve them as resolved names, never through the
+   call site's source loader.
+4. **Identify classes by FQN.** `ClassInfo::name` is the short name, and
+   `class_lookup::find_class_by_name` matches a bare name against the
+   classes of every namespace block in the file. Use `ClassInfo::fqn()` and
+   `find_class_by_fqn` when the question is "which class".
+
+A change to name resolution needs tests with a global class and a
+namespaced class sharing one short name: the global one imported, not
+imported, and written with a leading `\`; inside a namespace and in the
+global namespace; and read from a caller in a different namespace than the
+file that declares it.
+
 ## Symbol Resolution: `find_or_load_class`
 
 When the LSP needs to resolve a class name (e.g. during completion on `Iterator::` or when following a type hint), it calls `find_or_load_class`. This method tries four phases in order, returning as soon as one succeeds:
@@ -1243,4 +1347,4 @@ PHP class names go through resolution at parse time (`resolve_parent_class_names
 4. **Unqualified, not in use map** → prepend current namespace.
 5. **No namespace** → keep as-is.
 
-This runs on `parent_class`, `used_traits`, and `mixins` for every `ClassInfo` extracted from a file.
+This runs on every name a `ClassInfo` extracted from a file carries: its parents, interfaces, traits and mixins, its members' native and docblock types, its `@property` and `@method` tags, and the classes its constants' initializers name. A function's types get the same treatment. Names read later, in a method body or by whoever consumes a resolved name, follow [Source Names and Resolved Names](#source-names-and-resolved-names).

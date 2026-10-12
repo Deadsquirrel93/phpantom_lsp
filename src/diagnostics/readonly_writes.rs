@@ -458,7 +458,8 @@ impl Backend {
         }
 
         let local_classes = &ctx.file.classes;
-        let class_loaders = self.class_loaders(&ctx.file);
+        let class_loaders = self.resolved_class_loaders(&ctx.file);
+        let source_class_loaders = self.class_loaders(&ctx.file);
         let function_loaders = self.function_loaders(&ctx.file);
         let symbol_map = &ctx.symbol_map;
         let Some(source) = symbol_map.source(content) else {
@@ -523,7 +524,12 @@ impl Backend {
                     local_classes,
                     content,
                     span.start,
-                    CtxLoaders::without_macro_this(class_loader, function_loaders.at(span.start)),
+                    CtxLoaders::without_macro_this(
+                        class_loader,
+                        source_class_loaders.at(span.start),
+                        function_loaders.at(span.start),
+                    )
+                    .with_imports(ctx.file.use_map_at(span.start)),
                 )
             };
             let SubjectOutcome::Resolved(receivers) =

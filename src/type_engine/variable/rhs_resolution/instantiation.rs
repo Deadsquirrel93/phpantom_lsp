@@ -35,25 +35,20 @@ pub(super) fn resolve_rhs_instantiation(
             // global class (`App\Error` vs the built-in `\Error`) would
             // otherwise have every `new self(…)` resolve to the global one.
             "self" | "static" => ctx.current_class.fqn().to_string(),
-            // `parent` names the class the enclosing one extends, written
-            // however the `extends` clause spelled it, so it resolves
-            // through the same import table a written name does.
+            // `parent` names the class the enclosing one extends, which the
+            // parser already resolved against the declaring file's imports.
             "parent" => {
                 let Some(parent) = ctx.current_class.parent_class else {
                     return vec![];
                 };
-                crate::util::resolve_source_class_name(
-                    parent.as_str(),
-                    ctx.current_class.file_namespace.as_deref(),
-                    ctx.all_classes,
-                    ctx.class_loader,
-                )
+                parent.to_string()
             }
-            other => crate::util::resolve_source_class_name(
+            other => crate::util::resolve_code_class_name(
                 other,
                 ctx.current_class.file_namespace.as_deref(),
+                ctx.source_imports,
                 ctx.all_classes,
-                ctx.class_loader,
+                ctx.source_class_loader,
             ),
         };
         let parsed_name = if name == "static" {
@@ -63,7 +58,7 @@ pub(super) fn resolve_rhs_instantiation(
         };
         let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
             &parsed_name,
-            &ctx.current_class.name,
+            &ctx.current_class.fqn(),
             ctx.all_classes,
             ctx.class_loader,
         );
@@ -109,7 +104,6 @@ pub(super) fn resolve_rhs_instantiation(
             .then(|| {
                 crate::type_engine::type_resolution::lookup_class_declaration(
                     &fqn,
-                    &ctx.current_class.name,
                     ctx.all_classes,
                     ctx.class_loader,
                 )
@@ -163,7 +157,7 @@ pub(super) fn resolve_rhs_instantiation(
         {
             let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
                 inner,
-                &ctx.current_class.name,
+                &ctx.current_class.fqn(),
                 ctx.all_classes,
                 ctx.class_loader,
             );
@@ -175,12 +169,8 @@ pub(super) fn resolve_rhs_instantiation(
         let resolved =
             crate::type_engine::variable::class_string_resolution::resolve_class_string_targets(
                 &var_name,
-                ctx.current_class,
-                ctx.all_classes,
-                ctx.content,
                 ctx.cursor_offset,
-                ctx.class_loader,
-                ctx.backend,
+                ctx,
             );
         if !resolved.is_empty() {
             return ResolvedType::from_classes(resolved.into_iter().map(Arc::new).collect());

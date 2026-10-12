@@ -437,6 +437,7 @@ fn build_function_snippet(
             position,
             local_classes,
             class_loader,
+            Some(use_map),
             backend,
             function_loader,
         );
@@ -449,7 +450,7 @@ fn build_function_snippet(
         // doesn't produce anything useful.
         if let Some(t) = inferred {
             Some(
-                t.resolve_names(&|n| crate::util::shorten_from_fqn(n, use_map, file_namespace))
+                crate::util::shorten_type_for_file(&t, use_map, file_namespace, class_loader)
                     .to_string(),
             )
         } else {
@@ -562,6 +563,7 @@ fn build_function_plain(
             position,
             local_classes,
             class_loader,
+            Some(use_map),
             backend,
             function_loader,
         );
@@ -576,7 +578,7 @@ fn build_function_plain(
         // doesn't produce anything useful.
         inferred
             .map(|t| {
-                t.resolve_names(&|n| crate::util::shorten_from_fqn(n, use_map, file_namespace))
+                crate::util::shorten_type_for_file(&t, use_map, file_namespace, class_loader)
                     .to_string()
             })
             .or_else(|| {
@@ -796,11 +798,12 @@ pub(crate) fn infer_inline_variable_type(
     sym: &SymbolInfo,
     content: &str,
     position: Position,
-    all_classes: &[Arc<ClassInfo>],
+    file_ctx: &crate::types::FileContext,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     backend: Option<&crate::Backend>,
     function_loader: FunctionLoaderFn<'_>,
 ) -> Option<PhpType> {
+    let all_classes = &file_ctx.classes;
     let var_name = sym.variable_name.as_deref()?;
 
     // The cursor is at the `/**` trigger, which is above the variable
@@ -826,13 +829,17 @@ pub(crate) fn infer_inline_variable_type(
 
     let current_class = crate::class_lookup::find_class_at_offset(all_classes, cursor_offset);
 
+    let resolved_class_loader =
+        |name: &str| crate::class_lookup::load_resolved_name(name, class_loader);
     crate::type_engine::variable::resolution::resolve_variable_php_type(
         var_name,
         effective_content,
         cursor_offset,
         current_class,
         all_classes,
+        &resolved_class_loader,
         class_loader,
+        Some(&file_ctx.use_map),
         backend,
         crate::type_engine::resolver::Loaders::with_function(function_loader),
     )

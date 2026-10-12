@@ -67,6 +67,8 @@ impl Backend {
         }
 
         let class_loader = self.class_loader(ctx);
+
+        let resolved_class_loader = self.resolved_class_loader(ctx);
         let function_loader = self.function_loader(ctx);
         let constant_loader = self.constant_loader(ctx);
         let config_resolver = |key: &str| self.resolve_config_type(key);
@@ -88,7 +90,9 @@ impl Backend {
                 cursor_offset,
                 current_class,
                 &ctx.classes,
+                &resolved_class_loader,
                 &class_loader,
+                Some(&ctx.use_map),
                 Some(self),
                 loaders,
             )
@@ -102,7 +106,7 @@ impl Backend {
             let hover_body = build_variable_hover_body(
                 &var_name,
                 &resolved_type,
-                &class_loader,
+                &resolved_class_loader,
                 template_line.as_deref(),
             );
             return Some(make_hover(hover_body));

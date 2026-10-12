@@ -17,6 +17,8 @@ fn context<'a>(
         content,
         cursor_offset: content.len() as u32,
         class_loader: loader,
+        source_class_loader: loader,
+        source_imports: None,
         backend: None,
         loaders: Loaders::default(),
         resolved_class_cache: None,

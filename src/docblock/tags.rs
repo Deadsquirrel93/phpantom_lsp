@@ -386,7 +386,7 @@ fn strip_fqn_prefix_typed(ty: &PhpType) -> PhpType {
 ///   - `@throws \Fully\Qualified\ExceptionType`
 ///   - `@throws ExceptionType Some description text`
 ///
-/// Returns a list of parsed [`PhpType`] values (leading `\` stripped).
+/// Returns a list of parsed [`PhpType`] values as written.
 pub fn extract_throws_tags(docblock: &str) -> Vec<PhpType> {
     let Some(info) = parse_docblock_for_tags(docblock) else {
         return Vec::new();
@@ -404,9 +404,11 @@ pub fn extract_throws_tags_from_info(info: &DocblockInfo) -> Vec<PhpType> {
             continue;
         };
 
-        let cleaned = type_text.trim_start_matches('\\');
-        if !cleaned.is_empty() {
-            results.push(PhpType::parse(cleaned));
+        // The leading `\` stays: it is what tells the declaring file's
+        // name resolution that `\LogicException` is the global class and
+        // not one in the current namespace.
+        if !type_text.is_empty() {
+            results.push(PhpType::parse(&type_text));
         }
     }
 
@@ -1509,7 +1511,10 @@ pub fn should_override_type_typed(docblock_type: &PhpType, native_type: &PhpType
     // (handles `?X` ↔ `X|null`, reordered unions, FQN vs short names),
     // there is no value in overriding — the docblock doesn't carry any
     // extra information.
-    if docblock_type.equivalent(native_type) {
+    if docblock_type == native_type
+        || (docblock_type.equivalent(native_type)
+            && class_names_spelled_alike(docblock_type, native_type))
+    {
         return false;
     }
 
@@ -1613,8 +1618,37 @@ pub fn should_override_type_typed(docblock_type: &PhpType, native_type: &PhpType
         return true;
     }
 
-    // Native type is a non-scalar class — docblock can always refine.
+    // Native type is a non-scalar class.  Whether a class the docblock
+    // names narrows it takes the class hierarchy, so the docblock wins here
+    // and loading the declaration checks it (`docblock_narrowing`).
     true
+}
+
+/// Whether `a` and `b` name their classes the same way.
+///
+/// [`PhpType::equivalent`] matches classes by short name, but the parser
+/// reconciles a docblock with its native hint before either is qualified, so
+/// `ReflectionProperty` may name an imported `Adapter\ReflectionProperty`
+/// while the hint spells out the global `\ReflectionProperty`. A docblock
+/// that spells a name differently can name a different class, so it is not
+/// redundant; when it names the same one, keeping it costs nothing.
+fn class_names_spelled_alike(a: &PhpType, b: &PhpType) -> bool {
+    let mut a_names = a.extract_class_names();
+    let mut b_names = b.extract_class_names();
+    if a_names.len() != b_names.len() {
+        return false;
+    }
+    let by_folded_case = |x: &String, y: &String| {
+        x.bytes()
+            .map(|c| c.to_ascii_lowercase())
+            .cmp(y.bytes().map(|c| c.to_ascii_lowercase()))
+    };
+    a_names.sort_unstable_by(by_folded_case);
+    b_names.sort_unstable_by(by_folded_case);
+    a_names
+        .iter()
+        .zip(&b_names)
+        .all(|(x, y)| x.eq_ignore_ascii_case(y))
 }
 
 /// A declaration docblock with the members removed that its native class

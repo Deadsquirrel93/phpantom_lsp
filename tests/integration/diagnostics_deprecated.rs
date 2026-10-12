@@ -2299,6 +2299,7 @@ fn replace_deprecated_function_call_action_offered() {
                     is_pure: false,
                     is_impure: false,
                     reads_func_args: false,
+                    unverified_doc_types: Default::default(),
                 },
             ),
         );

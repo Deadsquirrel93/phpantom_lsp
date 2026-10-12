@@ -413,6 +413,7 @@ fn test_extends_generics_propagate_through_parent_use_generics() {
     };
 
     let class_loader = |name: &str| -> Option<Arc<ClassInfo>> {
+        let name = name.strip_prefix('\\').unwrap_or(name);
         match name {
             "DataCollection" => Some(Arc::new(parent_class.clone())),
             "EnumerableMethods" => Some(Arc::new(trait_info.clone())),
@@ -637,6 +638,7 @@ fn method_tag_does_not_shadow_a_real_inherited_method() {
     ));
 
     let class_loader = |name: &str| -> Option<Arc<ClassInfo>> {
+        let name = name.strip_prefix('\\').unwrap_or(name);
         match name {
             "TestCase" => Some(Arc::new(parent_class.clone())),
             _ => None,

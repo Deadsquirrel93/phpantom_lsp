@@ -296,11 +296,11 @@ impl Backend {
     ) -> Option<CompletionResponse> {
         let rc_ctx = detect_laravel_route_controller_context(content, position)?;
 
-        let class_loader = self.class_loader(ctx);
+        let class_loader = self.resolved_class_loader(ctx);
 
         // Resolve the controller class name to FQN and load.
         let fqn =
-            super::array_callable::resolve_class_name_to_fqn(self, &rc_ctx.controller_class, ctx)?;
+            super::array_callable::resolve_class_name_to_fqn(self, &rc_ctx.controller_class, ctx);
         let class_info = class_loader(&fqn)?;
 
         // Build completion items using the standard builder.

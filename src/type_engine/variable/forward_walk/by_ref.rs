@@ -868,7 +868,7 @@ fn instance_method_callee<'b>(
 
     let class_name = match object {
         Expression::Variable(Variable::Direct(dv)) if dv.name == b"$this" => {
-            ctx.current_class.name.to_string()
+            ctx.current_class.fqn().to_string()
         }
         Expression::Variable(Variable::Direct(dv)) => {
             scope.get(bytes_to_str(dv.name)).iter().find_map(|rt| {
@@ -983,7 +983,8 @@ pub(crate) fn seed_pass_by_ref_primitives<'b>(
                 sc.class,
                 ctx.current_class,
                 ctx.all_classes,
-                ctx.class_loader,
+                ctx.source_class_loader,
+                ctx.source_imports,
             ) else {
                 return;
             };

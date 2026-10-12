@@ -20,7 +20,7 @@
 use std::sync::Arc;
 
 use crate::atom::atom;
-use crate::class_lookup::find_class_by_name;
+use crate::class_lookup::{find_class_by_fqn, find_or_load_resolved};
 use crate::inheritance::build_generic_subs;
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::*;
@@ -50,13 +50,11 @@ pub(crate) fn resolve_property_types(
     type_hint_to_classes_typed(&type_hint, &owner_fqn, all_classes, class_loader)
 }
 
-/// Look up a class by name and return its declaration as written, with
-/// no generic substitution applied.
+/// Look up the class the resolved `name` names and return its declaration
+/// as written, with no generic substitution applied.
 ///
-/// When `name` is a short name (no backslash), a class in the same
-/// namespace as the owning class wins.  This prevents cross-namespace
-/// contamination in multi-namespace files where several namespaces
-/// define a class with the same short name.
+/// `name` is exactly the FQN it spells: a bare `Node` is the global class,
+/// never a same-named class of the namespace the lookup happens in.
 ///
 /// Callers that want the *type* `name` denotes (with unsupplied
 /// `@template` parameters erased to their bounds) want
@@ -65,57 +63,10 @@ pub(crate) fn resolve_property_types(
 /// the parameter names still standing in the member signatures.
 pub(crate) fn lookup_class_declaration(
     name: &str,
-    owning_class_name: &str,
     all_classes: &[Arc<ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<Arc<ClassInfo>> {
-    if !name.contains('\\') && owning_class_name.contains('\\') {
-        let owning_ns = owning_class_name.rsplit_once('\\').map(|(ns, _)| ns);
-        all_classes
-            .iter()
-            .find(|c| c.name == name && c.file_namespace.as_deref() == owning_ns)
-            .map(Arc::clone)
-            .or_else(|| find_class_by_name(all_classes, name).map(Arc::clone))
-            .or_else(|| class_loader(name))
-    } else if !name.contains('\\') && owning_class_name.is_empty() {
-        // For unqualified names in top-level code (no enclosing class),
-        // prefer the namespace-aware class_loader over find_class_by_name.
-        // The class_loader uses the FileContext's namespace to resolve
-        // short names correctly, while find_class_by_name returns the
-        // first match regardless of namespace in multi-namespace files.
-        class_loader(name).or_else(|| find_class_by_name(all_classes, name).map(Arc::clone))
-    } else {
-        find_class_by_name(all_classes, name)
-            .map(Arc::clone)
-            .or_else(|| class_loader(name))
-    }
-}
-
-/// Whether `cls` is the very class the hint is being resolved inside.
-///
-/// Callers spell `owning_class_name` either short or fully qualified, so
-/// a direct FQN comparison is not enough.  When only the short names
-/// match, the owning class is looked up to confirm both spellings name
-/// the same declaration; that lookup is skipped whenever the cheap
-/// comparison already settles it.
-fn is_enclosing_class(
-    cls: &ClassInfo,
-    owning_class_name: &str,
-    all_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> bool {
-    if owning_class_name.is_empty() {
-        return false;
-    }
-    let fqn = cls.fqn();
-    if fqn.eq_ignore_ascii_case(owning_class_name) {
-        return true;
-    }
-    if !cls.name.eq_ignore_ascii_case(short_name(owning_class_name)) {
-        return false;
-    }
-    lookup_class_declaration(owning_class_name, "", all_classes, class_loader)
-        .is_some_and(|owner| owner.fqn().eq_ignore_ascii_case(fqn.as_str()))
+    find_or_load_resolved(name, all_classes, class_loader)
 }
 
 /// Map a parsed [`PhpType`] to all matching `ClassInfo` values.
@@ -290,10 +241,7 @@ fn type_hint_to_classes_typed_depth(
             let self_fqn = if !owning_class_name.is_empty()
                 && entries.iter().any(|e| e.value_type.contains_bare_self())
             {
-                find_class_by_name(all_classes, owning_class_name)
-                    .map(Arc::clone)
-                    .or_else(|| class_loader(owning_class_name))
-                    .map(|c| c.fqn())
+                find_or_load_resolved(owning_class_name, all_classes, class_loader).map(|c| c.fqn())
             } else {
                 None
             };
@@ -459,9 +407,7 @@ fn resolve_named_type(
                 produced,
             );
         }
-        return find_class_by_name(all_classes, owning_class_name)
-            .map(Arc::clone)
-            .or_else(|| class_loader(owning_class_name))
+        return find_or_load_resolved(owning_class_name, all_classes, class_loader)
             .into_iter()
             .collect();
     }
@@ -469,13 +415,10 @@ fn resolve_named_type(
     // ── parent ─────────────────────────────────────────────────────
     // Case-insensitive to match PHP behaviour (`Parent::`, `PARENT::` are valid).
     if name.eq_ignore_ascii_case("parent") {
-        let parent_name = find_class_by_name(all_classes, owning_class_name)
-            .and_then(|c| c.parent_class)
-            .or_else(|| class_loader(owning_class_name).and_then(|c| c.parent_class));
+        let parent_name = find_or_load_resolved(owning_class_name, all_classes, class_loader)
+            .and_then(|c| c.parent_class);
         if let Some(parent) = parent_name {
-            return find_class_by_name(all_classes, &parent)
-                .map(Arc::clone)
-                .or_else(|| class_loader(&parent))
+            return find_or_load_resolved(&parent, all_classes, class_loader)
                 .into_iter()
                 .collect();
         }
@@ -503,11 +446,7 @@ fn resolve_named_type(
     let owner_cell: std::cell::OnceCell<Option<Arc<ClassInfo>>> = std::cell::OnceCell::new();
     let owner = || {
         owner_cell
-            .get_or_init(|| {
-                find_class_by_name(all_classes, owning_class_name)
-                    .cloned()
-                    .or_else(|| class_loader(owning_class_name))
-            })
+            .get_or_init(|| find_or_load_resolved(owning_class_name, all_classes, class_loader))
             .as_deref()
     };
 
@@ -534,7 +473,7 @@ fn resolve_named_type(
         };
     }
 
-    match lookup_class_declaration(name, owning_class_name, all_classes, class_loader) {
+    match lookup_class_declaration(name, all_classes, class_loader) {
         Some(cls) => {
             // ── Eloquent custom collection swapping ────────────────
             // Only for a returned type hint — see
@@ -570,7 +509,7 @@ fn resolve_named_type(
             let erased_args: Vec<PhpType>;
             let generic_args: &[PhpType] = if generic_args.is_empty()
                 && !cls.template_params.is_empty()
-                && !is_enclosing_class(&cls, owning_class_name, all_classes, class_loader)
+                && !cls.fqn().eq_ignore_ascii_case(owning_class_name)
             {
                 erased_args = crate::inheritance::default_type_args(&cls);
                 &erased_args
@@ -796,7 +735,8 @@ pub(crate) fn expand_member_type_aliases(
     all_classes: &[Arc<ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<PhpType> {
-    if let Some(expanded) = expand_nested_type_aliases(ty, &class.name, all_classes, class_loader) {
+    if let Some(expanded) = expand_nested_type_aliases(ty, &class.fqn(), all_classes, class_loader)
+    {
         return Some(expanded);
     }
     let TypeKind::Named(name) = ty.kind() else {
@@ -815,7 +755,7 @@ pub(crate) fn expand_member_type_aliases(
         if let Some(def) = current.type_aliases.get(&name) {
             let expanded = expand_type_alias_def(def, all_classes, class_loader)?;
             return Some(
-                expand_nested_type_aliases(&expanded, &current.name, all_classes, class_loader)
+                expand_nested_type_aliases(&expanded, &current.fqn(), all_classes, class_loader)
                     .unwrap_or(expanded),
             );
         }
@@ -847,7 +787,7 @@ fn resolve_type_alias_once(
         _ => return None,
     };
 
-    let owning_class = all_classes.iter().find(|c| c.name == owning_class_name);
+    let owning_class = find_class_by_fqn(all_classes, owning_class_name);
 
     if let Some(cls) = owning_class
         && let Some(def) = cls.type_aliases.get(&atom(name))
@@ -862,7 +802,7 @@ fn resolve_type_alias_once(
     // the type is used in a context where the owning class is not the
     // declaring class.
     for cls in all_classes {
-        if cls.name == owning_class_name {
+        if owning_class.is_some_and(|owner| Arc::ptr_eq(owner, cls)) {
             continue; // Already checked above.
         }
         if let Some(def) = cls.type_aliases.get(&atom(name)) {

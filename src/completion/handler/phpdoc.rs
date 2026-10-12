@@ -44,7 +44,7 @@ impl Backend {
                     &sym,
                     content,
                     position,
-                    &ctx.classes,
+                    ctx,
                     &class_loader,
                     Some(self),
                     Some(

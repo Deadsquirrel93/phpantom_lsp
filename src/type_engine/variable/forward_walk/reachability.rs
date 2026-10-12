@@ -257,7 +257,7 @@ fn static_class_of(expr: &Expression<'_>, ctx: &ForwardWalkCtx<'_>) -> Option<Ar
             }
             match access.class {
                 Expression::Self_(_) | Expression::Static(_) => {
-                    (ctx.class_loader)(&ctx.current_class.name)
+                    (ctx.class_loader)(&ctx.current_class.fqn())
                 }
                 Expression::Parent(_) => {
                     let parent = ctx.current_class.parent_class.as_ref()?;
@@ -265,8 +265,7 @@ fn static_class_of(expr: &Expression<'_>, ctx: &ForwardWalkCtx<'_>) -> Option<Ar
                 }
                 Expression::Identifier(ident) => {
                     let name = bytes_to_str(ident.value());
-                    let fqn = crate::util::resolve_name_via_loader(name, ctx.class_loader);
-                    (ctx.class_loader)(&fqn).or_else(|| (ctx.class_loader)(name))
+                    (ctx.class_loader)(&ctx.resolve_written_class(name))
                 }
                 _ => None,
             }

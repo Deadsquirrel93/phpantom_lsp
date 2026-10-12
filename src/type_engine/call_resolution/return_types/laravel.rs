@@ -297,6 +297,8 @@ mod auth_guard_tests {
             content: "",
             cursor_offset: 0,
             class_loader: &class_loader,
+            source_class_loader: &class_loader,
+            source_imports: None,
             backend: None,
             laravel_macro_this_resolver: None,
             resolved_class_cache: None,

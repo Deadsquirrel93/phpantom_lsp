@@ -560,6 +560,11 @@ fn resolve_class_fully_inner(
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     cache: Option<&ResolvedClassCache>,
 ) -> Arc<ClassInfo> {
+    // Every name a class carries (ancestors, mixins, member types) is
+    // already resolved, and the class may come from any file, so none of
+    // them may go through the consuming file's imports and namespace.
+    let class_loader = &|name: &str| crate::class_lookup::load_resolved_name(name, class_loader);
+
     // Cycle breaking needs somewhere to record in-flight resolutions,
     // so cache-less callers fall back to the thread's active cache
     // when one is live, and otherwise get a throwaway cache scoped to

@@ -26,6 +26,7 @@ pub(crate) fn resolve_var_type(
 ) -> Option<PhpType> {
     let ctx = backend.file_context_at(uri, cursor_offset);
     let class_loader = backend.class_loader(&ctx);
+    let resolved_class_loader = backend.resolved_class_loader(&ctx);
     let function_loader = backend.function_loader(&ctx);
     let constant_loader = backend.constant_loader(&ctx);
     let config_resolver = |key: &str| backend.resolve_config_type(key);
@@ -47,7 +48,9 @@ pub(crate) fn resolve_var_type(
         cursor_offset,
         current_class,
         &ctx.classes,
+        &resolved_class_loader,
         &class_loader,
+        Some(&ctx.use_map),
         Some(backend),
         loaders,
     )

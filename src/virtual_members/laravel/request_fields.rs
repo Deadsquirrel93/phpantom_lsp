@@ -239,7 +239,8 @@ pub(crate) fn request_fields_at_position(
         loaded.as_deref()?
     };
 
-    if !is_request_like(receiver_class, &class_loader) {
+    let resolved_class_loader = backend.resolved_class_loader_with(&ctx.classes);
+    if !is_request_like(receiver_class, &resolved_class_loader) {
         return None;
     }
 
@@ -277,19 +278,26 @@ fn resolve_variable_class(
             &fallback
         }
     };
+    let resolved_class_loader =
+        |name: &str| crate::class_lookup::load_resolved_name(name, class_loader);
     let types = crate::type_engine::variable::resolution::resolve_variable_types(
         variable,
         effective_class,
         &ctx.classes,
         content,
         cursor_offset,
+        &resolved_class_loader,
         class_loader,
+        Some(ctx.use_map_at(cursor_offset)),
         Some(backend),
         crate::type_engine::resolver::Loaders::default(),
     );
-    types
-        .iter()
-        .find_map(|resolved| resolved.type_string.base_name().and_then(class_loader))
+    types.iter().find_map(|resolved| {
+        resolved
+            .type_string
+            .base_name()
+            .and_then(resolved_class_loader)
+    })
 }
 
 // ─── Go to definition ───────────────────────────────────────────────────────

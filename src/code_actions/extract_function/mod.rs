@@ -289,7 +289,7 @@ impl Backend {
             &typed_returns,
         );
         let ctx = self.file_context_at(uri, start as u32);
-        let class_loader = self.class_loader(&ctx);
+        let class_loader = self.resolved_class_loader(&ctx);
         let docblock = build_docblock_for_extraction(
             &typed_params,
             &return_type_for_docblock,

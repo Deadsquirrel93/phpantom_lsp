@@ -62,14 +62,17 @@ impl ThrowPoints {
         }
         let hint = extract_hint_type(&catch.hint);
         hint.union_members().into_iter().any(|member| {
-            let Some(name) = member.base_name() else {
+            // The name as written: `base_name` would drop the leading `\` of
+            // `catch (\RuntimeException $e)`, turning it namespace-relative.
+            let crate::php_type::TypeKind::Named(name) = member.kind() else {
                 return true;
             };
-            let catch_name = crate::util::resolve_source_class_name(
+            let catch_name = crate::util::resolve_code_class_name(
                 name,
                 ctx.current_class.file_namespace.as_deref(),
+                ctx.source_imports,
                 ctx.all_classes,
-                ctx.class_loader,
+                ctx.source_class_loader,
             );
             self.explicit
                 .iter()
@@ -144,11 +147,7 @@ fn may_catch(catch_name: &str, thrown: &str, ctx: &ForwardWalkCtx<'_>) -> bool {
 /// A backslash-free name there is a global class, so it must not go
 /// through the current file's `use` map the way a name typed in source does.
 fn load_fqn(name: &str, ctx: &ForwardWalkCtx<'_>) -> Option<Arc<ClassInfo>> {
-    if name.contains('\\') {
-        (ctx.class_loader)(name)
-    } else {
-        (ctx.class_loader)(&format!("__fqn__\\{name}")).or_else(|| (ctx.class_loader)(name))
-    }
+    crate::class_lookup::load_resolved_name(name, ctx.class_loader)
 }
 
 struct Collect<'c, 'w> {
@@ -163,7 +162,7 @@ impl Collect<'_, '_> {
     fn classes_of(&self, expr: &Expression<'_>) -> Option<Vec<String>> {
         match expr {
             Expression::Variable(Variable::Direct(dv)) if dv.name == b"$this" => {
-                Some(vec![self.ctx.current_class.name.to_string()])
+                Some(vec![self.ctx.current_class.fqn().to_string()])
             }
             Expression::Variable(Variable::Direct(dv)) => {
                 let types = self.scope?.get(bytes_to_str(dv.name));
@@ -222,7 +221,8 @@ impl Collect<'_, '_> {
             expr,
             self.ctx.current_class,
             self.ctx.all_classes,
-            self.ctx.class_loader,
+            self.ctx.source_class_loader,
+            self.ctx.source_imports,
         )
     }
 }

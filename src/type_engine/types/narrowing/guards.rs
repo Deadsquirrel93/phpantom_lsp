@@ -92,7 +92,7 @@ pub(in crate::type_engine) fn try_extract_class_string_guard(
                     }
                     // Every enum implements `UnitEnum`, so `enum_exists()`
                     // knows more than that the name is declared.
-                    let target = (func_name == "enum_exists").then(|| "UnitEnum".to_string());
+                    let target = (func_name == "enum_exists").then(|| "\\UnitEnum".to_string());
                     Some((target, false))
                 }
                 _ => None,
@@ -329,6 +329,10 @@ pub(in crate::type_engine) struct ExitCtx<'a> {
     /// namespace block declares.
     pub all_classes: &'a [Arc<ClassInfo>],
     pub class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    /// See [`ResolutionCtx::source_class_loader`](crate::type_engine::resolver::ResolutionCtx::source_class_loader).
+    pub source_class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    /// See [`ResolutionCtx::source_imports`](crate::type_engine::resolver::ResolutionCtx::source_imports).
+    pub source_imports: crate::type_engine::resolver::SourceImports<'a>,
     pub function_loader: FunctionLoaderFn<'a>,
     pub resolved_class_cache: Option<&'a crate::virtual_members::ResolvedClassCache>,
     /// Resolves a `$`-prefixed local variable to its types, when the
@@ -438,11 +442,12 @@ fn expression_is_never_call(expr: &Expression<'_>, ctx: &ExitCtx<'_>) -> bool {
                 // name against the current namespace before the global
                 // scope, so a same-namespace class must win over a
                 // global class of the same short name.
-                Expression::Identifier(ident) => crate::util::resolve_source_class_name(
+                Expression::Identifier(ident) => crate::util::resolve_code_class_name(
                     bytes_to_str(ident.value()),
                     ctx.current_class.file_namespace.as_deref(),
+                    ctx.source_imports,
                     ctx.all_classes,
-                    ctx.class_loader,
+                    ctx.source_class_loader,
                 ),
                 // `never` is the bottom type, so a child override can
                 // only narrow to `never` again — reading `static::`
@@ -743,13 +748,14 @@ pub(crate) fn split_type_by_guard_name(
 /// keeps the type it has) and when it admits no value at all, since an
 /// empty type is never a useful answer for a caller that only knows the
 /// condition held.
-pub(crate) fn narrow_type_by_condition(
+pub(in crate::type_engine) fn narrow_type_by_condition(
     condition: &Expression<'_>,
     var_name: &str,
     ty: &PhpType,
     class_loader: GuardClassLoader<'_>,
+    names: &WrittenClassNames<'_>,
 ) -> Option<PhpType> {
-    let narrowed = narrow_by_condition_inner(condition, var_name, ty, class_loader)?;
+    let narrowed = narrow_by_condition_inner(condition, var_name, ty, class_loader, names)?;
     (!narrowed.is_empty_sentinel()).then_some(narrowed)
 }
 
@@ -758,10 +764,11 @@ fn narrow_by_condition_inner(
     var_name: &str,
     ty: &PhpType,
     class_loader: GuardClassLoader<'_>,
+    names: &WrittenClassNames<'_>,
 ) -> Option<PhpType> {
     match condition {
         Expression::Parenthesized(inner) => {
-            return narrow_by_condition_inner(inner.expression, var_name, ty, class_loader);
+            return narrow_by_condition_inner(inner.expression, var_name, ty, class_loader, names);
         }
         Expression::Binary(bin)
             if matches!(
@@ -771,9 +778,9 @@ fn narrow_by_condition_inner(
         {
             // Both operands hold, so the right-hand one narrows whatever
             // the left-hand one left behind.
-            let lhs = narrow_by_condition_inner(bin.lhs, var_name, ty, class_loader);
+            let lhs = narrow_by_condition_inner(bin.lhs, var_name, ty, class_loader, names);
             let base = lhs.as_ref().unwrap_or(ty);
-            return narrow_by_condition_inner(bin.rhs, var_name, base, class_loader).or(lhs);
+            return narrow_by_condition_inner(bin.rhs, var_name, base, class_loader, names).or(lhs);
         }
         Expression::Binary(bin)
             if matches!(
@@ -785,8 +792,8 @@ fn narrow_by_condition_inner(
             // answer is what they admit between them. An operand that says
             // nothing about `var_name` admits everything, which makes the
             // whole condition uninformative.
-            let lhs = narrow_by_condition_inner(bin.lhs, var_name, ty, class_loader)?;
-            let rhs = narrow_by_condition_inner(bin.rhs, var_name, ty, class_loader)?;
+            let lhs = narrow_by_condition_inner(bin.lhs, var_name, ty, class_loader, names)?;
+            let rhs = narrow_by_condition_inner(bin.rhs, var_name, ty, class_loader, names)?;
             let members: Vec<PhpType> = [lhs, rhs]
                 .into_iter()
                 .filter(|m| !m.is_empty_sentinel())
@@ -803,7 +810,9 @@ fn narrow_by_condition_inner(
     // `$v instanceof Foo` is the type test a filter callback is most often
     // written with, and `$v !== null` the one `is_null()` is spelled as
     // when nobody reaches for a function call.
-    if let Some(extraction) = super::try_extract_instanceof_with_negation(condition, var_name) {
+    if let Some(extraction) =
+        super::try_extract_instanceof_with_negation(condition, var_name, names)
+    {
         return narrow_type_by_instanceof(ty, &extraction, class_loader);
     }
     if let Some(expects_null) = try_extract_null_comparison(condition, var_name) {

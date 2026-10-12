@@ -107,8 +107,9 @@ impl Backend {
                     at,
                     None,
                     crate::type_engine::types::conditional::ConditionalClassContext {
-                        calling: rctx.current_class.map(|c| c.name.as_str()),
+                        calling: rctx.current_class.map(|c| c.fqn().as_str()),
                         declaring: Some(owner.fqn().as_str()),
+                        written_class: Some(&|name: &str| rctx.resolve_written_class(name)),
                     },
                     rctx.class_loader,
                     &tpl,
@@ -608,6 +609,7 @@ impl Backend {
         let namespace = file_ctx.namespace_at(cursor_offset);
         let use_map = file_ctx.use_map_at(cursor_offset);
         let class_loader = self.class_loader_with(&file_ctx.classes, use_map, namespace);
+        let resolved_class_loader = self.resolved_class_loader_with(&file_ctx.classes);
         let function_loader_cl =
             self.function_loader_with(file_ctx.resolved_names.as_deref(), use_map, namespace);
         let current_class = find_class_at_offset(&file_ctx.classes, cursor_offset);
@@ -619,10 +621,12 @@ impl Backend {
             content,
             cursor_offset,
             CtxLoaders::new(
+                &resolved_class_loader,
                 &class_loader,
                 &function_loader_cl,
                 &laravel_macro_this_resolver,
-            ),
+            )
+            .with_imports(use_map),
         );
 
         // ── Invoked value: `($this->handler)(…)` ──────────────────
@@ -664,19 +668,13 @@ impl Backend {
                 // source-level reference so a same-namespace class wins
                 // over a global stub of the same short name.
                 let resolved_class_name = if resolved_class_name == *class_name {
-                    let ns = rctx.current_class.and_then(|c| c.file_namespace.as_deref());
-                    crate::util::resolve_source_class_name(
-                        class_name,
-                        ns,
-                        rctx.all_classes,
-                        &class_loader,
-                    )
+                    rctx.resolve_written_class(class_name)
                 } else {
                     resolved_class_name
                 };
                 Self::resolve_constructor_callable(
                     &resolved_class_name,
-                    &class_loader,
+                    &resolved_class_loader,
                     &self.resolved_class_cache,
                     effective_args_text,
                     &rctx,

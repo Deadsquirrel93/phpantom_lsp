@@ -46,6 +46,7 @@ pub(crate) struct TypeCheckCtx<'a> {
     pub(crate) file_ctx: &'a FileContext,
     /// One loader set per `namespace` block; pick with the `*_at` methods.
     class_loaders: &'a BlockClassLoaders<'a>,
+    resolved_class_loaders: &'a BlockClassLoaders<'a>,
     function_loaders: &'a PerBlock<'a, DynFunctionLoader<'a>>,
     constant_loaders: &'a PerBlock<'a, DynConstantLoader<'a>>,
     /// Whether the file declares `strict_types=1`, which decides how
@@ -57,12 +58,22 @@ type DynFunctionLoader<'a> = &'a (dyn Fn(&str, u32) -> Option<FunctionInfo> + 'a
 type DynConstantLoader<'a> = &'a (dyn Fn(&str, u32) -> Option<Option<String>> + 'a);
 
 impl<'a> TypeCheckCtx<'a> {
-    /// The class loader for the `namespace` block containing `offset`.
+    /// The class loader for names as written in source in the
+    /// `namespace` block containing `offset`.
     pub(crate) fn class_loader_at(
         &self,
         offset: u32,
     ) -> &'a (dyn Fn(&str) -> Option<Arc<ClassInfo>> + 'a) {
         *self.class_loaders.at(offset)
+    }
+
+    /// The class loader for already-resolved names in the `namespace`
+    /// block containing `offset`.
+    pub(crate) fn resolved_class_loader_at(
+        &self,
+        offset: u32,
+    ) -> &'a (dyn Fn(&str) -> Option<Arc<ClassInfo>> + 'a) {
+        *self.resolved_class_loaders.at(offset)
     }
 
     /// The function loader for the `namespace` block containing `offset`.
@@ -103,6 +114,8 @@ pub(crate) fn collect_type_check<S>(
 
     let class_loaders = backend.class_loaders(&file_ctx);
     let class_loaders = class_loaders.as_dyn();
+    let resolved_class_loaders = backend.resolved_class_loaders(&file_ctx);
+    let resolved_class_loaders = resolved_class_loaders.as_dyn();
     let function_loaders = backend.function_loaders(&file_ctx);
     let function_loaders = function_loaders.map(|loader| loader as DynFunctionLoader<'_>);
     let constant_loaders = file_ctx.per_block(|use_map, namespace| {
@@ -116,6 +129,7 @@ pub(crate) fn collect_type_check<S>(
     let ctx = TypeCheckCtx {
         file_ctx: &file_ctx,
         class_loaders: &class_loaders,
+        resolved_class_loaders: &resolved_class_loaders,
         function_loaders: &function_loaders,
         constant_loaders: &constant_loaders,
         strict_types,

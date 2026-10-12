@@ -5703,6 +5703,64 @@ async fn definition_of_property_named_by_a_parent_hook_call() {
 }
 
 #[tokio::test]
+async fn definition_through_implicit_set_hook_value_inside_a_namespace() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///hook_implicit_value_ns.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "class Price {\n",
+        "    public function format(): string {\n",
+        "        return '0';\n",
+        "    }\n",
+        "}\n",
+        "class Item {\n",
+        "    public Price $label {\n",
+        "        set {\n",
+        "            $this->stored = $value->format();\n",
+        "        }\n",
+        "    }\n",
+        "    public string $stored;\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // The property's `Price` hint is written inside `namespace App`, so the
+    // implicit `$value` is `App\Price`. Click on "format".
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 10,
+                character: 39,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    match backend.goto_definition(params).await.unwrap() {
+        Some(GotoDefinitionResponse::Scalar(location)) => {
+            assert_eq!(
+                location.range.start.line, 3,
+                "format() is declared on line 3"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+#[tokio::test]
 async fn definition_through_implicit_value_of_an_arrow_bodied_set_hook() {
     let backend = create_test_backend();
 

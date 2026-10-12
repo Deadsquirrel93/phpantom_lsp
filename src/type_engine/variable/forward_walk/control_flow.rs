@@ -21,10 +21,10 @@ fn bind_catch_variable(
     let Some(ref var) = catch.variable else {
         return;
     };
-    let parsed_hint = extract_hint_type(&catch.hint);
+    let parsed_hint = ctx.resolve_hint_type(&extract_hint_type(&catch.hint));
     let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
         &parsed_hint,
-        &ctx.current_class.name,
+        &ctx.current_class.fqn(),
         ctx.all_classes,
         ctx.class_loader,
     );

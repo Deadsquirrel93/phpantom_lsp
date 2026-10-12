@@ -37,7 +37,6 @@ use crate::parser::extract_hint_type;
 use crate::php_type::PhpType;
 use crate::text_position::offset_to_position;
 use crate::types::{ClassInfo, FunctionLoader};
-use crate::util::short_name;
 
 // ── Data types ──────────────────────────────────────────────────────────────
 
@@ -98,15 +97,9 @@ struct FunctionWithDocblock {
     docblock_position: Position,
 }
 
-/// Resolve a type name to its FQN, using the class loader as the
-/// source of truth.
-///
-/// Resolution order:
-/// 1. Try `resolve_to_fqn` (use-map → namespace prefix → bare name).
-/// 2. If the result can be loaded by the class loader, use the loaded FQN.
-/// 3. Otherwise, try loading the original name directly (handles root-
-///    namespace classes like `RuntimeException` that have no `use` import).
-/// 4. Fall back to the `resolve_to_fqn` result.
+/// Resolve a type name written in the file to its FQN: through the
+/// use-map, else the namespace, then the declared spelling of the class
+/// that names, when one loads.
 fn resolve_type_name_to_fqn(
     name: &str,
     use_map: &HashMap<String, String>,
@@ -114,18 +107,9 @@ fn resolve_type_name_to_fqn(
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> String {
     let resolved = crate::util::resolve_to_fqn(name, use_map, file_namespace);
-    // If the class loader recognises the resolved name, use its canonical FQN.
-    if let Some(cls) = class_loader(&resolved) {
-        return cls.fqn().to_string();
-    }
-    // The resolved name wasn't found — try the original name directly.
-    // This handles root-namespace classes (e.g. `RuntimeException`) when
-    // the file has a namespace but no explicit `use` import.
-    if let Some(cls) = class_loader(name) {
-        return cls.fqn().to_string();
-    }
-    // Neither worked — return the best guess.
-    resolved
+    crate::class_lookup::load_resolved_name(&resolved, class_loader)
+        .map(|cls| cls.fqn().to_string())
+        .unwrap_or(resolved)
 }
 
 impl Backend {
@@ -661,6 +645,7 @@ fn check_needs_update(
                 info.docblock_position,
                 local_classes,
                 class_loader,
+                Some(use_map),
                 backend,
                 function_loader,
             )
@@ -695,9 +680,8 @@ fn check_needs_update(
         .map(|t| resolve_type_name_to_fqn(t, use_map, file_namespace, class_loader).to_lowercase())
         .collect();
     for exc in &uncaught {
-        let exc_str = exc.to_string();
-        let exc_fqn = resolve_type_name_to_fqn(&exc_str, use_map, file_namespace, class_loader)
-            .to_lowercase();
+        // The throws analysis already resolved it.
+        let exc_fqn = exc.to_string().to_lowercase();
         if !existing_fqns.contains(&exc_fqn) {
             return true;
         }
@@ -928,13 +912,15 @@ fn build_updated_docblock(
 
     let mut new_throws: Vec<String> = Vec::new();
     for exc in &uncaught {
+        // The throws analysis already resolved it.
         let exc_str = exc.to_string();
-        let exc_fqn = resolve_type_name_to_fqn(&exc_str, use_map, file_namespace, class_loader)
-            .to_lowercase();
+        let exc_fqn = exc_str.to_lowercase();
         if !existing_fqns.contains(&exc_fqn) {
-            // Use the short name in the generated @throws tag for readability
-            let display_name = short_name(&exc_str);
-            new_throws.push(display_name.to_string());
+            new_throws.push(crate::util::shorten_class_fqn(
+                &exc_str,
+                use_map,
+                file_namespace,
+            ));
         }
     }
 
@@ -981,6 +967,7 @@ fn build_updated_docblock(
                 info.docblock_position,
                 local_classes,
                 class_loader,
+                Some(use_map),
                 backend,
                 function_loader,
             )
@@ -993,6 +980,12 @@ fn build_updated_docblock(
                 .as_ref()
                 .is_none_or(|dr| !dr.type_parsed.equivalent(&enriched));
             if differs_from_doc {
+                let enriched = crate::util::shorten_type_for_file(
+                    &enriched,
+                    use_map,
+                    file_namespace,
+                    class_loader,
+                );
                 // Update existing @return line or insert a new one.
                 let mut updated_existing = false;
                 for line in &mut lines {

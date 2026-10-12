@@ -13,38 +13,19 @@ use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
 use crate::atom::bytes_to_str;
-use crate::class_lookup::resolve_class_keyword;
 use crate::parser::with_parsed_program;
 use crate::types::ClassInfo;
-use crate::util::short_name;
 
 use crate::type_engine::conditional_resolution::extract_class_string_from_expr;
 use crate::type_engine::resolver::VarResolutionCtx;
 
-/// Resolve the class a `::class` literal names, after `self`/`static`/
-/// `parent` have already been substituted, and append it to `results`.
-///
-/// A same-file class is preferred for a bare name, since that is the one
-/// the file means and it is already loaded.  A *qualified* name spells
-/// where the class lives, so it goes straight to the loader: matching it
-/// against a same-file class by short name alone would pick a namespace
-/// mate that merely shares the last segment (`Consumer\Pen` standing in
-/// for `App\Support\Pen`).
+/// Resolve the class a `::class` literal names, as written (`self`,
+/// `static` and `parent` included), and append it to `results`.
 fn push_class_string_target(name: &str, ctx: &VarResolutionCtx<'_>, results: &mut Vec<ClassInfo>) {
-    let local = (!name.contains('\\'))
-        .then(|| ctx.all_classes.iter().find(|c| c.name == short_name(name)))
-        .flatten();
-    if let Some(cls) = local {
-        ClassInfo::push_unique(results, ClassInfo::clone(cls));
-        return;
-    }
-    let fqn = crate::util::resolve_source_class_name(
-        name,
-        ctx.current_class.file_namespace.as_deref(),
-        ctx.all_classes,
-        ctx.class_loader,
-    );
-    if let Some(cls) = (ctx.class_loader)(&fqn) {
+    let fqn = ctx.resolve_written_class(name);
+    if let Some(cls) =
+        crate::class_lookup::find_or_load_resolved(&fqn, ctx.all_classes, ctx.class_loader)
+    {
         ClassInfo::push_unique(results, Arc::unwrap_or_clone(cls));
     }
 }
@@ -55,29 +36,31 @@ fn push_class_string_target(name: &str, ctx: &VarResolutionCtx<'_>, results: &mu
 /// Instead of resolving the variable to its *value type* (`string`),
 /// this resolves it to the *referenced class* so that static members
 /// are offered — see the module docs for the supported patterns.
+///
+/// Only the class, file, loaders and backend of `outer` are used: the
+/// variable is looked up at `cursor_offset` from a fresh walk, not from
+/// whatever scope `outer` carries.
 pub(in crate::type_engine) fn resolve_class_string_targets(
     var_name: &str,
-    current_class: &ClassInfo,
-    all_classes: &[Arc<ClassInfo>],
-    content: &str,
     cursor_offset: u32,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    backend: Option<&crate::Backend>,
+    outer: &VarResolutionCtx<'_>,
 ) -> Vec<ClassInfo> {
     with_parsed_program(
-        content,
+        outer.content,
         "resolve_class_string_targets",
         |program, _content| {
             let ctx = VarResolutionCtx {
-                backend,
+                source_imports: outer.source_imports,
+                backend: outer.backend,
                 resolved_class_cache: crate::virtual_members::active_resolved_class_cache(),
                 ..VarResolutionCtx::new(
                     var_name,
-                    current_class,
-                    all_classes,
-                    content,
+                    outer.current_class,
+                    outer.all_classes,
+                    outer.content,
                     cursor_offset,
-                    class_loader,
+                    outer.class_loader,
+                    outer.source_class_loader,
                 )
             };
             resolve_class_string_in_statements(program.statements.iter(), &ctx)
@@ -231,14 +214,7 @@ fn walk_class_string_assignments<'b>(
                     if !class_names.is_empty() {
                         results.clear();
                         for cn in class_names {
-                            let resolved_name = if let Some(resolved) =
-                                resolve_class_keyword(&cn, Some(ctx.current_class))
-                            {
-                                resolved
-                            } else {
-                                cn
-                            };
-                            push_class_string_target(&resolved_name, ctx, results);
+                            push_class_string_target(&cn, ctx, results);
                         }
                     }
                 }
@@ -347,13 +323,7 @@ fn check_class_string_assignment(
     // Clear previous results — the last unconditional assignment wins.
     results.clear();
     for name in class_names {
-        let resolved_name =
-            if let Some(resolved) = resolve_class_keyword(&name, Some(ctx.current_class)) {
-                resolved
-            } else {
-                name
-            };
-        push_class_string_target(&resolved_name, ctx, results);
+        push_class_string_target(&name, ctx, results);
     }
 }
 

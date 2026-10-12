@@ -24,10 +24,11 @@ pub(crate) fn apply_class_match_arm_narrowing<'b>(
 ) {
     // The arm runs when any one condition matches, so a condition that
     // names no class lets the subject in whatever its class.
+    let names = ctx.written_class_names();
     let Some(classes) = expr_arm
         .conditions
         .iter()
-        .map(|c| narrowing::class_match_condition_class(c))
+        .map(|c| narrowing::class_match_condition_class(c, &names))
         .collect::<Option<Vec<PhpType>>>()
     else {
         return;
@@ -279,6 +280,7 @@ fn apply_condition_narrowing_inverse_single<'b>(
     seed_property_keys_into_scope(condition, scope, ctx);
 
     let scope_resolver = scope.snapshot_resolver();
+    let names = ctx.written_class_names();
     // Include variables from instanceof conditions that may not be in
     // scope yet (e.g. `if (!$foobar instanceof Foobar) { break; }`
     // where `$foobar` was never assigned).  After the guard clause,
@@ -338,7 +340,8 @@ fn apply_condition_narrowing_inverse_single<'b>(
             continue;
         }
 
-        if let Some(classes) = narrowing::try_extract_compound_or_instanceof(condition, var_name)
+        if let Some(classes) =
+            narrowing::try_extract_compound_or_instanceof(condition, var_name, &names)
             && !classes.is_empty()
         {
             let var_ctx = build_var_ctx(var_name, ctx, &scope_resolver);
@@ -382,14 +385,15 @@ fn apply_condition_narrowing_inverse_single<'b>(
             }
         }
 
-        if let Some(extraction) =
-            narrowing::try_extract_instanceof_with_negation(condition, var_name).or_else(|| {
-                alias_extractions
-                    .iter()
-                    .find(|a| a.subject == *var_name)
-                    .map(|a| a.extraction.clone())
-            })
-        {
+        if let Some(extraction) = narrowing::try_extract_instanceof_with_negation(
+            condition, var_name, &names,
+        )
+        .or_else(|| {
+            alias_extractions
+                .iter()
+                .find(|a| a.subject == *var_name)
+                .map(|a| a.extraction.clone())
+        }) {
             let var_ctx = build_var_ctx(var_name, ctx, &scope_resolver);
             if extraction.negated {
                 // Inverse of negated instanceof → positive instanceof,
@@ -702,6 +706,7 @@ pub(crate) fn build_var_ctx<'a>(
     scope_resolver: &'a dyn Fn(&str) -> Vec<ResolvedType>,
 ) -> VarResolutionCtx<'a> {
     VarResolutionCtx {
+        source_imports: ctx.source_imports,
         backend: ctx.backend,
         loaders: ctx.loaders,
         resolved_class_cache: ctx.resolved_class_cache,
@@ -715,6 +720,7 @@ pub(crate) fn build_var_ctx<'a>(
             ctx.content,
             ctx.cursor_offset,
             ctx.class_loader,
+            ctx.source_class_loader,
         )
     }
 }

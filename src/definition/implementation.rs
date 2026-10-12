@@ -86,7 +86,7 @@ impl Backend {
                 // class and check whether it is an interface/abstract.
                 SymbolKind::SelfStaticParent(ssp_kind) => {
                     let ctx = self.file_context_at(uri, sym.start);
-                    let class_loader = self.class_loader(&ctx);
+                    let class_loader = self.resolved_class_loader(&ctx);
                     let current_class = find_class_at_offset(&ctx.classes, sym.start);
                     let target = match ssp_kind {
                         SelfStaticParentKind::Parent => current_class
@@ -94,17 +94,14 @@ impl Backend {
                             .and_then(|p| class_loader(p).map(Arc::unwrap_or_clone)),
                         _ => current_class.cloned(),
                     };
-                    if let Some(ref t) = target {
-                        return self
-                            .resolve_class_implementation(uri, content, &t.name, &ctx, sym.start);
-                    }
-                    return None;
+                    return target
+                        .and_then(|t| self.class_implementation(uri, content, t, &class_loader));
                 }
                 // Member declaration — reverse jump: from a concrete method
                 // definition to the interface/abstract method it implements.
                 SymbolKind::MemberDeclaration { name, .. } => {
                     let ctx = self.file_context_at(uri, sym.start);
-                    let class_loader = self.class_loader(&ctx);
+                    let class_loader = self.resolved_class_loader(&ctx);
                     let current_class = find_class_at_offset(&ctx.classes, sym.start);
                     if let Some(cls) = current_class {
                         return self.resolve_reverse_implementation(
@@ -142,38 +139,35 @@ impl Backend {
         name_offset: u32,
     ) -> Option<Vec<Location>> {
         let class_loader = self.class_loader(ctx);
+        let resolved_class_loader = self.resolved_class_loader(ctx);
 
         let fqn = ctx.resolve_name_at(name, name_offset);
-        let target = class_loader(&fqn)
+        let target = resolved_class_loader(&fqn)
             .or_else(|| class_loader(name))
             .map(Arc::unwrap_or_clone)?;
+        self.class_implementation(uri, content, target, &resolved_class_loader)
+    }
 
+    /// Go-to-implementation for the class `target`.
+    ///
+    /// Checks that `target` can have implementations, finds every
+    /// implementor or subclass, and returns their declaration locations.
+    fn class_implementation(
+        &self,
+        uri: &str,
+        content: &str,
+        target: ClassInfo,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    ) -> Option<Vec<Location>> {
         // Final classes cannot be extended, so there are no implementations.
         if target.is_final {
             return None;
         }
 
-        let target_short = target.name;
-        // Compute target FQN from the class's own namespace (most
-        // reliable), then fall back to fqn_uri_index, then to the FQN we
-        // resolved from the use-map, and finally to the short name.
-        let target_fqn = {
-            let from_class = crate::util::build_fqn(&target.name, target.file_namespace.as_deref());
-            if from_class.contains('\\') {
-                from_class
-            } else {
-                self.class_fqn_for_short(&target_short).unwrap_or_else(|| {
-                    if fqn.contains('\\') {
-                        fqn.clone()
-                    } else {
-                        target_short.to_string()
-                    }
-                })
-            }
-        };
+        let target_fqn = target.fqn().to_string();
 
         let descendants =
-            self.implementation_descendants(&target, &target_fqn, &class_loader, false);
+            self.implementation_descendants(&target, &target_fqn, class_loader, false);
         let locations = self.class_implementation_locations(uri, content, &target, &descendants);
         (!locations.is_empty()).then_some(locations)
     }
@@ -334,7 +328,7 @@ impl Backend {
         member_name: &str,
         class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     ) -> Option<Vec<Location>> {
-        let target_fqn = self.implementor_target_fqn(interface_class);
+        let target_fqn = interface_class.fqn().to_string();
         let descendants =
             self.implementation_descendants(interface_class, &target_fqn, class_loader, false);
 
@@ -399,18 +393,6 @@ impl Backend {
         locations
     }
 
-    /// The FQN to search implementors of `cls` by: the namespace the class
-    /// declares itself when it has one, falling back to whatever the class
-    /// index knows about its short name.
-    fn implementor_target_fqn(&self, cls: &ClassInfo) -> String {
-        let from_class = crate::util::build_fqn(&cls.name, cls.file_namespace.as_deref());
-        if from_class.contains('\\') {
-            return from_class;
-        }
-        self.class_fqn_for_short(&cls.name)
-            .unwrap_or_else(|| cls.name.to_string())
-    }
-
     /// Resolve implementations of a method call on an interface/abstract class.
     fn resolve_member_implementations(
         &self,
@@ -427,6 +409,8 @@ impl Backend {
         let current_class = find_class_at_offset(&ctx.classes, cursor_offset);
 
         let class_loader = self.class_loader(ctx);
+
+        let resolved_class_loader = self.resolved_class_loader(ctx);
         let function_loader = self.function_loader(ctx);
         let laravel_macro_this_resolver = self.laravel_macro_this_resolver(&class_loader);
 
@@ -437,10 +421,12 @@ impl Backend {
             content,
             cursor_offset,
             CtxLoaders::new(
+                &resolved_class_loader,
                 &class_loader,
                 &function_loader,
                 &laravel_macro_this_resolver,
-            ),
+            )
+            .with_imports(&ctx.use_map),
         );
 
         let candidates = ResolvedType::into_arced_classes(
@@ -464,7 +450,7 @@ impl Backend {
             // (directly or inherited).
             let merged = crate::virtual_members::resolve_class_fully_cached(
                 candidate,
-                &class_loader,
+                &resolved_class_loader,
                 &self.resolved_class_cache,
             );
             let has_method = merged.has_method(member_name);
@@ -480,15 +466,19 @@ impl Backend {
                 MemberKind::Property
             };
 
-            let target_fqn = self.implementor_target_fqn(candidate);
-            let descendants =
-                self.implementation_descendants(candidate, &target_fqn, &class_loader, false);
+            let target_fqn = candidate.fqn().to_string();
+            let descendants = self.implementation_descendants(
+                candidate,
+                &target_fqn,
+                &resolved_class_loader,
+                false,
+            );
             let providers = member_implementation_providers(
                 &target_fqn,
                 member_name,
                 member_kind,
                 &descendants,
-                &class_loader,
+                &resolved_class_loader,
             );
             all_locations.extend(self.member_implementation_locations(
                 uri,
@@ -1058,18 +1048,6 @@ impl Backend {
 
     /// Get the FQN for a class given its short name, by looking it up in
     /// the `fqn_uri_index`.
-    fn class_fqn_for_short(&self, target_short: &str) -> Option<String> {
-        let idx = self.symbols.fqn_uri_index.read();
-        // Look for an entry whose short name matches.
-        for fqn in idx.keys() {
-            let short = short_name(fqn);
-            if short.eq_ignore_ascii_case(target_short) {
-                return Some(fqn.to_owned());
-            }
-        }
-        None
-    }
-
     /// Find the location of a class declaration for an implementor.
     fn locate_class_declaration(
         &self,

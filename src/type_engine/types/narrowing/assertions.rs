@@ -130,10 +130,11 @@ fn resolve_static_receiver_class(
     match class_expr {
         Expression::Identifier(ident) => {
             let name = bytes_to_str(ident.value());
-            let fqn = crate::util::resolve_name_via_loader(name, ctx.class_loader);
-            (ctx.class_loader)(&fqn).or_else(|| (ctx.class_loader)(name))
+            (ctx.class_loader)(&ctx.resolve_written_class(name))
         }
-        Expression::Self_(_) | Expression::Static(_) => (ctx.class_loader)(&ctx.current_class.name),
+        Expression::Self_(_) | Expression::Static(_) => {
+            (ctx.class_loader)(&ctx.current_class.fqn())
+        }
         Expression::Parent(_) => {
             let parent = ctx.current_class.parent_class.as_ref()?;
             (ctx.class_loader)(parent)
@@ -158,7 +159,7 @@ fn resolve_instance_receiver_class(
     // Variable names carry the leading `$` (e.g. `$this`, `$obj`).
     let name = bytes_to_str(dv.name);
     if name == "$this" {
-        return (ctx.class_loader)(&ctx.current_class.name);
+        return (ctx.class_loader)(&ctx.current_class.fqn());
     }
     let resolver = ctx.scope_var_resolver?;
     let first = resolver(name).into_iter().next()?;
@@ -805,7 +806,7 @@ fn template_argument_at_call(
 
     // Try to extract a class name from the argument expression.
     if let Some(class_name) = extract_class_string_from_expr(arg_expr) {
-        let fqn = crate::util::resolve_name_via_loader(&class_name, ctx.class_loader);
+        let fqn = ctx.resolve_written_class(&class_name);
         return Some(PhpType::named(atom(&fqn)));
     }
 
@@ -843,12 +844,8 @@ fn template_argument_at_call(
         let targets =
             crate::type_engine::variable::class_string_resolution::resolve_class_string_targets(
                 &var_name,
-                ctx.current_class,
-                ctx.all_classes,
-                ctx.content,
                 arg_expr.span().start.offset,
-                ctx.class_loader,
-                ctx.backend,
+                ctx,
             );
         if let Some(first) = targets.into_iter().next() {
             return Some(PhpType::named(atom(first.name.as_ref())));

@@ -216,7 +216,7 @@ impl Backend {
                 .into_iter()
                 .map(|(_, hint)| crate::php_type::CallableParam {
                     type_hint: hint
-                        .map(|h| crate::util::resolve_php_type_names(&h, ctx.class_loader))
+                        .map(|h| ctx.resolve_hint_type(&h))
                         .unwrap_or_else(PhpType::mixed),
                     optional: false,
                     variadic: false,
@@ -279,12 +279,7 @@ impl Backend {
                     .and_then(|c| c.parent_class.as_ref())
                     .map(|p| PhpType::named(atom(p.as_ref())))
             } else {
-                let resolved_name = if let Some(cls) = (ctx.class_loader)(name) {
-                    cls.fqn().to_string()
-                } else {
-                    name.to_string()
-                };
-                Some(PhpType::named(atom(&resolved_name)))
+                Some(PhpType::named(atom(&ctx.resolve_written_class(name))))
             };
             return class_named.map(|n| PhpType::class_string(Some(n)));
         }
@@ -348,12 +343,10 @@ impl Backend {
             && let Some(class_name) =
                 crate::completion::source::helpers::extract_new_expression_class(trimmed)
         {
-            let resolved_name = if let Some(cls) = (ctx.class_loader)(&class_name) {
-                cls.fqn().to_string()
-            } else {
-                class_name
-            };
-            return Some(PhpType::named(atom(&resolved_name)));
+            let resolved_name = ctx.resolve_written_class(&class_name);
+            return Some(PhpType::named(atom(
+                resolved_name.strip_prefix('\\').unwrap_or(&resolved_name),
+            )));
         }
 
         // $this / self / static → current class (or preserve the keyword when asked)
@@ -366,7 +359,7 @@ impl Backend {
                         _ => PhpType::named(c.fqn()),
                     }
                 } else {
-                    PhpType::named(atom(c.name.as_ref()))
+                    PhpType::named(c.fqn())
                 }
             });
         }
@@ -467,7 +460,7 @@ impl Backend {
         // behind a `use App\Support;`).  A template bound from it is
         // compared against types that arrived fully qualified, so the
         // spelling has to be canonicalised before it is bound.
-        let declared = crate::util::resolve_php_type_names(&declared, ctx.class_loader);
+        let declared = ctx.resolve_hint_type(&declared);
         let narrowed = body_type().filter(|body| {
             crate::class_lookup::is_subtype_of_typed(body, &declared, ctx.class_loader)
         });
@@ -536,8 +529,7 @@ impl Backend {
                     // the file's own spelling of the class name; canonicalise
                     // it so the seeded type matches one resolved any other
                     // way.
-                    let declared =
-                        declared.map(|t| crate::util::resolve_php_type_names(&t, ctx.class_loader));
+                    let declared = declared.map(|t| ctx.resolve_hint_type(&t));
                     let ty = match (declared, seed) {
                         (Some(declared), Some(seed))
                             if crate::class_lookup::is_subtype_of_typed(
@@ -562,7 +554,8 @@ impl Backend {
 
         // Pre-resolve each typed parameter to its classes so the
         // injected resolver is a cheap map lookup.
-        let owning_class_name = ctx.current_class.map(|c| c.name.as_str()).unwrap_or("");
+        let owning_class_fqn = ctx.current_class.map(ClassInfo::fqn);
+        let owning_class_name = owning_class_fqn.as_deref().unwrap_or("");
         let seed_one = |ty: PhpType| -> Vec<ResolvedType> {
             let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
                 &ty,
@@ -647,6 +640,8 @@ impl Backend {
                         ctx.content,
                         ctx.cursor_offset,
                         ctx.class_loader,
+                        ctx.source_class_loader,
+                        ctx.source_imports,
                         ctx.backend,
                         Loaders::with_function(ctx.function_loader),
                     )
@@ -660,6 +655,8 @@ impl Backend {
             content: ctx.content,
             cursor_offset: ctx.cursor_offset,
             class_loader: ctx.class_loader,
+            source_class_loader: ctx.source_class_loader,
+            source_imports: ctx.source_imports,
             backend: ctx.backend,
             laravel_macro_this_resolver: ctx.laravel_macro_this_resolver,
             resolved_class_cache: ctx.resolved_class_cache,
@@ -746,6 +743,8 @@ fn walk_closure_body_locals(
                 content,
                 cursor_offset: u32::MAX,
                 class_loader: ctx.class_loader,
+                source_class_loader: ctx.source_class_loader,
+                source_imports: ctx.source_imports,
                 backend: ctx.backend,
                 loaders: Loaders::with_function(ctx.function_loader),
                 resolved_class_cache: ctx.resolved_class_cache,
@@ -821,6 +820,22 @@ pub(crate) fn build_call_template_subs(
                         .zip(g.args.iter())
                         .map(|(name, ty)| (name.to_string(), ty.clone())),
                 );
+            }
+            // A receiver typed without some of the owner's arguments (a bare
+            // `Iterator` hint) has them erased, as `type_hint_to_classes_typed`
+            // erases them for the class itself.  Inside the owner's own body
+            // its parameters are still in scope and stay unbound.
+            let inside_owner = ctx
+                .current_class
+                .is_some_and(|cc| cc.fqn().eq_ignore_ascii_case(&owner.fqn()));
+            if !inside_owner && values.len() < owner.template_params.len() {
+                for (name, arg) in owner
+                    .template_params
+                    .iter()
+                    .zip(crate::inheritance::default_type_args(owner))
+                {
+                    values.entry(name.to_string()).or_insert(arg);
+                }
             }
             values
         })
@@ -1162,7 +1177,7 @@ pub(crate) fn constant_operand_shape(name: &str, ctx: &ResolutionCtx<'_>) -> Opt
                             class_part,
                             ns,
                             ctx.all_classes,
-                            ctx.class_loader,
+                            ctx.source_class_loader,
                         )
                     });
             let class = crate::class_lookup::find_class_by_fqn(ctx.all_classes, &class_name)
@@ -1342,7 +1357,7 @@ fn enum_backing_values(operand: &PhpType, ctx: &ResolutionCtx<'_>) -> Option<Php
                 class_part,
                 ns,
                 ctx.all_classes,
-                ctx.class_loader,
+                ctx.source_class_loader,
             )
         });
     let class = crate::class_lookup::find_class_by_fqn(ctx.all_classes, &class_name)
@@ -1619,10 +1634,7 @@ pub(crate) fn bind_callable_param_template(
     let param_type = crate::completion::source::helpers::extract_closure_param_type_from_text(
         arg_text, position,
     )?;
-    Some(crate::util::resolve_php_type_names(
-        &param_type,
-        ctx.class_loader,
-    ))
+    Some(ctx.resolve_written_type(&param_type))
 }
 
 /// Bind the template a `@param callable(...): …` hint names in its return
@@ -1975,6 +1987,8 @@ mod class_template_sub_tests {
             content: "",
             cursor_offset: 0,
             class_loader: &class_loader,
+            source_class_loader: &class_loader,
+            source_imports: None,
             backend: None,
             laravel_macro_this_resolver: None,
             resolved_class_cache: None,

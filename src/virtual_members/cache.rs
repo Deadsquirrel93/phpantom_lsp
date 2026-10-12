@@ -157,14 +157,19 @@ pub struct ResolvedCacheInner {
     /// Same as [`substituted_methods_swept_len`](Self::substituted_methods_swept_len),
     /// for [`substituted_properties`](Self::substituted_properties).
     substituted_properties_swept_len: usize,
-    /// Loaded classes with their `@phpstan-import-type` aliases linked into
-    /// their members, keyed by the identity of the class as loaded.
+    /// Loaded classes as linked by `Backend::link_loaded_class` (their
+    /// `@phpstan-import-type` aliases linked into their members, and their
+    /// docblock types checked against the native hints), keyed by the
+    /// identity of the class as loaded.
     ///
     /// The [`Weak`] witness retires an entry once its class is re-parsed.
-    /// An edit to a class an import was read from does not re-parse the
-    /// importer, so each entry also lists every class the linking loaded,
-    /// and [`evict_fqn`] drops the entries that list the evicted class.
-    linked_aliases: HashMap<usize, LinkedAliasesEntry>,
+    /// An edit to a class the linking read does not re-parse the linked one,
+    /// so each entry also lists every class the linking loaded, and
+    /// [`evict_fqn`] drops the entries that list the evicted class.
+    linked_classes: HashMap<usize, LinkedClassEntry>,
+    /// Length of [`linked_classes`](Self::linked_classes) after its last
+    /// dead-witness sweep.  See [`sweep_dead_witnesses`].
+    linked_classes_swept_len: usize,
     /// Members of the cached classes, pooled by content so classes that
     /// inherit an identical member share one allocation of it.  See
     /// [`MemberPool`].
@@ -174,14 +179,21 @@ pub struct ResolvedCacheInner {
     member_pool: parking_lot::Mutex<MemberPool>,
 }
 
-/// One class with its imported type aliases linked.  See
-/// [`ResolvedCacheInner::linked_aliases`].
-struct LinkedAliasesEntry {
+/// One class as linked.  See [`ResolvedCacheInner::linked_classes`].
+struct LinkedClassEntry {
     witness: Weak<ClassInfo>,
-    /// The classes the imports were read from, as the linking asked for
-    /// them.
+    /// The FQN of the class.
+    fqn: Atom,
+    /// The classes the linking read, as it asked for them.
     sources: Vec<String>,
-    value: Arc<ClassInfo>,
+    /// The class lookup generation the linking ran at, when one of
+    /// `sources` could not be loaded: indexing it later changes the
+    /// generation, so the entry is only good while that stays the same.
+    /// `None` when every one loaded, which only an edit to one of them can
+    /// change.
+    generation: Option<u64>,
+    /// The linked class, or `None` when linking left the class as loaded.
+    value: Option<Arc<ClassInfo>>,
 }
 
 /// Outcome of [`ResolvedCacheInner::claim_pending`].
@@ -215,26 +227,28 @@ struct SubstitutedPropertyEntry {
     value: Arc<PropertyInfo>,
 }
 
-/// Ceiling on the live entries of each interned-member map (methods and
-/// properties).  A sweep that leaves this many clears the map (the merge
-/// simply stops sharing until it refills), so a map never grows past
-/// twice the cap.  It exists only as a backstop, far above what a full
-/// workspace resolution produces.
+/// Ceiling on the live entries of each map [`sweep_dead_witnesses`] keeps
+/// (interned methods and properties, linked classes).  A sweep that leaves
+/// this many clears the map (the merge simply stops sharing until it
+/// refills), so a map never grows past twice the cap.  It exists only as a
+/// backstop, far above what a full workspace resolution produces.
 const SUBSTITUTED_METHODS_CAP: usize = 1 << 20;
 
 /// Smallest interned-member map that is swept for dead witnesses, so a
 /// small map is not rescanned on every few inserts.
 const SUBSTITUTED_SWEEP_FLOOR: usize = 1 << 12;
 
-/// Drop the entries of an interned-member map whose origin has died,
-/// once the map has doubled since its last sweep.
+/// Drop the entries of a map keyed by the identity of an origin (a member,
+/// or a class as loaded) whose origin has died, once the map has doubled
+/// since its last sweep.
 ///
-/// An edit that re-parses a file kills the origins of its members, but
-/// their entries stay in the map: the transformed value is held strongly,
-/// and the `Weak` witness keeps the dead origin's allocation.  Sweeping
-/// at each doubling keeps the cost amortised O(1) per insert.
-fn sweep_dead_witnesses<V>(
-    map: &mut HashMap<(usize, u128), V>,
+/// An edit that re-parses a file kills the origins of its members and
+/// classes, but their entries stay in the map: the transformed value is
+/// held strongly, and the `Weak` witness keeps the dead origin's
+/// allocation.  Sweeping at each doubling keeps the cost amortised O(1)
+/// per insert.
+fn sweep_dead_witnesses<K, V>(
+    map: &mut HashMap<K, V>,
     swept_len: &mut usize,
     alive: impl Fn(&V) -> bool,
 ) {
@@ -263,7 +277,8 @@ impl Default for ResolvedCacheInner {
             substituted_properties: HashMap::new(),
             substituted_methods_swept_len: 0,
             substituted_properties_swept_len: 0,
-            linked_aliases: HashMap::new(),
+            linked_classes: HashMap::new(),
+            linked_classes_swept_len: 0,
             member_pool: parking_lot::Mutex::default(),
         }
     }
@@ -440,7 +455,8 @@ impl ResolvedCacheInner {
         self.substituted_properties.clear();
         self.substituted_methods_swept_len = 0;
         self.substituted_properties_swept_len = 0;
-        self.linked_aliases.clear();
+        self.linked_classes.clear();
+        self.linked_classes_swept_len = 0;
         self.member_pool.get_mut().clear();
     }
 
@@ -451,55 +467,65 @@ impl ResolvedCacheInner {
         self.member_pool.lock().share_class(class);
     }
 
-    /// The copy of `class` with its imported type aliases linked, when one
-    /// was stored for this very class, with the classes the imports were
-    /// read from.
-    pub(crate) fn get_linked_aliases(
+    /// `class` as linked, when that was stored for this very class and is
+    /// still good at the class lookup `generation`, with the classes the
+    /// linking read.
+    pub(crate) fn get_linked_class(
         &self,
         class: &Arc<ClassInfo>,
+        generation: u64,
     ) -> Option<(Arc<ClassInfo>, &[String])> {
-        let entry = self.linked_aliases.get(&(Arc::as_ptr(class) as usize))?;
+        let entry = self.linked_classes.get(&(Arc::as_ptr(class) as usize))?;
         let alive = entry.witness.upgrade()?;
-        Arc::ptr_eq(&alive, class).then(|| (Arc::clone(&entry.value), entry.sources.as_slice()))
+        if !Arc::ptr_eq(&alive, class) || entry.generation.is_some_and(|g| g != generation) {
+            return None;
+        }
+        let linked = entry.value.as_ref().unwrap_or(class);
+        Some((Arc::clone(linked), entry.sources.as_slice()))
     }
 
-    /// Store the copy of `class` with its imported type aliases linked,
-    /// read from `sources`.
-    pub(crate) fn insert_linked_aliases(
+    /// Store `class` as linked (`None` when linking left it as loaded),
+    /// read from `sources`.  `generation` is the class lookup generation
+    /// the linking ran at when it could not load one of them.
+    pub(crate) fn insert_linked_class(
         &mut self,
         class: &Arc<ClassInfo>,
-        value: Arc<ClassInfo>,
+        value: Option<Arc<ClassInfo>>,
         sources: Vec<String>,
+        generation: Option<u64>,
     ) {
-        if self.linked_aliases.len() >= SUBSTITUTED_METHODS_CAP {
-            self.linked_aliases
-                .retain(|_, e| e.witness.strong_count() > 0);
-        }
-        self.linked_aliases.insert(
+        sweep_dead_witnesses(
+            &mut self.linked_classes,
+            &mut self.linked_classes_swept_len,
+            |e| e.witness.strong_count() > 0,
+        );
+        self.linked_classes.insert(
             Arc::as_ptr(class) as usize,
-            LinkedAliasesEntry {
+            LinkedClassEntry {
                 witness: Arc::downgrade(class),
+                fqn: class.fqn(),
                 sources,
+                generation,
                 value,
             },
         );
     }
 
-    /// Drop every linked-alias entry that read an import from `fqn`,
-    /// returning the FQNs of the classes they belonged to.
-    fn evict_linked_aliases_reading(&mut self, fqn: &str) -> Vec<String> {
-        if self.linked_aliases.is_empty() {
+    /// Drop every linked-class entry that read `fqn`, returning the FQNs
+    /// of the classes they belonged to.
+    fn evict_linked_classes_reading(&mut self, fqn: &str) -> Vec<String> {
+        if self.linked_classes.is_empty() {
             return Vec::new();
         }
         let short = crate::util::short_name(fqn);
         let mut owners = Vec::new();
-        self.linked_aliases.retain(|_, entry| {
+        self.linked_classes.retain(|_, entry| {
             let reads = entry
                 .sources
                 .iter()
                 .any(|s| s.eq_ignore_ascii_case(fqn) || s.eq_ignore_ascii_case(short));
             if reads {
-                owners.push(entry.value.fqn().to_string());
+                owners.push(entry.fqn.to_string());
             }
             !reads
         });
@@ -882,9 +908,10 @@ pub(crate) fn intern_transformed_property(
 /// The returned vector lists the seed FQN followed by every transitively
 /// evicted dependent, or is empty when nothing matched.
 pub fn evict_fqn(cache: &mut ResolvedCacheInner, fqn: &str) -> Vec<String> {
-    // A class that imported a type alias from `fqn` has it linked into its
-    // members, so it changed along with `fqn` and its dependents go too.
-    let importers = cache.evict_linked_aliases_reading(fqn);
+    // A class whose linking read `fqn` (an imported type alias, or the
+    // ancestors of a docblock class) changed along with `fqn`, and its
+    // dependents go too.
+    let importers = cache.evict_linked_classes_reading(fqn);
     if cache.map.is_empty() {
         return vec![];
     }
@@ -997,5 +1024,56 @@ mod tests {
         drop(dead);
         sweep_dead_witnesses(&mut map, &mut swept_len, |w| w.strong_count() > 0);
         assert_eq!(map.len(), SUBSTITUTED_SWEEP_FLOOR + 1);
+    }
+
+    fn class_named(name: &str) -> Arc<ClassInfo> {
+        Arc::new(ClassInfo {
+            name: crate::atom::atom(name),
+            ..ClassInfo::default()
+        })
+    }
+
+    #[test]
+    fn a_linked_class_that_missed_a_class_lasts_one_lookup_generation() {
+        let mut cache = ResolvedCacheInner::default();
+        let complete = class_named("Complete");
+        let missed = class_named("Missed");
+        let linked = class_named("Linked");
+        cache.insert_linked_class(&complete, None, vec!["Read".into()], None);
+        cache.insert_linked_class(&missed, Some(Arc::clone(&linked)), vec![], Some(3));
+
+        let (served, _) = cache.get_linked_class(&complete, 7).unwrap();
+        assert!(Arc::ptr_eq(&served, &complete), "linking left it as loaded");
+        let (served, _) = cache.get_linked_class(&missed, 3).unwrap();
+        assert!(Arc::ptr_eq(&served, &linked));
+        assert!(
+            cache.get_linked_class(&missed, 4).is_none(),
+            "the class index changed since"
+        );
+    }
+
+    #[test]
+    fn a_linked_class_does_not_keep_the_class_it_was_linked_from_alive() {
+        let mut cache = ResolvedCacheInner::default();
+        let class = class_named("Unchanged");
+        let witness = Arc::downgrade(&class);
+        cache.insert_linked_class(&class, None, vec![], None);
+        drop(class);
+        assert_eq!(witness.strong_count(), 0);
+    }
+
+    #[test]
+    fn editing_a_class_the_linking_read_drops_the_linked_class() {
+        let mut cache = ResolvedCacheInner::default();
+        let class = Arc::new(ClassInfo {
+            file_namespace: Some(crate::atom::atom("App")),
+            ..(*class_named("Clock")).clone()
+        });
+        cache.insert_linked_class(&class, None, vec!["App\\Instant".into()], None);
+        assert_eq!(
+            cache.evict_linked_classes_reading("App\\Instant"),
+            vec!["App\\Clock".to_string()]
+        );
+        assert!(cache.get_linked_class(&class, 0).is_none());
     }
 }

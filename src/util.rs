@@ -68,34 +68,80 @@ pub(crate) fn resolve_to_fqn(
     name.to_string()
 }
 
-/// Reverse of [`resolve_to_fqn`]: shorten a fully-qualified class name to
-/// the form the file would actually reference it by — the `use`-map
-/// alias when one imports it, or the bare name when it lives in the
-/// file's own namespace. A name that matches neither is returned
-/// unchanged (still fully qualified).
+/// Reverse of [`resolve_to_fqn`]: shorten a resolved name to the form the
+/// file would reference it by: the `use`-map alias when one imports it,
+/// or the bare name when it lives in the file's own namespace.  A
+/// qualified name that matches neither gets a leading `\` inside a
+/// namespace, which would otherwise read it relative to itself.  A bare
+/// name that matches neither comes back as is, since it may be a
+/// template parameter rather than a global class; use
+/// [`shorten_class_fqn`] for a name known to be a class.
 pub(crate) fn shorten_from_fqn(
     fqn: &str,
     use_map: &HashMap<String, String>,
     namespace: &Option<String>,
 ) -> String {
     let fqn = fqn.trim_start_matches('\\');
+    shorten_to_import_or_namespace(fqn, use_map, namespace).unwrap_or_else(|| {
+        if namespace.is_some() && fqn.contains('\\') {
+            format!("\\{fqn}")
+        } else {
+            fqn.to_string()
+        }
+    })
+}
 
+/// [`shorten_from_fqn`] for a name known to be a class: one the file can
+/// neither import-alias nor reach through its namespace is written fully
+/// qualified with a leading `\`, global classes included.
+pub(crate) fn shorten_class_fqn(
+    fqn: &str,
+    use_map: &HashMap<String, String>,
+    namespace: &Option<String>,
+) -> String {
+    let fqn = fqn.trim_start_matches('\\');
+    shorten_to_import_or_namespace(fqn, use_map, namespace).unwrap_or_else(|| {
+        if namespace.is_some() {
+            format!("\\{fqn}")
+        } else {
+            fqn.to_string()
+        }
+    })
+}
+
+/// Write a resolved type as source text for a file with `use_map` and
+/// `namespace`: every name `class_loader` knows as a class is shortened
+/// with [`shorten_class_fqn`], and anything else (a template parameter)
+/// with [`shorten_from_fqn`].
+pub(crate) fn shorten_type_for_file(
+    ty: &crate::php_type::PhpType,
+    use_map: &HashMap<String, String>,
+    namespace: &Option<String>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<crate::types::ClassInfo>>,
+) -> crate::php_type::PhpType {
+    ty.resolve_names(&|name| {
+        if crate::class_lookup::load_resolved_name(name, class_loader).is_some() {
+            shorten_class_fqn(name, use_map, namespace)
+        } else {
+            shorten_from_fqn(name, use_map, namespace)
+        }
+    })
+}
+
+fn shorten_to_import_or_namespace(
+    fqn: &str,
+    use_map: &HashMap<String, String>,
+    namespace: &Option<String>,
+) -> Option<String> {
     for (alias, imported) in use_map {
         if imported.trim_start_matches('\\') == fqn {
-            return alias.clone();
+            return Some(alias.clone());
         }
     }
-
-    if let Some(ns) = namespace {
-        let prefix = format!("{}\\", ns);
-        if let Some(rest) = fqn.strip_prefix(&prefix)
-            && !rest.contains('\\')
-        {
-            return rest.to_string();
-        }
-    }
-
-    fqn.to_string()
+    let rest = fqn
+        .strip_prefix(namespace.as_deref()?)
+        .and_then(|rest| rest.strip_prefix('\\'))?;
+    (!rest.contains('\\')).then(|| rest.to_string())
 }
 
 /// Resolve a class name to its FQN via the class loader.
@@ -120,41 +166,37 @@ pub(crate) fn resolve_name_via_loader(
         .unwrap_or_else(|| name.to_string())
 }
 
-/// Resolve a source-level (user-typed) class reference to its FQN,
-/// preferring a class in the current namespace over a global class of the
-/// same short name.
+/// Resolve a source-level (user-typed) class reference to the FQN of the
+/// class it names, through the source loader.
 ///
-/// PHP resolves a relative class reference (as written in `new Foo()`
-/// or a type hint) against the current namespace before falling back to
-/// the global scope, so `new Iterator()` inside `namespace App` means
-/// `App\Iterator` when that class exists, not the global SPL `\Iterator`.
-/// The same applies to a *qualified* relative name: `new View\Event()`
-/// inside `namespace Site` means `Site\View\Event`.  Only a leading `\`
-/// escapes to the global scope.
+/// The source loader applies PHP's rule (the block's imports, else the
+/// current namespace, never a global class), so this only adds a check of
+/// the file's own classes: PHP refuses to compile an import that collides
+/// with a class declared in the same namespace block, so an unqualified
+/// name that matches one always means it.  This is what keeps a file with
+/// several `namespace` blocks from resolving a short name in a later block
+/// to the same-named class of the first, which is the namespace the
+/// file-wide class loader was built for.
 ///
-/// The plain [`resolve_name_via_loader`] delegates to the class loader,
-/// which is deliberately global-first for already-canonicalised names
-/// (parent/interface FQNs, where a backslash-free name signals an
-/// intentional global reference).  This helper corrects that for raw
-/// source references: when the loader lands on a global class, it re-checks
-/// the namespace-qualified form and prefers a genuine same-namespace class.
-///
-/// An explicit `use` import still wins: it resolves to a namespaced or
-/// aliased class whose FQN differs from the bare name, which this helper
-/// leaves untouched.  The one exception is a class the file itself
-/// declares in `namespace` (`local_classes` is the file's class list):
-/// PHP refuses to compile an import that collides with a class declared
-/// in the same namespace block, so an unqualified name that matches one
-/// always means it.  This is what keeps a file with several `namespace`
-/// blocks from resolving a short name in a later block to the
-/// same-named class of the first, which is the namespace the file-wide
-/// class loader was built for.
+/// A name no class answers to comes back as written.  Use
+/// [`resolve_code_class_name`] where the block's imports are known, so a
+/// miss is still qualified the way PHP would read it.
 pub(crate) fn resolve_source_class_name(
     name: &str,
     namespace: Option<&str>,
     local_classes: &[Arc<crate::types::ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<crate::types::ClassInfo>>,
 ) -> String {
+    find_source_class_name(name, namespace, local_classes, class_loader)
+        .unwrap_or_else(|| name.to_string())
+}
+
+fn find_source_class_name(
+    name: &str,
+    namespace: Option<&str>,
+    local_classes: &[Arc<crate::types::ClassInfo>],
+    class_loader: &dyn Fn(&str) -> Option<Arc<crate::types::ClassInfo>>,
+) -> Option<String> {
     if !name.contains('\\')
         && let Some(local) = local_classes.iter().find(|c| {
             c.name.eq_ignore_ascii_case(name)
@@ -165,37 +207,92 @@ pub(crate) fn resolve_source_class_name(
                 }
         })
     {
-        return local.fqn().to_string();
+        return Some(local.fqn().to_string());
     }
-    let resolved = class_loader(name);
-    // Only a relative name inside a namespace can be shadowed by a global
-    // class of the same path; a leading `\` is an explicit global reference.
-    if !name.starts_with('\\')
-        && let Some(ns) = namespace
-    {
-        // Did the loader land outside the current namespace?  An
-        // unqualified name that resolved to a global class, or a qualified
-        // name that resolved to exactly the global path it spells, can
-        // still be shadowed by a class in the current namespace.  A name
-        // that resolved through an import carries a different prefix and
-        // is left alone: the import outranks the namespace.
-        let landed_on_global = match resolved.as_ref() {
-            None => true,
-            Some(c) if !name.contains('\\') => c.file_namespace.is_none(),
-            Some(c) => c.fqn().eq_ignore_ascii_case(name),
-        };
-        if landed_on_global {
-            let ns_qualified = format!("{ns}\\{name}");
-            if let Some(local) = class_loader(&ns_qualified)
-                && local.fqn().eq_ignore_ascii_case(&ns_qualified)
-            {
-                return local.fqn().to_string();
-            }
-        }
-    }
-    resolved
-        .map(|cls| cls.fqn().to_string())
+    class_loader(name).map(|cls| cls.fqn().to_string())
+}
+
+/// [`resolve_source_class_name`] for a class named in code (`new Foo`,
+/// `Foo::`, `instanceof Foo`, `catch (Foo $e)`) or in a docblock.
+///
+/// A written class name never falls back to the global scope: inside
+/// `namespace App`, an unimported `Foo` is `App\Foo` whether or not that
+/// class exists, even when a global `Foo` does.  A name no class answers
+/// to is qualified that way too, when nothing in `imports` (the namespace
+/// block's `use` table) claims its first segment, so a later lookup of the
+/// result cannot land on the global class.
+///
+/// `imports` is `None` where the caller has no file context to read them
+/// from; a miss then comes back as written.
+pub(crate) fn resolve_code_class_name(
+    name: &str,
+    namespace: Option<&str>,
+    imports: Option<&HashMap<String, String>>,
+    local_classes: &[Arc<crate::types::ClassInfo>],
+    class_loader: &dyn Fn(&str) -> Option<Arc<crate::types::ClassInfo>>,
+) -> String {
+    find_source_class_name(name, namespace, local_classes, class_loader)
+        .or_else(|| qualify_unknown_code_name(name, namespace, imports))
         .unwrap_or_else(|| name.to_string())
+}
+
+/// The name PHP reads a class name no class answers to as: expanded
+/// through the import that claims its first segment, else qualified with
+/// the current namespace.  `None` when PHP reads it as written.
+fn qualify_unknown_code_name(
+    name: &str,
+    namespace: Option<&str>,
+    imports: Option<&HashMap<String, String>>,
+) -> Option<String> {
+    expand_import(name, imports).or_else(|| {
+        namespace_relative_code_name(name, namespace, imports).map(|ns| format!("{ns}\\{name}"))
+    })
+}
+
+/// `name` with its first segment replaced by the import that claims it,
+/// for a relative name an entry of `imports` claims.
+fn expand_import(name: &str, imports: Option<&HashMap<String, String>>) -> Option<String> {
+    if name.starts_with('\\') {
+        return None;
+    }
+    let (first_segment, rest) = match name.find('\\') {
+        Some(pos) => (&name[..pos], &name[pos..]),
+        None => (name, ""),
+    };
+    lookup_import(imports?, first_segment).map(|target| format!("{target}{rest}"))
+}
+
+/// The import `alias` names in `imports`.  Aliases are case-insensitive,
+/// like class names, so a `use Lib\Bar;` answers to `bar` too.
+pub(crate) fn lookup_import<'m>(
+    imports: &'m HashMap<String, String>,
+    alias: &str,
+) -> Option<&'m String> {
+    imports.get(alias).or_else(|| {
+        imports
+            .iter()
+            .find(|(key, _)| key.eq_ignore_ascii_case(alias))
+            .map(|(_, target)| target)
+    })
+}
+
+/// The namespace PHP qualifies a class named in code with, when that is
+/// all it can mean: a relative name inside a namespace whose first segment
+/// no import claims.  `None` for a fully qualified name, a name in the
+/// global namespace, an imported name, or unknown `imports`.
+pub(crate) fn namespace_relative_code_name<'a>(
+    name: &str,
+    namespace: Option<&'a str>,
+    imports: Option<&HashMap<String, String>>,
+) -> Option<&'a str> {
+    let (ns, imports) = (namespace?, imports?);
+    if name.starts_with('\\') {
+        return None;
+    }
+    let first_segment = name.split('\\').next().unwrap_or(name);
+    lookup_import(imports, first_segment)
+        .is_none()
+        .then_some(ns)
 }
 
 /// Resolve all class names inside a [`PhpType`] to their fully-qualified
@@ -250,7 +347,11 @@ fn fill_generic_type_defaults(
                 .iter()
                 .map(|a| fill_generic_type_defaults(a, class_loader))
                 .collect();
-            let filled_args = class_loader(g.name.as_str()).and_then(|cls| {
+            // The name is already resolved, so a source-name loader must not
+            // resolve a global FQN such as `Iterator` against the file's
+            // namespace again.
+            let fq_class = crate::class_lookup::load_resolved_name(g.name.as_str(), class_loader);
+            let filled_args = fq_class.and_then(|cls| {
                 let written = args.len();
                 let offset = crate::inheritance::generic_arg_offset(&cls, written);
                 let every_omitted_is_left_to_something = cls
@@ -278,38 +379,131 @@ fn fill_generic_type_defaults(
     }
 }
 
-/// [`resolve_php_type_names`] for a type written as source the reader
-/// resolves relative to where it stands: a docblock annotation inside a
-/// namespace.
-///
-/// The difference is which class an unqualified name lands on. PHP looks in
-/// the current namespace before the global one, so `@var list<Error>` inside
-/// `namespace App` means `App\Error` whenever that class exists, and only
-/// falls back to `\Error`. The loader-only [`resolve_php_type_names`] is
-/// global-first and would pick the stub, leaving the annotation naming a
-/// different class than the same spelling in a `@param` tag (which the parser
-/// resolves through the file's use-map and namespace).
-///
-/// A name that resolves to the class it already spells keeps the spelling it
-/// was written with, leading `\` included. That backslash is the only mark
-/// distinguishing an explicit global reference from a relative one, and a
-/// global class's FQN carries no namespace to encode it in, so dropping it
-/// would let a later lookup of the bare name land on a same-named class in
-/// another namespace of the file.
-pub(crate) fn resolve_source_php_type_names(
+/// [`resolve_php_type_names`] for a native type hint written in code (a
+/// parameter, a closure's return type, a `catch`), where every name is a
+/// class: each one follows [`resolve_code_class_name`], so a name no class
+/// answers to is still qualified the way PHP reads it.
+pub(crate) fn resolve_code_php_type_names(
     ty: &crate::php_type::PhpType,
     namespace: Option<&str>,
+    imports: Option<&HashMap<String, String>>,
     local_classes: &[Arc<crate::types::ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<crate::types::ClassInfo>>,
 ) -> crate::php_type::PhpType {
     let resolved = ty.resolve_names(&|name| {
-        let resolved = resolve_source_class_name(name, namespace, local_classes, class_loader);
-        if resolved == name.trim_start_matches('\\') {
-            return name.to_string();
-        }
-        resolved
+        resolve_code_class_name(name, namespace, imports, local_classes, class_loader)
     });
     fill_generic_type_defaults(&resolved, class_loader)
+}
+
+/// [`resolve_php_type_names`] for a type written as source the reader
+/// resolves relative to where it stands: a docblock annotation inside a
+/// body.
+///
+/// Every class name follows PHP's rule through the source loader, the same
+/// as a `@param` tag (which the parser resolves through the file's use-map
+/// and namespace): `@var list<Error>` inside `namespace App` means
+/// `App\Error` unless `Error` is imported, never the global `\Error`.
+///
+/// A name no class answers to is qualified the way
+/// [`resolve_code_class_name`] qualifies it, so the global class of the
+/// same short name is not read in its place, unless a docblock of
+/// `content` (the file the type is written in) declares it as a template
+/// parameter or a type alias.  Those keep their spelling for the
+/// declaration in scope to read.
+pub(crate) fn resolve_source_php_type_names(
+    ty: &crate::php_type::PhpType,
+    namespace: Option<&str>,
+    imports: Option<&HashMap<String, String>>,
+    content: &str,
+    local_classes: &[Arc<crate::types::ClassInfo>],
+    class_loader: &dyn Fn(&str) -> Option<Arc<crate::types::ClassInfo>>,
+) -> crate::php_type::PhpType {
+    let resolved = ty.resolve_names(&|name| {
+        find_source_class_name(name, namespace, local_classes, class_loader)
+            .or_else(|| {
+                qualify_unknown_code_name(name, namespace, imports)
+                    .filter(|_| !declares_docblock_type_name(content, name))
+            })
+            .unwrap_or_else(|| name.to_string())
+    });
+    fill_generic_type_defaults(&resolved, class_loader)
+}
+
+/// Whether a docblock in `content` declares `name` as a `@template`
+/// parameter or a type alias (`@phpstan-type`, `@psalm-type`, or either
+/// side of an `@phpstan-import-type … as …`).
+///
+/// The whole file is searched rather than the declarations around the
+/// name: a template kept by a declaration out of its scope is only read
+/// the way it was before, while one missed would be qualified into a
+/// class that does not exist.  A file in the active parse cache is
+/// scanned once per pass (see
+/// [`declares_docblock_type_name`](crate::parser::declares_docblock_type_name)).
+fn declares_docblock_type_name(content: &str, name: &str) -> bool {
+    !name.contains('\\') && crate::parser::declares_docblock_type_name(content, name)
+}
+
+/// [`declares_docblock_type_name`] for text outside the parse cache: a
+/// search for `name` alone, cheaper for one lookup than collecting every
+/// declared name.
+pub(crate) fn scan_declares_docblock_type_name(content: &str, name: &str) -> bool {
+    let bytes = content.as_bytes();
+    memchr::memmem::find_iter(bytes, name.as_bytes()).any(|pos| {
+        // A declared name follows the tag (or `as`) after whitespace.
+        if pos == 0 || !bytes[pos - 1].is_ascii_whitespace() {
+            return false;
+        }
+        let line_start = content[..pos].rfind('\n').map_or(0, |i| i + 1);
+        let line_end = content[pos..].find('\n').map_or(content.len(), |i| pos + i);
+        let mut found = false;
+        line_declared_type_names(&content[line_start..line_end], |declared| {
+            found |= declared == name;
+        });
+        found
+    })
+}
+
+/// Every name a docblock in `content` declares as a template parameter or
+/// a type alias; see [`declares_docblock_type_name`].
+pub(crate) fn docblock_declared_type_names(content: &str) -> std::collections::HashSet<String> {
+    let mut names = std::collections::HashSet::new();
+    for line in content.lines().filter(|line| line.contains('@')) {
+        line_declared_type_names(line, |name| {
+            names.insert(name.to_string());
+        });
+    }
+    names
+}
+
+fn line_declared_type_names<'a>(line: &'a str, mut found: impl FnMut(&'a str)) {
+    let identifier = |word: &'a str| {
+        let end = word
+            .find(|c: char| !(c.is_alphanumeric() || c == '_' || !c.is_ascii()))
+            .unwrap_or(word.len());
+        &word[..end]
+    };
+    for tag in line.split('@').skip(1) {
+        let (tag, rest) = tag.split_once(char::is_whitespace).unwrap_or((tag, ""));
+        let mut words = rest.split_whitespace();
+        if tag.ends_with("import-type") {
+            // `@phpstan-import-type Alias from Source as Local`
+            if let Some(alias) = words.next() {
+                found(identifier(alias));
+            }
+            if let Some(local) = words.skip_while(|w| *w != "as").nth(1) {
+                found(identifier(local));
+            }
+        } else if (tag.ends_with("template")
+            || tag.ends_with("template-covariant")
+            || tag.ends_with("template-contravariant")
+            || tag == "type"
+            || tag.ends_with("-type"))
+            && let Some(name) = words.next()
+        {
+            found(identifier(name));
+        }
+    }
 }
 
 /// Run `f` inside [`panic::catch_unwind`], logging and swallowing any
@@ -737,6 +931,70 @@ mod tests {
     fn unescape_string_literal_rejects_unquoted_input() {
         assert_eq!(unescape_php_string_literal("bare"), None);
         assert_eq!(unescape_php_string_literal("'unterminated"), None);
+    }
+
+    /// `ty` written inside `namespace App` of `content`, with `imports` and
+    /// no class answering to any name.
+    fn resolve_unknown_docblock_type(ty: &str, imports: &[(&str, &str)], content: &str) -> String {
+        let imports: HashMap<String, String> = imports
+            .iter()
+            .map(|(alias, fqn)| (alias.to_string(), fqn.to_string()))
+            .collect();
+        resolve_source_php_type_names(
+            &crate::php_type::PhpType::parse(ty),
+            Some("App"),
+            Some(&imports),
+            content,
+            &[],
+            &|_| None,
+        )
+        .to_string()
+    }
+
+    #[test]
+    fn unknown_docblock_name_is_qualified_like_code() {
+        assert_eq!(
+            resolve_unknown_docblock_type("Bar", &[], "<?php"),
+            r"App\Bar"
+        );
+        assert_eq!(
+            resolve_unknown_docblock_type("list<Bar>", &[("Bar", r"Lib\Bar")], "<?php"),
+            r"list<Lib\Bar>"
+        );
+        assert_eq!(
+            resolve_unknown_docblock_type(r"\Bar", &[], "<?php"),
+            r"\Bar"
+        );
+    }
+
+    #[test]
+    fn docblock_templates_and_aliases_keep_their_spelling() {
+        for content in [
+            "/**\n * @template T\n */",
+            "/** @template-covariant T of object */",
+            "/** @psalm-template T as object */",
+            "/** @phpstan-type T array{a: int} */",
+            "/** @psalm-type T=array{a: int} */",
+            "/** @phpstan-import-type T from Other */",
+            "/** @phpstan-import-type Shape from Other as T */",
+        ] {
+            assert_eq!(
+                resolve_unknown_docblock_type("T", &[], content),
+                "T",
+                "{content}"
+            );
+        }
+        for content in [
+            "/** @template-extends T<int> */",
+            "/** @var T $t */",
+            "/** @template TT */",
+        ] {
+            assert_eq!(
+                resolve_unknown_docblock_type("T", &[], content),
+                r"App\T",
+                "{content}"
+            );
+        }
     }
 
     #[test]

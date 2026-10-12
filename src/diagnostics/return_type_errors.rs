@@ -188,6 +188,7 @@ impl Backend {
                             content,
                             ctx.file_ctx,
                             ctx.class_loader_at(offset),
+                            ctx.resolved_class_loader_at(offset),
                             ctx.function_loader_at(offset),
                             ctx.constant_loader_at(offset),
                             self,
@@ -215,7 +216,7 @@ impl Backend {
                         if is_type_compatible(
                             ty,
                             &ret.declared_type,
-                            ctx.class_loader_at(ret.start as u32),
+                            ctx.resolved_class_loader_at(ret.start as u32),
                             ctx.strict_types,
                         ) =>
                     {
@@ -245,20 +246,13 @@ fn evaluate_declared_return(
     current_class: &ClassInfo,
     content: &str,
     all_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    function_loader: &dyn Fn(&str, u32) -> Option<crate::types::FunctionInfo>,
+    loaders: CtxLoaders<'_>,
     backend: &Backend,
 ) -> PhpType {
     if !declared.contains_unevaluated_operator() {
         return declared;
     }
-    let ctx = backend.resolution_ctx_at(
-        Some(current_class),
-        all_classes,
-        content,
-        0,
-        CtxLoaders::without_macro_this(class_loader, function_loader),
-    );
+    let ctx = backend.resolution_ctx_at(Some(current_class), all_classes, content, 0, loaders);
     crate::type_engine::call_resolution::evaluate_constant_operands(&declared, &ctx)
         .unwrap_or(declared)
 }
@@ -279,8 +273,9 @@ fn resolve_return_and_push(
     template_bounds: &HashMap<String, PhpType>,
     current_class: &ClassInfo,
     content: &str,
-    all_classes: &[Arc<ClassInfo>],
+    file_ctx: &crate::types::FileContext,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    resolved_class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     loaders: Loaders<'_>,
     backend: &Backend,
     out: &mut Vec<ResolvedReturn>,
@@ -311,29 +306,34 @@ fn resolve_return_and_push(
                 return;
             }
 
-            let resolve_class_names = |ty: PhpType| {
-                let ty = if template_bounds.is_empty() {
-                    ty
-                } else {
-                    ty.substitute(template_bounds)
-                };
-                let ty = ty.resolve_names(&|name: &str| {
-                    if name.contains("__anonymous@") {
-                        return name.to_string();
-                    }
-                    if let Some(cls) = class_loader(name) {
-                        cls.fqn().to_string()
+            // `name_loader` is the source-name loader for a type read from a
+            // docblock, and the resolved-name loader for one the engine
+            // produced.  The template bounds are resolved names, so they go
+            // in after the type's own names are read.
+            let resolve_class_names =
+                |ty: PhpType, name_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>| {
+                    let ty = ty.resolve_names(&|name: &str| {
+                        if name.contains("__anonymous@") {
+                            return name.to_string();
+                        }
+                        if let Some(cls) = name_loader(name) {
+                            cls.fqn().to_string()
+                        } else {
+                            name.to_string()
+                        }
+                    });
+                    let ty = if template_bounds.is_empty() {
+                        ty
                     } else {
-                        name.to_string()
-                    }
-                });
-                // A Laravel model operator is a name for a class too, and
-                // this is where names become classes. Leaving it for the
-                // comparison alone would report the operator's own
-                // spelling back at the reader, who wrote a type that does
-                // name something.
-                crate::virtual_members::laravel::expand_model_type(&ty, class_loader)
-            };
+                        ty.substitute(template_bounds)
+                    };
+                    // A Laravel model operator is a name for a class too, and
+                    // this is where names become classes. Leaving it for the
+                    // comparison alone would report the operator's own
+                    // spelling back at the reader, who wrote a type that does
+                    // name something.
+                    crate::virtual_members::laravel::expand_model_type(&ty, resolved_class_loader)
+                };
 
             // A standalone `/** @var Type */` docblock (no variable name)
             // immediately above the `return` keyword casts the returned
@@ -347,7 +347,7 @@ fn resolve_return_and_push(
                 && !cast.is_empty()
             {
                 out.push(ResolvedReturn {
-                    ty: Some(resolve_class_names(cast)),
+                    ty: Some(resolve_class_names(cast, class_loader)),
                     start,
                     end,
                     declared_type: declared_return.clone(),
@@ -356,15 +356,17 @@ fn resolve_return_and_push(
             }
 
             let var_ctx = VarResolutionCtx {
+                source_imports: Some(file_ctx.use_map_at(start as u32)),
                 backend: Some(backend),
                 loaders,
                 resolved_class_cache: Some(&backend.resolved_class_cache),
                 ..VarResolutionCtx::new(
                     "",
                     current_class,
-                    all_classes,
+                    &file_ctx.classes,
                     content,
                     start as u32,
+                    resolved_class_loader,
                     class_loader,
                 )
             };
@@ -380,7 +382,7 @@ fn resolve_return_and_push(
             }
 
             // Resolve short class names to FQN.
-            let ty = resolve_class_names(ty);
+            let ty = resolve_class_names(ty, resolved_class_loader);
 
             out.push(ResolvedReturn {
                 ty: Some(ty),
@@ -408,32 +410,28 @@ fn indexed_return_type(
     func_offset: u32,
 ) -> Option<(PhpType, HashMap<String, PhpType>)> {
     let fqn = file_ctx.resolve_name_at(func_name, func_offset);
-    let with_bounds = |fi: &crate::types::FunctionInfo| {
-        let ret = fi.return_type.clone()?;
-        Some((
-            ret,
-            template_bounds(&fi.template_params, &fi.template_param_bounds),
-        ))
-    };
-
-    {
-        let fmap = backend.global_functions().read();
-        for name in [fqn.as_str(), func_name] {
-            if let Some((decl_uri, fi)) = fmap.get(name)
-                && decl_uri == uri
-            {
-                return with_bounds(fi);
+    let declared = || {
+        {
+            let fmap = backend.global_functions().read();
+            for name in [fqn.as_str(), func_name] {
+                if let Some((decl_uri, fi)) = fmap.get(name)
+                    && decl_uri == uri
+                {
+                    return Some(fi.clone());
+                }
             }
         }
-    }
+        let dups = backend.symbols.duplicate_functions.read();
+        [fqn.as_str(), func_name]
+            .into_iter()
+            .find_map(|name| dups.get(name).and_then(|by_uri| by_uri.get(uri)).cloned())
+    };
 
-    let dups = backend.symbols.duplicate_functions.read();
-    for name in [fqn.as_str(), func_name] {
-        if let Some(fi) = dups.get(name).and_then(|by_uri| by_uri.get(uri)) {
-            return with_bounds(fi);
-        }
-    }
-    None
+    let mut fi = declared()?;
+    // Checked once the index is no longer locked: it loads classes.
+    backend.verify_function_doc_types(&mut fi);
+    let bounds = template_bounds(&fi.template_params, &fi.template_param_bounds);
+    Some((fi.return_type?, bounds))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -444,6 +442,7 @@ fn process_top_level_statement(
     content: &str,
     file_ctx: &crate::types::FileContext,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    resolved_class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     function_loader: &dyn Fn(&str, u32) -> Option<crate::types::FunctionInfo>,
     constant_loader: &dyn Fn(&str, u32) -> Option<Option<String>>,
     backend: &Backend,
@@ -458,6 +457,7 @@ fn process_top_level_statement(
                     content,
                     file_ctx,
                     class_loader,
+                    resolved_class_loader,
                     function_loader,
                     constant_loader,
                     backend,
@@ -472,6 +472,7 @@ fn process_top_level_statement(
                     content,
                     file_ctx,
                     class_loader,
+                    resolved_class_loader,
                     function_loader,
                     constant_loader,
                     backend,
@@ -486,6 +487,7 @@ fn process_top_level_statement(
                     content,
                     file_ctx,
                     class_loader,
+                    resolved_class_loader,
                     function_loader,
                     constant_loader,
                     backend,
@@ -500,6 +502,7 @@ fn process_top_level_statement(
                     content,
                     file_ctx,
                     class_loader,
+                    resolved_class_loader,
                     function_loader,
                     constant_loader,
                     backend,
@@ -514,6 +517,7 @@ fn process_top_level_statement(
                     content,
                     file_ctx,
                     class_loader,
+                    resolved_class_loader,
                     function_loader,
                     constant_loader,
                     backend,
@@ -584,8 +588,12 @@ fn process_top_level_statement(
                 current_class,
                 content,
                 &file_ctx.classes,
-                class_loader,
-                function_loader,
+                CtxLoaders::without_macro_this(
+                    resolved_class_loader,
+                    class_loader,
+                    function_loader,
+                )
+                .with_imports(file_ctx.use_map_at(func_offset)),
                 backend,
             );
 
@@ -602,8 +610,9 @@ fn process_top_level_statement(
                     &template_bounds,
                     current_class,
                     content,
-                    &file_ctx.classes,
+                    file_ctx,
                     class_loader,
+                    resolved_class_loader,
                     loaders,
                     backend,
                     out,
@@ -620,6 +629,7 @@ fn process_top_level_statement(
                         content,
                         file_ctx,
                         class_loader,
+                        resolved_class_loader,
                         function_loader,
                         constant_loader,
                         backend,
@@ -634,6 +644,7 @@ fn process_top_level_statement(
                             content,
                             file_ctx,
                             class_loader,
+                            resolved_class_loader,
                             function_loader,
                             constant_loader,
                             backend,
@@ -654,6 +665,7 @@ fn process_class_member(
     content: &str,
     file_ctx: &crate::types::FileContext,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    resolved_class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     function_loader: &dyn Fn(&str, u32) -> Option<crate::types::FunctionInfo>,
     constant_loader: &dyn Fn(&str, u32) -> Option<Option<String>>,
     backend: &Backend,
@@ -696,7 +708,7 @@ fn process_class_member(
     let template_bounds = template_bounds_in_scope(
         current_class,
         method_info,
-        class_loader,
+        resolved_class_loader,
         &backend.resolved_class_cache,
     );
     let declared_return = if template_bounds.is_empty() {
@@ -730,7 +742,7 @@ fn process_class_member(
             if name.contains("__anonymous@") {
                 return name.to_string();
             }
-            if let Some(cls) = class_loader(name) {
+            if let Some(cls) = resolved_class_loader(name) {
                 cls.fqn().to_string()
             } else {
                 name.to_string()
@@ -742,12 +754,12 @@ fn process_class_member(
         current_class,
         content,
         &file_ctx.classes,
-        class_loader,
-        function_loader,
+        CtxLoaders::without_macro_this(resolved_class_loader, class_loader, function_loader)
+            .with_imports(file_ctx.use_map_at(method_offset)),
         backend,
     );
     let declared_return =
-        crate::virtual_members::laravel::expand_model_type(&declared_return, class_loader);
+        crate::virtual_members::laravel::expand_model_type(&declared_return, resolved_class_loader);
 
     let owned_loaders = backend.diagnostic_loaders_over(function_loader, constant_loader);
     let loaders = owned_loaders.loaders();
@@ -762,8 +774,9 @@ fn process_class_member(
             &template_bounds,
             current_class,
             content,
-            &file_ctx.classes,
+            file_ctx,
             class_loader,
+            resolved_class_loader,
             loaders,
             backend,
             out,

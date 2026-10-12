@@ -242,6 +242,39 @@ pub enum TypeAliasDef {
     },
 }
 
+/// A type a declaration's docblock settled in place of its native hint
+/// while naming a class the hint does not.
+///
+/// PHP enforces the native hint, so the docblock type may only narrow it,
+/// and whether a class does takes the class hierarchy: `@return Clock` on
+/// `: \DateTimeInterface` narrows it when `Clock` implements the interface,
+/// and `@return DateTimeImmutable` inside `namespace App` names an
+/// `App\DateTimeImmutable` that may not exist at all.  The parser has no
+/// class loader, so it records the type here, and loading the declaration
+/// decides (see `type_engine::types::docblock_narrowing`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct UnverifiedDocType {
+    /// The method or property the type belongs to, or the function itself.
+    pub member: Atom,
+    /// Which of the member's types it is.
+    pub slot: DocTypeSlot,
+    /// What the slot holds when the docblock type does not narrow the
+    /// native hint: the hint with its class names qualified, and with `null`
+    /// for a parameter that defaults to it.
+    pub native: PhpType,
+}
+
+/// Where in a declaration an [`UnverifiedDocType`] was settled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum DocTypeSlot {
+    /// The return type.
+    Return,
+    /// The parameter at this position.
+    Param(u32),
+    /// A property's type.
+    Property,
+}
+
 /// Variance of a `@template` parameter.
 ///
 /// PHPStan and Psalm support `@template-covariant` and
@@ -1475,6 +1508,10 @@ pub struct FunctionInfo {
     /// Whether the body calls `func_get_args()` (or a sibling), so the
     /// callable accepts arguments beyond its declared parameters.
     pub reads_func_args: bool,
+    /// The types the docblock settled in place of a native hint while
+    /// naming a class the hint does not, which loading the function keeps
+    /// only where they narrow the hint.
+    pub unverified_doc_types: Box<[UnverifiedDocType]>,
 }
 
 impl FunctionInfo {
@@ -1520,6 +1557,7 @@ impl FunctionInfo {
             || self.type_assertions != other.type_assertions
             || self.throws != other.throws
             || self.namespace != other.namespace
+            || self.unverified_doc_types != other.unverified_doc_types
         {
             return false;
         }
@@ -2267,6 +2305,10 @@ pub struct ClassInfo {
     /// These are consulted during type resolution so that a method returning
     /// `UserData` resolves to the underlying `array{name: string, email: string}`.
     pub type_aliases: AtomMap<TypeAliasDef>,
+    /// The member types the docblock settled in place of a native hint while
+    /// naming a class the hint does not, sorted by member and slot.  Loading
+    /// the class keeps each one only where it narrows the hint.
+    pub unverified_doc_types: Box<[UnverifiedDocType]>,
     /// Trait `insteadof` precedence adaptations.
     ///
     /// When a class uses multiple traits with conflicting method names,
@@ -2367,9 +2409,14 @@ impl ClassInfo {
     /// Compute the FQN from `name` + `file_namespace` without consulting the
     /// cache. Allocates a temporary `String` to intern the joined name when a
     /// namespace is present; returns `name` as-is otherwise (no allocation).
+    ///
+    /// The nameless placeholder that stands in for top-level code keeps its
+    /// empty name: it is no class of its namespace.
     fn compute_fqn(&self) -> Atom {
         match &self.file_namespace {
-            Some(ns) if !ns.is_empty() => crate::atom::atom(&format!("{}\\{}", ns, self.name)),
+            Some(ns) if !ns.is_empty() && !self.name.is_empty() => {
+                crate::atom::atom(&format!("{}\\{}", ns, self.name))
+            }
             _ => self.name,
         }
     }
@@ -2614,6 +2661,7 @@ impl ClassInfo {
             || self.implements_generics != other.implements_generics
             || self.use_generics != other.use_generics
             || self.type_aliases != other.type_aliases
+            || self.unverified_doc_types != other.unverified_doc_types
             || self.trait_precedences != other.trait_precedences
             || self.trait_aliases != other.trait_aliases
             || self.class_docblock != other.class_docblock
@@ -2864,6 +2912,10 @@ pub(crate) struct FileContext {
 /// objects so it can be handed through non-generic walkers.
 pub type BlockClassLoaders<'a> = PerBlock<'a, &'a (dyn Fn(&str) -> Option<Arc<ClassInfo>> + 'a)>;
 
+/// The `use` imports of each `namespace` block of a file, built by
+/// [`FileContext::block_imports`].
+pub type BlockImports<'a> = PerBlock<'a, &'a HashMap<String, String>>;
+
 /// One value per `namespace` block of a file, built by
 /// [`FileContext::per_block`].
 ///
@@ -2956,6 +3008,12 @@ impl FileContext {
                 items: vec![build(&self.use_map, &self.namespace)],
             },
         }
+    }
+
+    /// Each block's `use` imports, to pair with the loaders
+    /// [`per_block`](Self::per_block) builds from them.
+    pub fn block_imports(&self) -> BlockImports<'_> {
+        self.per_block(|use_map, _| use_map)
     }
 
     /// This context narrowed to the namespace block containing `offset`:

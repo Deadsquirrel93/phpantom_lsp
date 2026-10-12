@@ -813,6 +813,7 @@ mod tests {
             implements_generics: vec![],
             use_generics: vec![],
             type_aliases: Default::default(),
+            unverified_doc_types: Default::default(),
             trait_precedences: vec![],
             trait_aliases: vec![],
             class_docblock: None,
@@ -862,6 +863,7 @@ mod tests {
             implements_generics: vec![],
             use_generics: vec![],
             type_aliases: Default::default(),
+            unverified_doc_types: Default::default(),
             trait_precedences: vec![],
             trait_aliases: vec![],
             class_docblock: None,
@@ -903,6 +905,7 @@ mod tests {
             is_pure: false,
             is_impure: false,
             reads_func_args: false,
+            unverified_doc_types: Default::default(),
         };
         let detail = build_function_detail(&func);
         assert_eq!(detail, Some("()".to_string()));

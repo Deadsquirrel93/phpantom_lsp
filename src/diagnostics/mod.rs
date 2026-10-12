@@ -498,13 +498,16 @@ impl Backend {
         let file_ctx = helpers::FileDiagnosticContext::gather(self, uri_str);
 
         if let Some(ctx) = &file_ctx {
-            let class_loaders = self.class_loaders(&ctx.file);
+            let class_loaders = self.resolved_class_loaders(&ctx.file);
+            let source_class_loaders = self.class_loaders(&ctx.file);
             let owned_loaders = self.diagnostic_loaders(&ctx.file);
             match targets {
                 None => crate::type_engine::variable::forward_walk::build_diagnostic_scopes(
                     content,
                     &ctx.file.classes,
                     &class_loaders.as_dyn(),
+                    &source_class_loaders.as_dyn(),
+                    &ctx.file.block_imports(),
                     Some(self),
                     owned_loaders.loaders(),
                     Some(&self.resolved_class_cache),
@@ -514,6 +517,8 @@ impl Backend {
                         content,
                         &ctx.file.classes,
                         &class_loaders.as_dyn(),
+                        &source_class_loaders.as_dyn(),
+                        &ctx.file.block_imports(),
                         Some(self),
                         owned_loaders.loaders(),
                         Some(&self.resolved_class_cache),

@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use crate::Backend;
 use crate::class_lookup::find_class_by_name;
-use crate::class_lookup::{is_self_or_static, resolve_class_keyword};
+use crate::class_lookup::{is_class_keyword, is_self_or_static};
 use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::subject_expr::SubjectExpr;
 use crate::type_engine::variable::array_func_rules::{
@@ -23,9 +23,8 @@ use crate::types::*;
 
 use crate::type_engine::conditional_resolution::{
     TemplateContext, ThisContext, VarClassStringResolver, receiver_type_for_condition,
-    resolve_conditional_with_text_args, resolve_conditional_with_text_args_and_defaults,
-    resolve_conditional_without_args, resolve_conditional_without_args_and_defaults,
-    split_text_args,
+    resolve_conditional_with_text_args_and_defaults, resolve_conditional_without_args,
+    resolve_conditional_without_args_and_defaults, split_text_args,
 };
 use crate::type_engine::resolver::ResolutionCtx;
 
@@ -49,7 +48,7 @@ use operands::{
 pub(crate) struct MethodReturnCtx<'a> {
     /// All classes known in the current file.
     pub all_classes: &'a [Arc<ClassInfo>],
-    /// Cross-file class resolution callback.
+    /// Cross-file class resolution callback for already-resolved names.
     pub class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     /// Server state for project-wide answers.  See
     /// [`ResolutionCtx::backend`].
@@ -65,6 +64,9 @@ pub(crate) struct MethodReturnCtx<'a> {
     /// appears), as opposed to the class that owns the method being called.
     /// Used to resolve `self`/`static`/`parent` in conditional return types.
     pub calling_class_name: Option<&'a str>,
+    /// Resolves a class a call-site argument names as written; see
+    /// [`ConditionalClassContext::written_class`](crate::type_engine::conditional_resolution::ConditionalClassContext::written_class).
+    pub written_class: Option<&'a dyn Fn(&str) -> String>,
     /// Whether the call is a static method call (`Class::method()`).
     ///
     /// When `true`, the magic-method fallback checks `__callStatic`
@@ -93,6 +95,7 @@ impl<'a> MethodReturnCtx<'a> {
         ctx: &'a ResolutionCtx<'a>,
         template_subs: &'a HashMap<String, PhpType>,
         var_resolver: &'a dyn Fn(&str) -> Vec<String>,
+        written_class: &'a dyn Fn(&str) -> String,
         is_static: bool,
     ) -> Self {
         Self {
@@ -102,7 +105,8 @@ impl<'a> MethodReturnCtx<'a> {
             template_subs,
             var_resolver: Some(var_resolver),
             cache: ctx.resolved_class_cache,
-            calling_class_name: ctx.current_class.map(|c| c.name.as_str()),
+            calling_class_name: ctx.current_class.map(|c| c.fqn().as_str()),
+            written_class: Some(written_class),
             is_static,
             call_args: None,
         }
@@ -123,14 +127,23 @@ pub(super) fn build_var_resolver<'a>(
 ) -> impl Fn(&str) -> Vec<String> + 'a {
     move |var_name: &str| -> Vec<String> {
         if let Some(cc) = ctx.current_class {
+            let var_ctx = crate::type_engine::resolver::VarResolutionCtx {
+                source_imports: ctx.source_imports,
+                backend: ctx.backend,
+                ..crate::type_engine::resolver::VarResolutionCtx::new(
+                    var_name,
+                    cc,
+                    ctx.all_classes,
+                    ctx.content,
+                    ctx.cursor_offset,
+                    ctx.class_loader,
+                    ctx.source_class_loader,
+                )
+            };
             crate::type_engine::variable::class_string_resolution::resolve_class_string_targets(
                 var_name,
-                cc,
-                ctx.all_classes,
-                ctx.content,
                 ctx.cursor_offset,
-                ctx.class_loader,
-                ctx.backend,
+                &var_ctx,
             )
             .iter()
             .map(|c| c.fqn().to_string())
@@ -158,7 +171,7 @@ fn resolve_conditional_return_hint(
     text_args: &str,
     var_resolver: VarClassStringResolver<'_>,
     template_subs: &HashMap<String, PhpType>,
-    calling_class_name: Option<&str>,
+    call_site: crate::type_engine::conditional_resolution::ConditionalClassContext<'_>,
     owner: &ClassInfo,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<PhpType> {
@@ -190,8 +203,8 @@ fn resolve_conditional_return_hint(
             text_args,
             var_resolver,
             crate::type_engine::conditional_resolution::ConditionalClassContext {
-                calling: calling_class_name,
                 declaring: Some(declaring_fqn.as_str()),
+                ..call_site
             },
             class_loader,
             &tpl,
@@ -411,6 +424,7 @@ impl Backend {
                 crate::type_engine::conditional_resolution::ConditionalClassContext {
                     calling: mr_ctx.calling_class_name,
                     declaring: Some(class_info.fqn().as_str()),
+                    written_class: mr_ctx.written_class,
                 },
                 class_loader,
                 &tpl,
@@ -425,9 +439,13 @@ impl Backend {
                 text_args,
                 var_resolver,
                 template_subs,
-                mr_ctx.calling_class_name,
+                crate::type_engine::conditional_resolution::ConditionalClassContext {
+                    calling: mr_ctx.calling_class_name,
+                    declaring: None,
+                    written_class: mr_ctx.written_class,
+                },
                 class_info,
-                mr_ctx.class_loader,
+                class_loader,
             ) {
                 let classes: Vec<Arc<ClassInfo>> =
                     crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
@@ -993,16 +1011,7 @@ pub(crate) fn resolve_static_access_type(text: &str, ctx: &ResolutionCtx<'_>) ->
         return None;
     }
 
-    // Resolve `self` / `static` / `parent` to the actual class name.
-    let class_name = if is_self_or_static(class_part) {
-        ctx.current_class?.name.to_string()
-    } else if let Some(resolved) = resolve_class_keyword(class_part, ctx.current_class) {
-        resolved
-    } else {
-        class_part.to_string()
-    };
-
-    let cls = (ctx.class_loader)(&class_name)?;
+    let cls = static_access_class(class_part, ctx)?;
 
     // Enum cases resolve to the enum type itself.  A constant declared on
     // the enum is read like any other class constant below.
@@ -1065,14 +1074,20 @@ fn resolve_enum_case_property_text(text: &str, ctx: &ResolutionCtx<'_>) -> Optio
     if !is_name(class_part) || !is_name(case) || !is_name(property) {
         return None;
     }
-    let class_name = if is_self_or_static(class_part) {
-        ctx.current_class?.name.to_string()
-    } else {
-        resolve_class_keyword(class_part, ctx.current_class)
-            .unwrap_or_else(|| class_part.to_string())
-    };
-    let cls = (ctx.class_loader)(&class_name)?;
+    let cls = static_access_class(class_part, ctx)?;
     enum_case_property_literal(&cls, case, property)
+}
+
+/// The class `class_part` of a `Class::member` expression names: `self`,
+/// `static` and `parent` the way they read inside the current class, and
+/// any other name as a class named in code.
+fn static_access_class(class_part: &str, ctx: &ResolutionCtx<'_>) -> Option<Arc<ClassInfo>> {
+    let class_name = if is_self_or_static(class_part) {
+        ctx.current_class?.fqn().to_string()
+    } else {
+        ctx.resolve_written_class(class_part)
+    };
+    (ctx.class_loader)(class_name.strip_prefix('\\').unwrap_or(&class_name))
 }
 
 /// The type a class constant holds, read from its initializer where that
@@ -1105,18 +1120,38 @@ pub(crate) fn class_constant_type(
             member
         ))
     {
+        // The initialiser was written in the declaring class's file, so the
+        // reader's imports have no say in it: the classes it names were
+        // qualified against that file's imports when it was parsed, and
+        // `self`/`parent` are read against the class that declares the
+        // constant. Only an initialiser naming a class constant can depend
+        // on which class that is, so the hierarchy is searched for no other.
+        let declaring = val
+            .contains("::")
+            .then(|| constant_declaring_class(merged, constant, ctx.class_loader))
+            .flatten();
+        let owner = declaring.as_deref().unwrap_or(merged);
+        let ctx = &ResolutionCtx {
+            current_class: Some(owner),
+            source_imports: None,
+            ..*ctx
+        };
         let resolve = |text: &str| {
-            Backend::resolve_arg_text_to_type(&qualify_class_keyword(text, merged), ctx)
+            Backend::resolve_arg_text_to_type(&qualify_class_keyword(text, owner), ctx)
         };
         let inferred =
             crate::type_engine::variable::rhs_resolution::infer_type_from_constant_value_resolved(
                 val, &resolve,
             )
-            .or_else(|| folded_class_constant_type(merged, member, val, ctx))
-            // An initialiser that is itself `Class::Case` holds that case's
-            // own enum type, which the folding above skips (an enum case is
-            // not a literal).
-            .or_else(|| resolve_static_access_type(&qualify_class_keyword(val, merged), ctx));
+            .or_else(|| folded_class_constant_type(owner, member, val, ctx))
+            // An initialiser that is itself `Foo::class` or `Class::Case` is
+            // not a literal, so the folding above skips it. `Foo::class` is
+            // read first, as an enum's `::class` is not one of its cases.
+            .or_else(|| {
+                let qualified = qualify_class_keyword(val, owner);
+                class_name_literal_type(&qualified)
+                    .or_else(|| resolve_static_access_type(&qualified, ctx))
+            });
         // The initialiser is one fixed value whichever class the constant
         // is read through, so a declared `static` (legal on an enum's
         // constant) is checked as the class it is declared on.
@@ -1124,7 +1159,7 @@ pub(crate) fn class_constant_type(
             constant
                 .type_hint
                 .as_ref()
-                .is_none_or(|hint| ty.is_subtype_of(&hint.replace_self_bound(&merged.fqn(), None)))
+                .is_none_or(|hint| ty.is_subtype_of(&hint.replace_self_bound(&owner.fqn(), None)))
         }) {
             return Some(ty);
         }
@@ -1132,13 +1167,63 @@ pub(crate) fn class_constant_type(
     constant.type_hint.clone()
 }
 
+/// The class `self` names inside `constant`'s initialiser, when that is an
+/// ancestor of `merged` rather than `merged` itself.
+///
+/// Inheritance shares a constant by `Arc`, so the declaring class is the one
+/// whose own constants hold that same `Arc`. A constant declared on a trait
+/// is the class's that uses the trait, as PHP copies it in. `None` when
+/// `merged` declares the constant itself, or when no ancestor can be shown
+/// to.
+fn constant_declaring_class(
+    merged: &ClassInfo,
+    constant: &Arc<ConstantInfo>,
+    class_loader: crate::inheritance::ancestry::ClassLoader<'_>,
+) -> Option<Arc<ClassInfo>> {
+    use crate::inheritance::ancestry::{ancestors, find_declaring_ancestor, find_declaring_trait};
+
+    let declares = |c: &ClassInfo| c.constants.iter().any(|k| Arc::ptr_eq(k, constant));
+    let declares_or_uses = |c: &ClassInfo| {
+        declares(c) || find_declaring_trait(&c.used_traits, class_loader, &declares).is_some()
+    };
+    // `merged` carries every inherited constant, so whether it declares this
+    // one is read off the class as it was parsed.
+    if class_loader(&merged.fqn()).is_none_or(|own| declares_or_uses(&own)) {
+        return None;
+    }
+    if let Some((_, parent)) = ancestors(merged, class_loader).find(|(_, p)| declares_or_uses(p)) {
+        return Some(parent);
+    }
+    find_declaring_ancestor(merged, class_loader, &declares)
+        .map(|(_, iface)| iface)
+        .filter(|iface| iface.kind == ClassLikeKind::Interface)
+}
+
+/// The type of `text` when it is `Foo::class` with the class spelled in
+/// full: exactly the name of that class, as `$x = Foo::class;` is typed in
+/// code.
+///
+/// The class need not exist, since PHP names it without loading it.
+fn class_name_literal_type(text: &str) -> Option<PhpType> {
+    let (class, constant) = text.split_once("::")?;
+    if !constant.eq_ignore_ascii_case("class")
+        || is_class_keyword(class)
+        || !class
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '_' || c == '\\')
+    {
+        return None;
+    }
+    let class = class.strip_prefix('\\').unwrap_or(class);
+    (!class.is_empty()).then(|| PhpType::class_name_literal(atom(class)))
+}
+
 /// The literal value an untyped class constant holds, folded from an
 /// initialiser that names other constants (`const FLAGS = JSON_THROW_ON_ERROR;`,
 /// `const COMBO = A | B;`).
 ///
-/// `class` is the class the constant was looked up on, with its inherited
-/// members merged in, so `self::` inside the initialiser is read against a
-/// class that has the constant it names.
+/// `class` is the class that declares the constant, so `self::` and
+/// `parent::` inside the initialiser are read as PHP binds them.
 pub(crate) fn folded_class_constant_type(
     class: &ClassInfo,
     const_name: &str,
@@ -1175,16 +1260,18 @@ pub(crate) fn qualify_class_keyword<'t>(
         None => return std::borrow::Cow::Borrowed(text),
     };
     let qualifier = if is_self_or_static(keyword) {
-        class.fqn().to_string()
+        class.fqn()
     } else if let Some(parent) = class
         .parent_class
         .filter(|_| keyword.eq_ignore_ascii_case("parent"))
     {
-        parent.to_string()
+        parent
     } else {
         return std::borrow::Cow::Borrowed(text);
     };
-    std::borrow::Cow::Owned(format!("{qualifier}::{rest}"))
+    // Fully qualified, so reading it as a class named in code does not
+    // qualify it against the reader's namespace a second time.
+    std::borrow::Cow::Owned(format!("\\{qualifier}::{rest}"))
 }
 
 /// Resolve `self`/`static`/`parent` in a return-type hint to concrete

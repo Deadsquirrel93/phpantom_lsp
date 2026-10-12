@@ -50,7 +50,7 @@ impl Backend {
 
         // Resolve the full inheritance hierarchy to collect all abstract
         // and interface methods.
-        let class_loader = self.class_loader(&ctx);
+        let class_loader = self.resolved_class_loader(&ctx);
 
         let missing = collect_missing_methods(current_class, &class_loader);
 

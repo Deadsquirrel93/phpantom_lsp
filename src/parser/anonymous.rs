@@ -116,6 +116,7 @@ impl Backend {
             implements_generics: vec![],
             use_generics: vec![],
             type_aliases: AtomMap::default(),
+            unverified_doc_types: Box::default(),
             trait_precedences,
             trait_aliases,
             links: Vec::new(),

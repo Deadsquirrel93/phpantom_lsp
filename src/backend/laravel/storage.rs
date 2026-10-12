@@ -84,6 +84,7 @@ impl Backend {
         }
         let file_ctx = self.file_context(uri);
         let class_loaders = self.class_loaders(&file_ctx);
+        let resolved_class_loaders = self.resolved_class_loaders(&file_ctx);
         let function_loaders = self.function_loaders(&file_ctx);
         for reg in regs.iter_mut() {
             if reg.return_type.is_some() {
@@ -101,9 +102,11 @@ impl Backend {
                 content,
                 reg.closure_offset,
                 CtxLoaders::without_macro_this(
+                    resolved_class_loaders.at(reg.closure_offset),
                     class_loaders.at(reg.closure_offset),
                     function_loaders.at(reg.closure_offset),
-                ),
+                )
+                .with_imports(file_ctx.use_map_at(reg.closure_offset)),
             );
             reg.return_type = Self::infer_closure_return_type(closure_text, &rctx);
         }

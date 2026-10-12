@@ -332,6 +332,7 @@ impl Backend {
         }
 
         let class_loaders = self.class_loaders(&file_ctx);
+        let resolved_class_loaders = self.resolved_class_loaders(&file_ctx);
         let function_loaders = self.function_loaders(&file_ctx);
         let constant_loaders = file_ctx.per_block(|use_map, namespace| {
             self.constant_loader_with(file_ctx.resolved_names.as_deref(), use_map, namespace)
@@ -378,6 +379,7 @@ impl Backend {
                         };
 
                     let class_loader = class_loaders.at(*args_start);
+                    let resolved_class_loader = resolved_class_loaders.at(*args_start);
                     let owned_loaders = self.diagnostic_loaders_over(
                         function_loaders.at(*args_start),
                         constant_loaders.at(*args_start),
@@ -385,6 +387,7 @@ impl Backend {
                     let loaders = owned_loaders.loaders();
 
                     let var_ctx = VarResolutionCtx {
+                        source_imports: Some(file_ctx.use_map_at(*args_start)),
                         backend: Some(self),
                         loaders,
                         resolved_class_cache: Some(&self.resolved_class_cache),
@@ -394,6 +397,7 @@ impl Backend {
                             &file_ctx.classes,
                             content,
                             *args_start,
+                            resolved_class_loader,
                             class_loader,
                         )
                     };
@@ -401,7 +405,7 @@ impl Backend {
                     let template_bounds = super::helpers::template_bounds_in_scope(
                         current_class_info,
                         super::helpers::method_declared_before(current_class_info, *args_start),
-                        class_loader,
+                        resolved_class_loader,
                         &self.resolved_class_cache,
                     );
 
@@ -441,7 +445,7 @@ impl Backend {
                             if name.contains("__anonymous@") {
                                 return name.to_string();
                             }
-                            if let Some(cls) = class_loader(name) {
+                            if let Some(cls) = resolved_class_loader(name) {
                                 cls.fqn().to_string()
                             } else {
                                 name.to_string()
@@ -454,7 +458,7 @@ impl Backend {
                             &ty,
                             &current_class_info.fqn(),
                             &file_ctx.classes,
-                            class_loader,
+                            resolved_class_loader,
                         )
                         .unwrap_or(ty);
                         let array_string_literals = extract_array_string_literals(arg_expr);
@@ -506,7 +510,7 @@ impl Backend {
             }
 
             let expr = call_site.call_expression;
-            let class_loader = class_loaders.at(call_site.args_start);
+            let class_loader = resolved_class_loaders.at(call_site.args_start);
 
             // Look up or populate the call expression cache.
             // Variable-based and `self::`/`static::`/`parent::` calls
