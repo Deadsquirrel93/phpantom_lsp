@@ -56,7 +56,13 @@ impl Backend {
                     Some(VarDefKind::Property)
                 ) || self.is_promoted_property_param(uri, span.start);
                 if is_property {
-                    self.highlight_member_name(uri, symbol_map, content, name, MemberRefKind::Property)
+                    self.highlight_member_name(
+                        uri,
+                        symbol_map,
+                        content,
+                        name,
+                        MemberRefKind::Property,
+                    )
                 } else {
                     self.highlight_variable(symbol_map, content, name, span.start)
                 }

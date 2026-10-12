@@ -5232,7 +5232,7 @@ fn position_in(text: &str, needle: &str, sub: &str) -> (u32, u32) {
 /// sorted `(line, character)` starts.
 async fn reference_starts(text: &str, needle: &str, sub: &str) -> Vec<(u32, u32)> {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     open_php(&backend, &uri, text).await;
     let (line, character) = position_in(text, needle, sub);
     let mut starts: Vec<(u32, u32)> = references_at(&backend, &uri, line, character, true)

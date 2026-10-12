@@ -647,7 +647,8 @@ impl Backend {
                             is_static,
                             is_method,
                         } if name == target_member
-                            && target_kind.admits(MemberRefKind::of_declaration(*is_static, *is_method)) =>
+                            && target_kind
+                                .admits(MemberRefKind::of_declaration(*is_static, *is_method)) =>
                         {
                             if *is_static != target_is_static && hierarchy.is_none() {
                                 continue;
