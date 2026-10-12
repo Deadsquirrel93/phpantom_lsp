@@ -2,9 +2,11 @@
 //! class, and enum cases.
 
 use crate::common::{
-    apply_edits, create_initialized_psr4_workspace, create_test_backend, edits_for_uri,
-    line_char_of, open_php, prepare_rename, rename, rename_result,
+    apply_edits, create_initialized_psr4_workspace, create_test_backend,
+    create_test_backend_with_full_stubs, edits_for_uri, line_char_of, open_php, prepare_rename,
+    rename, rename_result,
 };
+use tower_lsp_server::LanguageServer;
 use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Method Rename ──────────────────────────────────────────────────────────
@@ -1181,7 +1183,7 @@ fn position_in(text: &str, needle: &str, sub: &str) -> (u32, u32) {
 /// returning the refusal.
 async fn refusal_for(text: &str, needle: &str, sub: &str, new_name: &str) -> String {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     open_php(&backend, &uri, text).await;
     let (line, character) = position_in(text, needle, sub);
     match rename_result(&backend, &uri, line, character, new_name).await {
@@ -1198,7 +1200,7 @@ async fn refusal_for(text: &str, needle: &str, sub: &str, new_name: &str) -> Str
 /// returning the text with the edits applied.
 async fn renamed_text(text: &str, needle: &str, sub: &str, new_name: &str) -> String {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     open_php(&backend, &uri, text).await;
     let (line, character) = position_in(text, needle, sub);
     let edit = rename(&backend, &uri, line, character, new_name)
@@ -1557,7 +1559,8 @@ async fn a_contract_in_an_unopened_file_is_kept() {
         .await
         .expect_err("the interface in the unopened file still requires greet()");
     assert!(
-        refusal.contains("`App\\Greeter`") && refusal.contains("`App\\Greeting::greet()`"),
+        refusal.contains("`App\\Greeter`")
+            && refusal.contains("Rename `App\\Greeting::greet()` instead"),
         "{refusal}"
     );
 }
@@ -1589,5 +1592,112 @@ async fn a_contract_from_a_dependency_is_kept() {
     let refusal = rename_result(&backend, &uri, line, character, "process")
         .await
         .expect_err("a dependency's interface still requires handle()");
-    assert!(refusal.contains("`Acme\\Handles::handle()`"), "{refusal}");
+    assert!(
+        refusal.contains("`Acme\\Handles::handle()` is declared outside the project"),
+        "{refusal}"
+    );
+}
+
+#[tokio::test]
+async fn a_contract_from_the_standard_library_is_kept() {
+    let text = concat!(
+        "<?php\n",
+        "class Point implements JsonSerializable {\n",
+        "    public function jsonSerialize(): mixed { return []; }\n",
+        "}\n",
+    );
+    let backend = create_test_backend_with_full_stubs();
+    let uri = Uri::parse("file:///test.php").unwrap();
+    open_php(&backend, &uri, text).await;
+    let (line, character) = position_in(text, "function jsonSerialize", "jsonSerialize");
+    let refusal = rename_result(&backend, &uri, line, character, "toJson")
+        .await
+        .expect_err("JsonSerializable still requires jsonSerialize()");
+    assert!(
+        refusal.contains("`JsonSerializable::jsonSerialize()` is declared outside the project"),
+        "{refusal}"
+    );
+}
+
+#[tokio::test]
+async fn renaming_a_trait_method_a_using_class_implements_with_is_refused() {
+    let text = concat!(
+        "<?php\n",
+        "interface Greeting { public function greet(): string; }\n",
+        "trait Greets { public function greet(): string { return 'x'; } }\n",
+        "class Greeter implements Greeting { use Greets; }\n",
+    );
+    let refusal = refusal_for(text, "function greet(): string { return", "greet", "hello").await;
+    assert!(
+        refusal.contains("`Greeter`") && refusal.contains("`Greeting::greet()`"),
+        "{refusal}"
+    );
+}
+
+#[tokio::test]
+async fn an_abstract_class_may_leave_a_requirement_open() {
+    let text = concat!(
+        "<?php\n",
+        "abstract class Base { abstract public function run(): void; }\n",
+        "abstract class Mid extends Base { public function run(): void {} }\n",
+    );
+    assert_eq!(
+        renamed_text(text, "function run(): void {}", "run", "go").await,
+        text.replace("function run(): void {}", "function go(): void {}"),
+    );
+}
+
+#[tokio::test]
+async fn a_private_parent_method_does_not_fulfil_the_contract() {
+    let text = concat!(
+        "<?php\n",
+        "interface Greeting { public function greet(): string; }\n",
+        "class Base { private function greet(): string { return 'b'; } }\n",
+        "class Greeter extends Base implements Greeting {\n",
+        "    public function greet(): string { return 'g'; }\n",
+        "}\n",
+    );
+    let refusal = refusal_for(
+        text,
+        "public function greet(): string { return 'g'",
+        "greet",
+        "hello",
+    )
+    .await;
+    assert!(refusal.contains("`Greeting::greet()`"), "{refusal}");
+}
+
+#[tokio::test]
+async fn prepare_rename_refuses_an_implementation_before_asking_for_a_name() {
+    let backend = create_test_backend();
+    let uri = Uri::parse("file:///test.php").unwrap();
+    open_php(&backend, &uri, GREETERS).await;
+    let (line, character) = position_in(
+        GREETERS,
+        "function greet(): string { return 'hello'",
+        "greet",
+    );
+    let params = TextDocumentPositionParams {
+        text_document: TextDocumentIdentifier { uri: uri.clone() },
+        position: Position { line, character },
+    };
+    let refusal = backend
+        .prepare_rename(params)
+        .await
+        .expect_err("prepareRename should refuse");
+    assert!(
+        refusal.message.contains("`Greeting::greet()`"),
+        "{refusal:?}"
+    );
+
+    let (line, character) = position_in(
+        GREETERS,
+        "interface Greeting { public function greet",
+        "greet",
+    );
+    assert!(
+        prepare_rename(&backend, &uri, line, character)
+            .await
+            .is_some()
+    );
 }

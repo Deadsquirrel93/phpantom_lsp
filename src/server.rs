@@ -737,28 +737,37 @@ impl LanguageServer for Backend {
         let position = params.position;
 
         self.run_position_request("prepare_rename", uri, position, |backend, uri, position| {
-            backend.handle_with_position("prepare_rename", uri, position, |content, pos| {
-                backend
-                    .handle_prepare_rename(uri, content, pos)
-                    .and_then(|res| match res {
-                        PrepareRenameResult::Range(r) => backend
-                            .try_translate_blade_range(uri, r)
-                            .map(PrepareRenameResult::Range),
-                        PrepareRenameResult::PrepareRenamePlaceholder(p) => backend
-                            .try_translate_blade_range(uri, p.range)
-                            .map(|range| {
-                                PrepareRenameResult::PrepareRenamePlaceholder(
-                                    PrepareRenamePlaceholder {
-                                        range,
-                                        placeholder: p.placeholder,
-                                    },
-                                )
-                            }),
-                        default @ PrepareRenameResult::PrepareRenameDefaultBehavior(_) => {
-                            Some(default)
-                        }
-                    })
-            })
+            let outcome =
+                backend.handle_with_position("prepare_rename", uri, position, |content, pos| {
+                    Some(backend.handle_prepare_rename(uri, content, pos))
+                })?;
+            // A refusal is answered as an error so the editor shows why
+            // instead of asking for a name it would then reject.
+            let response = match outcome {
+                Some(Ok(response)) => response,
+                Some(Err(message)) => {
+                    return Err(tower_lsp_server::jsonrpc::Error {
+                        code: tower_lsp_server::jsonrpc::ErrorCode::InvalidRequest,
+                        message: message.into(),
+                        data: None,
+                    });
+                }
+                None => None,
+            };
+            Ok(response.and_then(|res| match res {
+                PrepareRenameResult::Range(r) => backend
+                    .try_translate_blade_range(uri, r)
+                    .map(PrepareRenameResult::Range),
+                PrepareRenameResult::PrepareRenamePlaceholder(p) => backend
+                    .try_translate_blade_range(uri, p.range)
+                    .map(|range| {
+                        PrepareRenameResult::PrepareRenamePlaceholder(PrepareRenamePlaceholder {
+                            range,
+                            placeholder: p.placeholder,
+                        })
+                    }),
+                default @ PrepareRenameResult::PrepareRenameDefaultBehavior(_) => Some(default),
+            }))
         })
         .await
     }
