@@ -533,6 +533,11 @@ namespace BuilderRelationAudit {
     }
 
     function eagerRelations(): void {
+        Stock::query()->with(['team' => function ($query) {
+            assertType('Illuminate\Database\Eloquent\Relations\BelongsTo<BuilderRelationAudit\Team, BuilderRelationAudit\Stock>', $query);
+        }], function ($query) {
+            assertType('Illuminate\Database\Eloquent\Relations\Relation<mixed, mixed, mixed>', $query);
+        });
         Team::withWhereHas('stocks', function ($query) {
             assertType('Illuminate\Database\Eloquent\Builder<BuilderRelationAudit\Stock>|Illuminate\Database\Eloquent\Relations\HasMany<BuilderRelationAudit\Stock, BuilderRelationAudit\Team>', $query);
         });
@@ -576,8 +581,16 @@ namespace BuilderRelationAudit {
      * @param class-string<Team> $teamClass
      * @param list<class-string<Team|Warehouse>> $classes
      * @param list<string> $unknownClasses
+     * @param ?class-string<Team> $maybeTeam
+     * @param class-string<Team>|class-string<Warehouse>|null $teamOrWarehouse
      */
-    function morphCandidates(string $teamClass, array $classes, array $unknownClasses, string $unknown): void {
+    function morphCandidates(string $teamClass, array $classes, array $unknownClasses, string $unknown, ?string $maybeTeam, ?string $teamOrWarehouse): void {
+        Comment::whereHasMorph('commentable', $maybeTeam, function ($query) {
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', $query);
+        });
+        Comment::whereHasMorph('commentable', $teamOrWarehouse, function ($query) {
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>|Illuminate\Database\Eloquent\Builder<BuilderRelationAudit\Warehouse>', $query);
+        });
         Comment::whereHasMorph('commentable', $teamClass, function (Builder $query) {
             assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', $query);
         });
@@ -627,6 +640,13 @@ namespace BuilderRelationAudit {
     }
 
     function morphs(): void {
+        Comment::whereHasMorph('missing', '*', function ($query, $type) {
+            assertType('Illuminate\Database\Eloquent\Builder<Illuminate\Database\Eloquent\Model>', $query);
+            assertType('string', $type);
+        });
+        Comment::whereHasMorph('missing', Team::class, function ($query) {
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', $query);
+        });
         Comment::whereHasMorph('commentable', Warehouse::class, function ($query, $type) {
             assertType('Illuminate\Database\Eloquent\Builder<BuilderRelationAudit\Warehouse>', $query);
             assertType('string', $type);
@@ -670,5 +690,250 @@ namespace BuilderRelationAudit {
             assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', $query);
         });
         assertType('Illuminate\Database\Eloquent\Builder<BuilderRelationAudit\Comment>', Comment::whereHasMorph('commentable', [Team::class], null));
+    }
+}
+
+namespace BuilderRelationAudit {
+    use Illuminate\Database\Eloquent\Builder;
+    use Illuminate\Database\Eloquent\Model;
+    use Illuminate\Database\Eloquent\Relations\BelongsTo;
+    use Illuminate\Database\Eloquent\Relations\HasMany;
+    use Illuminate\Database\Eloquent\Relations\Relation;
+    use function PHPStan\Testing\assertType;
+
+    class SpecialStock extends Stock {
+        /** @return ReorderedRelation<$this, Team> */
+        public function custom(): ReorderedRelation {}
+        /** @return FixedTeamRelation */
+        public function fixed(): FixedTeamRelation {}
+        /** @return BelongsTo<Team|Warehouse, $this> */
+        public function either(): BelongsTo {}
+        /** @return BelongsTo<Team, $this>|HasMany<Warehouse, $this> */
+        public function relationUnion(): BelongsTo|HasMany {}
+        /** @return BelongsTo<Team, $this>|HasMany<Team, $this> */
+        public function sharedTeam(): BelongsTo|HasMany {}
+    }
+    function customNamedRelations(): void {
+        SpecialStock::whereHas('custom', function ($q) {
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', $q);
+        });
+        SpecialStock::whereHas('fixed', function ($q) {
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', $q);
+        });
+        SpecialStock::query()->with('custom', function ($q) {
+            assertType('BuilderRelationAudit\ReorderedRelation<BuilderRelationAudit\SpecialStock, BuilderRelationAudit\Team>', $q);
+        });
+        SpecialStock::whereHas('either', function ($q) {
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>|Illuminate\Database\Eloquent\Builder<BuilderRelationAudit\Warehouse>', $q);
+        });
+        SpecialStock::whereHas('relationUnion', function ($q) {
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>|Illuminate\Database\Eloquent\Builder<BuilderRelationAudit\Warehouse>', $q);
+        });
+    }
+
+    class OtherStock extends Model {
+        /** @return BelongsTo<Warehouse, $this> */
+        public function team(): BelongsTo {}
+    }
+    /** @param Builder<Stock>|Builder<OtherStock> $q */
+    function receiverAlternatives(Builder $q, Stock|OtherStock $model): void {
+        $q->whereHas('team', function ($related) {
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>|Illuminate\Database\Eloquent\Builder<BuilderRelationAudit\Warehouse>', $related);
+        });
+        $model->whereHas('team', function ($related) {
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>|Illuminate\Database\Eloquent\Builder<BuilderRelationAudit\Warehouse>', $related);
+        });
+    }
+
+    /**
+     * @template TExtra
+     * @template TRelated of Model
+     * @extends Builder<TRelated>
+     */
+    class ReorderedBuilder extends Builder {}
+    /** @param ReorderedBuilder<string, Stock> $builder */
+    function reorderedBuilderReceiver(ReorderedBuilder $builder): void {
+        $builder->whereHas('team', function ($related) {
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', $related);
+        });
+    }
+
+    class OwnCallback extends Stock {
+        /** @param \Closure(Warehouse): mixed $callback */
+        public static function whereHas($relation, ?\Closure $callback = null, $operator = '>=', $count = 1) {}
+    }
+    function ownDeclaration(): void {
+        OwnCallback::whereHas('team', function ($related) {
+            assertType('BuilderRelationAudit\Warehouse', $related);
+        });
+    }
+
+    function caseInsensitiveMethod(): void {
+        Stock::WHEREHAS('team', function ($related) {
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', $related);
+        });
+        Stock::query()->WhereHas('team', function ($related) {
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', $related);
+        });
+    }
+
+    /**
+     * @template TModel of Model
+     */
+    class GenericStock extends Model {
+        /** @return BelongsTo<TModel, $this> */
+        public function target(): BelongsTo {}
+    }
+    /** @param GenericStock<Team> $stock */
+    function genericModelReceiver(GenericStock $stock): void {
+        $stock->whereHas('target', function ($related) {
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', $related);
+        });
+    }
+
+    function nestedEagerClosure(): void {
+        Stock::with(['warehouse', 'team' => function ($related) {
+            assertType('Illuminate\Database\Eloquent\Relations\BelongsTo<BuilderRelationAudit\Team, BuilderRelationAudit\Stock>', $related);
+        }]);
+    }
+}
+
+namespace BuilderRelationAudit {
+    use Illuminate\Database\Eloquent\Builder;
+    use Illuminate\Database\Eloquent\Relations\Relation;
+    use function PHPStan\Testing\assertType;
+
+    trait CallbackDeclaration {
+        /** @param \Closure(Warehouse): mixed $callback */
+        public static function whereHas($relation, ?\Closure $callback = null, $operator = '>=', $count = 1) {}
+    }
+    trait NestedCallbackDeclaration { use CallbackDeclaration; }
+    class TraitCallback extends Stock { use NestedCallbackDeclaration; }
+    class ChildCallback extends OwnCallback {}
+    trait AliasedCallbackDeclaration {
+        /** @param \Closure(Warehouse): mixed $callback */
+        public static function constraint($relation, ?\Closure $callback = null) {}
+    }
+    class AliasedCallback extends Stock { use AliasedCallbackDeclaration { constraint as whereHas; } }
+    class OwnCallbackBuilder extends Builder {
+        /** @param \Closure(Warehouse): mixed $callback */
+        public function whereHas($relation, ?\Closure $callback = null, $operator = '>=', $count = 1) { return $this; }
+    }
+    function callbackDeclarations(OwnCallbackBuilder $builder): void {
+        TraitCallback::whereHas('team', function ($q) {
+            assertType('BuilderRelationAudit\Warehouse', $q);
+        });
+        ChildCallback::whereHas('team', function ($q) {
+            assertType('BuilderRelationAudit\Warehouse', $q);
+        });
+        AliasedCallback::whereHas('team', function ($q) {
+            assertType('BuilderRelationAudit\Warehouse', $q);
+        });
+        $builder->whereHas('team', function ($q) {
+            assertType('BuilderRelationAudit\Warehouse', $q);
+        });
+    }
+    /** @param Stock|OwnCallback $model */
+    function mixedCallbackDeclarations(Stock $model): void {
+        $model->whereHas('team', function ($q) {
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>|BuilderRelationAudit\Warehouse', $q);
+        });
+    }
+
+    function nestedNamedRelations(): void {
+        SpecialStock::query()->with('sharedTeam', function ($q) {
+            assertType('Illuminate\Database\Eloquent\Relations\BelongsTo<BuilderRelationAudit\Team, BuilderRelationAudit\SpecialStock>|Illuminate\Database\Eloquent\Relations\HasMany<BuilderRelationAudit\Team, BuilderRelationAudit\SpecialStock>', $q);
+        });
+        assertType('Illuminate\Database\Eloquent\Builder<BuilderRelationAudit\Stock>', Stock::with(['team', 'warehouse']));
+        assertType('Illuminate\Database\Eloquent\Builder<BuilderRelationAudit\Stock>', Stock::query()->with(['team' => ['stocks']]));
+        SpecialStock::whereHas('custom.stocks.warehouse', function ($q) {
+            assertType('Illuminate\Database\Eloquent\Builder<BuilderRelationAudit\Warehouse>', $q);
+        });
+        SpecialStock::whereHas('either.stocks', function ($q) {
+            assertType('Illuminate\Database\Eloquent\Builder<BuilderRelationAudit\Stock>', $q);
+        });
+        SpecialStock::withWhereHas('either', function (Builder|Relation $q) {
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>|Illuminate\Database\Eloquent\Builder<BuilderRelationAudit\Warehouse>|Illuminate\Database\Eloquent\Relations\BelongsTo<BuilderRelationAudit\Team|BuilderRelationAudit\Warehouse, BuilderRelationAudit\SpecialStock>', $q);
+        });
+    }
+    /** @param Builder<Stock>|Builder<OtherStock> $builder */
+    function eagerReceiverAlternatives(Builder $builder): void {
+        $builder->with('team', function ($q) {
+            assertType('Illuminate\Database\Eloquent\Relations\BelongsTo<BuilderRelationAudit\Team, BuilderRelationAudit\Stock>|Illuminate\Database\Eloquent\Relations\BelongsTo<BuilderRelationAudit\Warehouse, BuilderRelationAudit\OtherStock>', $q);
+        });
+    }
+
+    /** @param 'team'|'warehouse' $name */
+    function eagerArrayKeys(string $name, string $unknown): void {
+        $key = 'team';
+        Stock::WITH(relations: [$key => function (Relation $q) {
+            assertType('Illuminate\Database\Eloquent\Relations\BelongsTo<BuilderRelationAudit\Team, BuilderRelationAudit\Stock>', $q);
+        }]);
+        Stock::query()?->with(relations: [$name => function ($q) {
+            assertType('Illuminate\Database\Eloquent\Relations\BelongsTo<BuilderRelationAudit\Team, BuilderRelationAudit\Stock>|Illuminate\Database\Eloquent\Relations\BelongsTo<BuilderRelationAudit\Warehouse, BuilderRelationAudit\Stock>', $q);
+        }]);
+        Stock::with([$unknown => function ($q) {
+            assertType('Illuminate\Database\Eloquent\Relations\Relation<mixed, mixed, mixed>', $q);
+        }]);
+        Team::with(['stocks' => ['warehouse' => function ($q) {
+            assertType('Illuminate\Database\Eloquent\Relations\BelongsTo<BuilderRelationAudit\Warehouse, BuilderRelationAudit\Stock>', $q);
+        }]]);
+        Team::query()->with(array('stocks.warehouse' => function ($q) {
+            assertType('Illuminate\Database\Eloquent\Relations\BelongsTo<BuilderRelationAudit\Warehouse, BuilderRelationAudit\Stock>', $q);
+        }));
+        Stock::with(['team' => (function ($q) {
+            assertType('Illuminate\Database\Eloquent\Relations\BelongsTo<BuilderRelationAudit\Team, BuilderRelationAudit\Stock>', $q);
+        })]);
+        Stock::with(['team' => function (Warehouse $q) {
+            assertType('BuilderRelationAudit\Warehouse', $q);
+        }]);
+        SpecialStock::with(['custom' => function ($q) {
+            assertType('BuilderRelationAudit\ReorderedRelation<BuilderRelationAudit\SpecialStock, BuilderRelationAudit\Team>', $q);
+        }]);
+        Team::with(['stocks' => [$name => function ($q) {
+            assertType('Illuminate\Database\Eloquent\Relations\BelongsTo<BuilderRelationAudit\Team, BuilderRelationAudit\Stock>|Illuminate\Database\Eloquent\Relations\BelongsTo<BuilderRelationAudit\Warehouse, BuilderRelationAudit\Stock>', $q);
+        }]]);
+        // `warehouse.stocks` names no relation, so the path as a whole is
+        // unknown and the callback keeps its declared type.
+        Stock::with([$name => ['stocks' => function ($q) {
+            assertType('Illuminate\Database\Eloquent\Relations\Relation<mixed, mixed, mixed>', $q);
+        }]]);
+        Stock::with([$unknown => ['stocks' => function ($q) {
+            assertType('Illuminate\Database\Eloquent\Relations\Relation<mixed, mixed, mixed>', $q);
+        }]]);
+    }
+}
+
+namespace BuilderRelationAudit {
+    use function PHPStan\Testing\assertType;
+    /** @param GenericStock<Team>|GenericStock<Warehouse> $model */
+    function genericReceiverAlternatives(GenericStock $model): void {
+        $model->whereHas('target', function ($query) {
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>|Illuminate\Database\Eloquent\Builder<BuilderRelationAudit\Warehouse>', $query);
+        });
+    }
+}
+
+namespace CustomRelations {
+    /**
+     * @template TParent of \Illuminate\Database\Eloquent\Model
+     * @template TRelated of \Illuminate\Database\Eloquent\Model
+     * @extends \Illuminate\Database\Eloquent\Relations\BelongsTo<TRelated, TParent>
+     */
+    class Relation extends \Illuminate\Database\Eloquent\Relations\BelongsTo {}
+}
+namespace BuilderRelationAudit {
+    use function PHPStan\Testing\assertType;
+    class RelationNamedStock extends Stock {
+        /** @return \CustomRelations\Relation<$this, Team> */
+        public function custom(): \CustomRelations\Relation {}
+    }
+    function relationNameCollision(RelationNamedStock $model): void {
+        RelationNamedStock::whereHas('custom', function ($q) {
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', $q);
+        });
+        RelationNamedStock::whereHas($model->custom(), function ($q) {
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', $q);
+        });
     }
 }
