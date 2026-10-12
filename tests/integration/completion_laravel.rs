@@ -15437,6 +15437,9 @@ async fn test_morph_callback_candidates_reach_completion_and_diagnostics() {
     let fixture = include_str!("../phpstan_nsrt/laravel-builder-relations.php");
     let backend = create_test_backend();
     let uri = Url::parse("file:///morph-callbacks.php").unwrap();
+    // Diagnose only the call under test; the fixture supplies its classes.
+    let fixture_uri = Url::parse("file:///builder-relations-fixture.php").unwrap();
+    crate::common::open_php(&backend, &fixture_uri, fixture).await;
     for call in [
         "Comment::whereHasMorph('commentable', Team::class, function ($morphQuery, $type) { BODY });",
         "Comment::hasMorph('commentable', Team::class, '>=', 1, 'and', fn ($morphQuery, $type) => BODY);",
@@ -15451,7 +15454,7 @@ async fn test_morph_callback_candidates_reach_completion_and_diagnostics() {
         "TeamComment::whereHasMorph('commentable', '*', fn ($morphQuery) => BODY);",
     ] {
         let source = format!(
-            "{fixture}\nnamespace BuilderRelationAudit {{ use Illuminate\\Database\\Eloquent\\Builder; $candidate = Team::class; {call} }}"
+            "<?php\nnamespace BuilderRelationAudit {{ use Illuminate\\Database\\Eloquent\\Builder; $candidate = Team::class; {call} }}"
         );
         let content = source.replace("BODY", "$morphQuery->");
         let position = crate::common::position_after(&content, "$morphQuery->");
@@ -15492,6 +15495,9 @@ async fn test_eager_callback_union_reaches_completion_and_diagnostics() {
     let fixture = include_str!("../phpstan_nsrt/laravel-builder-relations.php");
     let backend = create_test_backend();
     let uri = Url::parse("file:///eager-callbacks.php").unwrap();
+    // Diagnose only the call under test; the fixture supplies its classes.
+    let fixture_uri = Url::parse("file:///builder-relations-fixture.php").unwrap();
+    crate::common::open_php(&backend, &fixture_uri, fixture).await;
     for call in [
         "Stock::withWhereHas('team', fn ($eagerQuery) => BODY);",
         "Stock::query()->withWhereHas(callback: function (Builder|Relation $eagerQuery) { BODY }, relation: 'team');",
@@ -15500,7 +15506,7 @@ async fn test_eager_callback_union_reaches_completion_and_diagnostics() {
         "Stock::query()?->withWhereRelation(column: fn ($eagerQuery) => BODY, relation: 'team');",
     ] {
         let source = format!(
-            "{fixture}\nnamespace BuilderRelationAudit {{ use Illuminate\\Database\\Eloquent\\Builder; use Illuminate\\Database\\Eloquent\\Relations\\Relation; {call} }}"
+            "<?php\nnamespace BuilderRelationAudit {{ use Illuminate\\Database\\Eloquent\\Builder; use Illuminate\\Database\\Eloquent\\Relations\\Relation; {call} }}"
         );
         let content = source.replace("BODY", "$eagerQuery->where('id', 1)->");
         let position = crate::common::position_after(&content, "$eagerQuery->where('id', 1)->");
@@ -15541,6 +15547,9 @@ async fn test_relation_callback_arguments_reach_completion_and_diagnostics() {
     let fixture = include_str!("../phpstan_nsrt/laravel-builder-relations.php");
     let backend = create_test_backend();
     let uri = Url::parse("file:///relation-arguments.php").unwrap();
+    // Diagnose only the call under test; the fixture supplies its classes.
+    let fixture_uri = Url::parse("file:///builder-relations-fixture.php").unwrap();
+    crate::common::open_php(&backend, &fixture_uri, fixture).await;
     for call in [
         "Stock::whereHas($name, fn ($argumentQuery) => BODY);",
         "Stock::query()?->whereHas(callback: function (Builder $argumentQuery) { BODY }, relation: $name);",
@@ -15557,7 +15566,7 @@ async fn test_relation_callback_arguments_reach_completion_and_diagnostics() {
         "Stock::query()?->with(callback: fn ($argumentQuery) => BODY, relations: $name);",
     ] {
         let source = format!(
-            "{fixture}\nnamespace BuilderRelationAudit {{ use Illuminate\\Database\\Eloquent\\Builder; use Illuminate\\Database\\Eloquent\\Relations\\Relation; $name = 'team'; $stock = new Stock(); $comment = new TeamComment(); {call} }}"
+            "<?php\nnamespace BuilderRelationAudit {{ use Illuminate\\Database\\Eloquent\\Builder; use Illuminate\\Database\\Eloquent\\Relations\\Relation; $name = 'team'; $stock = new Stock(); $comment = new TeamComment(); {call} }}"
         );
         let content = source.replace("BODY", "$argumentQuery->where('id', 1)->firstOrFail()->");
         let position = crate::common::position_after(
