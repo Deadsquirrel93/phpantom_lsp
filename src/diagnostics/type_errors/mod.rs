@@ -71,6 +71,11 @@ struct ResolvedArg {
 /// All resolved argument types for a single call site.
 struct ResolvedCallArgs {
     args: Vec<ResolvedArg>,
+    /// The bounds of the `@template` parameters in scope at the call site.
+    /// They have been substituted into each argument type, and a parameter
+    /// type bound from those arguments names the same templates, so it
+    /// gets the same substitution before the two are compared.
+    template_bounds: HashMap<String, PhpType>,
 }
 
 /// Returns `true` when the file declares `strict_types=1`.
@@ -393,6 +398,13 @@ impl Backend {
                         )
                     };
 
+                    let template_bounds = super::helpers::template_bounds_in_scope(
+                        current_class_info,
+                        super::helpers::method_declared_before(current_class_info, *args_start),
+                        class_loader,
+                        &self.resolved_class_cache,
+                    );
+
                     let mut resolved_args = Vec::with_capacity(exprs.len());
                     for &(arg_expr, start, end) in exprs {
                         // Use the argument expression's own start offset
@@ -406,6 +418,13 @@ impl Backend {
                         let arg_ctx = var_ctx.with_cursor_offset(start as u32);
                         let ty = resolve_expression_type(arg_expr, &arg_ctx)
                             .unwrap_or_else(PhpType::untyped);
+                        // A template in scope is known only by its bound, and
+                        // must not be looked up as a class of the same name.
+                        let ty = if template_bounds.is_empty() {
+                            ty
+                        } else {
+                            ty.substitute(&template_bounds)
+                        };
                         // Resolve any short class names in the arg type
                         // to FQN via the class loader.  Variable
                         // resolution may return raw docblock names
@@ -451,6 +470,7 @@ impl Backend {
                         *args_start,
                         ResolvedCallArgs {
                             args: resolved_args,
+                            template_bounds,
                         },
                     );
                 }
@@ -675,6 +695,13 @@ impl Backend {
                     }
                 } else {
                     param_type
+                };
+                let bounded_param;
+                let effective_param_type = if resolved_args.template_bounds.is_empty() {
+                    effective_param_type
+                } else {
+                    bounded_param = effective_param_type.substitute(&resolved_args.template_bounds);
+                    &bounded_param
                 };
 
                 // A `view-string` parameter demands a name some Blade

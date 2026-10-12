@@ -53,105 +53,7 @@ No outstanding items.
 
 ## Templates
 
-#### B6. A closure returning a local variable binds the template from its declared type
-
-**Impact: Medium · Complexity: Medium**
-
-A closure's declared return type is narrowed by what its body returns
-before it binds a `Closure(): T` template, but only when the returned
-expression resolves without the closure's own local variables:
-
-```php
-/**
- * @template T
- * @param \Closure(): T $cb
- * @return T
- */
-function remember(\Closure $cb): mixed { return $cb(); }
-
-function local(): Sub {
-    return remember(function (): Base {
-        $p = make();          // returns Sub
-        return $p->sortBy();  // returns static
-    });
-    // Return type Base is incompatible with declared return type Sub
-}
-
-function direct(): Sub {
-    return remember(function (): Base {
-        return make()->sortBy();  // fine, T = Sub
-    });
-}
-```
-
-`Sub` extends `Base`. PHPStan intersects the declared type with the
-union of every `return` statement's type, so `T` is `Sub` in both.
-
-**Where to change:** `infer_closure_return_type_seeded` in
-`src/type_engine/call_resolution/template_subs.rs` resolves the text of
-the first `return EXPR;` with only the closure's parameters seeded, so a
-variable assigned inside the body is unknown and the declared type wins.
-The body should be walked by the forward walker so locals are in scope,
-and every `return` should contribute.
-
-#### B7. A class named like a template parameter still shadows it in type checks
-
-**Impact: Low-Medium · Complexity: Low**
-
-With a class-like named `T` anywhere in the project (PDepend's test
-fixtures declare `trait T`), member access on a `@template T` value now
-resolves correctly, but argument and return compatibility checks still
-compare against the class instead of the template's bound:
-
-```php
-trait T {}   // anywhere in the index
-```
-
-```php
-namespace App;
-
-/** @template T of Art */
-class ArtList {
-    /** @param T[] $artifacts */
-    public function __construct(array $artifacts) {
-        foreach ($artifacts as $artifact) {
-            (new Filter())->accept($artifact);  // expects Art, got T
-        }
-    }
-}
-
-interface Node {
-    /**
-     * @template T of Node
-     * @param class-string<T> $targetType
-     * @return T|null
-     */
-    public function first($targetType);
-}
-
-abstract class AbstractNode implements Node {
-    public function first($targetType): ?Node {
-        foreach ($this->children() as $node) {
-            if ($node instanceof $targetType) {
-                return $node;  // Return type T is incompatible with ?Node
-            }
-            if (($child = $node->first($targetType)) !== null) {
-                // expects class-string<Node>, got class-string<T>
-                return $child;
-            }
-        }
-        return null;
-    }
-}
-```
-
-Removing the trait makes all three clean.
-
-**Where to change:** the argument and return type compatibility checks
-need the template names in scope (including ones inherited from an
-interface method's docblock) to win over class lookup, the way member
-access does since the earlier fix. An unqualified `T` inside
-`namespace App` also should not fall back to the global `\T` at all.
+No outstanding items.
 
 ## Miscellaneous
 
@@ -171,6 +73,10 @@ Redis::connection('cache');
 
 PHP resolves `Redis` through the first import, the facade. PHPantom
 resolves it to the global `\Redis` extension class.
+
+The same ambiguity lets an unqualified name inside a namespace fall back
+to a global class: with `trait T {}` in the global namespace, a bare `T`
+in `namespace App` loads it, where PHP only ever means `App\T`.
 
 **Where to change:** `resolve_class_name` and `class_loader_with` in
 `src/resolution.rs` deliberately skip an import when another import's

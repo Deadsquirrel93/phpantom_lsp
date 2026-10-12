@@ -26,7 +26,9 @@ use crate::type_engine::resolver::{CtxLoaders, LendsLoaders, Loaders, VarResolut
 use crate::type_engine::variable::foreach_resolution::resolve_expression_type;
 use crate::types::ClassInfo;
 
-use super::helpers::{collect_type_check, find_innermost_enclosing_class};
+use super::helpers::{
+    collect_type_check, find_innermost_enclosing_class, template_bounds, template_bounds_in_scope,
+};
 use super::type_errors::is_type_compatible;
 
 /// Diagnostic code used for return type mismatch diagnostics.
@@ -434,25 +436,6 @@ fn indexed_return_type(
     None
 }
 
-/// Map each template parameter to its bound, or `mixed` when it has none.
-///
-/// Template parameters are plain names in a `PhpType`, so left in place they
-/// would be looked up as classes and a same-named class would stand in for
-/// them.  A value that fails the bound fails the template too, so the bound is
-/// what a return is checked against.
-fn template_bounds(
-    params: &[crate::atom::Atom],
-    bounds: &crate::atom::AtomMap<PhpType>,
-) -> HashMap<String, PhpType> {
-    params
-        .iter()
-        .map(|param| {
-            let bound = bounds.get(param).cloned();
-            (param.to_string(), bound.unwrap_or_else(PhpType::mixed))
-        })
-        .collect()
-}
-
 #[allow(clippy::too_many_arguments)]
 /// Walk a top-level statement looking for function/class declarations.
 fn process_top_level_statement(
@@ -710,17 +693,12 @@ fn process_class_member(
         Some(t) if !t.is_untyped() && !t.is_mixed() => t,
         _ => return,
     };
-    let mut bounds = template_bounds(
-        &current_class.template_params,
-        &current_class.template_param_bounds,
+    let template_bounds = template_bounds_in_scope(
+        current_class,
+        method_info,
+        class_loader,
+        &backend.resolved_class_cache,
     );
-    if let Some(mi) = method_info {
-        bounds.extend(template_bounds(
-            mi.template_params(),
-            mi.template_param_bounds(),
-        ));
-    }
-    let template_bounds = bounds;
     let declared_return = if template_bounds.is_empty() {
         declared_return
     } else {

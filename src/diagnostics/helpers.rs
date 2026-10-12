@@ -3,13 +3,15 @@
 //! Functions and types that are used by multiple diagnostic modules live
 //! here to avoid duplication.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::php_type::PhpType;
 use crate::symbol_map::SymbolMap;
-use crate::types::{BlockClassLoaders, ClassInfo, FileContext, FunctionInfo, PerBlock};
+use crate::types::{BlockClassLoaders, ClassInfo, FileContext, FunctionInfo, MethodInfo, PerBlock};
 
 /// A byte range `[start, end)` in the source.
 pub(crate) type ByteRange = (usize, usize);
@@ -230,6 +232,77 @@ pub(crate) fn find_innermost_enclosing_class(
         .filter(|(c, start)| offset >= *start && offset <= c.end_offset)
         .min_by_key(|(c, start)| c.end_offset.saturating_sub(*start))
         .map(|(c, _)| c.as_ref())
+}
+
+/// Map each template parameter to its bound, or `mixed` when it has none.
+///
+/// Template parameters are plain names in a `PhpType`, so left in place
+/// they would be looked up as classes and a same-named class would stand
+/// in for them (`@template T` beside a `trait T` elsewhere in the project).
+/// Substituting the bound first keeps a type check comparing what the
+/// template is known to be.
+pub(crate) fn template_bounds(
+    params: &[crate::atom::Atom],
+    bounds: &crate::atom::AtomMap<PhpType>,
+) -> HashMap<String, PhpType> {
+    params
+        .iter()
+        .map(|param| {
+            let bound = bounds.get(param).cloned();
+            (param.to_string(), bound.unwrap_or_else(PhpType::mixed))
+        })
+        .collect()
+}
+
+/// The `@template` parameters in scope at `offset` inside `class`, mapped
+/// to their bounds (see [`template_bounds`]): the class's own, and those of
+/// the method `method` names, with the method's shadowing the class's.
+///
+/// An overriding method without a docblock of its own still declares the
+/// templates of the method it overrides (`first($targetType)` implementing
+/// an interface's `@template T of Node`), so when the class's own copy has
+/// none they are read from the fully resolved class, where inheritance has
+/// carried them over.
+pub(crate) fn template_bounds_in_scope(
+    class: &ClassInfo,
+    method: Option<&MethodInfo>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    cache: &crate::virtual_members::ResolvedClassCache,
+) -> HashMap<String, PhpType> {
+    let mut bounds = template_bounds(&class.template_params, &class.template_param_bounds);
+    let Some(method) = method else {
+        return bounds;
+    };
+    if !method.template_params().is_empty() {
+        bounds.extend(template_bounds(
+            method.template_params(),
+            method.template_param_bounds(),
+        ));
+    } else if class.parent_class.is_some() || !class.interfaces.is_empty() {
+        let resolved =
+            crate::virtual_members::resolve_class_fully_cached(class, class_loader, cache);
+        if let Some(inherited) = resolved.get_method(&method.name) {
+            bounds.extend(template_bounds(
+                inherited.template_params(),
+                inherited.template_param_bounds(),
+            ));
+        }
+    }
+    bounds
+}
+
+/// The method of `class` whose body holds `offset`, judged by name
+/// offsets alone: methods are laid out one after another, so it is the
+/// last one declared before `offset`.
+pub(crate) fn method_declared_before(class: &ClassInfo, offset: u32) -> Option<&MethodInfo> {
+    class
+        .methods
+        .iter()
+        .filter(|m| {
+            m.name_offset != 0 && m.name_offset >= class.start_offset && m.name_offset <= offset
+        })
+        .max_by_key(|m| m.name_offset)
+        .map(|m| m.as_ref())
 }
 
 /// Find the name of the method whose body contains `offset`, if any.

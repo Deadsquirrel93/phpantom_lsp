@@ -14323,3 +14323,75 @@ fn array_map_reads_the_element_type_of_a_call_on_a_parenthesised_new() {
     );
     assert_eq!(msgs, ["Argument 1 ($i) expects int, got list<stdClass>"]);
 }
+
+const TEMPLATE_NAMED_LIKE_A_CLASS: &str = r#"<?php
+namespace {
+    trait T {}
+}
+
+namespace App {
+    class Art {}
+
+    class Filter {
+        public function accept(Art $artifact): bool { return true; }
+    }
+
+    /** @template T of Art */
+    class ArtList {
+        /** @param T[] $artifacts */
+        public function __construct(array $artifacts) {
+            foreach ($artifacts as $artifact) {
+                (new Filter())->accept($artifact);
+            }
+        }
+    }
+
+    interface Node {
+        /**
+         * @template T of Node
+         * @param class-string<T> $targetType
+         * @return T|null
+         */
+        public function first($targetType);
+
+        /** @return Node[] */
+        public function children(): array;
+    }
+
+    abstract class AbstractNode implements Node {
+        public function first($targetType): ?Node {
+            foreach ($this->children() as $node) {
+                if ($node instanceof $targetType) {
+                    return $node;
+                }
+                if (($child = $node->first($targetType)) !== null) {
+                    return $child;
+                }
+            }
+            return null;
+        }
+    }
+}
+"#;
+
+#[test]
+fn a_template_shadows_a_class_of_the_same_name_in_argument_checks() {
+    let diags = collect(TEMPLATE_NAMED_LIKE_A_CLASS);
+    assert!(
+        !has_type_error(&diags),
+        "`T` is the template, not the global trait, got: {diags:?}"
+    );
+}
+
+#[test]
+fn a_template_shadows_a_class_of_the_same_name_in_return_checks() {
+    let diags = collect_diagnostics_with(
+        &create_test_backend(),
+        TEMPLATE_NAMED_LIKE_A_CLASS,
+        Backend::collect_return_type_diagnostics,
+    );
+    assert!(
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
+        "`T` is the template, not the global trait, got: {diags:?}"
+    );
+}

@@ -5208,3 +5208,126 @@ final class U {
         "only the callback that may return null leaves `null` possible: {diags:?}"
     );
 }
+
+#[test]
+fn a_closure_returning_a_local_binds_the_template_from_its_body() {
+    let php = r#"<?php
+class Base {
+    /** @return static */
+    public function sortBy(): static { return $this; }
+}
+final class Sub extends Base {}
+
+function make(): Sub { return new Sub(); }
+
+/**
+ * @template T
+ * @param \Closure(): T $cb
+ * @return T
+ */
+function remember(\Closure $cb): mixed { return $cb(); }
+
+function local(): Sub {
+    return remember(function (): Base {
+        $p = make();
+        return $p->sortBy();
+    });
+}
+
+function direct(): Sub {
+    return remember(function (): Base {
+        return make()->sortBy();
+    });
+}
+
+function branches(bool $flag): Sub {
+    return remember(function () use ($flag): Base {
+        if ($flag) {
+            return new Sub();
+        }
+        $p = make();
+        return $p;
+    });
+}
+"#;
+    let diags = collect_diagnostics_with(
+        &create_test_backend(),
+        php,
+        Backend::collect_return_type_diagnostics,
+    );
+    assert!(
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
+        "a closure's body narrows its declared return type even through locals, got: {diags:?}"
+    );
+}
+
+#[test]
+fn a_closure_with_a_wider_return_keeps_its_declared_type() {
+    let php = r#"<?php
+class Base {}
+final class Sub extends Base {}
+
+/**
+ * @template T
+ * @param \Closure(): T $cb
+ * @return T
+ */
+function remember(\Closure $cb): mixed { return $cb(); }
+
+function wider(bool $flag): Sub {
+    return remember(function () use ($flag): Base {
+        if ($flag) {
+            return new Sub();
+        }
+        $p = new Base();
+        return $p;
+    });
+}
+"#;
+    let diags = collect_diagnostics_with(
+        &create_test_backend(),
+        php,
+        Backend::collect_return_type_diagnostics,
+    );
+    assert_eq!(
+        messages_with_code(&diags, "type_mismatch_return").len(),
+        1,
+        "one return yields Base, so T stays Base, got: {diags:?}"
+    );
+}
+
+#[test]
+fn a_static_property_in_a_closure_return_keeps_its_own_type() {
+    let php = r#"<?php
+final class Trap {
+    /** @var string[] */
+    public static array $files = [];
+}
+
+/**
+ * @template T
+ * @param callable(): T $cb
+ * @return T
+ */
+function within(callable $cb): mixed { return $cb(); }
+
+/** @return array{array<string>, string}|null */
+function locate(string $name): ?array {
+    return within(static function () use ($name): ?array {
+        if ($name === '') {
+            return null;
+        }
+        return [Trap::$files, $name];
+    });
+}
+"#;
+    let diags = collect_diagnostics_with(
+        &create_test_backend(),
+        php,
+        Backend::collect_return_type_diagnostics,
+    );
+    assert!(
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
+        "`Trap::$files` is a string[], not a Trap, got: {diags:?}"
+    );
+}

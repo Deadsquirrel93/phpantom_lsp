@@ -13,6 +13,7 @@ use crate::type_engine::resolver::{Loaders, ResolutionCtx, with_isolated_chain_c
 use crate::type_engine::variable::forward_walk::{
     ForwardWalkCtx, ScopeState, suspend_diagnostic_scope, suspend_return_edges, walk_body_forward,
 };
+use mago_span::HasSpan;
 use mago_syntax::cst::{Expression, Statement};
 
 use super::return_types::{
@@ -432,9 +433,8 @@ impl Backend {
     /// with its parameters seeded from `param_seeds` (one per position;
     /// see [`resolve_closure_body_type`](Self::resolve_closure_body_type)).
     ///
-    /// The body expression (an arrow `fn() => EXPR`, or the first `return
-    /// EXPR;` of a full closure body) is resolved through the shared type
-    /// resolver.  A closure really returns what its body produces narrowed
+    /// The body (an arrow `fn() => EXPR`, or every `return EXPR;` of a full
+    /// closure body, joined) is resolved through the shared type resolver.  A closure really returns what its body produces narrowed
     /// by what it declares, so an explicit `: ReturnType` annotation only
     /// wins when the body resolves to something that is not a subtype of
     /// it (this includes scalar refinements like `class-string` under a
@@ -448,14 +448,11 @@ impl Backend {
         ctx: &ResolutionCtx<'_>,
     ) -> Option<PhpType> {
         let body_type = || {
-            let body =
-                crate::completion::source::helpers::extract_closure_body_expr_text(arg_text)?;
             // A body that resolves to `mixed` says nothing about the
             // template, and binding it hides the template's own bound
             // (`@template TNewKey of array-key`), which is strictly more
             // informative.  Leave the template unbound instead.
-            Self::resolve_closure_body_type(arg_text, body, param_seeds, ctx)
-                .filter(|ty| !ty.is_mixed())
+            Self::resolve_closure_body_type(arg_text, param_seeds, ctx).filter(|ty| !ty.is_mixed())
         };
         let Some(declared) =
             crate::completion::source::helpers::extract_closure_return_type_from_text(arg_text)
@@ -491,12 +488,18 @@ impl Backend {
         param_type: &PhpType,
         ctx: &ResolutionCtx<'_>,
     ) -> Option<PhpType> {
-        let body = crate::completion::source::helpers::extract_closure_body_expr_text(arg_text)?;
-        Self::resolve_closure_body_type(arg_text, body, &[Some(param_type.clone())], ctx)
+        Self::resolve_closure_body_type(arg_text, &[Some(param_type.clone())], ctx)
     }
 
-    /// Resolve a closure's body expression to a type, seeding the
-    /// closure's own parameters into variable resolution.
+    /// Resolve what a closure's body returns, seeding the closure's own
+    /// parameters into variable resolution.
+    ///
+    /// An arrow function returns its single body expression.  A full
+    /// closure returns the union of every `return` it reaches, each
+    /// resolved after its body has been walked so locals assigned along
+    /// the way are known; one bare or unresolvable `return` leaves the
+    /// whole body unknown, since joining the rest would claim a narrower
+    /// type than the closure really produces.
     ///
     /// A body expression rooted at a closure parameter (e.g.
     /// `fn(Decimal $carry, $op) => $carry->add(...)`) cannot resolve
@@ -515,10 +518,13 @@ impl Backend {
     /// hint.
     fn resolve_closure_body_type(
         closure_text: &str,
-        body: &str,
         param_seeds: &[Option<PhpType>],
         ctx: &ResolutionCtx<'_>,
     ) -> Option<PhpType> {
+        // Also rejects text that is not a closure literal, or a full
+        // closure with no `return EXPR;`, before anything is parsed.
+        let first_body =
+            crate::completion::source::helpers::extract_closure_body_expr_text(closure_text)?;
         let typed_params: Vec<(String, PhpType)> =
             crate::completion::source::helpers::extract_closure_params_from_text(closure_text)
                 .unwrap_or_default()
@@ -548,8 +554,10 @@ impl Backend {
                     Some((name, ty))
                 })
                 .collect();
-        if typed_params.is_empty() {
-            return Self::resolve_arg_text_to_type(body, ctx);
+        let is_arrow = crate::completion::source::helpers::closure_literal_parts(closure_text)
+            .is_some_and(|(is_arrow, _)| is_arrow);
+        if is_arrow && typed_params.is_empty() {
+            return Self::resolve_arg_text_to_type(first_body, ctx);
         }
 
         // Pre-resolve each typed parameter to its classes so the
@@ -587,7 +595,15 @@ impl Backend {
             })
             .collect();
 
-        let walked_locals = walk_closure_body_locals(closure_text, &param_types, ctx);
+        let (walked_locals, returns) = if is_arrow {
+            (None, vec![Some(first_body.to_owned())])
+        } else {
+            let (locals, returns) = walk_closure_body_locals(closure_text, &param_types, ctx)?;
+            if returns.is_empty() {
+                return None;
+            }
+            (Some(locals), returns)
+        };
 
         let outer_resolver = ctx.scope_var_resolver;
         let param_aware_resolver = move |name: &str| -> Vec<ResolvedType> {
@@ -652,21 +668,27 @@ impl Backend {
             is_in_static_method: ctx.is_in_static_method,
             preserve_static: ctx.preserve_static,
         };
-        Self::resolve_arg_text_to_type(body, &param_ctx)
+        let mut members = Vec::with_capacity(returns.len());
+        for ret in &returns {
+            members.push(Self::resolve_arg_text_to_type(ret.as_deref()?, &param_ctx)?);
+        }
+        Some(PhpType::union(members))
     }
 }
 
 /// Walk a full closure literal's own body with the shared forward walker,
 /// seeded with the parameter types the call site hands it, and return the
-/// scope those statements leave behind.
+/// scope those statements leave behind together with the text of every
+/// `return` the body reaches (`None` for a bare `return;`).
 ///
-/// [`Backend::resolve_closure_body_type`] otherwise resolves only the
-/// return expression's text against the raw parameter seed, so a body that
-/// reassigns a parameter before returning it (`$result['a'] = (string)
-/// $result['a']; return $result;`) still reports the parameter's original
-/// shape. Re-parsing the closure in isolation and running its body through
-/// [`walk_body_forward`] answers with what the body actually leaves in
-/// `$result`, the same as any other consumer of the forward walker.
+/// Resolving a return expression's text on its own knows nothing about
+/// the body's locals, so `$p = make(); return $p;` could not see `$p`, and
+/// a body that reassigns a parameter before returning it (`$result['a'] =
+/// (string) $result['a']; return $result;`) would still report the
+/// parameter's original shape. Re-parsing the closure in isolation and
+/// running its body through [`walk_body_forward`] answers with what the
+/// body actually leaves behind, the same as any other consumer of the
+/// forward walker.
 ///
 /// Returns `None` when `closure_text` is not a full (`function`) closure
 /// literal — an arrow function's body is a single expression with nothing
@@ -675,7 +697,10 @@ fn walk_closure_body_locals(
     closure_text: &str,
     param_types: &HashMap<String, Vec<ResolvedType>>,
     ctx: &ResolutionCtx<'_>,
-) -> Option<crate::type_engine::variable::forward_walk::Locals> {
+) -> Option<(
+    crate::type_engine::variable::forward_walk::Locals,
+    Vec<Option<String>>,
+)> {
     let trimmed = closure_text.trim().trim_end_matches(';');
     let wrapped = format!("<?php $__closure = {trimmed};");
 
@@ -738,7 +763,19 @@ fn walk_closure_body_locals(
 
             walk_body_forward(closure.body.statements.iter(), &mut scope, &fw_ctx);
 
-            Some(scope.locals)
+            let mut found = Vec::new();
+            crate::return_collection::collect_returns(closure.body.statements.iter(), &mut found);
+            let returns = found
+                .into_iter()
+                .map(|(expr, ..)| {
+                    expr.map(|e| {
+                        let span = e.span();
+                        content[span.start.offset as usize..span.end.offset as usize].to_owned()
+                    })
+                })
+                .collect();
+
+            Some((scope.locals, returns))
         },
     )
 }

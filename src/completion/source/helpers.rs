@@ -138,7 +138,7 @@ pub(crate) fn trailing_class_name(s: &str) -> &str {
 /// signature without tripping over the modifier.  `static fn ($x) => …` is
 /// an ordinary closure literal; a caller that stops at the modifier reads
 /// it as "not a closure" and silently binds no template from it.
-fn closure_literal_parts(text: &str) -> Option<(bool, &str)> {
+pub(crate) fn closure_literal_parts(text: &str) -> Option<(bool, &str)> {
     let trimmed = text.trim();
     let trimmed = trimmed
         .strip_prefix("static")

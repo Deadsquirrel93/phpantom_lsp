@@ -654,24 +654,33 @@ fn resolve_target_classes_expr_inner(
             // resolve to the property's declared type instead of the
             // owning class.  This makes `self::$instance->method()`
             // resolve `method()` on the property's type, not on the
-            // class that declares the static property.
+            // class that declares the static property.  A property whose
+            // type names no class (`string[]`) still is that type, never
+            // the class declaring it.
             if let Some(prop_name) = member.strip_prefix('$') {
                 let mut results: Vec<ResolvedType> = Vec::new();
                 for cls in &owner_classes {
-                    let resolved = super::type_resolution::resolve_property_types(
-                        prop_name,
+                    let Some(hint) = crate::inheritance::resolve_property_type_hint(
                         cls,
+                        prop_name,
+                        class_loader,
+                    ) else {
+                        continue;
+                    };
+                    let resolved = super::type_resolution::type_hint_to_classes_typed(
+                        &hint,
+                        &cls.fqn(),
                         all_classes,
                         class_loader,
                     );
-                    ResolvedType::extend_unique(
-                        &mut results,
-                        resolved.into_iter().map(ResolvedType::from_arc).collect(),
-                    );
+                    let resolved = if resolved.is_empty() {
+                        vec![ResolvedType::from_type_string(hint)]
+                    } else {
+                        resolved.into_iter().map(ResolvedType::from_arc).collect()
+                    };
+                    ResolvedType::extend_unique(&mut results, resolved);
                 }
-                if !results.is_empty() {
-                    return results;
-                }
+                return results;
             } else {
                 // Otherwise the member is an enum case or class constant.
                 // Resolve it through the same constant-type path the call
