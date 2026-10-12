@@ -45,68 +45,7 @@ No outstanding items.
 
 ## Laravel
 
-#### B2. Relation callbacks on a relation receiver lose the related model
-
-**Impact: Medium · Complexity: Medium**
-
-Relation-query callbacks are typed from the receiver's model, but a
-relation receiver is not recognised as carrying one. Both calls below
-reach the callback with the declared fallback type rather than the
-related model:
-
-```php
-class Team extends Model {
-    /** @return HasMany<Stock, $this> */
-    public function stocks(): HasMany { return $this->hasMany(Stock::class); }
-}
-class Stock extends Model {
-    /** @return BelongsTo<Warehouse, $this> */
-    public function warehouse(): BelongsTo { return $this->belongsTo(Warehouse::class); }
-}
-
-$team->stocks()->whereHas('warehouse', fn ($q) => $q);  // Builder<Model>, expected Builder<Warehouse>
-$team->stocks()->with('warehouse', fn ($r) => $r);      // Relation<mixed, mixed, mixed>, expected BelongsTo<Warehouse, Stock>
-```
-
-Both forms run at runtime: `Relation` forwards `whereHas()` and `with()`
-to its query, whose model is the relation's related model.
-
-**Where to change:** `find_models_from_receivers` in
-`src/type_engine/variable/closure_resolution.rs` reads a model from a
-builder's generic argument, `getModel()` or builder methods. A
-`Relation<TRelated, …>` receiver should yield `TRelated` through the
-same ancestor projection custom relation subclasses already use.
-
-#### B3. Builder methods called through a relation drop the relation
-
-**Impact: Low-Medium · Complexity: Medium**
-
-`Relation::__call` forwards unknown methods to the related query and
-returns the relation itself when the forwarded call returns the builder.
-Custom builder methods do not follow this:
-
-```php
-#[UseEloquentBuilder(LoafBuilder::class)]
-class Loaf extends Model {}   // LoafBuilder::stale() returns $this
-
-$bakery->baguettes()->stale();         // no type, expected HasMany<Loaf, Bakery>
-$bakery->baguettes()->where('a', 1);   // HasMany<Loaf, Bakery>, correct
-
-Bakery::withWhereHas('baguettes', function ($q) {
-    $q->stale();   // LoafBuilder<Loaf>, expected LoafBuilder<Loaf>|HasMany<Loaf, Bakery>
-});
-```
-
-`where()` works because the stubs declare it on `Relation`. Methods that
-only exist on the related model's custom builder (scopes, builder
-methods) are not forwarded at all on a plain relation, and on the
-`withWhereHas()` builder/relation union they narrow to the builder arm.
-
-**Where to change:** the `Relation` member forwarding in
-`virtual_members/laravel/` should include the related model's custom
-builder methods, rewriting a builder-typed return to the relation the
-way `transform_flags::FORWARDS_CALLS_SELF` already does for
-`ForwardsCalls` decorators.
+No outstanding items.
 
 ## Blade
 
