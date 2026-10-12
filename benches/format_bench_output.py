@@ -2,7 +2,7 @@
 """Convert Criterion bencher-format output (stdin) to customSmallerIsBetter JSON (stdout).
 
 Parses lines like:
-    test cold_start_completion ... bench:   2610870 ns/iter (+/- 10235)
+    test cold_start_completion ... bench:   2,610,870 ns/iter (+/- 10,235)
 
 and emits a JSON array with nanosecond values converted to milliseconds:
     [{"name": "cold_start_completion", "unit": "ms", "value": 2.611, "range": "± 0.010"}, ...]
@@ -23,7 +23,11 @@ import re
 import sys
 
 _NAME_RE = re.compile(r"test\s+(?P<name>\S+)\s+\.\.\.")
-_BENCH_RE = re.compile(r"bench:\s+(?P<value>\d+)\s+ns/iter\s+\(\+/-\s+(?P<range>\d+)\)")
+# Criterion 0.8 groups digits with commas (`4,466,815 ns/iter`); older
+# versions print bare digits.
+_BENCH_RE = re.compile(
+    r"bench:\s+(?P<value>[\d,]+)\s+ns/iter\s+\(\+/-\s+(?P<range>[\d,]+)\)"
+)
 
 # Criterion itself never colours the bencher reporter, but the output can
 # still pick up escape sequences from whatever is sharing the pipe.
@@ -33,6 +37,10 @@ NS_PER_MS = 1_000_000
 
 # How many raw lines to echo back when nothing parsed.
 _PREVIEW_LINES = 20
+
+
+def _parse_ns(text: str) -> int:
+    return int(text.replace(",", ""))
 
 
 def main() -> None:
@@ -62,8 +70,8 @@ def main() -> None:
             unnamed += 1
             continue
 
-        value_ms = round(int(measurement.group("value")) / NS_PER_MS, 3)
-        range_ms = round(int(measurement.group("range")) / NS_PER_MS, 3)
+        value_ms = round(_parse_ns(measurement.group("value")) / NS_PER_MS, 3)
+        range_ms = round(_parse_ns(measurement.group("range")) / NS_PER_MS, 3)
         results.append(
             {
                 "name": pending,
