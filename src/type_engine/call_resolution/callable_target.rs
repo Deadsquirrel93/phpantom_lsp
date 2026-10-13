@@ -608,10 +608,14 @@ impl Backend {
         // block covering this call site.
         let namespace = file_ctx.namespace_at(cursor_offset);
         let use_map = file_ctx.use_map_at(cursor_offset);
+        let function_imports = &file_ctx.symbol_imports_at(cursor_offset).functions;
         let class_loader = self.class_loader_with(&file_ctx.classes, use_map, namespace);
         let resolved_class_loader = self.resolved_class_loader_with(&file_ctx.classes);
-        let function_loader_cl =
-            self.function_loader_with(file_ctx.resolved_names.as_deref(), use_map, namespace);
+        let function_loader_cl = self.function_loader_with(
+            file_ctx.resolved_names.as_deref(),
+            function_imports,
+            namespace,
+        );
         let current_class = find_class_at_offset(&file_ctx.classes, cursor_offset);
         let laravel_macro_this_resolver = self.laravel_macro_this_resolver(&class_loader);
 
@@ -693,7 +697,7 @@ impl Backend {
 
             // ── Standalone function call: `functionName(…)` ─────────
             SubjectExpr::FunctionCall(name) => {
-                let func = self.resolve_function_name(name, use_map, namespace)?;
+                let func = self.resolve_function_name(name, function_imports, namespace)?;
                 Some(Self::function_to_callable_with_subs(
                     &func,
                     effective_args_text,
@@ -725,7 +729,7 @@ impl Backend {
             // as `ClassName` (since it can't distinguish class names
             // from function names without context).
             SubjectExpr::ClassName(name) => {
-                let func = self.resolve_function_name(name, use_map, namespace)?;
+                let func = self.resolve_function_name(name, function_imports, namespace)?;
                 Some(Self::function_to_callable_with_subs(
                     &func,
                     effective_args_text,

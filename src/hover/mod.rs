@@ -594,6 +594,7 @@ impl Backend {
                     ctx.resolved_names.as_deref(),
                     symbol.start,
                     &ctx.use_map,
+                    &ctx.symbol_imports.constants,
                     &ctx.namespace,
                 );
 

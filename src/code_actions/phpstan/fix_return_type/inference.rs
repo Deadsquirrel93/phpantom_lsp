@@ -97,7 +97,8 @@ impl Backend {
             .unwrap_or_default();
         let (file_use_map, file_namespace) = self.use_map_and_namespace_at(uri, offset);
         let class_loader = self.class_loader_with(&local_classes, &file_use_map, &file_namespace);
-        let function_loader = self.function_loader_with(None, &file_use_map, &file_namespace);
+        let function_imports = self.symbol_imports_for(uri).functions;
+        let function_loader = self.function_loader_with(None, &function_imports, &file_namespace);
 
         infer_return_type_at(
             content,

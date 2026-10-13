@@ -61,7 +61,12 @@ impl Backend {
         let resolved_class_loaders = self.resolved_class_loaders(&file_ctx);
         let function_loaders = self.function_loaders(&file_ctx);
         let constant_loaders = file_ctx.per_block(|use_map, namespace| {
-            self.constant_loader_with(file_ctx.resolved_names.as_deref(), use_map, namespace)
+            self.constant_loader_with(
+                file_ctx.resolved_names.as_deref(),
+                use_map,
+                &file_ctx.symbol_imports.constants,
+                namespace,
+            )
         });
         let default_class = ClassInfo::default();
 

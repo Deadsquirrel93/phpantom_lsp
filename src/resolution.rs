@@ -815,6 +815,7 @@ impl Backend {
         // The three helpers below each parse `content`; share one AST.
         let _parse_guard = crate::parser::with_parse_cache(content);
         let file_use_map = self.parse_use_statements(content);
+        let constant_imports = self.parse_symbol_imports(content).constants;
         let file_namespace = self.parse_namespace(content);
 
         // Parse classes with per-class namespace tracking so that
@@ -830,6 +831,7 @@ impl Backend {
             &mut classes_with_ns,
             &blocks,
             &file_use_map,
+            &constant_imports,
             &file_namespace,
         );
         let single_namespace = {
@@ -1270,7 +1272,12 @@ impl Backend {
                 if !classes.is_empty() {
                     let empty_use_map = HashMap::new();
                     let stub_namespace = self.parse_namespace(stub_content);
-                    Self::resolve_parent_class_names(&mut classes, &empty_use_map, &stub_namespace);
+                    Self::resolve_parent_class_names(
+                        &mut classes,
+                        &empty_use_map,
+                        &empty_use_map,
+                        &stub_namespace,
+                    );
                     let class_uri = format!("phpantom-stub-fn://{}", name);
                     let arc_classes: Vec<Arc<ClassInfo>> =
                         classes.into_iter().map(Arc::new).collect();
@@ -1343,7 +1350,8 @@ impl Backend {
         self.find_or_load_class(&format!("{}\\{}", ns, name))
     }
 
-    /// Resolve a function name using use-map and namespace context.
+    /// Resolve a function name using the file's `use function` imports and
+    /// namespace.
     ///
     /// Equivalent to [`resolve_function_name_at`](Self::resolve_function_name_at)
     /// with no per-offset name resolution.  Prefer the offset-aware
@@ -1353,10 +1361,10 @@ impl Backend {
     pub(crate) fn resolve_function_name(
         &self,
         name: &str,
-        file_use_map: &HashMap<String, String>,
+        function_imports: &HashMap<String, String>,
         file_namespace: &Option<String>,
     ) -> Option<FunctionInfo> {
-        self.resolve_function_name_at(name, None, 0, file_use_map, file_namespace)
+        self.resolve_function_name_at(name, None, 0, function_imports, file_namespace)
     }
 
     /// Whether discovery or full parsing has seen this exact function FQN.
@@ -1402,13 +1410,14 @@ impl Backend {
     ///
     /// Candidate order mirrors PHP's unqualified-call resolution: the
     /// namespace-local name wins, with the bare name as the global
-    /// fallback, then the use-map alias and the single-namespace guess.
+    /// fallback, then the `use function` alias and the single-namespace
+    /// guess.
     pub(crate) fn resolve_function_name_at(
         &self,
         name: &str,
         resolved_names: Option<&crate::names::OwnedResolvedNames>,
         offset: u32,
-        file_use_map: &HashMap<String, String>,
+        function_imports: &HashMap<String, String>,
         file_namespace: &Option<String>,
     ) -> Option<FunctionInfo> {
         // A leading backslash (`\response`, `\App\Helpers\foo`) is an
@@ -1431,7 +1440,7 @@ impl Backend {
             None
         };
 
-        let use_resolved: Option<String> = file_use_map.get(name).cloned();
+        let use_resolved: Option<String> = function_imports.get(name).cloned();
         let ns_qualified: Option<String> = file_namespace
             .as_ref()
             .map(|ns| format!("{}\\{}", ns, name));
@@ -1689,8 +1698,11 @@ impl Backend {
         &'a self,
         ctx: &'a FileContext,
     ) -> impl Fn(&str, u32) -> Option<FunctionInfo> + 'a {
-        let load =
-            self.function_loader_with(ctx.resolved_names.as_deref(), &ctx.use_map, &ctx.namespace);
+        let load = self.function_loader_with(
+            ctx.resolved_names.as_deref(),
+            &ctx.symbol_imports.functions,
+            &ctx.namespace,
+        );
         move |name: &str, offset: u32| {
             let mut fi = load(name, offset)?;
             self.bind_pest_closure_this(&mut fi, ctx.pest_uses.as_deref());
@@ -1704,8 +1716,12 @@ impl Backend {
         &'a self,
         ctx: &'a FileContext,
     ) -> crate::types::PerBlock<'a, impl Fn(&str, u32) -> Option<FunctionInfo> + 'a> {
-        ctx.per_block(|use_map, namespace| {
-            let load = self.function_loader_with(ctx.resolved_names.as_deref(), use_map, namespace);
+        ctx.per_block(|_, namespace| {
+            let load = self.function_loader_with(
+                ctx.resolved_names.as_deref(),
+                &ctx.symbol_imports.functions,
+                namespace,
+            );
             move |name: &str, offset: u32| {
                 let mut fi = load(name, offset)?;
                 self.bind_pest_closure_this(&mut fi, ctx.pest_uses.as_deref());
@@ -1718,7 +1734,8 @@ impl Backend {
     /// components.
     ///
     /// Useful when the caller does not have a full `FileContext` or
-    /// needs to use a different use-map / namespace.  The closure's
+    /// needs to use different imports / namespace.  `function_imports` is
+    /// the file's `use function` table.  The closure's
     /// second argument is the byte offset of the function-name
     /// identifier; pass `0` when no offset is available.  Callers that
     /// have per-offset name resolution should supply `resolved_names` so
@@ -1727,11 +1744,11 @@ impl Backend {
     pub(crate) fn function_loader_with<'a>(
         &'a self,
         resolved_names: Option<&'a crate::names::OwnedResolvedNames>,
-        use_map: &'a HashMap<String, String>,
+        function_imports: &'a HashMap<String, String>,
         namespace: &'a Option<String>,
     ) -> impl Fn(&str, u32) -> Option<FunctionInfo> + 'a {
         move |name: &str, offset: u32| {
-            self.resolve_function_name_at(name, resolved_names, offset, use_map, namespace)
+            self.resolve_function_name_at(name, resolved_names, offset, function_imports, namespace)
         }
     }
 
@@ -1799,7 +1816,12 @@ impl Backend {
         &'a self,
         ctx: &'a FileContext,
     ) -> impl Fn(&str, u32) -> Option<Option<String>> + 'a {
-        self.constant_loader_with(ctx.resolved_names.as_deref(), &ctx.use_map, &ctx.namespace)
+        self.constant_loader_with(
+            ctx.resolved_names.as_deref(),
+            &ctx.use_map,
+            &ctx.symbol_imports.constants,
+            &ctx.namespace,
+        )
     }
 
     /// Bundle the four cross-file resolvers a diagnostic collector hands
@@ -1847,10 +1869,18 @@ impl Backend {
         &'a self,
         resolved_names: Option<&'a crate::names::OwnedResolvedNames>,
         use_map: &'a HashMap<String, String>,
+        constant_imports: &'a HashMap<String, String>,
         namespace: &'a Option<String>,
     ) -> impl Fn(&str, u32) -> Option<Option<String>> + 'a {
         move |name: &str, offset: u32| {
-            self.resolve_constant_name_at(name, resolved_names, offset, use_map, namespace)
+            self.resolve_constant_name_at(
+                name,
+                resolved_names,
+                offset,
+                use_map,
+                constant_imports,
+                namespace,
+            )
         }
     }
 
@@ -1873,6 +1903,7 @@ impl Backend {
         resolved_names: Option<&crate::names::OwnedResolvedNames>,
         offset: u32,
         use_map: &HashMap<String, String>,
+        constant_imports: &HashMap<String, String>,
         namespace: &Option<String>,
     ) -> Option<Option<String>> {
         // A leading backslash is an explicit absolute reference: it names
@@ -1893,8 +1924,10 @@ impl Backend {
         // names: a bare name may be a `use const` alias, and the first
         // segment of a qualified name may be an imported namespace.
         let use_resolved: Option<String> = match name.split_once('\\') {
-            Some((first, rest)) => use_map.get(first).map(|fqn| format!("{fqn}\\{rest}")),
-            None => use_map.get(name).cloned(),
+            Some((first, rest)) => {
+                crate::util::lookup_import(use_map, first).map(|fqn| format!("{fqn}\\{rest}"))
+            }
+            None => constant_imports.get(name).cloned(),
         };
         let ns_qualified: Option<String> = namespace.as_ref().map(|ns| format!("{ns}\\{name}"));
 

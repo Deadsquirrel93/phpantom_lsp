@@ -312,7 +312,7 @@ pub(crate) fn parse_config_tree(content: &str) -> Option<ConfigNode> {
     // statements, so `use App\Models\User; ... User::class` yields the
     // fully-qualified `App\Models\User` rather than the bare short name.
     let mut use_map: HashMap<String, String> = HashMap::new();
-    Backend::extract_use_statements_from_statements(program.statements.iter(), &mut use_map);
+    Backend::extract_use_statements_from_statements(program.statements.iter(), &mut use_map, None);
 
     Some(node_from_expr(expr, content, &use_map))
 }

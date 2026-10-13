@@ -1621,9 +1621,16 @@ impl Backend {
     pub(crate) fn parse_php_resolved(&self, content: &str) -> Vec<ClassInfo> {
         let _parse_guard = with_parse_cache(content);
         let use_map = self.parse_use_statements(content);
+        let constant_imports = self.parse_symbol_imports(content).constants;
         let namespace = self.parse_namespace(content);
         let (mut classes, blocks) = Self::parse_php_classes_by_block(content, None);
-        Self::resolve_parent_class_names_by_block(&mut classes, &blocks, &use_map, &namespace);
+        Self::resolve_parent_class_names_by_block(
+            &mut classes,
+            &blocks,
+            &use_map,
+            &constant_imports,
+            &namespace,
+        );
         classes
             .into_iter()
             .map(|(mut cls, ns, _)| {
@@ -1684,16 +1691,22 @@ impl Backend {
     ) {
         with_parsed_program(content, "parse_php", |program, content| {
             let mut use_map = HashMap::new();
-            Self::extract_use_statements_from_statements(program.statements.iter(), &mut use_map);
+            Self::extract_use_statements_from_statements(
+                program.statements.iter(),
+                &mut use_map,
+                None,
+            );
             let namespace = Self::extract_namespace_from_statements(program.statements.iter());
 
             let mut blocks: Vec<NamespaceSpan> = Vec::new();
             for statement in program.statements.iter() {
                 if let Statement::Namespace(ns) = statement {
                     let mut block_use_map = HashMap::new();
+                    let mut block_symbol_imports = crate::types::SymbolImports::default();
                     Self::extract_use_statements_from_statements(
                         ns.statements().iter(),
                         &mut block_use_map,
+                        Some(&mut block_symbol_imports),
                     );
                     let span = ns.span();
                     blocks.push(NamespaceSpan {
@@ -1705,6 +1718,7 @@ impl Backend {
                         start: span.start.offset,
                         end: span.end.offset,
                         use_map: block_use_map,
+                        symbol_imports: block_symbol_imports,
                     });
                 }
             }
@@ -1796,7 +1810,11 @@ impl Backend {
     ) -> Vec<FunctionInfo> {
         with_parsed_program(content, "parse_functions", |program, content| {
             let mut use_map = HashMap::new();
-            Self::extract_use_statements_from_statements(program.statements.iter(), &mut use_map);
+            Self::extract_use_statements_from_statements(
+                program.statements.iter(),
+                &mut use_map,
+                None,
+            );
             let namespace = Self::extract_namespace_from_statements(program.statements.iter());
 
             let doc_ctx = DocblockCtx {
@@ -1852,13 +1870,32 @@ impl Backend {
     ///   - Aliased use: `use Foo\Bar as Baz;`
     ///   - Grouped use: `use Foo\{Bar, Baz};`
     ///   - Mixed grouped use: `use Foo\{Bar, function baz, const QUX};`
-    ///     (function / const imports are skipped — we only track classes)
+    ///     (function / const imports are skipped; see
+    ///     [`parse_symbol_imports`](Self::parse_symbol_imports))
     ///   - Use statements inside namespace bodies
     pub(crate) fn parse_use_statements(&self, content: &str) -> HashMap<String, String> {
         with_parsed_program(content, "parse_use_statements", |program, _content| {
             let mut use_map = HashMap::new();
-            Self::extract_use_statements_from_statements(program.statements.iter(), &mut use_map);
+            Self::extract_use_statements_from_statements(
+                program.statements.iter(),
+                &mut use_map,
+                None,
+            );
             use_map
+        })
+    }
+
+    /// Parse PHP source text and extract its `use function` and `use const`
+    /// imports.
+    pub(crate) fn parse_symbol_imports(&self, content: &str) -> crate::types::SymbolImports {
+        with_parsed_program(content, "parse_symbol_imports", |program, _content| {
+            let mut imports = crate::types::SymbolImports::default();
+            Self::extract_use_statements_from_statements(
+                program.statements.iter(),
+                &mut HashMap::new(),
+                Some(&mut imports),
+            );
+            imports
         })
     }
 

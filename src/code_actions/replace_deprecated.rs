@@ -28,6 +28,7 @@ use crate::virtual_members::resolve_class_fully_cached;
 /// [`resolve_subject_to_class`] stays under the argument limit.
 struct FileCtx<'a> {
     use_map: &'a HashMap<String, String>,
+    function_imports: &'a HashMap<String, String>,
     namespace: &'a Option<String>,
     local_classes: &'a [Arc<ClassInfo>],
 }
@@ -66,6 +67,7 @@ impl Backend {
         // them, including in a file that declares several blocks.
         let (file_use_map, file_namespace) =
             self.use_map_and_namespace_at(uri, request_start as u32);
+        let function_imports = self.symbol_imports_for(uri).functions;
         let local_classes: Vec<Arc<ClassInfo>> = self
             .symbols
             .uri_classes_index
@@ -79,6 +81,7 @@ impl Backend {
 
         let file_ctx = FileCtx {
             use_map: &file_use_map,
+            function_imports: &function_imports,
             namespace: &file_namespace,
             local_classes: &local_classes,
         };
@@ -91,11 +94,14 @@ impl Backend {
 
             match &span.kind {
                 SymbolKind::FunctionCall { name, .. } => {
-                    let func_info =
-                        match self.resolve_function_name(name, &file_use_map, &file_namespace) {
-                            Some(f) => f,
-                            None => continue,
-                        };
+                    let func_info = match self.resolve_function_name(
+                        name,
+                        &function_imports,
+                        &file_namespace,
+                    ) {
+                        Some(f) => f,
+                        None => continue,
+                    };
 
                     let replacement_template = match &func_info.deprecated_replacement {
                         Some(r) => r.clone(),
@@ -493,7 +499,7 @@ fn resolve_subject_to_class(
 ) -> Option<ClassInfo> {
     let class_loader = backend.class_loader_with(ctx.local_classes, ctx.use_map, ctx.namespace);
     let resolved_class_loader = backend.resolved_class_loader_with(ctx.local_classes);
-    let function_loader = backend.function_loader_with(None, ctx.use_map, ctx.namespace);
+    let function_loader = backend.function_loader_with(None, ctx.function_imports, ctx.namespace);
     let res_ctx = crate::type_engine::subject_resolution::SubjectResolutionCtx {
         local_classes: ctx.local_classes,
         use_map: ctx.use_map,

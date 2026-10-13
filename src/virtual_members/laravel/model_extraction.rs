@@ -2007,6 +2007,7 @@ class InterpolatedFactory {
         Backend::resolve_parent_class_names(
             &mut classes,
             &use_map,
+            &HashMap::new(),
             &Some("Database\\Factories".to_string()),
         );
 
@@ -2078,6 +2079,7 @@ class EscapedDoubleQuotedStringFactory {
         Backend::resolve_parent_class_names(
             &mut classes,
             &use_map,
+            &HashMap::new(),
             &Some("Database\\Factories".to_string()),
         );
 
@@ -2170,6 +2172,7 @@ class InvalidEscapeFactory {
             .collect();
         Backend::resolve_parent_class_names(
             &mut classes,
+            &HashMap::new(),
             &HashMap::new(),
             &Some("Database\\Factories".to_string()),
         );

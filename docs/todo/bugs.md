@@ -88,41 +88,6 @@ scope at the name (the enclosing class's and function's `@template` tags and
 the class's aliases), and qualify every other miss with the namespace as
 `resolve_code_class_name` does.
 
-#### B28. A `use function` or `use const` import can claim a class name
-
-**Impact: Low-Medium · Complexity: Medium**
-
-```php
-namespace App\Console;
-
-use function Laravel\Prompts\table;
-
-class Table {}
-
-$t = new Table(); // PHPantom: `Laravel\Prompts\table`, not `App\Console\Table`
-```
-
-The file's `use` map holds function and constant imports under their short
-name alongside class imports (`register_use_item` in
-`src/parser/use_statements.rs`), and class-name resolution cannot tell them
-apart. Since class imports match case-insensitively (`lookup_import` in
-`src/util.rs`), `Table` finds the `table` function import, and an import that
-claims a name is final, so the class is never looked up in the namespace. A
-`use const App\VERSION;` does the same to a class `Version`. When two keys
-differ only in case, which one answers depends on hash-map order. Other
-readers of the map treat every entry as a class too (class completion,
-`use_map.values()` in `completion/handler/class_constant.rs`).
-
-The same split leaves declarations case-sensitive: `resolve_name` in
-`src/parser/ast_update.rs` matches imports exactly, so with `use Lib\Money;`
-a hint `money $m` reads as `App\money` while `new money()` in a body reads as
-`Lib\Money`. Making it case-insensitive before function imports are split out
-would spread the collision above to every signature.
-
-**Where to change:** keep function and constant imports out of the class
-import table (a separate map per kind, as `mago-names` resolves them), then
-switch `resolve_name` to `lookup_import`.
-
 ## Miscellaneous
 
 No outstanding items.

@@ -41,7 +41,10 @@ impl Backend {
         // that block alone.
         let blocks = self.import_blocks(uri);
 
-        if blocks.iter().all(|block| block.use_map.is_empty()) {
+        if blocks
+            .iter()
+            .all(|block| block.use_map.is_empty() && block.symbol_imports.is_empty())
+        {
             return;
         }
 
@@ -85,8 +88,10 @@ impl Backend {
         // We also check docblock type references, which are already emitted
         // as ClassReference spans by the symbol map extraction.
         //
-        // One set per block, holding the aliases referenced inside it.
-        let mut referenced_aliases: Vec<HashSet<&str>> = vec![HashSet::new(); blocks.len()];
+        // One entry per block, holding the aliases referenced inside it.
+        let mut referenced_aliases: Vec<ReferencedAliases<'_>> = (0..blocks.len())
+            .map(|_| ReferencedAliases::default())
+            .collect();
 
         for span in &symbol_map.spans {
             // Skip spans that fall on `use` statement lines — those are
@@ -95,11 +100,14 @@ impl Backend {
                 continue;
             }
 
-            let name = match &span.kind {
+            // Which import table a bare name is looked up in.  A qualified
+            // name's first segment is always a namespace, imported with a
+            // class-style `use`.
+            let (name, kind) = match &span.kind {
                 // The name may be fully qualified, partially qualified,
                 // or unqualified.  We need to check if the first segment
                 // (or the whole name for unqualified) matches a use alias.
-                SymbolKind::ClassReference { name, .. } => name.as_str(),
+                SymbolKind::ClassReference { name, .. } => (name.as_str(), ImportKind::Class),
 
                 SymbolKind::MemberAccess {
                     subject_text,
@@ -115,23 +123,32 @@ impl Backend {
                     {
                         continue;
                     }
-                    trimmed
+                    (trimmed, ImportKind::Class)
                 }
 
-                // `use function` imports are tracked in the use_map,
-                // so this marks them as referenced (preventing false
-                // "unused import" diagnostics).
-                SymbolKind::FunctionCall { name, .. } => name.as_str(),
+                SymbolKind::FunctionCall { name, .. } => (name.as_str(), ImportKind::Function),
 
-                SymbolKind::ConstantReference { name, .. } => name.as_str(),
+                SymbolKind::ConstantReference { name, .. } => (name.as_str(), ImportKind::Constant),
 
                 _ => continue,
             };
 
             let index = ImportBlock::index_at(&blocks, span.start as usize);
+            let block = &blocks[index];
+            let referenced = &mut referenced_aliases[index];
             let first_segment = extract_first_segment(name);
-            if let Some((alias, _)) = blocks[index].use_map.get_key_value(first_segment) {
-                referenced_aliases[index].insert(alias.as_str());
+            let (table, set) = match kind {
+                _ if first_segment.len() != name.len() => (&block.use_map, &mut referenced.classes),
+                ImportKind::Class => (&block.use_map, &mut referenced.classes),
+                ImportKind::Function => {
+                    (&block.symbol_imports.functions, &mut referenced.functions)
+                }
+                ImportKind::Constant => {
+                    (&block.symbol_imports.constants, &mut referenced.constants)
+                }
+            };
+            if let Some((alias, _)) = table.get_key_value(first_segment) {
+                set.insert(alias.as_str());
             }
         }
 
@@ -159,16 +176,24 @@ impl Backend {
         uri: &str,
         content: &str,
         block: &ImportBlock,
-        referenced: &HashSet<&str>,
+        referenced: &ReferencedAliases<'_>,
         ranges: &UseRanges<'_>,
         out: &mut Vec<Diagnostic>,
     ) {
         // Filter to only aliases the symbol map didn't find.
-        let unused_aliases: Vec<(&String, &String)> = block
-            .use_map
-            .iter()
-            .filter(|(alias, _)| !referenced.contains(alias.as_str()))
-            .collect();
+        let imports = &block.symbol_imports;
+        let unused_aliases: Vec<(&String, &String)> = [
+            (&block.use_map, &referenced.classes),
+            (&imports.functions, &referenced.functions),
+            (&imports.constants, &referenced.constants),
+        ]
+        .into_iter()
+        .flat_map(|(table, seen)| {
+            table
+                .iter()
+                .filter(|(alias, _)| !seen.contains(alias.as_str()))
+        })
+        .collect();
 
         if unused_aliases.is_empty() {
             return;
@@ -232,6 +257,23 @@ impl Backend {
             }
         }
     }
+}
+
+/// The kind of import a reference can use, by the symbol table PHP looks
+/// its name up in.
+#[derive(Clone, Copy)]
+enum ImportKind {
+    Class,
+    Function,
+    Constant,
+}
+
+/// The aliases one `namespace` block's references use, per import kind.
+#[derive(Default)]
+struct ReferencedAliases<'a> {
+    classes: HashSet<&'a str>,
+    functions: HashSet<&'a str>,
+    constants: HashSet<&'a str>,
 }
 
 /// The byte ranges of a file's `use` statements and class declaration

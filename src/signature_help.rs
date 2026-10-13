@@ -591,6 +591,7 @@ impl Backend {
                     let patched_ctx = FileContext {
                         classes: patched_classes,
                         use_map: ctx.use_map.clone(),
+                        symbol_imports: ctx.symbol_imports.clone(),
                         namespace: ctx.namespace.clone(),
                         namespace_spans: ctx.namespace_spans.clone(),
                         resolved_names: ctx.resolved_names.clone(),

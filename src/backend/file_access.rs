@@ -229,6 +229,7 @@ impl Backend {
             .get(uri)
             .cloned()
             .unwrap_or_default();
+        let symbol_imports = self.symbol_imports_for(uri);
 
         let (namespace, namespace_spans) = self.namespace_and_spans(uri);
         let resolved_names = self.resolved_names.read().get(uri).cloned();
@@ -236,6 +237,7 @@ impl Backend {
         FileContext {
             classes,
             use_map,
+            symbol_imports,
             namespace,
             namespace_spans,
             resolved_names,
@@ -374,6 +376,7 @@ impl Backend {
                     .map(|span| ImportBlock {
                         namespace: span.namespace.clone(),
                         use_map: span.use_map.clone(),
+                        symbol_imports: span.symbol_imports.clone(),
                         range: Some((span.start as usize, span.end as usize)),
                     })
                     .collect();
@@ -382,6 +385,7 @@ impl Backend {
         vec![ImportBlock {
             namespace: self.first_file_namespace(uri),
             use_map: self.file_use_map(uri),
+            symbol_imports: self.symbol_imports_for(uri),
             range: None,
         }]
     }
@@ -416,6 +420,15 @@ impl Backend {
     /// querying `resolved_names` directly via [`file_context`] instead.
     pub(crate) fn file_use_map(&self, uri: &str) -> std::collections::HashMap<String, String> {
         self.file_imports
+            .read()
+            .get(uri)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// The `use function` and `use const` imports of a file.
+    pub(crate) fn symbol_imports_for(&self, uri: &str) -> crate::types::SymbolImports {
+        self.file_symbol_imports
             .read()
             .get(uri)
             .cloned()
@@ -467,6 +480,7 @@ impl Backend {
         self.morph_column_spans_cache.write().clear();
         self.evict_reference_index_uri(uri);
         self.file_imports.write().remove(uri);
+        self.file_symbol_imports.write().remove(uri);
         self.resolved_names.write().remove(uri);
         self.file_pest_uses.write().remove(uri);
         self.file_namespaces.write().remove(uri);
@@ -560,8 +574,10 @@ pub(crate) fn namespace_in_spans(spans: &[NamespaceSpan], byte_offset: u32) -> O
 pub(crate) struct ImportBlock {
     /// The block's namespace, or `None` for the global namespace.
     pub(crate) namespace: Option<String>,
-    /// The imports the block declares (alias → FQN).
+    /// The class imports the block declares (alias → FQN).
     pub(crate) use_map: HashMap<String, String>,
+    /// The `use function` and `use const` imports the block declares.
+    pub(crate) symbol_imports: crate::types::SymbolImports,
     /// The block's byte range, or `None` when the file has only one
     /// block and its imports apply to the whole file.
     pub(crate) range: Option<(usize, usize)>,

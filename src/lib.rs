@@ -660,6 +660,10 @@ pub struct Backend {
     /// Maps a file URI to its `use` statement mappings (short name → fully qualified name).
     /// For example, `use Klarna\Rest\Resource;` produces `"Resource" → "Klarna\Rest\Resource"`.
     pub(crate) file_imports: Arc<RwLock<HashMap<String, HashMap<String, String>>>>,
+    /// Maps a file URI to its `use function` and `use const` imports, kept
+    /// apart from the class imports in `file_imports`.  Files without any
+    /// have no entry.
+    pub(crate) file_symbol_imports: Arc<RwLock<HashMap<String, types::SymbolImports>>>,
     /// Per-file name resolution data produced by `mago-names`.
     ///
     /// Maps a file URI to an [`OwnedResolvedNames`](names::OwnedResolvedNames)
@@ -1269,6 +1273,7 @@ impl Backend {
             whole_file_coalesce: Arc::new(WholeFileCoalesce::default()),
             client: None,
             file_imports: Arc::new(RwLock::new(HashMap::new())),
+            file_symbol_imports: Arc::new(RwLock::new(HashMap::new())),
             resolved_names: Arc::new(RwLock::new(HashMap::new())),
             file_namespaces: Arc::new(RwLock::new(HashMap::new())),
             phar_archives: Arc::new(RwLock::new(HashMap::new())),
@@ -2103,6 +2108,7 @@ impl Backend {
             // worker reads them concurrently with the main Backend.
             client: self.client.clone(),
             file_imports: Arc::clone(&self.file_imports),
+            file_symbol_imports: Arc::clone(&self.file_symbol_imports),
             resolved_names: Arc::clone(&self.resolved_names),
             file_namespaces: Arc::clone(&self.file_namespaces),
             phar_archives: Arc::clone(&self.phar_archives),

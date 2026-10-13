@@ -180,6 +180,30 @@ pub struct NamespaceSpan {
     /// has a single block, whose imports are the file-wide `file_imports`
     /// table, so the common case stores them once.
     pub use_map: HashMap<String, String>,
+    /// The `use function` and `use const` imports declared inside this
+    /// block, stored the same way as [`use_map`](Self::use_map).
+    pub symbol_imports: SymbolImports,
+}
+
+/// A file's `use function` and `use const` imports.
+///
+/// PHP keeps functions, constants and classes in separate symbol tables, so
+/// `use function Foo\table;` and a class `Table` never collide.  These live
+/// apart from the class import table (`use_map`) for the same reason: class
+/// imports match case-insensitively, and a function or constant alias
+/// sharing a short name with a class would otherwise claim it.
+#[derive(Debug, Clone, Default)]
+pub struct SymbolImports {
+    /// `use function` imports, alias → function FQN.
+    pub functions: HashMap<String, String>,
+    /// `use const` imports, alias → constant FQN.
+    pub constants: HashMap<String, String>,
+}
+
+impl SymbolImports {
+    pub fn is_empty(&self) -> bool {
+        self.functions.is_empty() && self.constants.is_empty()
+    }
 }
 
 impl NamespaceSpan {
@@ -2879,9 +2903,13 @@ impl FactoryCount {
 pub(crate) struct FileContext {
     /// Classes extracted from the file's AST (from `uri_classes_index`).
     pub classes: Vec<Arc<ClassInfo>>,
-    /// Import table mapping short names to fully-qualified names
+    /// Class import table mapping short names to fully-qualified names
     /// (from `file_imports`).
     pub use_map: HashMap<String, String>,
+    /// The file's function and constant imports (from
+    /// `file_symbol_imports`).  Like `use_map`, every block's imports;
+    /// see [`symbol_imports_at`](Self::symbol_imports_at).
+    pub symbol_imports: SymbolImports,
     /// The file's declared namespace, if any (from `file_namespaces`).
     ///
     /// This is the *first* `namespace` block's name. A file may declare
@@ -2980,6 +3008,13 @@ impl FileContext {
             .map_or(&self.use_map, |span| &span.use_map)
     }
 
+    /// The `use function` and `use const` imports in force at `offset`,
+    /// scoped to a block the way [`use_map_at`](Self::use_map_at) is.
+    pub fn symbol_imports_at(&self, offset: u32) -> &SymbolImports {
+        self.span_at(offset)
+            .map_or(&self.symbol_imports, |span| &span.symbol_imports)
+    }
+
     /// The namespace block containing `offset`, when the file has several.
     fn span_at(&self, offset: u32) -> Option<&NamespaceSpan> {
         NamespaceSpan::containing(self.namespace_spans.as_ref()?, offset)
@@ -3023,6 +3058,7 @@ impl FileContext {
         FileContext {
             classes: self.classes.clone(),
             use_map: self.use_map_at(offset).clone(),
+            symbol_imports: self.symbol_imports_at(offset).clone(),
             namespace: self.namespace_at(offset).clone(),
             namespace_spans: self.namespace_spans.clone(),
             resolved_names: self.resolved_names.clone(),

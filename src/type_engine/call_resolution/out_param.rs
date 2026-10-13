@@ -321,8 +321,11 @@ fn read_out_type(
     let use_map = file_ctx.use_map_at(name_offset);
     let class_loader = backend.class_loader_with(&file_ctx.classes, use_map, namespace);
     let resolved_class_loader = backend.resolved_class_loader_with(&file_ctx.classes);
-    let function_loader =
-        backend.function_loader_with(file_ctx.resolved_names.as_deref(), use_map, namespace);
+    let function_loader = backend.function_loader_with(
+        file_ctx.resolved_names.as_deref(),
+        &file_ctx.symbol_imports_at(name_offset).functions,
+        namespace,
+    );
 
     // The scope cache and the chain cache both key on offsets alone, and
     // the offsets below belong to another file. Neither may answer, nor

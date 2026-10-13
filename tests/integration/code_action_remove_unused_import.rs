@@ -224,3 +224,82 @@ fn an_import_used_only_in_another_namespace_block_is_unused() {
     let lines: Vec<u32> = diags.iter().map(|d| d.range.start.line).collect();
     assert_eq!(lines, [2], "only block A's import is unused: {diags:?}");
 }
+
+/// The `Unused import '…'` messages for `content`.
+fn unused_imports(content: &str) -> Vec<String> {
+    let backend = create_test_backend();
+    let mut messages: Vec<String> = crate::common::collect_diagnostics_with(
+        &backend,
+        content,
+        Backend::collect_unused_import_diagnostics,
+    )
+    .into_iter()
+    .map(|d| d.message)
+    .collect();
+    messages.sort();
+    messages
+}
+
+#[test]
+fn function_and_constant_imports_are_checked_for_use() {
+    let content = r#"<?php
+namespace App;
+
+use function Lib\used_fn;
+use function Lib\unused_fn;
+use const Lib\USED_CONST;
+use const Lib\UNUSED_CONST;
+
+used_fn(USED_CONST);
+"#;
+    assert_eq!(
+        unused_imports(content),
+        [
+            "Unused import 'Lib\\UNUSED_CONST'",
+            "Unused import 'Lib\\unused_fn'",
+        ]
+    );
+}
+
+/// A function import is used by a call, not by a class or constant of the
+/// same name, and the other way round.
+#[test]
+fn an_import_is_used_only_by_its_own_kind() {
+    let content = r#"<?php
+namespace App;
+
+use Lib\Table;
+use function Lib\table;
+use const Lib\TABLE;
+
+table();
+"#;
+    assert_eq!(
+        unused_imports(content),
+        ["Unused import 'Lib\\TABLE'", "Unused import 'Lib\\Table'"]
+    );
+}
+
+/// Each `namespace` block's function imports are checked against the calls
+/// in that block alone.
+#[test]
+fn function_imports_are_checked_per_namespace_block() {
+    let content = r#"<?php
+namespace A {
+    use function Lib\helper;
+    helper();
+}
+
+namespace B {
+    use function Lib\helper;
+}
+"#;
+    let backend = create_test_backend();
+    let diagnostics = crate::common::collect_diagnostics_with(
+        &backend,
+        content,
+        Backend::collect_unused_import_diagnostics,
+    );
+    assert_eq!(diagnostics.len(), 1, "got {diagnostics:?}");
+    assert_eq!(diagnostics[0].range.start.line, 7);
+}

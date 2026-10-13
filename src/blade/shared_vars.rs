@@ -207,6 +207,7 @@ impl Backend {
             Backend::extract_use_statements_from_statements(
                 program.statements.iter(),
                 &mut use_map,
+                None,
             );
             let namespace = file_namespace(program).or_else(|| file_ctx.namespace.clone());
             let class_loader = self.class_loader_with(&file_ctx.classes, &use_map, &namespace);

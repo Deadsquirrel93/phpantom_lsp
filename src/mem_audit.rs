@@ -1735,6 +1735,9 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
     probe("file_imports", &mut || {
         *backend.file_imports.write() = Default::default()
     });
+    probe("file_symbol_imports", &mut || {
+        *backend.file_symbol_imports.write() = Default::default()
+    });
     probe("symbol_maps", &mut || {
         *backend.symbol_maps.write() = Default::default()
     });

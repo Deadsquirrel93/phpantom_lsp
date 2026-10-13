@@ -119,7 +119,12 @@ pub(crate) fn collect_type_check<S>(
     let function_loaders = backend.function_loaders(&file_ctx);
     let function_loaders = function_loaders.map(|loader| loader as DynFunctionLoader<'_>);
     let constant_loaders = file_ctx.per_block(|use_map, namespace| {
-        backend.constant_loader_with(file_ctx.resolved_names.as_deref(), use_map, namespace)
+        backend.constant_loader_with(
+            file_ctx.resolved_names.as_deref(),
+            use_map,
+            &file_ctx.symbol_imports.constants,
+            namespace,
+        )
     });
     let constant_loaders = constant_loaders.map(|loader| loader as DynConstantLoader<'_>);
     let strict_types = crate::parser::with_parsed_program(content, "strict_types", |program, _| {

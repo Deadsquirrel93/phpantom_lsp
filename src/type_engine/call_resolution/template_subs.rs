@@ -1216,18 +1216,33 @@ fn resolve_operand_constant_value(name: &str, ctx: &ResolutionCtx<'_>) -> Option
     {
         return Some(value);
     }
-    // Last: a `use const` import, which is the one spelling neither the
-    // enclosing namespace nor the global scope accounts for.  The file's
-    // import table is read from the source here because a type operand
-    // carries no offset to resolve against, and it is read only once
-    // every cheaper candidate has missed — a docblock naming an imported
+    // Last: an import, which is the one spelling neither the enclosing
+    // namespace nor the global scope accounts for.  The file's import
+    // tables are read from the source here because a type operand carries
+    // no offset to resolve against, and they are read only once every
+    // cheaper candidate has missed — a docblock naming an imported
     // constant is rare, and the walk runs over the already-parsed AST.
-    let use_map = backend.parse_use_statements(ctx.content);
-
-    let imported = match name.split_once('\\') {
-        Some((first, rest)) => use_map.get(first).map(|fqn| format!("{fqn}\\{rest}")),
-        None => use_map.get(name).cloned(),
-    }?;
+    //
+    // A `use const` alias may arrive qualified with the enclosing
+    // namespace, the way a bare name in a type is read as a class.
+    let ns = ctx.current_class.and_then(|c| c.file_namespace.as_deref());
+    let alias = match ns.and_then(|ns| name.strip_prefix(ns)?.strip_prefix('\\')) {
+        Some(alias) if !alias.contains('\\') => alias,
+        _ => name,
+    };
+    let imported = match backend
+        .parse_symbol_imports(ctx.content)
+        .constants
+        .remove(alias)
+    {
+        Some(fqn) => fqn,
+        None => {
+            let (first, rest) = name.split_once('\\')?;
+            let use_map = backend.parse_use_statements(ctx.content);
+            let prefix = crate::util::lookup_import(&use_map, first)?;
+            format!("{prefix}\\{rest}")
+        }
+    };
     backend.lookup_indexed_global_constant(&imported)
 }
 

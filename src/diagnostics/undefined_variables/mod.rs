@@ -139,6 +139,7 @@ impl Backend {
                             call_kind,
                             enclosing_class_name,
                             file_use_map,
+                            &file_ctx.symbol_imports_at(offset).functions,
                             file_namespace,
                         )
                     };
@@ -158,13 +159,21 @@ impl Backend {
         call_kind: &ByRefCallKind<'_>,
         enclosing_class_name: Option<&str>,
         file_use_map: &std::collections::HashMap<String, String>,
+        function_imports: &std::collections::HashMap<String, String>,
         file_namespace: &Option<String>,
     ) -> Option<Vec<usize>> {
         match call_kind {
             ByRefCallKind::Function(name) => {
-                // Build FQN candidates: the raw name, plus the
-                // namespace-qualified name if the file has a namespace.
-                let fqn = crate::util::resolve_to_fqn(name, file_use_map, file_namespace);
+                // Build FQN candidates: the raw name, plus the imported or
+                // namespace-qualified name.  A bare name is a `use function`
+                // alias or local to the namespace; only a qualified name's
+                // first segment goes through the class/namespace imports.
+                let imports = if name.contains('\\') {
+                    file_use_map
+                } else {
+                    function_imports
+                };
+                let fqn = crate::util::resolve_to_fqn(name, imports, file_namespace);
                 let mut candidates: Vec<&str> = vec![*name];
                 if fqn != *name {
                     candidates.push(&fqn);

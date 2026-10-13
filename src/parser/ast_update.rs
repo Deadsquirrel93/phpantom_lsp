@@ -75,6 +75,7 @@ pub(crate) struct AstIndexUpdate {
     parse_errors: Vec<ParseErrorEntry>,
     classes: Vec<ClassInfo>,
     use_map: HashMap<String, String>,
+    symbol_imports: crate::types::SymbolImports,
     resolved_names: Arc<OwnedResolvedNames>,
     /// What a Pest test file binds to itself (see [`crate::pest::file_uses`]).
     pest_uses: Option<Arc<[String]>>,
@@ -396,6 +397,7 @@ impl Backend {
     fn extract_blade_wrapper_method_use_statements(
         statement: &Statement<'_>,
         use_map: &mut HashMap<String, String>,
+        symbol_imports: &mut crate::types::SymbolImports,
     ) {
         use mago_syntax::cst::class_like::member::ClassLikeMember;
         use mago_syntax::cst::class_like::method::MethodBody;
@@ -411,7 +413,11 @@ impl Backend {
                 && bytes_to_str(method.name.value) == crate::blade::WRAPPER_FUNCTION
                 && let MethodBody::Concrete(block) = &method.body
             {
-                Self::extract_use_statements_from_statements(block.statements.iter(), use_map);
+                Self::extract_use_statements_from_statements(
+                    block.statements.iter(),
+                    use_map,
+                    Some(&mut *symbol_imports),
+                );
             }
         }
     }
@@ -646,13 +652,18 @@ impl Backend {
             // names.
             let mut classes_with_ns: Vec<(ClassInfo, Option<String>, Option<usize>)> = Vec::new();
             let mut use_map = HashMap::new();
+            let mut symbol_imports = crate::types::SymbolImports::default();
             let mut namespace: Option<String> = None;
             let mut namespace_spans: Vec<NamespaceSpan> = Vec::new();
 
             for statement in program.statements.iter() {
                 match statement {
                     Statement::Use(use_stmt) => {
-                        Self::extract_use_items(&use_stmt.items, &mut use_map);
+                        Self::extract_use_items(
+                            &use_stmt.items,
+                            &mut use_map,
+                            Some(&mut symbol_imports),
+                        );
                     }
                     Statement::Namespace(ns) => {
                         let block_ns: Option<String> = ns
@@ -670,10 +681,15 @@ impl Backend {
                         // each with the block's namespace.
                         let mut block_classes = Vec::new();
                         let mut block_use_map = HashMap::new();
+                        let mut block_symbol_imports = crate::types::SymbolImports::default();
                         for inner in ns.statements().iter() {
                             match inner {
                                 Statement::Use(use_stmt) => {
-                                    Self::extract_use_items(&use_stmt.items, &mut block_use_map);
+                                    Self::extract_use_items(
+                                        &use_stmt.items,
+                                        &mut block_use_map,
+                                        Some(&mut block_symbol_imports),
+                                    );
                                 }
                                 inner if Self::is_classlike_extraction_candidate(inner) => {
                                     Self::extract_classes_from_statements(
@@ -687,6 +703,7 @@ impl Backend {
                                     Self::extract_use_statements_from_statements(
                                         inner_ns.statements().iter(),
                                         &mut block_use_map,
+                                        Some(&mut block_symbol_imports),
                                     );
                                     Self::extract_classes_from_statements(
                                         inner_ns.statements().iter(),
@@ -717,6 +734,7 @@ impl Backend {
                             start: ns_span.start.offset,
                             end: ns_span.end.offset,
                             use_map: block_use_map,
+                            symbol_imports: block_symbol_imports,
                         });
                     }
                     statement if Self::is_classlike_extraction_candidate(statement) => {
@@ -724,7 +742,11 @@ impl Backend {
                         // in a method rather than a function, which buries
                         // the template's own imports just the same (see the
                         // wrapper-function arm below).
-                        Self::extract_blade_wrapper_method_use_statements(statement, &mut use_map);
+                        Self::extract_blade_wrapper_method_use_statements(
+                            statement,
+                            &mut use_map,
+                            &mut symbol_imports,
+                        );
                         let mut top_classes = Vec::new();
                         Self::extract_classes_from_statements(
                             std::iter::once(statement),
@@ -747,6 +769,7 @@ impl Backend {
                         Self::extract_use_statements_from_statements(
                             func.body.statements.iter(),
                             &mut use_map,
+                            Some(&mut symbol_imports),
                         );
                     }
                     _ => {
@@ -775,8 +798,18 @@ impl Backend {
                             .iter()
                             .map(|(alias, fqn)| (alias.clone(), fqn.clone())),
                     );
+                    let block = &span.symbol_imports;
+                    symbol_imports
+                        .functions
+                        .extend(block.functions.iter().map(|(a, f)| (a.clone(), f.clone())));
+                    symbol_imports
+                        .constants
+                        .extend(block.constants.iter().map(|(a, f)| (a.clone(), f.clone())));
                 } else {
                     use_map.extend(std::mem::take(&mut span.use_map));
+                    let block = std::mem::take(&mut span.symbol_imports);
+                    symbol_imports.functions.extend(block.functions);
+                    symbol_imports.constants.extend(block.constants);
                 }
             }
 
@@ -874,17 +907,19 @@ impl Backend {
                     } else {
                         func.namespace.clone().or_else(|| namespace.clone())
                     };
-                    let func_use_map = if multi_block {
-                        namespace_spans
-                            .iter()
-                            .find(|span| {
-                                func.name_offset >= span.start && func.name_offset <= span.end
-                            })
-                            .map_or(&use_map, |span| &span.use_map)
-                    } else {
-                        &use_map
-                    };
-                    let resolver = Self::build_type_resolver(func_use_map, &func_ns, &skip_names);
+                    let (func_use_map, func_constant_imports) =
+                        match namespace_spans.iter().filter(|_| multi_block).find(|span| {
+                            func.name_offset >= span.start && func.name_offset <= span.end
+                        }) {
+                            Some(span) => (&span.use_map, &span.symbol_imports.constants),
+                            None => (&use_map, &symbol_imports.constants),
+                        };
+                    let resolver = Self::build_type_resolver(
+                        func_use_map,
+                        func_constant_imports,
+                        &func_ns,
+                        &skip_names,
+                    );
                     // The types the docblock settled with a class the native
                     // hint does not name, for loading the function to check.
                     let not_a_class = |name: &str| skip_names.iter().any(|t| t == name);
@@ -1039,6 +1074,7 @@ impl Backend {
                 &mut classes_with_ns,
                 &namespace_spans,
                 &use_map,
+                &symbol_imports.constants,
                 &namespace,
             );
 
@@ -1080,6 +1116,7 @@ impl Backend {
                     start: 0,
                     end: content.len() as u32,
                     use_map: HashMap::new(),
+                    symbol_imports: Default::default(),
                 });
             }
 
@@ -1088,6 +1125,7 @@ impl Backend {
                 parse_errors,
                 classes,
                 use_map,
+                symbol_imports,
                 resolved_names: Arc::new(owned_resolved),
                 pest_uses,
                 namespace_spans,
@@ -1126,6 +1164,7 @@ impl Backend {
             old_anon_fqns: Vec<String>,
             classes: Vec<Arc<ClassInfo>>,
             use_map: HashMap<String, String>,
+            symbol_imports: crate::types::SymbolImports,
             resolved_names: Arc<OwnedResolvedNames>,
             pest_uses: Option<Arc<[String]>>,
             namespace_spans: Vec<NamespaceSpan>,
@@ -1211,6 +1250,7 @@ impl Backend {
                 old_anon_fqns,
                 classes,
                 use_map: update.use_map,
+                symbol_imports: update.symbol_imports,
                 resolved_names: update.resolved_names,
                 pest_uses: update.pest_uses,
                 namespace_spans: update.namespace_spans,
@@ -1609,11 +1649,20 @@ impl Backend {
 
         {
             let mut imports = self.file_imports.write();
+            let mut symbol_imports = self.file_symbol_imports.write();
             let mut resolved_names = self.resolved_names.write();
             let mut pest_uses = self.file_pest_uses.write();
             let mut namespaces = self.file_namespaces.write();
             for update in &mut prepared {
                 imports.insert(update.uri.clone(), std::mem::take(&mut update.use_map));
+                if update.symbol_imports.is_empty() {
+                    symbol_imports.remove(&update.uri);
+                } else {
+                    symbol_imports.insert(
+                        update.uri.clone(),
+                        std::mem::take(&mut update.symbol_imports),
+                    );
+                }
                 resolved_names.insert(update.uri.clone(), Arc::clone(&update.resolved_names));
                 match update.pest_uses.take() {
                     Some(uses) => pest_uses.insert(update.uri.clone(), uses),
@@ -1787,6 +1836,7 @@ impl Backend {
         classes: &mut [(ClassInfo, Option<String>, Option<usize>)],
         blocks: &[NamespaceSpan],
         use_map: &HashMap<String, String>,
+        constant_imports: &HashMap<String, String>,
         namespace: &Option<String>,
     ) {
         let multi_block = blocks.len() > 1;
@@ -1806,13 +1856,21 @@ impl Backend {
                 .map(|&i| std::mem::take(&mut classes[i].0))
                 .collect();
             match group.and_then(|b| blocks.get(b)) {
-                Some(block) => {
-                    Self::resolve_parent_class_names(&mut members, &block.use_map, &block.namespace)
-                }
+                Some(block) => Self::resolve_parent_class_names(
+                    &mut members,
+                    &block.use_map,
+                    &block.symbol_imports.constants,
+                    &block.namespace,
+                ),
                 None if multi_block => {
-                    Self::resolve_parent_class_names(&mut members, use_map, &None)
+                    Self::resolve_parent_class_names(&mut members, use_map, constant_imports, &None)
                 }
-                None => Self::resolve_parent_class_names(&mut members, use_map, namespace),
+                None => Self::resolve_parent_class_names(
+                    &mut members,
+                    use_map,
+                    constant_imports,
+                    namespace,
+                ),
             }
             for (cls, &i) in members.into_iter().zip(&indices) {
                 classes[i].0 = cls;
@@ -1829,9 +1887,15 @@ impl Backend {
     ///      otherwise prepend current namespace
     ///   3. Unqualified (`Bar`) → check use_map; otherwise prepend namespace
     ///   4. No namespace and not in use_map → keep as-is
+    ///
+    /// `constant_imports` is the file's `use const` table: a constant may
+    /// stand in a docblock type (`$flag is PREG_SPLIT_NO_EMPTY`,
+    /// `key-of<TABLE>`), so the type resolver reads it after the class
+    /// imports.
     pub fn resolve_parent_class_names(
         classes: &mut [ClassInfo],
         use_map: &HashMap<String, String>,
+        constant_imports: &HashMap<String, String>,
         namespace: &Option<String>,
     ) {
         // Collect type alias names from ALL classes in the file up-front.
@@ -2013,24 +2077,28 @@ impl Backend {
             Self::resolve_generics_type_args(
                 &mut class.extends_generics,
                 use_map,
+                constant_imports,
                 namespace,
                 &generic_arg_skip,
             );
             Self::resolve_generics_type_args(
                 &mut class.implements_generics,
                 use_map,
+                constant_imports,
                 namespace,
                 &generic_arg_skip,
             );
             Self::resolve_generics_type_args(
                 &mut class.use_generics,
                 use_map,
+                constant_imports,
                 namespace,
                 &generic_arg_skip,
             );
             Self::resolve_generics_type_args(
                 &mut class.mixin_generics,
                 use_map,
+                constant_imports,
                 namespace,
                 &generic_arg_skip,
             );
@@ -2041,7 +2109,8 @@ impl Backend {
             // resolution that falls back to bounds gets unresolvable
             // short names.
             {
-                let bound_resolver = Self::build_type_resolver(use_map, namespace, &tpl_params);
+                let bound_resolver =
+                    Self::build_type_resolver(use_map, constant_imports, namespace, &tpl_params);
                 let defaults = class.template_param_defaults.values_mut();
                 for bound in class.template_param_bounds.values_mut().chain(defaults) {
                     let resolved = bound.resolve_names(&bound_resolver);
@@ -2068,7 +2137,8 @@ impl Backend {
                 .map(|a| a.to_string())
                 .chain(all_alias_names.iter().map(|a| a.to_string()))
                 .collect();
-            let resolver = Self::build_type_resolver(use_map, namespace, &skip_names);
+            let resolver =
+                Self::build_type_resolver(use_map, constant_imports, namespace, &skip_names);
 
             // Also resolve class-like names inside type alias definitions
             // so that `@phpstan-type ActiveUser User` where `User` is
@@ -2116,19 +2186,21 @@ impl Backend {
                 // class-level skip names.  Otherwise reuse the class-level
                 // resolver.
                 let method_skip: Vec<String>;
-                let method_resolver: &dyn Fn(&str) -> String =
-                    if method.template_params().is_empty() {
-                        &resolver
-                    } else {
-                        method_skip = skip_names
-                            .iter()
-                            .cloned()
-                            .chain(method.template_params().iter().map(|a| a.to_string()))
-                            .collect();
-                        // SAFETY: `method_skip` lives until end of this
-                        // `for method` iteration, so the closure is valid.
-                        &Self::build_type_resolver(use_map, namespace, &method_skip)
-                    };
+                let method_resolver: &dyn Fn(&str) -> String = if method
+                    .template_params()
+                    .is_empty()
+                {
+                    &resolver
+                } else {
+                    method_skip = skip_names
+                        .iter()
+                        .cloned()
+                        .chain(method.template_params().iter().map(|a| a.to_string()))
+                        .collect();
+                    // SAFETY: `method_skip` lives until end of this
+                    // `for method` iteration, so the closure is valid.
+                    &Self::build_type_resolver(use_map, constant_imports, namespace, &method_skip)
+                };
 
                 // Asked before qualifying, which sets every class name apart
                 // from the native return type kept as written.
@@ -2289,8 +2361,14 @@ impl Backend {
             // short names relative to the declaring file's imports, and a
             // cross-file consumer has no access to this file's use-map.
             if let Some(doc) = class.doc_members.as_ref()
-                && let Some(resolved) =
-                    Self::resolve_doc_member_types(doc, use_map, namespace, &skip_names, &resolver)
+                && let Some(resolved) = Self::resolve_doc_member_types(
+                    doc,
+                    use_map,
+                    constant_imports,
+                    namespace,
+                    &skip_names,
+                    &resolver,
+                )
             {
                 class.doc_members = Some(resolved);
             }
@@ -2367,6 +2445,7 @@ impl Backend {
     fn resolve_doc_member_types(
         doc: &Arc<DocblockMembers>,
         use_map: &HashMap<String, String>,
+        constant_imports: &HashMap<String, String>,
         namespace: &Option<String>,
         skip_names: &[String],
         resolver: &dyn Fn(&str) -> String,
@@ -2404,7 +2483,12 @@ impl Backend {
                         .cloned()
                         .chain(m.template_params().iter().map(|a| a.to_string()))
                         .collect();
-                    owned_resolver = Self::build_type_resolver(use_map, namespace, &method_skip);
+                    owned_resolver = Self::build_type_resolver(
+                        use_map,
+                        constant_imports,
+                        namespace,
+                        &method_skip,
+                    );
                     &owned_resolver
                 };
 
@@ -2471,10 +2555,11 @@ impl Backend {
     fn resolve_generics_type_args(
         generics: &mut [(Atom, Vec<PhpType>)],
         use_map: &HashMap<String, String>,
+        constant_imports: &HashMap<String, String>,
         namespace: &Option<String>,
         skip_names: &[String],
     ) {
-        let resolver = Self::build_type_resolver(use_map, namespace, skip_names);
+        let resolver = Self::build_type_resolver(use_map, constant_imports, namespace, skip_names);
         for (class_name, type_args) in generics.iter_mut() {
             // Resolve the base class/trait/interface name
             let resolved: String = Self::resolve_name(class_name, use_map, namespace);
@@ -2497,14 +2582,25 @@ impl Backend {
     /// `PhpType::resolve_names()`.  `is_keyword_type` inside `resolve_names`
     /// already handles scalar and keyword types; this closure additionally
     /// skips names in `skip_names` (template params and type alias names).
+    ///
+    /// A bare name no class import claims is read as a `use const` alias
+    /// when it is spelled exactly like one (constant names are
+    /// case-sensitive), since a type may name a constant
+    /// (`$flag is PREG_SPLIT_NO_EMPTY`, `key-of<TABLE>`).
     fn build_type_resolver<'a>(
         use_map: &'a HashMap<String, String>,
+        constant_imports: &'a HashMap<String, String>,
         namespace: &'a Option<String>,
         skip_names: &'a [String],
     ) -> impl Fn(&str) -> String + 'a {
         move |name: &str| {
             if skip_names.iter().any(|s| s == name) {
                 return name.to_string();
+            }
+            if let Some(fqn) = constant_imports.get(name)
+                && crate::util::lookup_import(use_map, name).is_none()
+            {
+                return fqn.clone();
             }
             Self::resolve_name(name, use_map, namespace)
         }
@@ -2532,12 +2628,12 @@ impl Backend {
             // Qualified name — check first segment
             let first = &name[..pos];
             let rest = &name[pos..]; // includes leading '\'
-            if let Some(fqn) = use_map.get(first) {
+            if let Some(fqn) = crate::util::lookup_import(use_map, first) {
                 return format!("{}{}", fqn, rest);
             }
         } else {
             // Unqualified name — check directly
-            if let Some(fqn) = use_map.get(name) {
+            if let Some(fqn) = crate::util::lookup_import(use_map, name) {
                 return fqn.clone();
             }
         }

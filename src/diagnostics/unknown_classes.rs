@@ -174,7 +174,15 @@ impl Backend {
                 && (self.lookup_indexed_global_constant(&fqn).is_some()
                     || self
                         .lookup_indexed_global_constant(crate::util::short_name(&fqn))
-                        .is_some())
+                        .is_some()
+                    || ctx
+                        .file
+                        .symbol_imports
+                        .constants
+                        .get(ref_name)
+                        .is_some_and(|imported| {
+                            self.lookup_indexed_global_constant(imported).is_some()
+                        }))
             {
                 continue;
             }

@@ -12723,6 +12723,79 @@ function acceptsKey(string $key): void {{
     }
 }
 
+/// A `use function` or `use const` import shares no names with classes, so
+/// one spelled like a class (case aside) must not answer for it, in a
+/// signature or in a body.
+#[test]
+fn function_and_constant_imports_do_not_claim_a_class_name() {
+    for import in [
+        "use function Laravel\\Prompts\\table;",
+        "use const App\\TABLE;",
+    ] {
+        let backend = create_test_backend();
+        // Declared in another file, so only the namespace can find it.
+        backend.update_ast(
+            "file:///Table.php",
+            "<?php\nnamespace App\\Console;\n\nclass Table {}\nclass Other {}\n",
+        );
+        let php = format!(
+            r#"<?php
+namespace App\Console;
+
+{import}
+
+/** @param Table $doc */
+function takesTable(Table $native, Table $doc): void {{}}
+
+function run(mixed $m): void {{
+    $t = new Table();
+    $o = new Other();
+    /** @var Table $v */
+    $v = $m;
+    takesTable($t, $v);
+    takesTable($o, $v);
+}}
+"#
+        );
+        let messages = messages_with_code(
+            &collect_diagnostics_with(&backend, &php, Backend::collect_argument_type_diagnostics),
+            "type_mismatch_argument",
+        );
+        assert_eq!(messages.len(), 1, "`{import}`: got {messages:?}");
+        assert!(
+            messages[0].contains("expects App\\Console\\Table, got App\\Console\\Other"),
+            "`{import}`: {messages:?}"
+        );
+    }
+}
+
+/// PHP class names are case-insensitive, so a type hint spelled in another
+/// case than its import still names the imported class.
+#[test]
+fn type_hint_matches_its_import_case_insensitively() {
+    let php = r#"<?php
+namespace Lib {
+    class Money {}
+}
+
+namespace App {
+    use Lib\Money;
+
+    class Other {}
+
+    /** @param money $doc */
+    function pay(money $native, $doc): void {}
+
+    function run(): void {
+        pay(new Money(), new Money());
+        pay(new Other(), new Other());
+    }
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 2, "got {messages:?}");
+}
+
 /// A file may declare several `namespace` blocks. A call in the second
 /// block must resolve against that block's namespace, not the first
 /// block's, or the callee is never found and the check goes silent.

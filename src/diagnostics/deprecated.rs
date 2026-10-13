@@ -375,7 +375,7 @@ impl Backend {
                         name,
                         file_resolved_names.as_deref(),
                         span.start,
-                        file_use_map,
+                        &ctx.file.symbol_imports_at(span.start).functions,
                         file_namespace,
                     ) && let Some(msg) = &func_info.deprecation_message
                         && !is_within_deprecated_scope(

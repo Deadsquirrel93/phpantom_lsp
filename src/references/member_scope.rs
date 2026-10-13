@@ -227,8 +227,11 @@ impl Backend {
         let namespace = ctx.namespace_at(access_offset);
         let class_loader = self.class_loader_with(&ctx.classes, use_map, namespace);
         let resolved_class_loader = self.resolved_class_loader_with(&ctx.classes);
-        let function_loader =
-            self.function_loader_with(ctx.resolved_names.as_deref(), use_map, namespace);
+        let function_loader = self.function_loader_with(
+            ctx.resolved_names.as_deref(),
+            &ctx.symbol_imports_at(access_offset).functions,
+            namespace,
+        );
         let resolution_ctx = crate::type_engine::subject_resolution::SubjectResolutionCtx {
             local_classes: &ctx.classes,
             use_map,

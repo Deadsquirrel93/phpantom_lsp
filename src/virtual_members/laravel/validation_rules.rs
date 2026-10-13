@@ -352,7 +352,7 @@ fn resolve_enum_names_in_program(rules: &mut RulesArray, program: &Program<'_>) 
     }
 
     let mut use_map = HashMap::new();
-    Backend::extract_use_statements_from_statements(program.statements.iter(), &mut use_map);
+    Backend::extract_use_statements_from_statements(program.statements.iter(), &mut use_map, None);
     let namespace = Backend::extract_namespace_from_statements(program.statements.iter());
 
     for entry in &mut rules.entries {
