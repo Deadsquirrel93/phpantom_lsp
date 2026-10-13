@@ -3007,12 +3007,20 @@ namespace {
 }
 "#;
 
+/// Collect return-type diagnostics in a Laravel project, where `now()` and
+/// `today()` return the date factory's configured class.
+fn collect_with_laravel_dates(php: &str) -> Vec<Diagnostic> {
+    let backend = create_test_backend();
+    *backend.laravel_date_class().write() = Some(None);
+    collect_diagnostics_with(&backend, php, Backend::collect_return_type_diagnostics)
+}
+
 #[test]
 fn now_and_today_satisfy_datetime_return() {
     let php = format!(
         "<?php\n{CARBON_SCAFFOLD}\nnamespace App {{\n    class Job {{\n        public function a(): \\DateTime {{ return now(); }}\n        public function b(): \\DateTime {{ return today(); }}\n    }}\n}}\n"
     );
-    let diags = collect(&php);
+    let diags = collect_with_laravel_dates(&php);
     assert!(
         messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "now()/today() resolve to Illuminate\\Support\\Carbon (a \\DateTime), so returning them \
@@ -3029,7 +3037,7 @@ fn now_chain_narrows_to_concrete_carbon() {
     let php = format!(
         "<?php\n{CARBON_SCAFFOLD}\nnamespace App {{\n    class Job {{\n        public function retryUntil(): \\DateTime {{ return now()->addHours(1); }}\n    }}\n}}\n"
     );
-    let diags = collect(&php);
+    let diags = collect_with_laravel_dates(&php);
     assert!(
         messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "now()->addHours(1) should resolve to the concrete Carbon (a \\DateTime), got: {}",

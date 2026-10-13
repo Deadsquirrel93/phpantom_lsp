@@ -36,6 +36,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`key-of` and `value-of` read in the function's own file.** A `key-of<Foo::BAR>` or `value-of<Suit>` in a function's docblock now names the class the function's file imports or declares, rather than one the caller happens to have under the same short name.
+- **Functions in a global `namespace { }` block.** A function declared in an unnamed `namespace { }` block after a named one is now global, instead of being placed in the earlier block's namespace.
 - **Classes inside a phar no longer go missing on a busy machine.** Classes shipped in a `.phar`, such as PHPStan's, could sometimes be reported as not found when the machine was under load.
 - **No more busy core after indexing large legacy scripts.** Preparing find-references data in the background could keep one CPU core busy indefinitely on a long file full of methods without return types.
 - **Untyped methods reached through long call chains.** A method without a declared return type that was first reached at the end of a long chain of such methods no longer stays untyped everywhere else it is called, so members used on its result are checked again.

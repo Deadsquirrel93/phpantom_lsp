@@ -96,7 +96,7 @@ fn runs_into_declaration(between: &str) -> bool {
 ///
 /// What it does carry is the namespace enclosing the cursor.  Source-level
 /// class references resolve through
-/// [`resolve_source_class_name`](crate::util::resolve_source_class_name),
+/// [`resolve_code_class_name`](crate::util::resolve_code_class_name),
 /// which reads that namespace from `current_class.file_namespace` so a
 /// same-namespace class outranks a global one of the same short name.  A
 /// bare `ClassInfo::default()` reports no namespace, which would resolve

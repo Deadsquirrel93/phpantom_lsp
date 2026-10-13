@@ -235,36 +235,6 @@ would spread the collision above to every signature.
 import table (a separate map per kind, as `mago-names` resolves them), then
 switch `resolve_name` to `lookup_import`.
 
-#### B26. A `key-of`/`value-of` operand in a callee's docblock is read through the caller's imports
-
-**Impact: Low · Complexity: Medium**
-
-```php
-namespace {
-    enum Suit: string { case Hearts = 'h'; }
-    /** @param value-of<Suit> $s */
-    function take(string $s): void {}
-}
-namespace App {
-    enum Suit: string { case Other = 'x'; }
-    function run(): void {
-        take('h'); // PHPantom: Argument 1 ($s) expects 'x', got 'h'
-    }
-}
-```
-
-`constant_operand_shape` and `enum_backing_values`
-(`src/type_engine/call_resolution/template_subs.rs`) resolve the class an
-operand names with the call site's source loader and namespace. Some operands
-arrive already qualified by the declaring file and some as written (a
-`key-of<Foo::BAR>` class constant is not qualified at parse time), so neither
-loader is right for all of them. Switching both to the resolved loader fixes
-the case above but breaks the `key-of` over class constant tests.
-
-**Where to change:** qualify the class names inside type-operator operands
-when the declaring file is parsed, as other docblock types are, then read
-them with the resolved loader.
-
 ## Miscellaneous
 
 No outstanding items.

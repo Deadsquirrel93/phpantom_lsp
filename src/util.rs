@@ -166,31 +166,6 @@ pub(crate) fn resolve_name_via_loader(
         .unwrap_or_else(|| name.to_string())
 }
 
-/// Resolve a source-level (user-typed) class reference to the FQN of the
-/// class it names, through the source loader.
-///
-/// The source loader applies PHP's rule (the block's imports, else the
-/// current namespace, never a global class), so this only adds a check of
-/// the file's own classes: PHP refuses to compile an import that collides
-/// with a class declared in the same namespace block, so an unqualified
-/// name that matches one always means it.  This is what keeps a file with
-/// several `namespace` blocks from resolving a short name in a later block
-/// to the same-named class of the first, which is the namespace the
-/// file-wide class loader was built for.
-///
-/// A name no class answers to comes back as written.  Use
-/// [`resolve_code_class_name`] where the block's imports are known, so a
-/// miss is still qualified the way PHP would read it.
-pub(crate) fn resolve_source_class_name(
-    name: &str,
-    namespace: Option<&str>,
-    local_classes: &[Arc<crate::types::ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<crate::types::ClassInfo>>,
-) -> String {
-    find_source_class_name(name, namespace, local_classes, class_loader)
-        .unwrap_or_else(|| name.to_string())
-}
-
 fn find_source_class_name(
     name: &str,
     namespace: Option<&str>,
@@ -212,8 +187,18 @@ fn find_source_class_name(
     class_loader(name).map(|cls| cls.fqn().to_string())
 }
 
-/// [`resolve_source_class_name`] for a class named in code (`new Foo`,
-/// `Foo::`, `instanceof Foo`, `catch (Foo $e)`) or in a docblock.
+/// Resolve a source-level (user-typed) class reference for a class named
+/// in code (`new Foo`, `Foo::`, `instanceof Foo`, `catch (Foo $e)`) or in a
+/// docblock, to the FQN of the class it names, through the source loader.
+///
+/// The source loader applies PHP's rule (the block's imports, else the
+/// current namespace, never a global class), so this only adds a check of
+/// the file's own classes: PHP refuses to compile an import that collides
+/// with a class declared in the same namespace block, so an unqualified
+/// name that matches one always means it.  This is what keeps a file with
+/// several `namespace` blocks from resolving a short name in a later block
+/// to the same-named class of the first, which is the namespace the
+/// file-wide class loader was built for.
 ///
 /// A written class name never falls back to the global scope: inside
 /// `namespace App`, an unimported `Foo` is `App\Foo` whether or not that

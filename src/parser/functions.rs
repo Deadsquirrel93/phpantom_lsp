@@ -435,20 +435,18 @@ impl Backend {
                     }
                 }
                 Statement::Namespace(namespace) => {
+                    // A `namespace { }` block with no name is the global
+                    // namespace, whatever block came before it.
                     let ns_name = namespace
                         .name
                         .as_ref()
                         .map(|ident| bytes_to_str(ident.value()).to_string())
                         .filter(|s| !s.is_empty());
 
-                    // Merge: if we already have a namespace and the inner
-                    // one is set, use the inner one; otherwise keep current.
-                    let effective_ns = ns_name.or_else(|| current_namespace.clone());
-
                     Self::extract_functions_from_statements(
                         namespace.statements().iter(),
                         functions,
-                        &effective_ns,
+                        &ns_name,
                         doc_ctx,
                     );
                 }

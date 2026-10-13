@@ -1163,26 +1163,7 @@ pub(crate) fn type_operator_bound_literal(
 pub(crate) fn constant_operand_shape(name: &str, ctx: &ResolutionCtx<'_>) -> Option<PhpType> {
     let value = match name.rsplit_once("::") {
         Some((class_part, const_name)) => {
-            // `class_part` is a source-level reference, so an unqualified
-            // name must resolve against the declaring class's namespace
-            // before falling back to the global scope — otherwise a file
-            // with several braced `namespace` blocks that each declare the
-            // same short class name always picks the first one, regardless
-            // of which block actually declared the operand.
-            let class_name =
-                crate::class_lookup::resolve_class_keyword(class_part, ctx.current_class)
-                    .unwrap_or_else(|| {
-                        let ns = ctx.current_class.and_then(|c| c.file_namespace.as_deref());
-                        crate::util::resolve_source_class_name(
-                            class_part,
-                            ns,
-                            ctx.all_classes,
-                            ctx.source_class_loader,
-                        )
-                    });
-            let class = crate::class_lookup::find_class_by_fqn(ctx.all_classes, &class_name)
-                .cloned()
-                .or_else(|| (ctx.class_loader)(&class_name))?;
+            let class = load_operand_class(class_part, ctx)?;
             let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
                 &class,
                 ctx.class_loader,
@@ -1350,19 +1331,7 @@ fn enum_backing_values(operand: &PhpType, ctx: &ResolutionCtx<'_>) -> Option<Php
         Some((class_part, case)) => (class_part, Some(case)),
         None => (name, None),
     };
-    let class_name = crate::class_lookup::resolve_class_keyword(class_part, ctx.current_class)
-        .unwrap_or_else(|| {
-            let ns = ctx.current_class.and_then(|c| c.file_namespace.as_deref());
-            crate::util::resolve_source_class_name(
-                class_part,
-                ns,
-                ctx.all_classes,
-                ctx.source_class_loader,
-            )
-        });
-    let class = crate::class_lookup::find_class_by_fqn(ctx.all_classes, &class_name)
-        .cloned()
-        .or_else(|| (ctx.class_loader)(&class_name))?;
+    let class = load_operand_class(class_part, ctx)?;
     if class.kind != crate::types::ClassLikeKind::Enum {
         return None;
     }
@@ -1383,6 +1352,25 @@ fn enum_backing_values(operand: &PhpType, ctx: &ResolutionCtx<'_>) -> Option<Php
         1 => values.pop(),
         _ => Some(PhpType::union(values)),
     }
+}
+
+/// The class a type operand's `Foo` or `Foo::BAR` names.
+///
+/// The declaring file's parse already qualified the name against its own
+/// imports and namespace, so it is read as a fully-qualified name: the call
+/// site's imports have no say in what a callee's docblock meant. Only the
+/// relative keywords are left, and those read the class in scope.
+fn load_operand_class(
+    class_part: &str,
+    ctx: &ResolutionCtx<'_>,
+) -> Option<std::sync::Arc<ClassInfo>> {
+    let class_name = crate::class_lookup::resolve_class_keyword(class_part, ctx.current_class);
+    let class_name = class_name
+        .as_deref()
+        .unwrap_or_else(|| class_part.strip_prefix('\\').unwrap_or(class_part));
+    crate::class_lookup::find_class_by_fqn(ctx.all_classes, class_name)
+        .cloned()
+        .or_else(|| (ctx.class_loader)(class_name))
 }
 
 /// Recover a template parameter no argument names directly, from the

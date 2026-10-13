@@ -10098,6 +10098,71 @@ class Ids {
     );
 }
 
+/// A callee's `value-of<Suit>` names the enum its own file sees, not the one
+/// a caller in another namespace would reach by the same short name.
+#[test]
+fn value_of_enum_operand_is_read_in_the_declaring_namespace() {
+    let php = r#"<?php
+namespace {
+    enum Suit: string { case Hearts = 'h'; }
+    /** @param value-of<Suit> $s */
+    function take(string $s): void {}
+}
+namespace App {
+    enum Suit: string { case Other = 'x'; }
+    class Runner {
+        public function run(): void {
+            take('h');
+            take('x');
+        }
+    }
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(messages[0].contains("got 'x'"), "{messages:?}");
+}
+
+/// A callee's `key-of<Ids::TABLE>` reads its class through the callee's own
+/// imports, whether the caller has a same-named class or none at all.
+#[test]
+fn key_of_class_constant_operand_is_read_through_the_declaring_imports() {
+    let php = r#"<?php
+namespace Lib\Tables {
+    class Ids { const TABLE = ['immutable' => 1, 'mutable' => 'two']; }
+}
+namespace Lib {
+    use Lib\Tables\Ids;
+    /** @param key-of<Ids::TABLE> $key */
+    function pick(string $key): void {}
+}
+namespace App {
+    class Ids { const TABLE = ['other' => 1]; }
+    function run(): void {
+        \Lib\pick('mutable');
+        \Lib\pick('other');
+    }
+    class Runner {
+        public function run(): void {
+            \Lib\pick('immutable');
+            \Lib\pick('nope');
+        }
+    }
+}
+namespace {
+    \Lib\pick('immutable');
+    \Lib\pick('nope');
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 3, "got {messages:?}");
+    assert!(messages[0].contains("got 'other'"), "{messages:?}");
+    assert!(
+        messages[1..].iter().all(|m| m.contains("got 'nope'")),
+        "{messages:?}"
+    );
+}
+
 // ── interface-string ────────────────────────────────────────────────
 
 #[test]

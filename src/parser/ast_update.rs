@@ -866,8 +866,14 @@ impl Backend {
                         func.template_params.iter().map(|a| a.to_string()).collect();
                     // Use the function's own namespace (not the file-level one)
                     // so that multi-namespace files resolve return types
-                    // against the correct namespace block.
-                    let func_ns = func.namespace.clone().or_else(|| namespace.clone());
+                    // against the correct namespace block.  A function in a
+                    // file's global `namespace { }` block has none, and must
+                    // not borrow the namespace of another block.
+                    let func_ns = if multi_block {
+                        func.namespace.clone()
+                    } else {
+                        func.namespace.clone().or_else(|| namespace.clone())
+                    };
                     let func_use_map = if multi_block {
                         namespace_spans
                             .iter()
