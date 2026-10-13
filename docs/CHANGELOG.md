@@ -36,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Classes inside a phar no longer go missing on a busy machine.** Classes shipped in a `.phar`, such as PHPStan's, could sometimes be reported as not found when the machine was under load.
 - **No more busy core after indexing large legacy scripts.** Preparing find-references data in the background could keep one CPU core busy indefinitely on a long file full of methods without return types.
 - **Untyped methods reached through long call chains.** A method without a declared return type that was first reached at the end of a long chain of such methods no longer stays untyped everywhere else it is called, so members used on its result are checked again.
 - **Class names held in properties, constants, and return values.** A function such as `app()` or one taking `@param class-string<T>` and returning `T` now resolves to the class when given a property, class constant, or method result that holds a `class-string`, not only when given `Foo::class`.

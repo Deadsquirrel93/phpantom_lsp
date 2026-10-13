@@ -595,6 +595,12 @@ pub(crate) fn path_to_uri(path: &Path) -> String {
         .unwrap_or_else(|()| format!("file://{}", effective.display()))
 }
 
+/// The URI of the file at `internal_path` inside the phar at `phar_path`,
+/// e.g. `phar:///path/to/phpstan.phar/src/Type/Type.php`.
+pub(crate) fn phar_entry_uri(phar_path: &Path, internal_path: &str) -> String {
+    format!("phar://{}/{}", phar_path.display(), internal_path)
+}
+
 /// Recursively collect all `.php` files under a directory, respecting
 /// `.gitignore` rules and skipping hidden directories (`.git`,
 /// `.idea`, etc.).

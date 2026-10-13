@@ -516,10 +516,7 @@ impl Backend {
         // that are loaded via Composer's `files` autoloading.
         let class_index_uri = self.symbols.fqn_uri_index.read().get(class_name).cloned();
         if let Some(file_uri) = class_index_uri
-            && let Some(file_path) = Url::parse(&file_uri)
-                .ok()
-                .and_then(|u| u.to_file_path().ok())
-            && let Some(classes) = self.parse_and_cache_file(&file_path)
+            && let Some(classes) = self.parse_and_cache_uri(&file_uri)
             && let Some(cls) = classes
                 .iter()
                 .find(|c| c.name.eq_ignore_ascii_case(last_segment))
@@ -656,53 +653,54 @@ impl Backend {
         None
     }
 
-    /// Parse a PHP file from disk (or from a phar archive), cache the
-    /// results, and return the extracted classes.
+    /// Parse the file a `fqn_uri_index` URI names, cache the results, and
+    /// return the extracted classes.
+    ///
+    /// Besides `file://` URIs this accepts the `phar://` URIs that
+    /// [`scan_phar_archive`](crate::Backend::scan_phar_archive) registers
+    /// and that a parse of a phar entry caches its classes under, reading
+    /// the entry out of [`phar_archives`](crate::Backend::phar_archives).
+    pub(crate) fn parse_and_cache_uri(&self, uri: &str) -> Option<Vec<Arc<ClassInfo>>> {
+        if uri.starts_with("phar://") {
+            return self.parse_and_cache_phar_entry(uri);
+        }
+        let file_path = Url::parse(uri).ok()?.to_file_path().ok()?;
+        self.parse_and_cache_file(&file_path)
+    }
+
+    /// Parse the phar entry at `uri` (see [`crate::util::phar_entry_uri`]).
+    fn parse_and_cache_phar_entry(&self, uri: &str) -> Option<Vec<Arc<ClassInfo>>> {
+        // Deduplicate concurrent parses of the same phar entry.
+        if !self.parse_inflight.try_claim(uri) {
+            return self.wait_for_cached_result(uri);
+        }
+        // Remove the inflight entry even if the work below unwinds.
+        let _guard = InflightGuard {
+            inflight: &self.parse_inflight,
+            uri: uri.to_owned(),
+        };
+        // Read the entry before parsing so the archive map is not locked
+        // for the duration of a parse.
+        let bytes = {
+            let entry = uri.strip_prefix("phar://")?;
+            let archives = self.phar_archives.read();
+            archives.iter().find_map(|(phar_path, archive)| {
+                let internal_path = entry.strip_prefix(phar_path.to_str()?)?.strip_prefix('/')?;
+                archive.read_file(internal_path)
+            })?
+        };
+        let content = std::str::from_utf8(&bytes).ok()?;
+        self.parse_and_cache_content(content, uri)
+    }
+
+    /// Parse a PHP file from disk, cache the results, and return the
+    /// extracted classes.
     ///
     /// Convenience wrapper around [`parse_and_cache_content`] that reads
     /// the file and derives a URI from the path.  Used by
-    /// [`find_or_load_class`] (Phases 1.5 and 2) and by the
+    /// [`find_or_load_class`] (Phases 1 and 2) and by the
     /// go-to-implementation scanner.
-    ///
-    /// **Phar support:** when `file_path` contains a `!` separator
-    /// (e.g. `/path/to/phpstan.phar!src/Type/Type.php`), the left side
-    /// is the phar archive path and the right side is the internal file
-    /// path.  The content is extracted from the in-memory
-    /// [`phar_archives`](crate::Backend::phar_archives) cache instead
-    /// of reading from disk.  The URI uses a `phar://` scheme so that
-    /// go-to-definition can distinguish phar-sourced classes.
     pub(crate) fn parse_and_cache_file(&self, file_path: &Path) -> Option<Vec<Arc<ClassInfo>>> {
-        let path_str = file_path.to_str().unwrap_or_default();
-
-        // ── Phar path: "archive.phar!internal/path.php" ─────────
-        if let Some(sep) = path_str.find('!') {
-            let phar_path = Path::new(&path_str[..sep]);
-            let internal_path = &path_str[sep + 1..];
-
-            let uri = format!("phar://{}/{}", phar_path.display(), internal_path);
-
-            // Deduplicate concurrent parses of the same phar entry.
-            if !self.parse_inflight.try_claim(&uri) {
-                return self.wait_for_cached_result(&uri);
-            }
-            // Remove the inflight entry even if the work below unwinds.
-            let _guard = InflightGuard {
-                inflight: &self.parse_inflight,
-                uri: uri.clone(),
-            };
-            return (|| {
-                // Read the entry before parsing so the archive map is not
-                // locked for the duration of a parse.
-                let bytes = {
-                    let archives = self.phar_archives.read();
-                    archives.get(phar_path)?.read_file(internal_path)?
-                };
-                let content = std::str::from_utf8(&bytes).ok()?;
-                self.parse_and_cache_content(content, &uri)
-            })();
-        }
-
-        // ── Regular file path ───────────────────────────────────
         let uri = crate::util::path_to_uri(file_path);
 
         // Deduplicate concurrent parses of the same file.

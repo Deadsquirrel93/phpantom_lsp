@@ -680,10 +680,10 @@ pub struct Backend {
     ///
     /// Populated during Composer autoload scanning when a bootstrap file
     /// references a `.phar` archive (e.g. PHPStan's `bootstrap.php`).
-    /// Used by [`parse_and_cache_file`](Self::parse_and_cache_file) to
+    /// Used by [`parse_and_cache_uri`](Self::parse_and_cache_uri) to
     /// extract PHP source files from inside the archive when the
-    /// fqn_uri_index contains a phar-based path (detected by a `!` separator,
-    /// e.g. `/path/to/phpstan.phar!src/Type/Type.php`).
+    /// fqn_uri_index holds a `phar://` URI (e.g.
+    /// `phar:///path/to/phpstan.phar/src/Type/Type.php`).
     pub(crate) phar_archives: Arc<RwLock<HashMap<PathBuf, phar::PharArchive>>>,
     /// Set of file URIs that have been fully parsed at least once.
     ///

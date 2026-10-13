@@ -267,36 +267,4 @@ them with the resolved loader.
 
 ## Miscellaneous
 
-#### B17. Classes inside a phar sometimes go missing when the machine is busy
-
-**Impact: Low-Medium · Complexity: Medium**
-
-```sh
-for i in $(seq 12); do
-    phpantom_lsp analyze --project-root projects/bladestan --no-colour | tail -1 &
-done; wait
-```
-
-Bladestan's PHPStan dependency ships as `vendor/phpstan/phpstan/phpstan.phar`.
-On an idle machine `analyze` reports no errors for it, run after run. With a
-dozen runs side by side, roughly one in eight reports between 3 and 104
-errors, every one of them a `PHPStan\…` class from the phar that is "not
-found" (`PHPStan\Rules\Rule`, `PHPStan\Type\Type`, `PHPStan\Analyser\Error`,
-…) or a member access on one. Each failing run loses a different set of
-classes, and no class outside the phar ever goes missing. The failing runs
-finish as fast as the clean ones, in about two seconds, so the ten-second
-escape hatch in `ParseInflight::wait_until_released` (`src/resolution.rs`)
-is not what fires.
-
-The cause is not pinned down yet. `scan_phar_archive` in
-`src/indexing/scan.rs` registers each phar class under an
-`archive.phar!inner.php` sentinel path, and the phar branch of
-`parse_and_cache_file` in `src/resolution.rs` reads it back and caches the
-parse under a `phar://` URI. A lookup that fails on either leg is
-remembered in `class_not_found_cache` for the rest of the run. One ordering
-there is wrong regardless: `scan_phar_archive` publishes the archive's
-classes and clears the not-found caches before it stores the archive in
-`phar_archives`, so a lookup in between finds the class, cannot read it,
-and caches the miss. Nothing in `analyze` looks classes up while the
-autoload files are scanned, so that alone does not explain these runs, but
-any lookup that runs alongside the scan can hit it.
+No outstanding items.

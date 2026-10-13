@@ -830,10 +830,7 @@ impl Backend {
         } else if let Some(cls) = self.symbols.fqn_class_index.read().get(fqn) {
             vec![Arc::clone(cls)]
         } else {
-            let file_path = Url::parse(target_uri)
-                .ok()
-                .and_then(|u| u.to_file_path().ok())?;
-            self.parse_and_cache_file(&file_path)?
+            self.parse_and_cache_uri(target_uri)?
         };
 
         // Match by short name + namespace, same logic as
