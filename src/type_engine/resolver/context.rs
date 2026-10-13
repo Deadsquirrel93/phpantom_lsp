@@ -370,6 +370,7 @@ impl<'a> ResolutionCtx<'a> {
             namespace,
             self.source_imports,
             self.content,
+            crate::util::written_name_region(self.content, self.current_class, self.cursor_offset),
             local_classes,
             self.source_class_loader,
         )
@@ -622,6 +623,11 @@ impl<'a> VarResolutionCtx<'a> {
             self.current_class.file_namespace.as_deref(),
             self.source_imports,
             self.content,
+            crate::util::written_name_region(
+                self.content,
+                Some(self.current_class),
+                self.cursor_offset,
+            ),
             self.all_classes,
             self.source_class_loader,
         )

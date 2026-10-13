@@ -57,36 +57,7 @@ No outstanding items.
 
 ## Name resolution
 
-#### B25. A docblock class name that no class answers to reads as a global class when the file declares a template of that name
-
-**Impact: Low · Complexity: Medium**
-
-```php
-namespace App;
-
-/** @template Node */
-class Box {}
-
-class Walker {
-    public function run(): void {
-        /** @var Node $n */
-        $n = make();
-        $n->missing(); // PHPantom: Method 'missing' not found on class 'Node'
-    }
-}
-```
-
-PHP reads `Node` in the `@var` as `App\Node`. `resolve_source_php_type_names`
-(`src/util.rs`) keeps a missed name as written when any docblock in the file
-declares it as a `@template` or type alias, since it may be one in scope
-there. The resolved loader then reads the bare `Node` as the global class.
-Checking the whole file rather than the declarations in scope is what lets
-`Box`'s template reach `Walker`.
-
-**Where to change:** decide template and alias names from the declarations in
-scope at the name (the enclosing class's and function's `@template` tags and
-the class's aliases), and qualify every other miss with the namespace as
-`resolve_code_class_name` does.
+No outstanding items.
 
 ## Miscellaneous
 

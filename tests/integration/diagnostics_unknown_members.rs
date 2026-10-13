@@ -15925,3 +15925,37 @@ function run(Shape $o): void {
         diags
     );
 }
+
+/// A docblock name that no class in the namespace answers to is read in
+/// the namespace, not as the global class of the same short name, even
+/// when another class of the file declares a template of that name.
+#[test]
+fn template_of_another_class_does_not_make_a_name_global() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+namespace {
+    class Node {}
+}
+
+namespace App {
+    /** @template Node */
+    class Box {}
+
+    class Walker {
+        public function run(): void {
+            /** @var Node $n */
+            $n = make();
+            $n->missing();
+        }
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("missing") && d.message.contains(r"App\Node")),
+        "`Node` is `App\\Node`, not the global class, got: {diags:?}"
+    );
+}

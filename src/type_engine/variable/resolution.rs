@@ -409,6 +409,7 @@ pub(crate) fn resolve_variable_php_type(
             current_class.and_then(|c| c.file_namespace.as_deref()),
             source_imports,
             content,
+            crate::util::written_name_region(content, current_class, cursor_offset),
             all_classes,
             source_class_loader,
         ))
@@ -462,6 +463,7 @@ pub(crate) fn resolve_variable_php_type(
             effective_class.file_namespace.as_deref(),
             source_imports,
             content,
+            crate::util::written_name_region(content, Some(effective_class), cursor_offset),
             all_classes,
             source_class_loader,
         ));

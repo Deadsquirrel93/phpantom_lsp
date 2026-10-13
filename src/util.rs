@@ -394,13 +394,15 @@ pub(crate) fn resolve_code_php_type_names(
 /// [`resolve_code_class_name`] qualifies it, so the global class of the
 /// same short name is not read in its place, unless a docblock of
 /// `content` (the file the type is written in) declares it as a template
-/// parameter or a type alias.  Those keep their spelling for the
+/// parameter or a type alias for a declaration that reaches `region`
+/// (see [`written_name_region`]).  Those keep their spelling for the
 /// declaration in scope to read.
 pub(crate) fn resolve_source_php_type_names(
     ty: &crate::php_type::PhpType,
     namespace: Option<&str>,
     imports: Option<&HashMap<String, String>>,
     content: &str,
+    region: (u32, u32),
     local_classes: &[Arc<crate::types::ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<crate::types::ClassInfo>>,
 ) -> crate::php_type::PhpType {
@@ -408,30 +410,164 @@ pub(crate) fn resolve_source_php_type_names(
         find_source_class_name(name, namespace, local_classes, class_loader)
             .or_else(|| {
                 qualify_unknown_code_name(name, namespace, imports)
-                    .filter(|_| !declares_docblock_type_name(content, name))
+                    .filter(|_| !declares_docblock_type_name(content, name, region))
             })
             .unwrap_or_else(|| name.to_string())
     });
     fill_generic_type_defaults(&resolved, class_loader)
 }
 
-/// Whether a docblock in `content` declares `name` as a `@template`
-/// parameter or a type alias (`@phpstan-type`, `@psalm-type`, or either
-/// side of an `@phpstan-import-type … as …`).
+/// The byte range of `content` a type written at `cursor_offset` inside
+/// `class` stands in, for deciding which `@template` and type alias
+/// declarations reach it.
 ///
-/// The whole file is searched rather than the declarations around the
-/// name: a template kept by a declaration out of its scope is only read
-/// the way it was before, while one missed would be qualified into a
-/// class that does not exist.  A file in the active parse cache is
-/// scanned once per pass (see
-/// [`declares_docblock_type_name`](crate::parser::declares_docblock_type_name)).
-fn declares_docblock_type_name(content: &str, name: &str) -> bool {
-    !name.contains('\\') && crate::parser::declares_docblock_type_name(content, name)
+/// Inside a class this is the whole class: a type read at the cursor may
+/// have been written in another of the class's members (a callee's
+/// parameter, a bound), so the templates of every member stay in scope.
+/// Outside a class it is the cursor itself, and a walk that runs without
+/// one (`u32::MAX`) gets the whole file.
+pub(crate) fn written_name_region(
+    content: &str,
+    class: Option<&crate::types::ClassInfo>,
+    cursor_offset: u32,
+) -> (u32, u32) {
+    match class {
+        Some(cls) if cls.end_offset > cls.start_offset => (cls.start_offset, cls.end_offset),
+        _ if (cursor_offset as usize) <= content.len() => (cursor_offset, cursor_offset),
+        _ => (0, u32::MAX),
+    }
 }
 
-/// [`declares_docblock_type_name`] for text outside the parse cache: a
-/// search for `name` alone, cheaper for one lookup than collecting every
-/// declared name.
+/// Whether a docblock in `content` declares `name` as a `@template`
+/// parameter or a type alias (`@phpstan-type`, `@psalm-type`, or either
+/// side of an `@phpstan-import-type … as …`) on a declaration whose span
+/// overlaps `region`.  A file in the active parse cache collects its
+/// declarations once per pass (see
+/// [`declares_docblock_type_name`](crate::parser::declares_docblock_type_name)).
+fn declares_docblock_type_name(content: &str, name: &str, region: (u32, u32)) -> bool {
+    !name.contains('\\') && crate::parser::declares_docblock_type_name(content, name, region)
+}
+
+/// The template parameters and type aliases a file's docblocks declare,
+/// each with the spans of the declarations that put it in scope.
+#[derive(Default)]
+pub(crate) struct DocblockTypeNames(HashMap<String, Vec<(u32, u32)>>);
+
+impl DocblockTypeNames {
+    /// Collect every declaring docblock of `content` and the class,
+    /// function, method, or closure it documents.  A docblock attached to
+    /// none of those declares its names for the whole file.
+    pub(crate) fn collect(content: &str) -> Self {
+        let mut declared: Vec<(&str, usize)> = Vec::new();
+        let bytes = content.as_bytes();
+        for start in memchr::memmem::find_iter(bytes, b"/**") {
+            // From the opening `*`, so an empty `/**/` closes on itself.
+            let Some(len) = memchr::memmem::find(&bytes[start + 2..], b"*/") else {
+                break;
+            };
+            let end = start + 2 + len + 2;
+            for line in content[start..end].lines().filter(|l| l.contains('@')) {
+                line_declared_type_names(line, |name| declared.push((name, end)));
+            }
+        }
+        let mut names = HashMap::new();
+        if declared.is_empty() {
+            return Self(names);
+        }
+
+        let spans = declaration_spans(content);
+        for (name, doc_end) in declared {
+            let scope = spans
+                .get(spans.partition_point(|&(start, _)| (start as usize) < doc_end))
+                .filter(|&&(start, _)| {
+                    let between = &content[doc_end..start as usize];
+                    !between.contains([';', '{', '}'])
+                })
+                .copied()
+                .unwrap_or((0, u32::MAX));
+            names
+                .entry(name.to_string())
+                .or_insert_with(Vec::new)
+                .push(scope);
+        }
+        Self(names)
+    }
+
+    /// Whether `name` is declared on a declaration overlapping `region`.
+    pub(crate) fn declares(&self, name: &str, region: (u32, u32)) -> bool {
+        self.0.get(name).is_some_and(|scopes| {
+            scopes
+                .iter()
+                .any(|&(start, end)| start <= region.1 && region.0 <= end)
+        })
+    }
+}
+
+/// The spans of `content`'s classes, functions, methods, and closures,
+/// sorted by start.
+fn declaration_spans(content: &str) -> Vec<(u32, u32)> {
+    use mago_span::HasSpan;
+    use mago_syntax::cst::*;
+    use mago_syntax::walker::Walker;
+
+    struct Spans;
+    fn push(spans: &mut Vec<(u32, u32)>, node: &impl HasSpan) {
+        let span = node.span();
+        spans.push((span.start.offset, span.end.offset));
+    }
+    impl<'ast, 'arena> Walker<'ast, 'arena, Vec<(u32, u32)>> for Spans {
+        fn walk_in_class(&self, node: &'ast Class<'arena>, spans: &mut Vec<(u32, u32)>) {
+            push(spans, node);
+        }
+        fn walk_in_interface(&self, node: &'ast Interface<'arena>, spans: &mut Vec<(u32, u32)>) {
+            push(spans, node);
+        }
+        fn walk_in_trait(&self, node: &'ast Trait<'arena>, spans: &mut Vec<(u32, u32)>) {
+            push(spans, node);
+        }
+        fn walk_in_enum(&self, node: &'ast Enum<'arena>, spans: &mut Vec<(u32, u32)>) {
+            push(spans, node);
+        }
+        fn walk_in_anonymous_class(
+            &self,
+            node: &'ast AnonymousClass<'arena>,
+            spans: &mut Vec<(u32, u32)>,
+        ) {
+            push(spans, node);
+        }
+        fn walk_in_function(&self, node: &'ast Function<'arena>, spans: &mut Vec<(u32, u32)>) {
+            push(spans, node);
+        }
+        fn walk_in_method(&self, node: &'ast Method<'arena>, spans: &mut Vec<(u32, u32)>) {
+            push(spans, node);
+        }
+        fn walk_in_closure(&self, node: &'ast Closure<'arena>, spans: &mut Vec<(u32, u32)>) {
+            push(spans, node);
+        }
+        fn walk_in_arrow_function(
+            &self,
+            node: &'ast ArrowFunction<'arena>,
+            spans: &mut Vec<(u32, u32)>,
+        ) {
+            push(spans, node);
+        }
+    }
+
+    let mut spans =
+        crate::parser::with_parsed_program(content, "declaration_spans", |program, _| {
+            let mut spans = Vec::new();
+            for statement in program.statements.iter() {
+                Spans.walk_statement(statement, &mut spans);
+            }
+            spans
+        });
+    spans.sort_unstable();
+    spans
+}
+
+/// Whether any docblock of `content` declares `name`, in or out of scope:
+/// a search for `name` alone, cheap enough to rule a name out before
+/// [`DocblockTypeNames::collect`] parses the file for scopes.
 pub(crate) fn scan_declares_docblock_type_name(content: &str, name: &str) -> bool {
     let bytes = content.as_bytes();
     memchr::memmem::find_iter(bytes, name.as_bytes()).any(|pos| {
@@ -447,18 +583,6 @@ pub(crate) fn scan_declares_docblock_type_name(content: &str, name: &str) -> boo
         });
         found
     })
-}
-
-/// Every name a docblock in `content` declares as a template parameter or
-/// a type alias; see [`declares_docblock_type_name`].
-pub(crate) fn docblock_declared_type_names(content: &str) -> std::collections::HashSet<String> {
-    let mut names = std::collections::HashSet::new();
-    for line in content.lines().filter(|line| line.contains('@')) {
-        line_declared_type_names(line, |name| {
-            names.insert(name.to_string());
-        });
-    }
-    names
 }
 
 fn line_declared_type_names<'a>(line: &'a str, mut found: impl FnMut(&'a str)) {
@@ -927,6 +1051,17 @@ mod tests {
     /// `ty` written inside `namespace App` of `content`, with `imports` and
     /// no class answering to any name.
     fn resolve_unknown_docblock_type(ty: &str, imports: &[(&str, &str)], content: &str) -> String {
+        resolve_unknown_docblock_type_at(ty, imports, content, (0, 0))
+    }
+
+    /// [`resolve_unknown_docblock_type`] with the type standing in
+    /// `region` of `content`.
+    fn resolve_unknown_docblock_type_at(
+        ty: &str,
+        imports: &[(&str, &str)],
+        content: &str,
+        region: (u32, u32),
+    ) -> String {
         let imports: HashMap<String, String> = imports
             .iter()
             .map(|(alias, fqn)| (alias.to_string(), fqn.to_string()))
@@ -936,6 +1071,7 @@ mod tests {
             Some("App"),
             Some(&imports),
             content,
+            region,
             &[],
             &|_| None,
         )
@@ -986,6 +1122,26 @@ mod tests {
                 "{content}"
             );
         }
+    }
+
+    #[test]
+    fn docblock_templates_reach_only_their_own_declaration() {
+        let content = "<?php\nnamespace App;\n\n/** @template Node */\nclass Box {}\n\n\
+                       class Walker {\n    /** @template Item */\n    public function run() {}\n}\n\n\
+                       $f = /** @template Leaf */ fn() => 1;\n";
+        let at = |needle: &str| content.find(needle).unwrap() as u32;
+        let in_box = (at("class Box"), at("class Box") + 1);
+        let in_walker = (at("class Walker"), at("$f") - 2);
+        let at_top = (at("$f"), at("$f"));
+        let in_arrow = (at("=> 1"), at("=> 1"));
+
+        let resolve = |ty: &str, region| resolve_unknown_docblock_type_at(ty, &[], content, region);
+        assert_eq!(resolve("Node", in_box), "Node");
+        assert_eq!(resolve("Node", in_walker), r"App\Node");
+        assert_eq!(resolve("Item", in_walker), "Item");
+        assert_eq!(resolve("Item", in_box), r"App\Item");
+        assert_eq!(resolve("Leaf", in_arrow), "Leaf");
+        assert_eq!(resolve("Leaf", at_top), r"App\Leaf");
     }
 
     #[test]

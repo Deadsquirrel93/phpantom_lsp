@@ -37,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Function and constant imports no longer stand in for a class.** A `use function` or `use const` import spelled like a class, such as `use function Laravel\Prompts\table;` next to a class `Table`, no longer makes that class name resolve to the function or constant. A type hint that spells an imported class in a different case, such as `money` for `Money`, now names the imported class.
+- **A template no longer reaches other classes in its file.** A docblock name such as `@var Node $n` inside `namespace App` now means `App\Node` even when another class in the same file declares `@template Node`, instead of the global `Node` class.
 - **Chained calls on container lookups keep their class.** `$container->get(Foo::class)->bar()` now resolves to `Foo` when the method's return type also depends on an optional argument left out of the call, as Symfony's `ContainerInterface::get()` does.
 - **`instanceof` on an `object` no longer sticks after the `if`.** Once an `if ($o instanceof Foo)` with no `else` ends, `$o` is plain `object` again, and calls on it are no longer reported as missing from `Foo`.
 - **Identity checks on values of unknown type.** `assert($array[1] === null)` or `if ($x === 'a')` now narrows the checked value even when its type could not be resolved, such as an offset on an object of a missing class.

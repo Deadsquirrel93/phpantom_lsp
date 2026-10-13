@@ -576,6 +576,7 @@ impl Backend {
                 file_ctx.namespace_at(cursor_offset as u32).as_deref(),
                 Some(file_ctx.use_map_at(cursor_offset as u32)),
                 content,
+                crate::util::written_name_region(content, current_class, cursor_offset as u32),
                 &file_ctx.classes,
                 &class_loader,
             ));

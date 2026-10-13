@@ -777,8 +777,8 @@ struct CachedFile {
     /// The file's first-class callable assignments, collected on first use.
     fcc_assignments: std::cell::OnceCell<Vec<crate::signature_help::FccAssignment>>,
     /// The template parameters and type aliases the file's docblocks
-    /// declare, collected on first use.
-    docblock_type_names: std::cell::OnceCell<std::collections::HashSet<String>>,
+    /// declare, with their scopes, collected on first use.
+    docblock_type_names: std::cell::OnceCell<crate::util::DocblockTypeNames>,
     /// Address and length of each borrowed copy of `content` a live
     /// [`ParseCacheGuard`] registered this file from.
     ///
@@ -1198,19 +1198,23 @@ pub(crate) fn namespace_at_offset(content: &str, offset: usize) -> Option<&str> 
 }
 
 /// Whether a docblock in `content` declares `name` as a template
-/// parameter or a type alias.
+/// parameter or a type alias on a declaration overlapping `region`.
 ///
 /// A file in the active parse cache collects its declared names once per
 /// pass, so a pass that checks every docblock name it cannot resolve does
-/// not rescan the file for each.  Other text is searched per call.
-pub(crate) fn declares_docblock_type_name(content: &str, name: &str) -> bool {
+/// not rescan the file for each.  Other text is searched for `name` first
+/// and parsed for scopes only when some docblock declares it.
+pub(crate) fn declares_docblock_type_name(content: &str, name: &str, region: (u32, u32)) -> bool {
     let cached = PARSE_CACHE.with(|cell| cell.borrow().as_ref().and_then(|c| c.find(content)));
     match cached {
         Some(file) => file
             .docblock_type_names
-            .get_or_init(|| crate::util::docblock_declared_type_names(&file.content))
-            .contains(name),
-        None => crate::util::scan_declares_docblock_type_name(content, name),
+            .get_or_init(|| crate::util::DocblockTypeNames::collect(&file.content))
+            .declares(name, region),
+        None => {
+            crate::util::scan_declares_docblock_type_name(content, name)
+                && crate::util::DocblockTypeNames::collect(content).declares(name, region)
+        }
     }
 }
 
