@@ -211,6 +211,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **An integer `range()` passed straight into a call is a list of integers.** `array_map(fn (int $i) => …, range(0, $n - 1))` no longer reports that the callback is passed `int|float`. Contributed by @phcorp. Closes #467.
 - **Callbacks returning arrays keep their PHPDoc return type.** A parameter such as `(callable(string): string[])|null` now accepts an array-returning closure without a false type mismatch, including Symfony Console's autocompleter callback. Contributed by @shuvroroy. Closes #456.
 - **A closure created in a narrowed ternary, `&&`, `||` or `match` branch sees the narrowed variable.** `$c ? fn () => $this->take($c) : null` no longer reports `$c` as nullable inside the closure. Contributed by @phcorp. Closes #459.
+- **A closure capturing a variable by reference sees later reassignments.** Inside `function () use (&$c) { … }`, `$c` now also has the types the code after the closure assigns to it, so a `$c = null` that follows the closure is no longer missed.
 
 ## [0.11.0] - 2026-10-05
 

@@ -882,6 +882,33 @@ function test(): void {
     );
 }
 
+/// A by-reference closure capture is read when the closure runs, so a
+/// reassignment after the closure is created reaches its body.
+#[test]
+fn hover_by_reference_capture_includes_writes_after_the_closure() {
+    let backend = create_test_backend();
+    let uri = "file:///by-ref-capture-later-write.php";
+    let content = r#"<?php
+class Node {}
+function test(?Node $c): void {
+    if ($c !== null) {
+        $f = function () use (&$c) {
+            echo $c;
+        };
+        $c = null;
+        $f();
+    }
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 5, 18).expect("hover on $c");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("null"),
+        "the later `null` write must reach the by-reference capture: {text}"
+    );
+}
+
 /// The counterpart to the test above: a by-reference call invalidates the
 /// exact value, not everything else known about the variable. `array_shift`
 /// is declared `array &$array` and says nothing about the element type, so

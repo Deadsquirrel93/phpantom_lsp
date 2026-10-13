@@ -1337,6 +1337,81 @@ fn by_reference_capture_in_a_narrowed_branch_matches_the_if_block() {
     assert_eq!(in_ternary, in_if);
 }
 
+/// A by-reference capture reads the variable when the closure runs, so
+/// what the enclosing function writes to it after creating the closure
+/// reaches the body.
+#[test]
+fn by_reference_capture_sees_writes_after_the_closure_is_created() {
+    let cases = [
+        (
+            "if block",
+            "if ($c !== null) { $f = function () use (&$c) { $this->take($c); }; $c = null; $f(); }",
+        ),
+        (
+            "ternary branch",
+            "$run = $c ? function () use (&$c) { $this->take($c); } : null; $c = null;",
+        ),
+        (
+            "outside the narrowed block",
+            "if ($c !== null) { $f = function () use (&$c) { $this->take($c); }; } $c = null;",
+        ),
+        (
+            "earlier in an enclosing loop",
+            "foreach ([1, 2] as $i) { $c = null; if (rand()) { $c = new Conversation(); $f = function () use (&$c) { $this->take($c); }; } }",
+        ),
+        (
+            "closure handed to an object",
+            "if ($c !== null) { $w = new \\ArrayObject([function () use (&$c) { $this->take($c); }]); $c = null; }",
+        ),
+    ];
+    let failing = failing_cases(&cases, |messages| messages.len() == 1);
+    assert!(
+        failing.is_empty(),
+        "expected exactly one mismatch, got: {failing:#?}"
+    );
+}
+
+/// The narrowing still holds inside a by-reference capture when nothing
+/// that can run after the closure is created writes a different value.
+#[test]
+fn by_reference_capture_keeps_narrowing_without_a_later_null_write() {
+    let cases = [
+        (
+            "no later write",
+            "if ($c !== null) { $f = function () use (&$c) { $this->take($c); }; $f(); }",
+        ),
+        (
+            "write before the closure",
+            "if ($c === null) { $c = new Conversation(); } $f = function () use (&$c) { $this->take($c); };",
+        ),
+        (
+            "later write of the same type",
+            "if ($c !== null) { $f = function () use (&$c) { $this->take($c); }; $c = new Conversation(); }",
+        ),
+        (
+            "invoked before the call returns",
+            "if ($c !== null) { array_map(function ($x) use (&$c) { $this->take($c); }, [1]); $c = null; }",
+        ),
+        (
+            "invoked where it is written",
+            "if ($c !== null) { (function () use (&$c) { $this->take($c); })(); $c = null; }",
+        ),
+        (
+            "captured by value",
+            "if ($c !== null) { $f = function () use ($c) { $this->take($c); }; $c = null; }",
+        ),
+        (
+            "write in another closure's own scope",
+            "if ($c !== null) { $f = function () use (&$c) { $this->take($c); }; $g = function () { $c = null; }; }",
+        ),
+    ];
+    let failing = failing_cases(&cases, <[String]>::is_empty);
+    assert!(
+        failing.is_empty(),
+        "expected no mismatch, got: {failing:#?}"
+    );
+}
+
 /// A `match ($x::class)` arm proves the subject's class to a closure
 /// written in it, as it does to a direct use there.
 #[test]

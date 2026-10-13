@@ -233,6 +233,7 @@ pub(crate) fn walk_closures_in_expr<'b>(
             // `resolve_variable_types` and a captured path keeps whatever
             // the code above the closure proved about it.
             seed_closure_captures(&mut closure_scope, outer_scope, closure.use_clause.as_ref());
+            widen_by_ref_captures_by_later_writes(closure, &mut closure_scope, outer_scope, ctx);
 
             // Seed with parameter types, using callable inference when
             // available.  Filter out any inferred params whose base

@@ -254,7 +254,9 @@ pub(crate) fn collect_expr_assignment_deps(
     }
 }
 
-fn increment_decrement_operand<'a>(expr: &'a Expression<'a>) -> Option<&'a Expression<'a>> {
+pub(crate) fn increment_decrement_operand<'a>(
+    expr: &'a Expression<'a>,
+) -> Option<&'a Expression<'a>> {
     use mago_syntax::cst::unary::UnaryPrefixOperator;
 
     match expr {
