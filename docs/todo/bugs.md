@@ -37,29 +37,6 @@ No outstanding items.
 
 ## Narrowing
 
-#### B27. An offset on a receiver of an unknown class is not narrowed
-
-**Impact: Low · Complexity: Low**
-
-```php
-namespace App;
-
-/** @param ArrayAccess<int, ?object> $array */
-function run(ArrayAccess $array): void {
-    assert($array[1] === null);
-    // PHPStan: `$array[1]` is `null`. PHPantom: still `?object`.
-}
-```
-
-Unimported, `ArrayAccess` names `App\ArrayAccess`, which does not exist. An
-`assert()` or `if` on an offset of a receiver whose class is unknown narrows
-nothing, though the check says as much about the offset whatever the receiver
-is. PHPStan's `bug-13214.php` in `tests/phpstan_nsrt/` is skipped for this.
-
-**Where to change:** the offset narrowing in
-`src/type_engine/variable/forward_walk/cond_narrowing/` should key the
-narrowed offset by expression even when the receiver resolves to no class.
-
 #### B24. An `instanceof` branch leaves its class behind after the `if`
 
 **Impact: Medium · Complexity: Medium**
