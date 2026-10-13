@@ -36,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Chained calls on container lookups keep their class.** `$container->get(Foo::class)->bar()` now resolves to `Foo` when the method's return type also depends on an optional argument left out of the call, as Symfony's `ContainerInterface::get()` does.
 - **`instanceof` on an `object` no longer sticks after the `if`.** Once an `if ($o instanceof Foo)` with no `else` ends, `$o` is plain `object` again, and calls on it are no longer reported as missing from `Foo`.
 - **Identity checks on values of unknown type.** `assert($array[1] === null)` or `if ($x === 'a')` now narrows the checked value even when its type could not be resolved, such as an offset on an object of a missing class.
 - **`key-of` and `value-of` read in the function's own file.** A `key-of<Foo::BAR>` or `value-of<Suit>` in a function's docblock now names the class the function's file imports or declares, rather than one the caller happens to have under the same short name.

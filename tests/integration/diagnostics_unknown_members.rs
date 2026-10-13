@@ -15291,6 +15291,64 @@ class Consumer
     );
 }
 
+/// A conditional return whose then-branch is itself a conditional on a
+/// template bound by an omitted argument resolves the same whether the call
+/// is assigned first or chained on directly.
+#[test]
+fn nested_template_conditional_resolves_on_chained_call() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+namespace App;
+
+class Svc
+{
+    public const MODE = 1;
+    public function run(): void {}
+}
+
+interface ContainerInterface
+{
+    /**
+     * @template C of object
+     * @template B of int
+     * @param string|class-string<C> $id
+     * @param B $invalidBehavior
+     * @return ($id is class-string<C> ? (B is 0|1 ? C : C|null) : object)
+     */
+    public function get(string $id, int $invalidBehavior = 1): ?object;
+
+    /**
+     * @template C of object
+     * @template B of int
+     * @param string|class-string<C> $id
+     * @param B $invalidBehavior
+     * @return ($id is class-string<C> ? (B is 0|1 ? C : C|null) : object)
+     */
+    public function getConst(string $id, int $invalidBehavior = Svc::MODE): ?object;
+}
+
+function run(ContainerInterface $c): void {
+    $c->get(Svc::class)->run();
+    $c->get(Svc::class)->missingLiteral();
+    $c->getConst(Svc::class)->missingConst();
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    for name in ["missingLiteral", "missingConst"] {
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.message.contains(&format!("'{name}'"))),
+            "the chained call must resolve to `Svc` and report `{name}`, got: {diags:?}",
+        );
+    }
+    assert!(
+        !diags.iter().any(|d| d.message.contains("'run'")),
+        "`run()` exists on `Svc`, got: {diags:?}",
+    );
+}
+
 /// An omitted `Foo::class` default binds a template to the class the
 /// declaring file names, whether `Foo` is imported there or lives in its
 /// namespace, and whatever namespace the call sits in.

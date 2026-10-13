@@ -399,17 +399,19 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                 // must have the template substituted with the resolved
                 // class(es) rather than being discarded wholesale — this
                 // preserves surrounding structure like `T&MockInterface`
-                // instead of collapsing it to bare `T`.
-                let substitute_bound = |resolved_ty: PhpType| -> PhpType {
+                // instead of collapsing it to bare `T`. The substituted
+                // branch can itself be a conditional (`(B is 0|1 ? C :
+                // C|null)`), so it is resolved in turn.
+                let substitute_bound = |resolved_ty: PhpType| -> Option<PhpType> {
                     match class_string_bound_name {
                         Some(bound_name) if bound_is_template => {
                             let subs = std::collections::HashMap::from([(
                                 bound_name.to_string(),
                                 resolved_ty,
                             )]);
-                            then_type.substitute(&subs)
+                            resolve_branch(&then_type.substitute(&subs))
                         }
-                        _ => resolved_ty,
+                        _ => Some(resolved_ty),
                     }
                 };
 
@@ -445,7 +447,7 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                             return choose_branch(false);
                         }
 
-                        return Some(substitute_bound(named_or_union(class_names)));
+                        return substitute_bound(named_or_union(class_names));
                     }
                     return resolve_conditional_with_text_args_and_defaults(
                         else_type,
@@ -478,7 +480,7 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                         return choose_branch(satisfies_bound(&resolved));
                     }
 
-                    return Some(substitute_bound(PhpType::named(atom(&resolved))));
+                    return substitute_bound(PhpType::named(atom(&resolved)));
                 }
                 // Check if the argument is a variable holding class-string
                 // value(s) (e.g. from a match expression).
@@ -500,7 +502,7 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                             return choose_branch(all_satisfy);
                         }
 
-                        return Some(substitute_bound(named_or_union(names)));
+                        return substitute_bound(named_or_union(names));
                     }
                 }
                 // Any other argument (a property, a method's return, a class
@@ -523,7 +525,7 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                     } else {
                         PhpType::union(inner)
                     };
-                    return Some(substitute_bound(bound));
+                    return substitute_bound(bound);
                 }
                 // Argument isn't a ::class literal or resolvable variable → try else branch
                 resolve_conditional_with_text_args_and_defaults(

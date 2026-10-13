@@ -53,46 +53,7 @@ No outstanding items.
 
 ## Templates
 
-#### B23. A chained call drops a conditional return that tests a template bound by an omitted argument
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-interface ContainerInterface
-{
-    /**
-     * @template C of object
-     * @template B of int
-     * @param string|class-string<C> $id
-     * @param B $invalidBehavior
-     * @return ($id is class-string<C> ? (B is 0|1 ? C : C|null) : object)
-     */
-    public function get(string $id, int $invalidBehavior = 1): ?object;
-}
-
-function run(ContainerInterface $c): void {
-    $svc = $c->get(Svc::class);
-    $svc->missing();                // reported against Svc
-    $c->get(Svc::class)->missing(); // PHPantom: not reported, the type is lost
-}
-```
-
-Assigned to a variable, the call resolves to `Svc`; called inline, it
-resolves to nothing, whether the omitted argument's default is a literal or a
-class constant. With the inner `B is 0|1` condition removed, both forms
-resolve. Symfony's `ContainerInterface::get()` has this shape, so
-`$container->get(Foo::class)->bar()` loses `Foo`.
-
-The cause is not pinned down yet. The assigned form resolves through the
-forward walker (`resolve_owner_method_call` in
-`src/type_engine/variable/rhs_resolution/calls.rs`) and the inline one through
-`resolve_method_return_types_with_args`
-(`src/type_engine/call_resolution/return_types.rs`). A `B is …` condition is
-decided by the argument that binds `B`, which
-`resolve_conditional_with_text_args_and_defaults`
-(`src/type_engine/types/conditional.rs`) finds through `tpl.bindings`, so a
-first thing to check is whether the inline path hands it the method's
-template bindings.
+No outstanding items.
 
 ## Name resolution
 
