@@ -15812,3 +15812,58 @@ Base::missingAtTopLevel();
         "`Base` names `App\\Base`, not the global `Base`, got: {diags:?}",
     );
 }
+
+/// After an `instanceof` branch with no `else`, the variable is back to
+/// the `object` it was declared as.  The class the branch narrowed to
+/// must not stay behind as an alternative the member check reads.
+#[test]
+fn instanceof_branch_on_object_does_not_leave_class_behind() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+namespace App;
+
+class Node { public function nodeOnly(): void {} }
+
+function run(object $o): void {
+    if ($o instanceof Node) {
+        $o->nodeOnly();
+    }
+    $o->anything();
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "No diagnostic expected on `object` after the branch, got: {:?}",
+        diags
+    );
+}
+
+/// The narrowed class only goes away when the other path carries
+/// `object`: a sibling class does not cover it.
+#[test]
+fn instanceof_branch_on_interface_still_checks_both_classes() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+namespace App;
+
+interface Shape {}
+class Node implements Shape { public function nodeOnly(): void {} }
+
+function run(Shape $o): void {
+    if ($o instanceof Node) {
+        $o->nodeOnly();
+    }
+    $o->nodeOnly();
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert_eq!(
+        diags.len(),
+        1,
+        "Expected only the post-branch access on `Shape` to be flagged, got: {:?}",
+        diags
+    );
+}

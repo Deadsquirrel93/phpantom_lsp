@@ -36,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`instanceof` on an `object` no longer sticks after the `if`.** Once an `if ($o instanceof Foo)` with no `else` ends, `$o` is plain `object` again, and calls on it are no longer reported as missing from `Foo`.
 - **Identity checks on values of unknown type.** `assert($array[1] === null)` or `if ($x === 'a')` now narrows the checked value even when its type could not be resolved, such as an offset on an object of a missing class.
 - **`key-of` and `value-of` read in the function's own file.** A `key-of<Foo::BAR>` or `value-of<Suit>` in a function's docblock now names the class the function's file imports or declares, rather than one the caller happens to have under the same short name.
 - **Functions in a global `namespace { }` block.** A function declared in an unnamed `namespace { }` block after a named one is now global, instead of being placed in the earlier block's namespace.

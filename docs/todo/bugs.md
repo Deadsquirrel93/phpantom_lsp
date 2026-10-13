@@ -37,36 +37,7 @@ No outstanding items.
 
 ## Narrowing
 
-#### B24. An `instanceof` branch leaves its class behind after the `if`
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-namespace App;
-
-class Node { public function nodeOnly(): void {} }
-
-function run(object $o): void {
-    if ($o instanceof Node) {
-        $o->nodeOnly();
-    }
-    $o->anything(); // PHPantom: Method 'anything' not found on class 'App\Node'
-}
-```
-
-After the `if`, `$o` is the join of the branch that narrowed it to `Node` and
-the path that skipped the branch, where it is still `object`. `object|Node` is
-just `object`, which PHPantom does not check member access on, but the join
-keeps `Node` as a class of its own and the member check reports what `Node`
-lacks. A union where one interface member covers a narrowed subclass
-(`Countable` joined with `ArrayObject`) may show the same thing; not yet
-checked.
-
-**Where to change:** the branch merge in the forward walker
-(`src/type_engine/variable/forward_walk/`) should drop a class the other
-branch's type already contains, or the member check should treat a union
-member of `object` as covering the rest. Check which consumer reads the join
-before deciding.
+No outstanding items.
 
 ## Array types
 
