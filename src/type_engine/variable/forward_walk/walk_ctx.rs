@@ -9,7 +9,7 @@ use std::sync::Arc;
 use mago_span::HasSpan;
 
 use crate::php_type::PhpType;
-use crate::type_engine::resolver::{Loaders, VarResolutionCtx};
+use crate::type_engine::resolver::{Loaders, VarResolutionCtx, WrittenNames};
 use crate::types::{ClassInfo, ResolvedType};
 
 /// Context for the forward walk.
@@ -126,63 +126,15 @@ impl<'a> ForwardWalkCtx<'a> {
         )
     }
 
-    /// Qualify the class names of a type written in this file; see
-    /// [`VarResolutionCtx::resolve_written_type`].
-    pub(crate) fn resolve_written_type(&self, ty: &PhpType) -> PhpType {
-        crate::names::resolve_source_php_type_names(
-            ty,
-            self.current_class.file_namespace.as_deref(),
-            self.source_imports,
+    /// How a class name written at the cursor reads.
+    pub(in crate::type_engine) fn written_names(&self) -> WrittenNames<'a> {
+        WrittenNames::new(
+            Some(self.current_class),
+            self.all_classes,
             self.content,
-            crate::names::written_name_region(
-                self.content,
-                Some(self.current_class),
-                self.cursor_offset,
-            ),
-            self.all_classes,
-            self.source_class_loader,
-        )
-    }
-
-    /// Qualify the class names of a native type hint written in this file;
-    /// see [`resolve_code_php_type_names`](crate::names::resolve_code_php_type_names).
-    pub(crate) fn resolve_hint_type(&self, ty: &PhpType) -> PhpType {
-        crate::names::resolve_code_php_type_names(
-            ty,
-            self.current_class.file_namespace.as_deref(),
+            self.cursor_offset,
             self.source_imports,
-            self.all_classes,
             self.source_class_loader,
-        )
-    }
-
-    /// Resolve a class name written in this file to its FQN; see
-    /// [`resolve_code_class_name`](crate::names::resolve_code_class_name).
-    /// `self`, `static` and `parent` name the class the code is in.
-    pub(crate) fn resolve_written_class(&self, name: &str) -> String {
-        if let Some(fqn) =
-            crate::class_lookup::resolve_class_keyword(name, Some(self.current_class))
-        {
-            return fqn;
-        }
-        crate::names::resolve_code_class_name(
-            name,
-            self.current_class.file_namespace.as_deref(),
-            self.source_imports,
-            self.all_classes,
-            self.source_class_loader,
-        )
-    }
-
-    /// Resolves the classes a check names as written in this file.
-    pub(in crate::type_engine) fn written_class_names(
-        &self,
-    ) -> crate::type_engine::types::narrowing::WrittenClassNames<'a> {
-        crate::type_engine::types::narrowing::WrittenClassNames::new(
-            self.all_classes,
-            self.source_class_loader,
-            self.current_class.file_namespace.as_deref(),
-            self.source_imports,
         )
     }
 
@@ -283,7 +235,7 @@ impl<'a> ForwardWalkCtx<'a> {
                 crate::type_engine::variable::resolution::declaration_template_markers(
                     self.content,
                     decl_start as usize,
-                    &|ty| self.resolve_written_type(ty),
+                    &self.written_names(),
                 ),
             enclosing_return_type: self.enclosing_return_type.clone(),
             top_level_scope: self.top_level_scope.clone(),

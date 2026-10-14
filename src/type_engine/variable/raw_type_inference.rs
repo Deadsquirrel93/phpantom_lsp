@@ -532,14 +532,9 @@ fn infer_element_type<'b>(
         // ── Object instantiation ──
         Expression::Instantiation(inst) => match inst.class {
             Expression::Identifier(ident) => {
-                let name = bytes_to_str(ident.value()).to_string();
-                let fqn = crate::names::resolve_code_class_name(
-                    &name,
-                    ctx.current_class.file_namespace.as_deref(),
-                    ctx.source_imports,
-                    ctx.all_classes,
-                    ctx.source_class_loader,
-                );
+                let fqn = ctx
+                    .written_names()
+                    .resolve_class(bytes_to_str(ident.value()));
                 Some(PhpType::named(atom(&fqn)))
             }
             Expression::Self_(_) => Some(PhpType::named(ctx.current_class.fqn())),
@@ -590,7 +585,7 @@ fn infer_element_type<'b>(
             // could type.
             let annotated = || {
                 docblock::find_iterable_raw_type_in_source(ctx.content, offset, &var_text)
-                    .map(|t| ctx.resolve_written_type(&t))
+                    .map(|t| ctx.written_names().resolve_type(&t))
             };
             // Inside the forward walker the scope above was the only
             // narrowing-aware answer on offer: running the full pipeline
@@ -671,7 +666,7 @@ impl ArrayFuncArgs for AstArrayFuncArgs<'_, '_, '_> {
         // class (`Support\Pen` behind a `use App\Support;`), and it is
         // compared against types that arrived fully qualified, so the
         // spelling is canonicalised on the way out.
-        let qualify = |ty: PhpType| self.ctx.resolve_hint_type(&ty);
+        let qualify = |ty: PhpType| self.ctx.written_names().resolve_hint(&ty);
         match super::resolution::nth_arg_expr(self.args, index)? {
             Expression::Closure(closure) => closure
                 .return_type_hint
@@ -733,7 +728,7 @@ impl ArrayFuncArgs for AstArrayFuncArgs<'_, '_, '_> {
             param_index,
             subject,
             Some(&self.ctx.class_loader),
-            &self.ctx.written_class_names(),
+            &self.ctx.written_names(),
         )
     }
 

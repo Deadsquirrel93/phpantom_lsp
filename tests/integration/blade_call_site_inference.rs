@@ -1407,4 +1407,50 @@ mod tests {
             "the reference to App\\Item on the template's second line: {locations:?}"
         );
     }
+
+    /// A namespaced constant a controller passes to a view types the
+    /// template's variable, read under the name the controller's namespace
+    /// gives it rather than as a global constant.
+    #[tokio::test]
+    async fn a_namespaced_constant_at_the_call_site_types_template_variable() {
+        let (backend, _dir) = create_psr4_workspace(
+            APP_PSR4_COMPOSER,
+            &[
+                (
+                    "app/limits.php",
+                    "<?php\nnamespace App;\nconst LIMIT = 10;\n",
+                ),
+                (
+                    "app/Controller.php",
+                    "<?php\nnamespace App;\nclass Controller {\n    public function show(): mixed {\n        return view('shop', ['limit' => LIMIT]);\n    }\n}\n",
+                ),
+                ("resources/views/shop.blade.php", "{{ $limit }}\n"),
+            ],
+        );
+
+        let limits_uri = workspace_uri(&backend, "app/limits.php");
+        let controller_uri = workspace_uri(&backend, "app/Controller.php");
+        let blade_uri = workspace_uri(&backend, "resources/views/shop.blade.php");
+
+        for (uri, path, language) in [
+            (&limits_uri, "app/limits.php", "php"),
+            (&controller_uri, "app/Controller.php", "php"),
+            (&blade_uri, "resources/views/shop.blade.php", "blade"),
+        ] {
+            open_document(
+                &backend,
+                uri,
+                language,
+                &std::fs::read_to_string(workspace_path(&backend, path)).unwrap(),
+            )
+            .await;
+        }
+
+        let hover = hover_type(&backend, &blade_uri, 0, 5).await;
+        assert!(
+            hover.contains("int") || hover.contains("10"),
+            "$limit should be typed by App\\LIMIT, got: {}",
+            hover
+        );
+    }
 }

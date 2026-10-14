@@ -393,7 +393,7 @@ fn extract_match_arm_narrowings(
     ctx: &VarResolutionCtx<'_>,
 ) -> HashMap<String, Vec<ResolvedType>> {
     let mut narrowed: Option<(String, Vec<ResolvedType>)> = None;
-    let names = ctx.written_class_names();
+    let names = ctx.written_names();
     for condition in expr_arm.conditions.iter() {
         // `match ($x::class) { Foo::class, Bar::class => … }` — each
         // condition names one class the subject may be, so the arm body
@@ -471,7 +471,7 @@ fn match_true_arm_narrowings(
 /// Extract `($var_name, ClassName)` from `$var instanceof ClassName`.
 fn extract_instanceof_pair(
     expr: &Expression<'_>,
-    names: &crate::type_engine::types::narrowing::WrittenClassNames<'_>,
+    names: &crate::type_engine::resolver::WrittenNames<'_>,
 ) -> Option<(String, PhpType)> {
     let expr = match expr {
         Expression::Parenthesized(inner) => inner.expression,
@@ -1666,7 +1666,10 @@ fn extract_closure_or_arrow_return_type(
         Expression::Closure(closure) => closure.return_type_hint.as_ref()?,
         _ => return None,
     };
-    Some(ctx.resolve_hint_type(&extract_hint_type(&hint.hint)))
+    Some(
+        ctx.written_names()
+            .resolve_hint(&extract_hint_type(&hint.hint)),
+    )
 }
 
 /// Infer template parameter substitutions from a `@psalm-if-this-is` pattern

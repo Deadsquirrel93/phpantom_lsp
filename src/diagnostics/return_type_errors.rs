@@ -19,6 +19,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
+use crate::class_lookup::find_class_at_offset;
 use crate::parser::with_parsed_program;
 use crate::php_type::{PhpType, TypeKind};
 use crate::return_collection::collect_returns;
@@ -26,9 +27,7 @@ use crate::type_engine::resolver::{CtxLoaders, LendsLoaders, Loaders, VarResolut
 use crate::type_engine::variable::foreach_resolution::resolve_expression_type;
 use crate::types::ClassInfo;
 
-use super::helpers::{
-    collect_type_check, find_innermost_enclosing_class, template_bounds, template_bounds_in_scope,
-};
+use super::helpers::{collect_type_check, template_bounds, template_bounds_in_scope};
 use super::type_errors::is_type_compatible;
 
 /// Diagnostic code used for return type mismatch diagnostics.
@@ -187,10 +186,10 @@ impl Backend {
                             uri,
                             content,
                             ctx.file_ctx,
-                            ctx.class_loader_at(offset),
-                            ctx.resolved_class_loader_at(offset),
-                            ctx.function_loader_at(offset),
-                            ctx.constant_loader_at(offset),
+                            ctx.loaders.class_loader_at(offset),
+                            ctx.loaders.resolved_class_loader(),
+                            ctx.loaders.function_loader_at(offset),
+                            ctx.loaders.constant_loader_at(offset),
                             self,
                             &mut resolved_returns,
                         );
@@ -216,7 +215,7 @@ impl Backend {
                         if is_type_compatible(
                             ty,
                             &ret.declared_type,
-                            ctx.resolved_class_loader_at(ret.start as u32),
+                            ctx.loaders.resolved_class_loader(),
                             ctx.strict_types,
                         ) =>
                     {
@@ -573,8 +572,7 @@ fn process_top_level_statement(
             }
 
             let placeholder;
-            let current_class = match find_innermost_enclosing_class(&file_ctx.classes, func_offset)
-            {
+            let current_class = match find_class_at_offset(&file_ctx.classes, func_offset) {
                 Some(cc) => cc,
                 None => {
                     placeholder =
@@ -691,7 +689,7 @@ fn process_class_member(
     }
 
     // Find the enclosing class to look up the method's declared return type.
-    let enclosing = find_innermost_enclosing_class(&file_ctx.classes, method_offset);
+    let enclosing = find_class_at_offset(&file_ctx.classes, method_offset);
     let current_class = match enclosing {
         Some(cls) => cls,
         None => return,

@@ -76,21 +76,31 @@ in `code_actions/docblock_edit.rs` write a literal `\n`. One
 `line_ending(content)` helper in `text_position.rs` would serve all of
 them.
 
-### B617. "Add @throws" is not offered when the method body has a `}` in a string before the throw
+### B618. "Update return type" on a closure writes the enclosing method's type
 
-**Impact: Low · Complexity: Medium**
+**Impact: Medium · Complexity: Medium-High**
 
 ```php
-public function second(): void {
-    $close = '}';
-    throw new \RuntimeException();   // no "Add @throws" action
+public function run(): array {
+    $f = function (): string {
+        return 42;   // PHPStan: Anonymous function should return string but returns int.
+    };
+    return [];
 }
 ```
 
-`find_enclosing_docblock` in `code_actions/phpstan/add_throws.rs` finds the
-method by counting braces backwards from the diagnostic line, without
-skipping strings or comments. The `}` in the literal throws the count off
-by one, the scan settles on the class's `{`, and with no `function`
-keyword before it the action is dropped. `find_enclosing_function_line_range`
-in the same file already locates the method through the parsed AST; the
-docblock lookup should start from that method's span (refactor.md item 2).
+The quick fix rewrites the closure to `function (): array` and adds a
+`@return array{}` docblock above the statement: the type it writes is the
+method's, not the closure's. The return-type quick fixes
+(`code_actions/phpstan/fix_return_type/`, `remove_unused_return_type.rs`,
+`add_iterable_type.rs`) find their function by scanning text (braces back
+from the diagnostic line, the `)` before the `{`, the line holding
+`function`), and the inference behind them (`declared_body` in
+`fix_return_type/inference.rs`) then looks for a named function or method
+around the body brace, so a closure resolves to the method it sits in. An
+arrow function has no brace at all, and the text scan lands on the
+method's. Locate the function through the parsed AST instead
+(`find_enclosing_function` in `code_actions/cursor_context.rs`, with
+`FunctionKinds::All`) and read the native return type, the body to infer
+from and the docblock (already `paren_function_docblock`) from that one
+node.

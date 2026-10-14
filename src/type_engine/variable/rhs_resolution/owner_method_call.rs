@@ -260,7 +260,7 @@ pub(super) fn resolve_owner_method_call(
     let text_args = arg_texts.join(", ");
     let rctx = ctx.as_resolution_ctx();
     let var_resolver = build_var_resolver_from_ctx(ctx);
-    let written = |name: &str| ctx.resolve_written_class(name);
+    let written = |name: &str| ctx.written_names().resolve_class(name);
 
     // Try the owner directly first — it may already be fully resolved with
     // generic substitutions applied.  The cache is keyed by bare FQN and

@@ -1085,7 +1085,7 @@ fn static_access_class(class_part: &str, ctx: &ResolutionCtx<'_>) -> Option<Arc<
     let class_name = if is_self_or_static(class_part) {
         ctx.current_class?.fqn().to_string()
     } else {
-        ctx.resolve_written_class(class_part)
+        ctx.written_names().resolve_class(class_part)
     };
     (ctx.class_loader)(class_name.strip_prefix('\\').unwrap_or(&class_name))
 }

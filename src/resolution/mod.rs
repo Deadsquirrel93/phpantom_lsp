@@ -53,6 +53,7 @@ mod loaders;
 
 pub(crate) use classes::needs_linking;
 pub(crate) use inflight::ParseInflight;
+pub(crate) use loaders::FileLoaders;
 
 #[cfg(test)]
 mod stub_patch_consistency_tests;

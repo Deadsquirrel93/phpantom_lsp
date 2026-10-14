@@ -11,7 +11,7 @@ use crate::types::{ClassInfo, ResolvedType};
 use mago_syntax::cst::*;
 
 use super::super::conditional::extract_class_string_from_expr;
-use crate::type_engine::resolver::VarResolutionCtx;
+use crate::type_engine::resolver::{VarResolutionCtx, WrittenNames};
 
 use super::*;
 
@@ -380,7 +380,7 @@ pub(in crate::type_engine) fn try_extract_dynamic_instanceof<'b>(
 pub(in crate::type_engine) fn try_extract_instanceof<'b>(
     expr: &'b Expression<'b>,
     var_name: &str,
-    names: &WrittenClassNames<'_>,
+    names: &WrittenNames<'_>,
 ) -> Option<PhpType> {
     match expr {
         Expression::Parenthesized(inner) => {
@@ -444,7 +444,7 @@ pub(in crate::type_engine) struct InstanceofExtraction {
 pub(in crate::type_engine) fn try_extract_instanceof_with_negation<'b>(
     expr: &'b Expression<'b>,
     var_name: &str,
-    names: &WrittenClassNames<'_>,
+    names: &WrittenNames<'_>,
 ) -> Option<InstanceofExtraction> {
     match expr {
         Expression::Parenthesized(inner) => {
@@ -504,7 +504,7 @@ pub(in crate::type_engine) fn try_extract_instanceof_with_negation<'b>(
 fn try_extract_is_a<'b>(
     expr: &'b Expression<'b>,
     var_name: &str,
-    names: &WrittenClassNames<'_>,
+    names: &WrittenNames<'_>,
 ) -> Option<(PhpType, bool)> {
     let expr = match expr {
         Expression::Parenthesized(inner) => inner.expression,
@@ -584,7 +584,7 @@ pub(in crate::type_engine) fn argument_value<'b>(arg: &'b Argument<'b>) -> &'b E
 fn try_extract_class_identity_check<'b>(
     expr: &'b Expression<'b>,
     var_name: &str,
-    names: &WrittenClassNames<'_>,
+    names: &WrittenNames<'_>,
 ) -> Option<(PhpType, bool)> {
     let expr = match expr {
         Expression::Parenthesized(inner) => inner.expression,
@@ -617,7 +617,7 @@ fn match_class_identity_pair<'b>(
     lhs: &'b Expression<'b>,
     rhs: &'b Expression<'b>,
     var_name: &str,
-    names: &WrittenClassNames<'_>,
+    names: &WrittenNames<'_>,
 ) -> Option<PhpType> {
     if class_identity_subject_key(lhs).as_deref() != Some(var_name) {
         return None;
@@ -701,7 +701,7 @@ pub(in crate::type_engine) fn match_class_subject_var<'b>(
 /// an arm's conditions together describe a union.
 pub(in crate::type_engine) fn class_match_condition_class(
     condition: &Expression<'_>,
-    names: &WrittenClassNames<'_>,
+    names: &WrittenNames<'_>,
 ) -> Option<PhpType> {
     let condition = match condition {
         Expression::Parenthesized(inner) => inner.expression,
@@ -720,7 +720,7 @@ pub(in crate::type_engine) fn class_match_condition_class(
 pub(in crate::type_engine) fn try_extract_compound_or_instanceof<'b>(
     expr: &'b Expression<'b>,
     var_name: &str,
-    names: &WrittenClassNames<'_>,
+    names: &WrittenNames<'_>,
 ) -> Option<Vec<PhpType>> {
     match expr {
         Expression::Parenthesized(inner) => {
@@ -749,7 +749,7 @@ pub(in crate::type_engine) fn try_extract_compound_or_instanceof<'b>(
 fn collect_or_instanceof_classes<'b>(
     expr: &'b Expression<'b>,
     var_name: &str,
-    names: &WrittenClassNames<'_>,
+    names: &WrittenNames<'_>,
     out: &mut Vec<PhpType>,
 ) {
     match expr {

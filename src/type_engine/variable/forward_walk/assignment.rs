@@ -504,7 +504,8 @@ pub(crate) fn resolve_var_docblock_type(php_type: &PhpType, ctx: &ForwardWalkCtx
         .template_markers
         .as_ref()
         .map(|m| php_type.substitute(m));
-    ctx.resolve_written_type(marked.as_ref().unwrap_or(php_type))
+    ctx.written_names()
+        .resolve_type(marked.as_ref().unwrap_or(php_type))
 }
 
 /// Process assignment expressions, updating the scope.
@@ -1496,9 +1497,10 @@ pub(crate) fn process_assert_narrowing<'b>(
         if scope.get(&var_name).is_empty() {
             // Variable not in scope — seed it with the asserted type.
             let class_name = match bin.rhs {
-                Expression::Identifier(ident) => {
-                    Some(ctx.resolve_written_class(bytes_to_str(ident.value())))
-                }
+                Expression::Identifier(ident) => Some(
+                    ctx.written_names()
+                        .resolve_class(bytes_to_str(ident.value())),
+                ),
                 Expression::Self_(_) | Expression::Static(_) => {
                     Some(ctx.current_class.fqn().to_string())
                 }

@@ -30,8 +30,6 @@ use mago_syntax::cst::*;
 use crate::Backend;
 use crate::parser::with_parsed_program;
 use crate::symbol_map::{SymbolMap, SymbolSpan, ViewReceiverSite};
-use crate::type_engine::resolver::{Loaders, VarResolutionCtx};
-use crate::types::ClassInfo;
 
 /// One file's confirmed extra view spans, and the source length they were
 /// derived from.
@@ -116,9 +114,7 @@ impl Backend {
             sites.iter().map(|site| (site.start, site)).collect();
 
         let file_ctx = self.file_context(uri);
-        let class_loaders = self.class_loaders(&file_ctx);
-        let resolved_class_loaders = self.resolved_class_loaders(&file_ctx);
-        let function_loaders = self.function_loaders(&file_ctx);
+        let loaders = self.file_loaders(&file_ctx);
 
         with_parsed_program(content, "blade_typed_receiver", |program, content| {
             let mut calls: Vec<ReceiverCall<'_, '_, '_>> = Vec::new();
@@ -128,34 +124,11 @@ impl Backend {
                 mago_syntax::walker::Walker::walk_statement(&walker, stmt, &mut ctx);
             }
 
-            let default_class = ClassInfo::default();
             let mut confirmed = Vec::new();
             for call in calls {
-                let offset = call.receiver.span().start.offset;
-                let class_loader = class_loaders.at(offset);
-                let resolved_class_loader = resolved_class_loaders.at(offset);
-                let function_loader = function_loaders.at(offset);
-                let function_loader_cl = |name: &str, offset: u32| function_loader(name, offset);
-                let current_class =
-                    crate::class_lookup::find_class_at_offset(&file_ctx.classes, offset)
-                        .unwrap_or(&default_class);
-                let var_ctx = VarResolutionCtx {
-                    source_imports: Some(file_ctx.use_map_at(offset)),
-                    backend: Some(self),
-                    loaders: Loaders::with_function(Some(&function_loader_cl)),
-                    resolved_class_cache: Some(&self.resolved_class_cache),
-                    // The receiver is resolved where the call is written, so
-                    // a local reassigned earlier reads as it does there.
-                    ..VarResolutionCtx::new(
-                        "",
-                        current_class,
-                        &file_ctx.classes,
-                        content,
-                        offset,
-                        resolved_class_loader,
-                        class_loader,
-                    )
-                };
+                // The receiver is resolved where the call is written, so a
+                // local reassigned earlier reads as it does there.
+                let var_ctx = loaders.var_ctx_at(content, call.receiver.span().start.offset);
                 let Some(ty) =
                     crate::type_engine::variable::foreach_resolution::resolve_expression_type(
                         call.receiver,
@@ -166,7 +139,11 @@ impl Backend {
                 };
                 for site in call.sites {
                     if site.receiver.fqns().iter().any(|fqn| {
-                        crate::class_lookup::is_subtype_of_named(&ty, fqn, resolved_class_loader)
+                        crate::class_lookup::is_subtype_of_named(
+                            &ty,
+                            fqn,
+                            loaders.resolved_class_loader(),
+                        )
                     }) {
                         confirmed.push(site.to_span());
                     }

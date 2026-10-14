@@ -247,7 +247,7 @@ fn static_call_on_class_strings(
             var_resolver: Some(&var_resolver),
             cache: ctx.resolved_class_cache,
             calling_class_name: Some(ctx.current_class.fqn().as_str()),
-            written_class: Some(&|name: &str| ctx.resolve_written_class(name)),
+            written_class: Some(&|name: &str| ctx.written_names().resolve_class(name)),
             is_static: true,
             // Only reached when the target has no such method, so the
             // call resolves through a magic method with no parameters to

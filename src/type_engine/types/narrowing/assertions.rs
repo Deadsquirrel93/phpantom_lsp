@@ -130,7 +130,7 @@ fn resolve_static_receiver_class(
     match class_expr {
         Expression::Identifier(ident) => {
             let name = bytes_to_str(ident.value());
-            (ctx.class_loader)(&ctx.resolve_written_class(name))
+            (ctx.class_loader)(&ctx.written_names().resolve_class(name))
         }
         Expression::Self_(_) | Expression::Static(_) => {
             (ctx.class_loader)(&ctx.current_class.fqn())
@@ -806,7 +806,7 @@ fn template_argument_at_call(
 
     // Try to extract a class name from the argument expression.
     if let Some(class_name) = extract_class_string_from_expr(arg_expr) {
-        let fqn = ctx.resolve_written_class(&class_name);
+        let fqn = ctx.written_names().resolve_class(&class_name);
         return Some(PhpType::named(atom(&fqn)));
     }
 

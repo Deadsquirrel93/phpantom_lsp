@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use crate::docblock;
 use crate::php_type::{PhpType, TypeKind, is_keyword_type};
+use crate::type_engine::resolver::WrittenNames;
 use crate::types::ClassInfo;
 
 /// Mark the method/function-level template parameters a type names with
@@ -24,7 +25,7 @@ pub(in crate::type_engine::variable) fn substitute_template_param_bounds(
     ty: PhpType,
     content: &str,
     method_start_offset: usize,
-    resolve_written_type: &dyn Fn(&PhpType) -> PhpType,
+    names: &WrittenNames<'_>,
 ) -> PhpType {
     // Quick check: only act when the type contains at least one bare
     // identifier that could be a template parameter.  This avoids the
@@ -46,7 +47,7 @@ pub(in crate::type_engine::variable) fn substitute_template_param_bounds(
         return ty;
     }
 
-    let subs = bounded_template_markers(bounds, resolve_written_type);
+    let subs = bounded_template_markers(bounds, names);
     if subs.is_empty() {
         return ty;
     }
@@ -56,10 +57,10 @@ pub(in crate::type_engine::variable) fn substitute_template_param_bounds(
 
 /// The markers [`bounded_template_markers`] builds for the declaration
 /// starting at `decl_start`, or `None` when it declares no bounded template.
-pub(crate) fn declaration_template_markers(
+pub(in crate::type_engine) fn declaration_template_markers(
     content: &str,
     decl_start: usize,
-    resolve_written_type: &dyn Fn(&PhpType) -> PhpType,
+    names: &WrittenNames<'_>,
 ) -> Option<std::sync::Arc<std::collections::HashMap<String, PhpType>>> {
     let docblock = extract_preceding_docblock(content.get(..decl_start)?)?;
     if !docblock.contains("template") {
@@ -67,7 +68,7 @@ pub(crate) fn declaration_template_markers(
     }
     let markers = bounded_template_markers(
         docblock::extract_template_params_with_bounds(docblock),
-        resolve_written_type,
+        names,
     );
     (!markers.is_empty()).then(|| std::sync::Arc::new(markers))
 }
@@ -76,21 +77,19 @@ pub(crate) fn declaration_template_markers(
 /// bounded template in `bounds` stands for, keyed by its name.
 ///
 /// The bounds are read from the docblock as written, so each one goes
-/// through `resolve_written_type` (the context's
-/// [`resolve_written_type`](crate::type_engine::resolver::VarResolutionCtx::resolve_written_type))
-/// before it stands for a class.
+/// through [`WrittenNames::resolve_type`] before it stands for a class.
 ///
 /// A bound naming another of the declaration's templates (`@template U of
 /// T`) reads through to that template's own bound, so `U` still resolves
 /// to a class.
 fn bounded_template_markers(
     bounds: Vec<(String, Option<PhpType>)>,
-    resolve_written_type: &dyn Fn(&PhpType) -> PhpType,
+    names: &WrittenNames<'_>,
 ) -> std::collections::HashMap<String, PhpType> {
     let mut subs: std::collections::HashMap<String, PhpType> = bounds
         .into_iter()
         .filter_map(|(name, bound)| {
-            let bound = resolve_written_type(&bound?);
+            let bound = names.resolve_type(&bound?);
             let marker = PhpType::template_param(crate::atom::atom(&name), bound);
             Some((name, marker))
         })
@@ -197,7 +196,7 @@ pub(in crate::type_engine::variable) fn substitute_class_string_template_bounds(
     ty: PhpType,
     content: &str,
     method_start_offset: usize,
-    resolve_written_type: &dyn Fn(&PhpType) -> PhpType,
+    names: &WrittenNames<'_>,
 ) -> PhpType {
     // Only act on class-string<T> where the inner type is a simple name
     // (i.e. a potential template parameter).
@@ -224,7 +223,7 @@ pub(in crate::type_engine::variable) fn substitute_class_string_template_bounds(
     };
 
     let bounds = docblock::extract_template_params_with_bounds(docblock);
-    match bounded_template_markers(bounds, resolve_written_type).remove(tpl_name.as_str()) {
+    match bounded_template_markers(bounds, names).remove(tpl_name.as_str()) {
         Some(marker) => PhpType::class_string(Some(marker)),
         None => ty,
     }

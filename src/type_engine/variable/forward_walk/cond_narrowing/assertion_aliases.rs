@@ -23,7 +23,7 @@ pub(crate) fn record_assertion_variable<'b>(
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
-    let names = ctx.written_class_names();
+    let names = ctx.written_names();
     let mut checks: Vec<VarAssertion> = Vec::new();
     for operand in collect_and_chain_operands(rhs) {
         let mut subjects = collect_condition_var_names(operand);
@@ -75,12 +75,12 @@ pub(crate) fn record_assertion_variable<'b>(
 fn or_chain_alternatives(
     expr: &Expression<'_>,
     subject: &str,
-    names: &WrittenClassNames<'_>,
+    names: &WrittenNames<'_>,
 ) -> Option<Vec<PhpType>> {
     fn walk(
         expr: &Expression<'_>,
         subject: &str,
-        names: &WrittenClassNames<'_>,
+        names: &WrittenNames<'_>,
         out: &mut Vec<PhpType>,
     ) -> bool {
         match expr {

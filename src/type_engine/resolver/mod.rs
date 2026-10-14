@@ -28,8 +28,9 @@
 //!
 //! Within this module, context types ([`ResolutionCtx`], [`VarResolutionCtx`],
 //! [`Loaders`]) and the thread-local chain resolution cache live in
-//! [`context`], the keys a subject chain is cached and narrowed under in
-//! [`chain_keys`], array access subjects in [`array_access`], `$this` and
+//! [`context`], how the contexts read a class name written in the file in
+//! [`written_names`], the keys a subject chain is cached and narrowed under
+//! in [`chain_keys`], array access subjects in [`array_access`], `$this` and
 //! `$var` subjects in [`variable_subjects`], and the diagnostic
 //! classification of a subject that resolved to no class in
 //! [`subject_outcome`].
@@ -39,6 +40,7 @@ mod chain_keys;
 mod context;
 mod subject_outcome;
 mod variable_subjects;
+mod written_names;
 
 pub(crate) use chain_keys::is_narrowable_call;
 pub(crate) use context::{
@@ -48,6 +50,7 @@ pub(crate) use context::{
 };
 pub(crate) use subject_outcome::{SubjectOutcome, resolve_subject_outcome};
 pub(crate) use variable_subjects::resolve_dynamic_member_name;
+pub(in crate::type_engine) use written_names::WrittenNames;
 
 use std::sync::Arc;
 
@@ -265,7 +268,7 @@ fn resolve_target_classes_expr_inner(
             // Both are source-level references: PHP resolves an
             // unqualified name through the imports, else the current
             // namespace, never a global class of the same short name.
-            class_loader(&ctx.resolve_written_class(name))
+            class_loader(&ctx.written_names().resolve_class(name))
                 .map(ResolvedType::from_arc)
                 .into_iter()
                 .collect()
@@ -338,7 +341,7 @@ fn resolve_static_access_subject(
         // `Foo::` is a source-level reference: PHP resolves an
         // unqualified name through the imports, else the current
         // namespace, never a global class of the same short name.
-        class_loader(&ctx.resolve_written_class(class))
+        class_loader(&ctx.written_names().resolve_class(class))
             .into_iter()
             .collect()
     };
@@ -582,7 +585,7 @@ pub(in crate::type_engine) fn resolve_static_owner_class(
         // parent — load via class_loader so we get the full parent ClassInfo
         (rctx.class_loader)(&resolved_name)
     } else {
-        let fqn = rctx.resolve_written_class(class);
+        let fqn = rctx.written_names().resolve_class(class);
         (rctx.class_loader)(&fqn).or_else(|| {
             resolved_to_arcs(resolve_target_classes(
                 class,

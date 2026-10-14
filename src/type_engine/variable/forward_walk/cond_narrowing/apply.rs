@@ -24,7 +24,7 @@ pub(crate) fn apply_class_match_arm_narrowing<'b>(
 ) {
     // The arm runs when any one condition matches, so a condition that
     // names no class lets the subject in whatever its class.
-    let names = ctx.written_class_names();
+    let names = ctx.written_names();
     let Some(classes) = expr_arm
         .conditions
         .iter()
@@ -280,7 +280,7 @@ fn apply_condition_narrowing_inverse_single<'b>(
     seed_property_keys_into_scope(condition, scope, ctx);
 
     let scope_resolver = scope.snapshot_resolver();
-    let names = ctx.written_class_names();
+    let names = ctx.written_names();
     // Include variables from instanceof conditions that may not be in
     // scope yet (e.g. `if (!$foobar instanceof Foobar) { break; }`
     // where `$foobar` was never assigned).  After the guard clause,

@@ -15,7 +15,7 @@ use mago_span::{HasSpan, Span};
 use mago_syntax::cst::*;
 
 use super::super::conditional::extract_class_string_from_expr;
-use crate::type_engine::resolver::{FunctionLoaderFn, ScopeVarResolverFn};
+use crate::type_engine::resolver::{FunctionLoaderFn, ScopeVarResolverFn, WrittenNames};
 
 use super::*;
 
@@ -753,7 +753,7 @@ pub(in crate::type_engine) fn narrow_type_by_condition(
     var_name: &str,
     ty: &PhpType,
     class_loader: GuardClassLoader<'_>,
-    names: &WrittenClassNames<'_>,
+    names: &WrittenNames<'_>,
 ) -> Option<PhpType> {
     let narrowed = narrow_by_condition_inner(condition, var_name, ty, class_loader, names)?;
     (!narrowed.is_empty_sentinel()).then_some(narrowed)
@@ -764,7 +764,7 @@ fn narrow_by_condition_inner(
     var_name: &str,
     ty: &PhpType,
     class_loader: GuardClassLoader<'_>,
-    names: &WrittenClassNames<'_>,
+    names: &WrittenNames<'_>,
 ) -> Option<PhpType> {
     match condition {
         Expression::Parenthesized(inner) => {

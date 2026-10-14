@@ -3,13 +3,13 @@
 
 use std::sync::Arc;
 
-use crate::atom::{atom, bytes_to_str, literal_bytes_to_str};
+use crate::atom::{bytes_to_str, literal_bytes_to_str};
 use crate::php_type::PhpType;
 use crate::types::ClassInfo;
 
 use mago_syntax::cst::*;
 
-use crate::type_engine::resolver::{SourceImports, VarResolutionCtx};
+use crate::type_engine::resolver::VarResolutionCtx;
 
 /// Resolve the classes an `instanceof`-style check names.
 ///
@@ -22,11 +22,12 @@ use crate::type_engine::resolver::{SourceImports, VarResolutionCtx};
 /// themselves, since a trait need not declare what its methods use.
 ///
 /// `ty` is always resolved already: a class a check names as written is
-/// resolved by [`WrittenClassNames`] where it is extracted, and the rest
+/// resolved by [`WrittenNames::class_type`] where it is extracted, and the rest
 /// (an `@phpstan-assert` type, an `in_array` haystack's classes, the
 /// target of `$x instanceof $cls`) arrive resolved.
 ///
 /// [`type_hint_to_classes_typed`]: super::super::resolution::type_hint_to_classes_typed
+/// [`WrittenNames::class_type`]: crate::type_engine::resolver::WrittenNames::class_type
 pub(in crate::type_engine) fn resolve_narrowing_target(
     ty: &PhpType,
     ctx: &VarResolutionCtx<'_>,
@@ -53,73 +54,6 @@ pub(in crate::type_engine) fn resolve_narrowing_target(
         }
     }
     out
-}
-
-/// Resolves the class an `instanceof`, `is_a()` or `::class` comparison
-/// names as written, through the file's imports and namespace.
-///
-/// The extractors resolve the name as they read it, so everything that
-/// carries a check onward (the narrowing itself, the exclusions a branch
-/// records, a boolean standing for the check) holds the class rather than
-/// its spelling, and never sends a resolved name through the imports a
-/// second time.
-#[derive(Clone, Copy)]
-pub(in crate::type_engine) struct WrittenClassNames<'a> {
-    all_classes: &'a [Arc<ClassInfo>],
-    source_class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    /// The namespace and `use` imports a class named in code resolves
-    /// against (see [`Self::class_type`]).
-    namespace: Option<&'a str>,
-    imports: SourceImports<'a>,
-}
-
-impl<'a> WrittenClassNames<'a> {
-    pub(in crate::type_engine) fn new(
-        all_classes: &'a [Arc<ClassInfo>],
-        source_class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-        namespace: Option<&'a str>,
-        imports: SourceImports<'a>,
-    ) -> Self {
-        Self {
-            all_classes,
-            source_class_loader,
-            namespace,
-            imports,
-        }
-    }
-
-    /// Names left as written, for a caller with no file to read them in.
-    #[cfg(test)]
-    pub(in crate::type_engine) fn verbatim() -> WrittenClassNames<'static> {
-        fn no_class(_: &str) -> Option<Arc<ClassInfo>> {
-            None
-        }
-        WrittenClassNames {
-            all_classes: &[],
-            source_class_loader: &no_class,
-            namespace: None,
-            imports: None,
-        }
-    }
-
-    /// The class `name` refers to, or `name` itself when it is
-    /// `self`/`static`/`parent` (which the enclosing class answers).
-    ///
-    /// A class named in code (`instanceof Foo`, `Foo::class`) never falls
-    /// back to a global class: an unimported `Foo` inside `namespace App`
-    /// is `App\Foo` even when only a global `Foo` exists.
-    pub(in crate::type_engine) fn class_type(&self, name: &str) -> PhpType {
-        if crate::class_lookup::is_class_keyword(name) {
-            return PhpType::named(atom(name));
-        }
-        PhpType::named(atom(&crate::names::resolve_code_class_name(
-            name,
-            self.namespace,
-            self.imports,
-            self.all_classes,
-            self.source_class_loader,
-        )))
-    }
 }
 
 /// Resolve a list of `PhpType` values into a deduplicated `Vec<ClassInfo>`.

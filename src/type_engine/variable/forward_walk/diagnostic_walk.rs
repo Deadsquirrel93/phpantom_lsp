@@ -843,7 +843,7 @@ pub(crate) fn seed_closure_params(
         let written_native = param.hint.as_ref().map(|h| extract_hint_type(h));
         let native_type = written_native
             .as_ref()
-            .map(|hint| accept_default(ctx.resolve_hint_type(hint)));
+            .map(|hint| accept_default(ctx.written_names().resolve_hint(hint)));
 
         // Check the `@param` docblock annotation, looking only in the
         // docblock attached to this closure/arrow function.
@@ -900,13 +900,13 @@ pub(crate) fn seed_closure_params(
                 ty,
                 ctx.content,
                 fn_span_start as usize,
-                &|ty| ctx.resolve_written_type(ty),
+                &ctx.written_names(),
             );
             super::super::resolution::substitute_class_string_template_bounds(
                 ty,
                 ctx.content,
                 fn_span_start as usize,
-                &|ty| ctx.resolve_written_type(ty),
+                &ctx.written_names(),
             )
         });
 
@@ -1746,8 +1746,8 @@ pub(crate) fn walk_anonymous_class_member_bodies<'b>(
 
 /// Find the innermost class whose body span contains `offset`.
 ///
-/// This is the diagnostic-module equivalent of
-/// [`find_innermost_enclosing_class`](crate::diagnostics::helpers::find_innermost_enclosing_class).
+/// Unlike [`find_class_at_offset`](crate::class_lookup::find_class_at_offset),
+/// a class's attributes and header are not part of it.
 pub(crate) fn find_enclosing_class_for_offset(
     local_classes: &[Arc<ClassInfo>],
     offset: u32,

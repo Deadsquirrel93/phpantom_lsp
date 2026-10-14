@@ -109,7 +109,7 @@ impl Backend {
                     crate::type_engine::types::conditional::ConditionalClassContext {
                         calling: rctx.current_class.map(|c| c.fqn().as_str()),
                         declaring: Some(owner.fqn().as_str()),
-                        written_class: Some(&|name: &str| rctx.resolve_written_class(name)),
+                        written_class: Some(&|name: &str| rctx.written_names().resolve_class(name)),
                     },
                     rctx.class_loader,
                     &tpl,
@@ -672,7 +672,7 @@ impl Backend {
                 // source-level reference so a same-namespace class wins
                 // over a global stub of the same short name.
                 let resolved_class_name = if resolved_class_name == *class_name {
-                    rctx.resolve_written_class(class_name)
+                    rctx.written_names().resolve_class(class_name)
                 } else {
                     resolved_class_name
                 };

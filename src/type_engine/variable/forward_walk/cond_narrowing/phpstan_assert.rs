@@ -119,7 +119,7 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
             let receiver = match static_call.class {
                 Expression::Identifier(ident) => {
                     let name = bytes_to_str(ident.value());
-                    (ctx.class_loader)(&ctx.resolve_written_class(name))
+                    (ctx.class_loader)(&ctx.written_names().resolve_class(name))
                 }
                 Expression::Self_(_) | Expression::Static(_) => {
                     (ctx.class_loader)(&ctx.current_class.fqn())

@@ -33,8 +33,7 @@ use crate::atom::bytes_to_str;
 use crate::parser::with_parsed_program;
 use crate::php_type::PhpType;
 use crate::symbol_map::{LaravelStringKind, SymbolKind, SymbolMap};
-use crate::type_engine::resolver::{Loaders, VarResolutionCtx};
-use crate::types::ClassInfo;
+use crate::type_engine::resolver::Loaders;
 use crate::virtual_members::laravel::canonical_view_name;
 
 pub(crate) use super::view_call_walker::string_literal_contents;
@@ -1074,13 +1073,10 @@ impl Backend {
         let _cache_guard =
             crate::virtual_members::with_active_resolved_class_cache(&self.resolved_class_cache);
         let file_ctx = self.file_context(uri);
-        let class_loaders = self.class_loaders(&file_ctx);
-        let resolved_class_loaders = self.resolved_class_loaders(&file_ctx);
-        let function_loaders = self.function_loaders(&file_ctx);
+        let loaders = self.file_loaders(&file_ctx);
+        let resolved_class_loader = loaders.resolved_class_loader();
 
         with_parsed_program(content, "blade_call_site_inference", |program, content| {
-            let default_class = ClassInfo::default();
-
             // Collect the matching call expressions first, then resolve
             // types — both inside the closure so AST references never
             // outlive the arena.
@@ -1095,28 +1091,23 @@ impl Backend {
 
             let mut result = Vec::new();
             for site in collected {
-                let class_loader = class_loaders.at(site.offset);
-                let resolved_class_loader = resolved_class_loaders.at(site.offset);
-                let function_loader = function_loaders.at(site.offset);
-                let imports = file_ctx.use_map_at(site.offset);
-                let function_loader_cl = |name: &str, offset: u32| function_loader(name, offset);
-                let enclosing =
-                    crate::class_lookup::find_class_at_offset(&file_ctx.classes, site.offset);
-                let current_class = enclosing.unwrap_or(&default_class);
-                let loaders = Loaders::with_function(Some(&function_loader_cl));
-                let var_ctx = VarResolutionCtx {
-                    source_imports: Some(imports),
-                    backend: Some(self),
-                    loaders,
-                    resolved_class_cache: Some(&self.resolved_class_cache),
-                    ..VarResolutionCtx::new(
-                        "",
-                        current_class,
-                        &file_ctx.classes,
+                let var_ctx = loaders.var_ctx_at(content, site.offset);
+                // A bare variable needs the public variable resolver's
+                // `@var` precedence. The generic RHS resolver deliberately
+                // skips that outer layer because it is also used inside
+                // the forward walk.
+                let variable_type = |name: &str| {
+                    crate::type_engine::variable::resolution::resolve_variable_php_type(
+                        name,
                         content,
                         site.offset,
-                        resolved_class_loader,
-                        class_loader,
+                        Some(var_ctx.current_class),
+                        var_ctx.all_classes,
+                        var_ctx.class_loader,
+                        var_ctx.source_class_loader,
+                        var_ctx.source_imports,
+                        var_ctx.backend,
+                        var_ctx.loaders,
                     )
                 };
 
@@ -1133,23 +1124,10 @@ impl Backend {
                             expr,
                         } => {
                             let span = expr.span();
-                            // A bare variable needs the public variable
-                            // resolver's `@var` precedence. The generic RHS
-                            // resolver deliberately skips that outer layer
-                            // because it is also used inside the forward walk.
                             let ty = match expr {
-                                Expression::Variable(Variable::Direct(dv)) => crate::type_engine::variable::resolution::resolve_variable_php_type(
-                                    bytes_to_str(dv.name),
-                                    content,
-                                    site.offset,
-                                    Some(current_class),
-                                    &file_ctx.classes,
-                                    resolved_class_loader,
-                                    class_loader,
-                                    Some(imports),
-                                    Some(self),
-                                    Loaders::with_function(Some(&function_loader_cl)),
-                                ),
+                                Expression::Variable(Variable::Direct(dv)) => {
+                                    variable_type(bytes_to_str(dv.name))
+                                }
                                 _ => crate::type_engine::variable::foreach_resolution::resolve_expression_type(
                                     expr, &var_ctx,
                                 ),
@@ -1158,20 +1136,7 @@ impl Backend {
                             (name, key_range, (span.start.offset, span.end.offset), ty)
                         }
                         SiteEntry::Variable { name, key_range } => {
-                            let loaders = Loaders::with_function(Some(&function_loader_cl));
-                            let ty = crate::type_engine::variable::resolution::resolve_variable_php_type(
-                                &name,
-                                content,
-                                site.offset,
-                                Some(current_class),
-                                &file_ctx.classes,
-                                resolved_class_loader,
-                                class_loader,
-                                Some(imports),
-                                Some(self),
-                                loaders,
-                            )
-                            .unwrap_or_else(PhpType::mixed);
+                            let ty = variable_type(&name).unwrap_or_else(PhpType::mixed);
                             (name, key_range, key_range, ty)
                         }
                         SiteEntry::Iteration {
@@ -1287,17 +1252,12 @@ impl Backend {
         let _cache_guard =
             crate::virtual_members::with_active_resolved_class_cache(&self.resolved_class_cache);
         let file_ctx = self.file_context(uri);
-        let class_loader = self.class_loader(&file_ctx);
-        let resolved_class_loader = self.resolved_class_loader(&file_ctx);
-        let function_loader = self.function_loader(&file_ctx);
-        let function_loader_cl = |name: &str, offset: u32| function_loader(name, offset);
+        let loaders = self.file_loaders(&file_ctx);
 
         with_parsed_program(
             virtual_php,
             "blade_component_call_site",
             |program, content| {
-                let default_class = ClassInfo::default();
-
                 let mut ctx = BladeDirectiveCollectCtx { calls: Vec::new() };
                 let walker = BladeDirectiveWalker;
                 for stmt in program.statements.iter() {
@@ -1312,31 +1272,15 @@ impl Backend {
                         let Some(expr) = calls.get(index).copied() else {
                             continue;
                         };
-                        let offset = expr.span().start.offset;
-                        let enclosing =
-                            crate::class_lookup::find_class_at_offset(&file_ctx.classes, offset);
-                        let current_class = enclosing.unwrap_or(&default_class);
-                        let loaders = Loaders::with_function(Some(&function_loader_cl));
-                        let var_ctx = VarResolutionCtx {
-                            source_imports: Some(&file_ctx.use_map),
-                            backend: Some(self),
-                            loaders,
-                            resolved_class_cache: Some(&self.resolved_class_cache),
-                            ..VarResolutionCtx::new(
-                                "",
-                                current_class,
-                                &file_ctx.classes,
-                                content,
-                                offset,
-                                &resolved_class_loader,
-                                &class_loader,
-                            )
-                        };
+                        let var_ctx = loaders.var_ctx_at(content, expr.span().start.offset);
                         let ty = crate::type_engine::variable::foreach_resolution::resolve_expression_type(
                         expr, &var_ctx,
                     )
                     .unwrap_or_else(PhpType::mixed);
-                        vars.push((name, qualify_class_names(ty, &resolved_class_loader)));
+                        vars.push((
+                            name,
+                            qualify_class_names(ty, loaders.resolved_class_loader()),
+                        ));
                     }
                     if !vars.is_empty() {
                         result.push(vars);

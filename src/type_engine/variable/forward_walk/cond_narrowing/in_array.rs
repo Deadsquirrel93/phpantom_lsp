@@ -347,7 +347,7 @@ pub(crate) fn resolve_in_array_haystack_type_fw(
         // Fall back to docblock annotation.
         let offset = haystack_expr.span().start.offset as usize;
         return crate::docblock::find_iterable_raw_type_in_source(ctx.content, offset, &var_name)
-            .map(|t| ctx.resolve_written_type(&t));
+            .map(|t| ctx.written_names().resolve_type(&t));
     }
 
     // For non-variable expressions (method calls, property access, etc.),

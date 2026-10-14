@@ -33,13 +33,10 @@ use crate::Backend;
 use crate::atom::bytes_to_str;
 use crate::parser::{with_parse_cache, with_parsed_program};
 use crate::php_type::{PhpType, TypeKind, is_array_like_name};
-use crate::type_engine::resolver::{LendsLoaders, VarResolutionCtx};
 use crate::type_engine::variable::foreach_resolution::resolve_expression_type;
 use crate::types::ResolvedCallableTarget;
 
-use super::helpers::{
-    find_innermost_enclosing_class, is_position_independent_call_expression, make_diagnostic,
-};
+use super::helpers::{is_position_independent_call_expression, make_diagnostic};
 
 /// Diagnostic code used for argument type mismatch diagnostics.
 pub(crate) const TYPE_MISMATCH_ARGUMENT_CODE: &str = "type_mismatch_argument";
@@ -331,17 +328,8 @@ impl Backend {
             return;
         }
 
-        let class_loaders = self.class_loaders(&file_ctx);
-        let resolved_class_loaders = self.resolved_class_loaders(&file_ctx);
-        let function_loaders = self.function_loaders(&file_ctx);
-        let constant_loaders = file_ctx.per_block(|use_map, namespace| {
-            self.constant_loader_with(
-                file_ctx.resolved_names.as_deref(),
-                use_map,
-                &file_ctx.symbol_imports.constants,
-                namespace,
-            )
-        });
+        let loaders = self.file_loaders(&file_ctx);
+        let resolved_class_loader = loaders.resolved_class_loader();
         // Read once for the whole file: `config()` clones the config
         // behind a lock, and the flag cannot change mid-pass.
         let downgrade_nullable_mismatch = self
@@ -370,42 +358,8 @@ impl Backend {
                 // Phase 2: resolve types for each collected expression.
                 let mut result: HashMap<u32, ResolvedCallArgs> = HashMap::new();
                 for (args_start, exprs) in &expr_map {
-                    let placeholder;
-                    let current_class_info =
-                        match find_innermost_enclosing_class(&file_ctx.classes, *args_start) {
-                            Some(cc) => cc,
-                            None => {
-                                placeholder = crate::class_lookup::class_context_placeholder(
-                                    content,
-                                    *args_start,
-                                );
-                                &placeholder
-                            }
-                        };
-
-                    let class_loader = class_loaders.at(*args_start);
-                    let resolved_class_loader = resolved_class_loaders.at(*args_start);
-                    let owned_loaders = self.diagnostic_loaders_over(
-                        function_loaders.at(*args_start),
-                        constant_loaders.at(*args_start),
-                    );
-                    let loaders = owned_loaders.loaders();
-
-                    let var_ctx = VarResolutionCtx {
-                        source_imports: Some(file_ctx.use_map_at(*args_start)),
-                        backend: Some(self),
-                        loaders,
-                        resolved_class_cache: Some(&self.resolved_class_cache),
-                        ..VarResolutionCtx::new(
-                            "",
-                            current_class_info,
-                            &file_ctx.classes,
-                            content,
-                            *args_start,
-                            resolved_class_loader,
-                            class_loader,
-                        )
-                    };
+                    let var_ctx = loaders.var_ctx_at(content, *args_start);
+                    let current_class_info = var_ctx.current_class;
 
                     let template_bounds = super::helpers::template_bounds_in_scope(
                         current_class_info,
@@ -515,7 +469,7 @@ impl Backend {
             }
 
             let expr = call_site.call_expression;
-            let class_loader = resolved_class_loaders.at(call_site.args_start);
+            let class_loader = resolved_class_loader;
 
             // Look up or populate the call expression cache.
             // Variable-based and `self::`/`static::`/`parent::` calls

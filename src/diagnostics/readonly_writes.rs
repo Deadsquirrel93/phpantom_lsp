@@ -61,17 +61,16 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::atom::{Atom, bytes_to_str};
+use crate::class_lookup::find_class_at_offset;
 use crate::hover::{MemberKindForOrigin, find_declaring_class};
 use crate::parser::{with_parse_cache, with_parsed_program};
 use crate::php_type::{PhpType, TypeKind, is_array_like_name};
 use crate::symbol_map::SymbolKind;
-use crate::type_engine::resolver::{
-    CtxLoaders, ResolutionCtx, SubjectOutcome, resolve_subject_outcome,
-};
+use crate::type_engine::resolver::{ResolutionCtx, SubjectOutcome, resolve_subject_outcome};
 use crate::types::{AccessKind, ClassInfo, ClassLikeKind, PropertyInfo};
 use crate::virtual_members::resolve_class_fully_cached;
 
-use super::helpers::{FileDiagnosticContext, find_innermost_enclosing_class, make_diagnostic};
+use super::helpers::{FileDiagnosticContext, make_diagnostic};
 
 /// Diagnostic code used for writes to a `readonly` property.
 pub(crate) const INVALID_READONLY_WRITE_CODE: &str = "invalid_readonly_write";
@@ -458,9 +457,8 @@ impl Backend {
         }
 
         let local_classes = &ctx.file.classes;
-        let class_loaders = self.resolved_class_loaders(&ctx.file);
-        let source_class_loaders = self.class_loaders(&ctx.file);
-        let function_loaders = self.function_loaders(&ctx.file);
+        let loaders = self.file_loaders(&ctx.file);
+        let class_loader = loaders.resolved_class_loader();
         let symbol_map = &ctx.symbol_map;
         let Some(source) = symbol_map.source(content) else {
             return;
@@ -484,8 +482,7 @@ impl Backend {
                 continue;
             }
 
-            let current_class = find_innermost_enclosing_class(local_classes, span.start);
-            let class_loader = class_loaders.at(span.start);
+            let current_class = find_class_at_offset(local_classes, span.start);
 
             // A trait body is incomplete by nature: the property it
             // writes may be declared by any host class, and the trait
@@ -519,18 +516,7 @@ impl Backend {
 
             let rctx = ResolutionCtx {
                 is_in_static_method: symbol_map.is_in_static_method(span.start),
-                ..self.resolution_ctx_at(
-                    current_class,
-                    local_classes,
-                    content,
-                    span.start,
-                    CtxLoaders::without_macro_this(
-                        class_loader,
-                        source_class_loaders.at(span.start),
-                        function_loaders.at(span.start),
-                    )
-                    .with_imports(ctx.file.use_map_at(span.start)),
-                )
+                ..loaders.resolution_ctx_at(content, span.start)
             };
             let SubjectOutcome::Resolved(receivers) =
                 resolve_subject_outcome(subject_text, AccessKind::Arrow, &rctx)

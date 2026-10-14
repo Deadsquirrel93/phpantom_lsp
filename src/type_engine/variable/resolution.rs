@@ -21,7 +21,7 @@ use crate::php_type::{PhpType, TypeKind};
 use crate::types::{ClassInfo, ResolvedType};
 
 use crate::Backend;
-use crate::type_engine::resolver::{Loaders, SourceImports, VarResolutionCtx};
+use crate::type_engine::resolver::{Loaders, SourceImports, VarResolutionCtx, WrittenNames};
 
 mod arguments;
 mod cursor_declarations;
@@ -271,20 +271,23 @@ pub(crate) fn resolve_variable_php_type(
         format!("${}", var_name)
     };
 
+    let written_names = || {
+        WrittenNames::new(
+            current_class,
+            all_classes,
+            content,
+            cursor_offset,
+            source_imports,
+            source_class_loader,
+        )
+    };
+
     // 1. Inline @var override (skip for self-assignment RHS).
     let var_override: Option<PhpType> = if let Some(var_type) =
         docblock::find_var_raw_type_in_source(content, cursor_offset as usize, &prefixed)
         && !is_cursor_in_self_assignment_rhs(content, cursor_offset as usize, &prefixed)
     {
-        Some(crate::names::resolve_source_php_type_names(
-            &var_type,
-            current_class.and_then(|c| c.file_namespace.as_deref()),
-            source_imports,
-            content,
-            crate::names::written_name_region(content, current_class, cursor_offset),
-            all_classes,
-            source_class_loader,
-        ))
+        Some(written_names().resolve_type(&var_type))
     } else {
         None
     };
@@ -330,15 +333,7 @@ pub(crate) fn resolve_variable_php_type(
             .or_else(|| find_catch_var_type_at_cursor(&stmts, &prefixed, cursor_offset))
     });
     if let Some(written) = param_type {
-        return Some(crate::names::resolve_source_php_type_names(
-            &written,
-            effective_class.file_namespace.as_deref(),
-            source_imports,
-            content,
-            crate::names::written_name_region(content, Some(effective_class), cursor_offset),
-            all_classes,
-            source_class_loader,
-        ));
+        return Some(written_names().resolve_type(&written));
     }
 
     // Fall back to the @var override.
@@ -768,7 +763,7 @@ fn try_resolve_in_function(
     // from nested control-flow.
     let enclosing_ret =
         crate::docblock::find_enclosing_return_type(ctx.content, (body_start + 1) as usize)
-            .map(|ty| ctx.resolve_written_type(&ty));
+            .map(|ty| ctx.written_names().resolve_type(&ty));
 
     // ── Forward walker (sole resolver) ──
     let fw_ctx = super::forward_walk::ForwardWalkCtx {
@@ -916,7 +911,7 @@ fn resolve_variable_in_members<'b>(
                         ctx.content,
                         (blk_start + 1) as usize,
                     )
-                    .map(|ty| ctx.resolve_written_type(&ty));
+                    .map(|ty| ctx.written_names().resolve_type(&ty));
 
                     let fw_ctx = super::forward_walk::ForwardWalkCtx {
                         enclosing_return_type: enclosing_ret,

@@ -67,13 +67,7 @@ impl ThrowPoints {
             let crate::php_type::TypeKind::Named(name) = member.kind() else {
                 return true;
             };
-            let catch_name = crate::names::resolve_code_class_name(
-                name,
-                ctx.current_class.file_namespace.as_deref(),
-                ctx.source_imports,
-                ctx.all_classes,
-                ctx.source_class_loader,
-            );
+            let catch_name = ctx.written_names().resolve_class(name);
             self.explicit
                 .iter()
                 .any(|thrown| may_catch(&catch_name, thrown, ctx))

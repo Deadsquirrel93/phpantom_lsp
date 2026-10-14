@@ -20,7 +20,7 @@ use mago_syntax::cst::*;
 
 use crate::atom::{atom, bytes_to_str};
 use crate::php_type::{PhpType, TypeKind};
-use crate::type_engine::resolver::ResolutionCtx;
+use crate::type_engine::resolver::{ResolutionCtx, WrittenNames};
 use crate::virtual_members::laravel::{
     ELOQUENT_BUILDER_FQN, ELOQUENT_MODEL_FQN, RELATION_QUERY_METHODS, extends_eloquent_model,
     model_builder_type, related_model_type, resolve_relation_chain_details,
@@ -647,21 +647,18 @@ pub(in crate::type_engine) fn resolve_receiver_types(
 }
 
 /// The FQN of the class a static-call receiver expression (`self`,
-/// `static`, `parent`, or a class identifier) names.
-///
-/// `resolve_written_class` is the context's
-/// [`resolve_written_class`](crate::type_engine::resolver::ResolutionCtx::resolve_written_class),
-/// which reads `self`, `static` and `parent` against the enclosing class.
+/// `static`, `parent`, or a class identifier) names, reading `self`,
+/// `static` and `parent` against the enclosing class.
 pub(in crate::type_engine) fn static_receiver_class_name(
     class_expr: &Expression<'_>,
-    current_class: Option<&ClassInfo>,
-    resolve_written_class: &dyn Fn(&str) -> String,
+    names: &WrittenNames<'_>,
 ) -> Option<String> {
+    let current_class = names.current_class();
     match class_expr {
         Expression::Self_(_) | Expression::Static(_) => {
             current_class.map(|cc| cc.fqn().to_string())
         }
-        Expression::Identifier(ident) => Some(resolve_written_class(bytes_to_str(ident.value()))),
+        Expression::Identifier(ident) => Some(names.resolve_class(bytes_to_str(ident.value()))),
         Expression::Parent(_) => {
             current_class.and_then(|cc| cc.parent_class.map(|a| a.to_string()))
         }
@@ -718,9 +715,7 @@ fn closure_this_from_static_receiver(
     arg_idx: usize,
     ctx: &ResolutionCtx<'_>,
 ) -> Option<Vec<ResolvedType>> {
-    let class_name = static_receiver_class_name(class_expr, ctx.current_class, &|name| {
-        ctx.resolve_written_class(name)
-    })?;
+    let class_name = static_receiver_class_name(class_expr, &ctx.written_names())?;
 
     if method_name.eq_ignore_ascii_case("macro")
         && arg_idx == 1

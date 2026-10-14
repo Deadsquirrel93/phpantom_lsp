@@ -34,14 +34,9 @@ pub(crate) fn extract_native_type_from_rhs<'b>(
         // `new ClassName(…)` → the class name.
         Expression::Instantiation(inst) => match inst.class {
             Expression::Identifier(ident) => {
-                let name = bytes_to_str(ident.value()).to_string();
-                let fqn = crate::names::resolve_code_class_name(
-                    &name,
-                    ctx.current_class.file_namespace.as_deref(),
-                    ctx.source_imports,
-                    ctx.all_classes,
-                    ctx.source_class_loader,
-                );
+                let fqn = ctx
+                    .written_names()
+                    .resolve_class(bytes_to_str(ident.value()));
                 Some(PhpType::named(atom(&fqn)))
             }
             Expression::Self_(_) => Some(PhpType::named(ctx.current_class.fqn())),
@@ -84,9 +79,10 @@ pub(crate) fn extract_native_type_from_rhs<'b>(
                     Expression::Self_(_) | Expression::Static(_) => {
                         Some(ctx.current_class.fqn().to_string())
                     }
-                    Expression::Identifier(ident) => {
-                        Some(ctx.resolve_written_class(bytes_to_str(ident.value())))
-                    }
+                    Expression::Identifier(ident) => Some(
+                        ctx.written_names()
+                            .resolve_class(bytes_to_str(ident.value())),
+                    ),
                     _ => None,
                 };
                 if let Some(cls_name) = class_name
@@ -187,7 +183,7 @@ pub(in crate::type_engine) fn resolve_arg_raw_type<'b>(
         let offset = arg_expr.span().start.offset as usize;
         let from_docblock =
             docblock::find_iterable_raw_type_in_source(ctx.content, offset, &var_text)
-                .map(|t| ctx.resolve_written_type(&t));
+                .map(|t| ctx.written_names().resolve_type(&t));
 
         // The scope the forward walker recorded for this position, from
         // whichever of its two channels is live.  Both are map reads,

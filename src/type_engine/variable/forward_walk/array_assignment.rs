@@ -54,7 +54,7 @@ pub(crate) fn destructuring_rhs_type(
         _ => None,
     };
     let raw_type = preceding_var_type_of_value(var_ctx.content, stmt_offset, rhs_var)
-        .map(|vt| var_ctx.resolve_written_type(&vt))
+        .map(|vt| var_ctx.written_names().resolve_type(&vt))
         .or_else(|| {
             super::super::foreach_resolution::resolve_expression_type(assignment.rhs, var_ctx)
         })?;

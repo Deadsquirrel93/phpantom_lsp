@@ -48,19 +48,20 @@ pub(crate) use inference::enrichment_return_type;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::code_actions::find_function_keyword_line as find_func_keyword_line;
 use crate::code_actions::phpstan::phpstan_identifier;
 use crate::code_actions::{CodeActionData, make_code_action_data};
-use crate::code_actions::{
-    find_function_docblock, find_function_keyword_line as find_func_keyword_line,
-};
 use crate::php_type::PhpType;
 
 use edits::{
     build_change_return_type_edits_to, build_strip_return_expr_edit,
     build_update_return_type_edits, build_update_return_type_edits_split,
-    find_close_paren_before_brace, find_function_open_brace_line, find_open_brace_from_declaration,
-    gather_between_paren_and_brace, has_return_type_between, read_current_return_type,
-    should_use_own_inference,
+    find_function_open_brace_line, gather_between_paren_and_brace, has_return_type_between,
+    read_current_return_type, should_use_own_inference,
+};
+pub(in crate::code_actions::phpstan) use edits::{
+    find_close_paren_before_brace, find_open_brace_from_declaration, find_return_type_edit,
+    native_return_type, paren_function_docblock,
 };
 use message_parse::{
     RETURN_EMPTY_MSG_FRAGMENT, RETURN_VOID_MSG_SUFFIX, extract_actual_type,
@@ -394,16 +395,13 @@ impl Backend {
                 });
 
                 // When the effective type is richer than the native hint,
-                // add a `@return` docblock tag.
-                if let Some(ref eff_type) = inferred.effective {
-                    let func_line = find_func_keyword_line(&lines, paren_line).unwrap_or(diag_line);
-                    let docblock_info = find_function_docblock(&lines, func_line);
-                    // An existing `@return` tag is left alone: the user
-                    // wrote it on purpose.
-                    if !docblock_info.has_return_tag {
-                        edits
-                            .push(docblock_info.add_return_tag_edit(&lines, &eff_type.to_string()));
-                    }
+                // add a `@return` docblock tag.  An existing `@return` tag
+                // is left alone: the user wrote it on purpose.
+                if let Some(ref eff_type) = inferred.effective
+                    && let Some(docblock) = paren_function_docblock(content, paren_line, paren_col)
+                    && docblock.return_tag().is_none()
+                {
+                    edits.push(docblock.add_return_tag_edit(content, &eff_type.to_string()));
                 }
 
                 Some(crate::code_actions::single_file_edit(doc_uri, edits))

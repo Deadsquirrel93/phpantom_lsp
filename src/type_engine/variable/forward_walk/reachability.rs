@@ -265,7 +265,7 @@ fn static_class_of(expr: &Expression<'_>, ctx: &ForwardWalkCtx<'_>) -> Option<Ar
                 }
                 Expression::Identifier(ident) => {
                     let name = bytes_to_str(ident.value());
-                    (ctx.class_loader)(&ctx.resolve_written_class(name))
+                    (ctx.class_loader)(&ctx.written_names().resolve_class(name))
                 }
                 _ => None,
             }

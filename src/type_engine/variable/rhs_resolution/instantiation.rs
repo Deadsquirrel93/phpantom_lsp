@@ -43,13 +43,7 @@ pub(super) fn resolve_rhs_instantiation(
                 };
                 parent.to_string()
             }
-            other => crate::names::resolve_code_class_name(
-                other,
-                ctx.current_class.file_namespace.as_deref(),
-                ctx.source_imports,
-                ctx.all_classes,
-                ctx.source_class_loader,
-            ),
+            other => ctx.written_names().resolve_class(other),
         };
         let parsed_name = if name == "static" {
             PhpType::static_type(atom(&fqn))

@@ -261,7 +261,7 @@ pub(crate) fn resolve_out_type_for_call(
         ConditionalClassContext {
             calling: resolution_ctx.current_class.map(|c| c.fqn().as_str()),
             declaring: declaring_fqn.as_deref(),
-            written_class: Some(&|name: &str| resolution_ctx.resolve_written_class(name)),
+            written_class: Some(&|name: &str| resolution_ctx.written_names().resolve_class(name)),
         },
         resolution_ctx.class_loader,
         &tpl,

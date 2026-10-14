@@ -22,7 +22,7 @@ use crate::type_engine::resolver::VarResolutionCtx;
 /// Resolve the class a `::class` literal names, as written (`self`,
 /// `static` and `parent` included), and append it to `results`.
 fn push_class_string_target(name: &str, ctx: &VarResolutionCtx<'_>, results: &mut Vec<ClassInfo>) {
-    let fqn = ctx.resolve_written_class(name);
+    let fqn = ctx.written_names().resolve_class(name);
     if let Some(cls) =
         crate::class_lookup::find_or_load_resolved(&fqn, ctx.all_classes, ctx.class_loader)
     {

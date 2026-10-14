@@ -4,11 +4,10 @@
 
 use tower_lsp::lsp_types::{Position, Range, TextEdit};
 
-use crate::code_actions::{
-    find_function_docblock, find_function_keyword_line as find_func_keyword_line,
-};
-use crate::docblock::type_strings::split_type_token;
+use crate::code_actions::cursor_context::FunctionKinds;
+use crate::code_actions::{FunctionDocblock, function_docblock_at};
 use crate::php_type::PhpType;
+use crate::text_position::line_start_byte_offset;
 use crate::text_scan::find_semicolon_balanced;
 
 use super::inference::InferredReturnType;
@@ -142,12 +141,10 @@ pub(super) fn build_change_return_type_edits_to(
     let type_edit = find_return_type_edit(&lines, paren_line, paren_col, brace_line, &target_str)?;
     edits.push(type_edit);
 
-    // ── Step 4: Find the function signature line ────────────────────
-    let func_line = find_func_keyword_line(&lines, paren_line)?;
-
-    // ── Step 5: Remove @return from docblock when target is void ────
+    // ── Step 4: Remove @return from docblock when target is void ────
     if target_type.is_void()
-        && let Some(return_tag_edit) = find_and_remove_return_tag(&lines, func_line)
+        && let Some(return_tag_edit) = paren_function_docblock(content, paren_line, paren_col)
+            .and_then(|docblock| docblock.remove_return_tag_edit(content))
     {
         edits.push(return_tag_edit);
     }
@@ -200,32 +197,11 @@ pub(super) fn read_current_return_type(content: &str, diag_line: usize) -> Curre
     };
 
     // ── Native type hint ────────────────────────────────────────────
-    let between = gather_between_paren_and_brace(&lines, paren_line, paren_col, brace_line);
-    let native = between.find(':').map(|colon_pos| {
-        let after_colon = &between[colon_pos + 1..];
-        let type_start = after_colon.find(|c: char| !c.is_whitespace()).unwrap_or(0);
-        let type_text = &after_colon[type_start..];
-        let type_len = type_text
-            .find(|c: char| c.is_whitespace() || c == '{')
-            .unwrap_or(type_text.len());
-        PhpType::parse(&type_text[..type_len])
-    });
+    let native = native_return_type(&lines, paren_line, paren_col, brace_line);
 
     // ── @return tag type ────────────────────────────────────────────
-    let func_line = find_func_keyword_line(&lines, paren_line);
-    let docblock = func_line.and_then(|fl| {
-        let info = find_function_docblock(&lines, fl);
-        let tag_line = info.return_tag_line?;
-        let line_text = lines[tag_line];
-        let at_pos = line_text.find("@return")?;
-        let after = &line_text[at_pos + "@return".len()..];
-        let trimmed = after.trim_start();
-        if trimmed.is_empty() {
-            return None;
-        }
-        let (type_token, _remainder) = split_type_token(trimmed);
-        Some(PhpType::parse(type_token))
-    });
+    let docblock = paren_function_docblock(content, paren_line, paren_col)
+        .and_then(|docblock| docblock.return_type());
 
     CurrentReturnType { native, docblock }
 }
@@ -303,15 +279,16 @@ pub(super) fn build_update_return_type_edits_split(
     }
 
     // ── Step 2: Update @return docblock tag ──────────────────────────
-    let func_line = find_func_keyword_line(&lines, paren_line)?;
-    let docblock_info = find_function_docblock(&lines, func_line);
-
-    if docblock_info.has_docblock && docblock_info.has_return_tag {
-        edits.extend(docblock_info.replace_return_type_edit(&lines, &full_type));
-    } else if has_docblock_type {
-        // Only create/insert a @return tag when the effective type
-        // differs from the native type.
-        edits.push(docblock_info.add_return_tag_edit(&lines, &full_type));
+    if let Some(docblock) = paren_function_docblock(content, paren_line, paren_col) {
+        match docblock.replace_return_type_edit(content, &full_type) {
+            Some(edit) => edits.push(edit),
+            // Only create/insert a @return tag when the effective type
+            // differs from the native type.
+            None if has_docblock_type => {
+                edits.push(docblock.add_return_tag_edit(content, &full_type));
+            }
+            None => {}
+        }
     }
 
     if edits.is_empty() {
@@ -363,15 +340,16 @@ pub(super) fn build_update_return_type_edits(
     }
 
     // ── Step 2: Update @return docblock tag ──────────────────────────
-    let func_line = find_func_keyword_line(&lines, paren_line)?;
-    let docblock_info = find_function_docblock(&lines, func_line);
-
-    if docblock_info.has_docblock && docblock_info.has_return_tag {
-        edits.extend(docblock_info.replace_return_type_edit(&lines, &actual_str));
-    } else if has_generics {
-        // Only create/insert a @return tag when the actual type has
-        // generics — otherwise the native type hint is sufficient.
-        edits.push(docblock_info.add_return_tag_edit(&lines, &actual_str));
+    if let Some(docblock) = paren_function_docblock(content, paren_line, paren_col) {
+        match docblock.replace_return_type_edit(content, &actual_str) {
+            Some(edit) => edits.push(edit),
+            // Only create/insert a @return tag when the actual type has
+            // generics — otherwise the native type hint is sufficient.
+            None if has_generics => {
+                edits.push(docblock.add_return_tag_edit(content, &actual_str));
+            }
+            None => {}
+        }
     }
 
     if edits.is_empty() {
@@ -507,7 +485,10 @@ pub(super) fn find_function_open_brace_line(lines: &[&str], start_line: usize) -
 ///
 /// Checks the declaration line itself and up to 5 lines after it.
 /// Returns the line number containing `{`, or `None`.
-pub(super) fn find_open_brace_from_declaration(lines: &[&str], decl_line: usize) -> Option<usize> {
+pub(in crate::code_actions::phpstan) fn find_open_brace_from_declaration(
+    lines: &[&str],
+    decl_line: usize,
+) -> Option<usize> {
     let end = (decl_line + 6).min(lines.len());
     (decl_line..end).find(|&i| lines[i].contains('{'))
 }
@@ -515,7 +496,7 @@ pub(super) fn find_open_brace_from_declaration(lines: &[&str], decl_line: usize)
 /// Find the closing `)` of the parameter list before the opening `{`.
 ///
 /// Scans backward from `brace_line` looking for `)`.
-pub(super) fn find_close_paren_before_brace(
+pub(in crate::code_actions::phpstan) fn find_close_paren_before_brace(
     lines: &[&str],
     brace_line: usize,
 ) -> Option<(usize, usize)> {
@@ -578,19 +559,16 @@ pub(super) fn gather_between_paren_and_brace(
     between
 }
 
-/// Find the return type hint between the closing `)` and opening `{`,
-/// and build a `TextEdit` that replaces it with `: {target_type}`.
-///
-/// Looks for the pattern `: TypeName` (with optional whitespace and
-/// nullable `?` prefix).  Returns `None` if the current type already
-/// matches `target_type`.
-fn find_return_type_edit(
+/// The native return type written between the closing `)` at
+/// `(paren_line, paren_col)` and the opening `{` on `brace_line`: the
+/// `between` text, the offset of its `:` and the range of the type after
+/// it.
+fn native_return_type_span(
     lines: &[&str],
     paren_line: usize,
     paren_col: usize,
     brace_line: usize,
-    target_type: &str,
-) -> Option<TextEdit> {
+) -> Option<(String, usize, std::ops::Range<usize>)> {
     // Gather the text between `)` and `{` across potentially multiple
     // lines.
     let between = gather_between_paren_and_brace(lines, paren_line, paren_col, brace_line);
@@ -608,12 +586,44 @@ fn find_return_type_edit(
         .find(|c: char| c.is_whitespace() || c == '{')
         .unwrap_or(type_text.len());
 
-    if type_len == 0 {
-        return None;
-    }
+    (type_len > 0).then(|| {
+        (
+            between,
+            colon_pos,
+            type_text_start..type_text_start + type_len,
+        )
+    })
+}
 
-    let type_name = &type_text[..type_len];
-    if type_name == target_type {
+/// The native return type written between the closing `)` at
+/// `(paren_line, paren_col)` and the opening `{` on `brace_line`, if any.
+pub(in crate::code_actions::phpstan) fn native_return_type(
+    lines: &[&str],
+    paren_line: usize,
+    paren_col: usize,
+    brace_line: usize,
+) -> Option<PhpType> {
+    let (between, _, type_range) =
+        native_return_type_span(lines, paren_line, paren_col, brace_line)?;
+    Some(PhpType::parse(&between[type_range]))
+}
+
+/// Find the return type hint between the closing `)` and opening `{`,
+/// and build a `TextEdit` that replaces it with `: {target_type}`.
+///
+/// Looks for the pattern `: TypeName` (with optional whitespace and
+/// nullable `?` prefix).  Returns `None` if the current type already
+/// matches `target_type`.
+pub(in crate::code_actions::phpstan) fn find_return_type_edit(
+    lines: &[&str],
+    paren_line: usize,
+    paren_col: usize,
+    brace_line: usize,
+    target_type: &str,
+) -> Option<TextEdit> {
+    let (between, colon_pos, type_range) =
+        native_return_type_span(lines, paren_line, paren_col, brace_line)?;
+    if between[type_range.clone()] == *target_type {
         return None;
     }
 
@@ -621,7 +631,7 @@ fn find_return_type_edit(
     // back to absolute line/col positions in the original source.
     let colon_abs = map_between_offset_to_position(lines, paren_line, paren_col, colon_pos)?;
     let type_end_abs =
-        map_between_offset_to_position(lines, paren_line, paren_col, type_text_start + type_len)?;
+        map_between_offset_to_position(lines, paren_line, paren_col, type_range.end)?;
 
     Some(TextEdit {
         range: Range {
@@ -666,55 +676,19 @@ fn map_between_offset_to_position(
     None
 }
 
-/// Look for a docblock above the function signature and remove any
-/// `@return` tag line from it.
-fn find_and_remove_return_tag(lines: &[&str], func_line: usize) -> Option<TextEdit> {
-    if func_line == 0 {
-        return None;
-    }
-
-    // Walk backward from the line before the function to find the
-    // docblock end.  Skip attribute lines like `#[Override]` and
-    // blank lines between the function and the docblock.
-    let mut doc_end_line = None;
-    for i in (0..func_line).rev() {
-        let trimmed = lines[i].trim();
-        if trimmed.ends_with("*/") {
-            doc_end_line = Some(i);
-            break;
-        }
-        if trimmed.starts_with("#[") || trimmed.is_empty() {
-            continue;
-        }
-        // Hit non-docblock, non-attribute content — no docblock.
-        break;
-    }
-
-    let doc_end_line = doc_end_line?;
-
-    let mut doc_start_line = doc_end_line;
-    for i in (0..=doc_end_line).rev() {
-        let trimmed = lines[i].trim();
-        if trimmed.starts_with("/**") {
-            doc_start_line = i;
-            break;
-        }
-        if trimmed.starts_with('*') || trimmed.starts_with("/*") {
-            continue;
-        }
-        break;
-    }
-
-    let return_line =
-        (doc_start_line..=doc_end_line).find(|&i| lines[i].trim().contains("@return"))?;
-
-    Some(TextEdit {
-        range: Range {
-            start: Position::new(return_line as u32, 0),
-            end: Position::new((return_line + 1) as u32, 0),
-        },
-        new_text: String::new(),
-    })
+/// The docblock of the function whose parameter list closes at
+/// `(paren_line, paren_col)`, as [`find_close_paren_before_brace`] finds it,
+/// so a docblock edit lands on the declaration the return-type edit does.
+pub(in crate::code_actions::phpstan) fn paren_function_docblock(
+    content: &str,
+    paren_line: usize,
+    paren_col: usize,
+) -> Option<FunctionDocblock> {
+    function_docblock_at(
+        content,
+        line_start_byte_offset(content, paren_line) + paren_col,
+        FunctionKinds::All,
+    )
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────

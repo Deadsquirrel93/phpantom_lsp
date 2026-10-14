@@ -20,7 +20,7 @@ impl Backend {
         ctx: &ResolutionCtx<'_>,
         mut return_type_hint_out: Option<&mut Option<PhpType>>,
     ) -> Vec<Arc<ClassInfo>> {
-        let written = |name: &str| ctx.resolve_written_class(name);
+        let written = |name: &str| ctx.written_names().resolve_class(name);
         // Resolve the base expression preserving generic type
         // arguments (e.g. `Collection<Product>`) so class-level
         // template parameters can be substituted in the method's
@@ -300,7 +300,7 @@ impl Backend {
         ctx: &ResolutionCtx<'_>,
         mut return_type_hint_out: Option<&mut Option<PhpType>>,
     ) -> Vec<Arc<ClassInfo>> {
-        let written = |name: &str| ctx.resolve_written_class(name);
+        let written = |name: &str| ctx.written_names().resolve_class(name);
         let owner_class = if class.starts_with('$') {
             // Variable holding a class-string (e.g. `$cls::make()`).
             // May resolve to multiple classes for union class-strings.
@@ -435,7 +435,7 @@ impl Backend {
         ctx: &ResolutionCtx<'_>,
         mut return_type_hint_out: Option<&mut Option<PhpType>>,
     ) -> Vec<Arc<ClassInfo>> {
-        let written = |name: &str| ctx.resolve_written_class(name);
+        let written = |name: &str| ctx.written_names().resolve_class(name);
         // ── Laravel container string binding ────────────────
         // `app('blade.compiler')` / `resolve('cache')` bind a plain
         // string to a concrete class.  The class-string form
@@ -750,7 +750,7 @@ impl Backend {
             cursor_offset as usize,
             var_name,
         )
-        .map(|t| ctx.resolve_written_type(&t))
+        .map(|t| ctx.written_names().resolve_type(&t))
             && let Some(ret_type) = raw_type.callable_return_type()
         {
             let classes: Vec<Arc<ClassInfo>> =
@@ -830,7 +830,7 @@ impl Backend {
         // resolves against the current namespace before the global
         // scope, so a same-namespace class wins over a global stub
         // of the same short name.
-        let fqn = ctx.resolve_written_class(class_name);
+        let fqn = ctx.written_names().resolve_class(class_name);
         let cls_arc = crate::class_lookup::find_class_by_fqn(ctx.all_classes, &fqn)
             .map(Arc::clone)
             .or_else(|| (ctx.class_loader)(&fqn));

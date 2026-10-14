@@ -338,6 +338,25 @@ mod tests {
     use super::*;
 
     #[test]
+    fn strips_public_static() {
+        assert_eq!(strip_trailing_modifiers("    public static").trim(), "");
+    }
+
+    #[test]
+    fn strips_protected() {
+        assert_eq!(
+            strip_trailing_modifiers("some code\n    protected").trim(),
+            "some code"
+        );
+    }
+
+    #[test]
+    fn does_not_strip_partial_keyword() {
+        // `mypublic` should not be stripped.
+        assert_eq!(strip_trailing_modifiers("mypublic"), "mypublic");
+    }
+
+    #[test]
     fn unescape_string_literal_collapses_namespace_separators() {
         // Single-quoted `'Foo\\Bar'` names the class `Foo\Bar` at runtime.
         assert_eq!(

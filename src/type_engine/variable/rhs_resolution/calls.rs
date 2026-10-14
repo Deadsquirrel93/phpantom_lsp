@@ -160,7 +160,7 @@ pub(crate) fn resolve_arg_variable_raw_type(
         rctx.cursor_offset as usize,
         var_name,
     )
-    .map(|t| rctx.resolve_written_type(&t))
+    .map(|t| rctx.written_names().resolve_type(&t))
     {
         return Some(raw);
     }
@@ -529,7 +529,9 @@ pub(crate) fn infer_closure_literal_type(
             .filter_map(|param| {
                 let hint = param.hint.as_ref()?;
                 let name = bytes_to_str(param.variable.name).to_string();
-                let ty = ctx.resolve_hint_type(&crate::parser::extract_hint_type(hint));
+                let ty = ctx
+                    .written_names()
+                    .resolve_hint(&crate::parser::extract_hint_type(hint));
                 Some((name, ty))
             })
             .collect();
@@ -562,7 +564,7 @@ pub(crate) fn infer_closure_literal_type(
         // `: Closure` on a closure whose body returns a closure with a
         // known signature).
         Some(declared) => {
-            let declared = ctx.resolve_written_type(&declared);
+            let declared = ctx.written_names().resolve_type(&declared);
             let narrowed = body_return().filter(|body| {
                 crate::class_lookup::is_subtype_of_typed(body, &declared, ctx.class_loader)
             });
@@ -639,7 +641,10 @@ fn declared_closure_params(
             type_hint: param
                 .hint
                 .as_ref()
-                .map(|hint| ctx.resolve_hint_type(&crate::parser::extract_hint_type(hint)))
+                .map(|hint| {
+                    ctx.written_names()
+                        .resolve_hint(&crate::parser::extract_hint_type(hint))
+                })
                 .unwrap_or_else(PhpType::mixed),
             optional: param.default_value.is_some(),
             variadic: param.ellipsis.is_some(),

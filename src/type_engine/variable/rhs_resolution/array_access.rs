@@ -82,7 +82,7 @@ pub(super) fn resolve_rhs_array_access<'b>(
         scope_result
             .or_else(|| {
                 docblock::find_iterable_raw_type_in_source(ctx.content, access_offset, &base_var)
-                    .map(|t| ctx.resolve_written_type(&t))
+                    .map(|t| ctx.written_names().resolve_type(&t))
             })
             .or_else(|| {
                 let resolved = resolve_var_types(&base_var, ctx, access_offset as u32);

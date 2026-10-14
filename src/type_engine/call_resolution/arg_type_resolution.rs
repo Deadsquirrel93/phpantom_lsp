@@ -117,7 +117,7 @@ impl ArrayFuncArgs for TextArrayFuncArgs<'_, '_> {
             // carries the file's own spelling of the class (`Support\Pen`
             // behind a `use App\Support;`).  It is compared against types
             // that arrived fully qualified, so canonicalise it here.
-            .map(|ty| self.ctx.resolve_hint_type(&ty))
+            .map(|ty| self.ctx.written_names().resolve_hint(&ty))
             .or_else(|| {
                 // See the AST counterpart: a callable string names a
                 // function whose declared return the call hands back.
@@ -160,7 +160,7 @@ impl ArrayFuncArgs for TextArrayFuncArgs<'_, '_> {
             param_index,
             subject,
             Some(&self.ctx.class_loader),
-            &self.ctx.written_class_names(),
+            &self.ctx.written_names(),
         )
     }
 
@@ -247,7 +247,7 @@ impl Backend {
                 ctx.cursor_offset as usize,
                 arg_text,
             )
-            .map(|t| ctx.resolve_written_type(&t))
+            .map(|t| ctx.written_names().resolve_type(&t))
             {
                 // A bare identifier that isn't a known keyword type and
                 // doesn't resolve to a loadable class is most likely an
@@ -345,8 +345,8 @@ impl Backend {
                     }
                 }
                 SubjectExpr::StaticMethodCall { class, method } => {
-                    let owner =
-                        class_loader(&ctx.resolve_written_class(class)).map(Arc::unwrap_or_clone);
+                    let owner = class_loader(&ctx.written_names().resolve_class(class))
+                        .map(Arc::unwrap_or_clone);
                     if let Some(ref cls) = owner
                         && let Some(rt) = crate::inheritance::resolve_method_return_type(
                             cls,

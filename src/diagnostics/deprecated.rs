@@ -23,17 +23,15 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::class_lookup::find_class_at_offset;
 use crate::symbol_map::{ClassRefContext, SymbolKind};
-use crate::type_engine::resolver::{
-    CtxLoaders, ResolutionCtx, SubjectOutcome, resolve_subject_outcome,
-};
+use crate::type_engine::resolver::{ResolutionCtx, SubjectOutcome, resolve_subject_outcome};
 use crate::types::AccessKind;
 use crate::types::{ClassInfo, ClassLikeKind};
 use crate::virtual_members::{ResolvedClassCache, resolve_class_fully_cached};
 
 use super::helpers::{
-    FileDiagnosticContext, find_enclosing_method_name, find_innermost_enclosing_class,
-    make_tagged_diagnostic, resolve_to_fqn,
+    FileDiagnosticContext, find_enclosing_method_name, make_tagged_diagnostic, resolve_to_fqn,
 };
 use super::subject_cache::SubjectCacheKey;
 
@@ -86,11 +84,8 @@ impl Backend {
         let file_resolved_names = &ctx.file.resolved_names;
         let local_classes = &ctx.file.classes;
 
-        let class_loaders = self.class_loaders(&ctx.file);
-        let resolved_class_loaders = self.resolved_class_loaders(&ctx.file);
-        let function_loaders = self.function_loaders(&ctx.file);
-        let laravel_macro_this_resolvers =
-            class_loaders.map(|class_loader| self.laravel_macro_this_resolver(class_loader));
+        let loaders = self.file_loaders(&ctx.file);
+        let resolved_class_loader = loaders.resolved_class_loader();
         let cache = &self.resolved_class_cache;
 
         // A map extracted from different text than `content` describes a
@@ -107,8 +102,6 @@ impl Backend {
             }
             let file_use_map = ctx.file.use_map_at(span.start);
             let file_namespace = ctx.file.namespace_at(span.start);
-            let class_loader = class_loaders.at(span.start);
-            let resolved_class_loader = resolved_class_loaders.at(span.start);
             match &span.kind {
                 // ── Class references (type hints, new Foo, extends, etc.) ─
                 SymbolKind::ClassReference {
@@ -174,7 +167,6 @@ impl Backend {
                     is_method_call,
                     ..
                 } => {
-                    let function_loader = function_loaders.at(span.start);
                     let subject_ctx =
                         crate::type_engine::subject_resolution::SubjectResolutionCtx {
                             local_classes,
@@ -182,9 +174,9 @@ impl Backend {
                             namespace: file_namespace,
                             content,
                             class_loader: resolved_class_loader,
-                            source_class_loader: class_loader,
+                            source_class_loader: loaders.class_loader_at(span.start),
                             backend: Some(self),
-                            function_loader,
+                            function_loader: loaders.function_loader_at(span.start),
                         };
 
                     // Resolve the subject type to a class.
@@ -203,8 +195,7 @@ impl Backend {
                     let base_class = match base_class {
                         Some(c) => c,
                         None if subject_str.starts_with('$') => {
-                            let enclosing_class =
-                                find_innermost_enclosing_class(local_classes, span.start);
+                            let enclosing_class = find_class_at_offset(local_classes, span.start);
 
                             let access_kind = if *is_static {
                                 AccessKind::DoubleColon
@@ -223,19 +214,7 @@ impl Backend {
                             let cached = var_type_cache.entry(cache_key).or_insert_with(|| {
                                 let rctx = ResolutionCtx {
                                     is_in_static_method: symbol_map.is_in_static_method(span.start),
-                                    ..self.resolution_ctx_at(
-                                        enclosing_class,
-                                        local_classes,
-                                        content,
-                                        span.start,
-                                        CtxLoaders::new(
-                                            resolved_class_loader,
-                                            class_loader,
-                                            function_loader,
-                                            laravel_macro_this_resolvers.at(span.start),
-                                        )
-                                        .with_imports(file_use_map),
-                                    )
+                                    ..loaders.resolution_ctx_at(content, span.start)
                                 };
 
                                 resolve_variable_subject(subject_str, access_kind, &rctx)
@@ -435,7 +414,7 @@ fn is_within_deprecated_scope(
     content: &str,
     offset: u32,
 ) -> bool {
-    let Some(enclosing) = find_innermost_enclosing_class(local_classes, offset) else {
+    let Some(enclosing) = find_class_at_offset(local_classes, offset) else {
         return false;
     };
     if enclosing.deprecation_message.is_some() {

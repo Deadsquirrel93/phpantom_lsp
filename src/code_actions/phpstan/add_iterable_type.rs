@@ -28,9 +28,10 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::code_actions::CodeActionData;
+use crate::code_actions::cursor_context::FunctionKinds;
 use crate::code_actions::make_code_action_data;
 use crate::code_actions::phpstan::phpstan_identifier;
-use crate::code_actions::{find_function_docblock, find_function_keyword_line};
+use crate::code_actions::{FunctionDocblock, function_docblock_at_line};
 use crate::php_type::{PhpType, TypeKind};
 
 // ── Constants ───────────────────────────────────────────────────────────────
@@ -82,34 +83,6 @@ fn extract_iterable_return_type(message: &str) -> Option<PhpType> {
 /// `Traversable<mixed>`, `array<int, string>`, etc.
 fn build_return_type(iterable_type: &str, args: Vec<PhpType>) -> PhpType {
     PhpType::generic(iterable_type, args)
-}
-
-/// Walk backward from `diag_line` to find the function declaration
-/// line (the line with the `function` keyword).
-///
-/// Tracks brace depth to exit the function body and locate the
-/// opening `{`, then searches backward for the `function` keyword.
-#[cfg(test)]
-fn find_enclosing_function_decl_line(lines: &[&str], diag_line: usize) -> Option<usize> {
-    // First find the opening `{` by tracking brace depth backward.
-    let mut depth: i32 = 0;
-    let mut brace_line = None;
-    for i in (0..diag_line).rev() {
-        for ch in lines[i].chars() {
-            match ch {
-                '{' => depth -= 1,
-                '}' => depth += 1,
-                _ => {}
-            }
-        }
-        if depth < 0 {
-            brace_line = Some(i);
-            break;
-        }
-    }
-
-    let brace_line = brace_line?;
-    find_function_keyword_line(lines, brace_line)
 }
 
 // ── Backend methods ─────────────────────────────────────────────────────────
@@ -174,16 +147,15 @@ impl Backend {
                 }
             };
 
-            let docblock = find_function_docblock(&lines, func_line);
+            let Some(docblock) =
+                function_docblock_at_line(content, func_line, FunctionKinds::Named)
+            else {
+                continue;
+            };
 
             // Skip if there is already a @return tag with a generic type.
-            if docblock.has_return_tag
-                && let Some(ret_line) = docblock.return_tag_line
-            {
-                let ret_text = lines[ret_line];
-                if docblock_return_line_has_type_structure(ret_text) {
-                    continue;
-                }
+            if has_structured_return_tag(&docblock) {
+                continue;
             }
 
             // Use a generic title — type inference is deferred to Phase 2.
@@ -233,20 +205,10 @@ impl Backend {
 
         let return_type = build_return_type(iterable_type, element_args).to_string();
 
-        let lines: Vec<&str> = content.lines().collect();
-        if func_line >= lines.len() {
-            return None;
-        }
-
-        // Find the function signature line (might differ from func_line
-        // if there are attributes between them).
-        let sig_line = find_function_keyword_line(&lines, func_line).unwrap_or(func_line);
-        let docblock = find_function_docblock(&lines, sig_line);
-
-        let edit = if docblock.has_docblock && docblock.has_return_tag {
-            docblock.replace_return_type_edit(&lines, &return_type)?
-        } else {
-            docblock.add_return_tag_edit(&lines, &return_type)
+        let docblock = function_docblock_at_line(content, func_line, FunctionKinds::Named)?;
+        let edit = match docblock.replace_return_type_edit(content, &return_type) {
+            Some(edit) => edit,
+            None => docblock.add_return_tag_edit(content, &return_type),
         };
 
         let doc_uri: Url = data.uri.parse().ok()?;
@@ -352,21 +314,16 @@ pub(crate) fn is_add_iterable_type_stale(content: &str, diag_line: usize, messag
             }
         };
 
-    let docblock = find_function_docblock(&lines, func_line);
+    function_docblock_at_line(content, func_line, FunctionKinds::Named)
+        .is_some_and(|docblock| has_structured_return_tag(&docblock))
+}
 
-    if !docblock.has_return_tag {
-        return false;
-    }
-
-    // Check if the @return tag has a generic type.
-    if let Some(ret_line_idx) = docblock.return_tag_line {
-        let ret_text = lines[ret_line_idx];
-        if docblock_return_line_has_type_structure(ret_text) {
-            return true;
-        }
-    }
-
-    false
+/// Whether the function's `@return` tag already gives its type a
+/// structure (see [`docblock_return_line_has_type_structure`]).
+fn has_structured_return_tag(docblock: &FunctionDocblock) -> bool {
+    docblock
+        .return_tag()
+        .is_some_and(|(_, line)| docblock_return_line_has_type_structure(line))
 }
 
 /// Check whether a `@return` docblock line already contains a type with
@@ -515,94 +472,85 @@ mod tests {
         );
     }
 
-    // ── find_function_docblock ─────────────────────────────────────
+    // ── Locating the docblock ──────────────────────────────────────
+
+    /// The docblock of the function declared on `line` of `php`.
+    fn docblock_at(php: &str, line: usize) -> FunctionDocblock {
+        function_docblock_at_line(php, line, FunctionKinds::Named).unwrap()
+    }
 
     #[test]
     fn finds_existing_multiline_docblock() {
-        let src =
-            "    /**\n     * Summary.\n     */\n    public function foo(): array\n    {\n    }";
-        let lines: Vec<&str> = src.lines().collect();
-        let db = find_function_docblock(&lines, 3);
-        assert!(db.has_docblock);
-        assert_eq!(db.doc_start_line, 0);
-        assert_eq!(db.doc_end_line, 2);
-        assert!(!db.has_return_tag);
-        assert_eq!(db.indent, "    ");
+        let php = "<?php\nclass Foo {\n    /**\n     * Summary.\n     */\n    public function foo(): array\n    {\n    }\n}";
+        let db = docblock_at(php, 5);
+        assert_eq!(
+            db.docblock.unwrap().text,
+            "    /**\n     * Summary.\n     */\n"
+        );
     }
 
     #[test]
     fn finds_docblock_with_return_tag() {
-        let src = "    /**\n     * Summary.\n     * @return array\n     */\n    public function foo(): array\n    {\n    }";
-        let lines: Vec<&str> = src.lines().collect();
-        let db = find_function_docblock(&lines, 4);
-        assert!(db.has_docblock);
-        assert!(db.has_return_tag);
-        assert_eq!(db.return_tag_line, Some(2));
+        let php = "<?php\nclass Foo {\n    /**\n     * Summary.\n     * @return array\n     */\n    public function foo(): array\n    {\n    }\n}";
+        let db = docblock_at(php, 6);
+        assert_eq!(
+            db.return_tag().map(|(_, line)| line),
+            Some("     * @return array")
+        );
     }
 
     #[test]
     fn no_docblock() {
-        let src = "    public function foo(): array\n    {\n    }";
-        let lines: Vec<&str> = src.lines().collect();
-        let db = find_function_docblock(&lines, 0);
-        assert!(!db.has_docblock);
-        assert_eq!(db.indent, "    ");
+        let php = "<?php\nclass Foo {\n    public function foo(): array\n    {\n    }\n}";
+        assert!(docblock_at(php, 2).docblock.is_none());
     }
 
     #[test]
     fn finds_single_line_docblock() {
-        let src = "    /** Summary. */\n    public function foo(): array\n    {\n    }";
-        let lines: Vec<&str> = src.lines().collect();
-        let db = find_function_docblock(&lines, 1);
-        assert!(db.has_docblock);
-        assert_eq!(db.doc_start_line, 0);
-        assert_eq!(db.doc_end_line, 0);
-        assert!(!db.has_return_tag);
+        let php = "<?php\nclass Foo {\n    /** Summary. */\n    public function foo(): array\n    {\n    }\n}";
+        let db = docblock_at(php, 3);
+        assert_eq!(db.docblock.unwrap().text, "    /** Summary. */\n");
     }
 
     #[test]
     fn skips_attributes_between_docblock_and_function() {
-        let src = "    /**\n     * Summary.\n     */\n    #[Override]\n    public function foo(): array\n    {\n    }";
-        let lines: Vec<&str> = src.lines().collect();
-        let db = find_function_docblock(&lines, 4);
-        assert!(db.has_docblock);
-        assert_eq!(db.doc_start_line, 0);
-        assert_eq!(db.doc_end_line, 2);
+        let php = "<?php\nclass Foo {\n    /**\n     * Summary.\n     */\n    #[Override]\n    public function foo(): array\n    {\n    }\n}";
+        let db = docblock_at(php, 6);
+        assert!(db.docblock.unwrap().text.contains("Summary."));
     }
 
     // ── Stale detection ────────────────────────────────────────────
 
     #[test]
     fn stale_when_return_tag_has_generic_type() {
-        let src = "    /**\n     * @return array<string>\n     */\n    public function foo(): array\n    {\n    }";
+        let src = "<?php\nclass Foo {\n    /**\n     * @return array<string>\n     */\n    public function foo(): array\n    {\n    }\n}";
         let msg =
             "Method Foo::foo() return type has no value type specified in iterable type array.";
-        assert!(is_add_iterable_type_stale(src, 3, msg));
+        assert!(is_add_iterable_type_stale(src, 5, msg));
     }
 
     #[test]
     fn stale_when_return_tag_has_array_suffix() {
-        let src = "    /**\n     * @return string[]\n     */\n    public function foo(): array\n    {\n    }";
+        let src = "<?php\nclass Foo {\n    /**\n     * @return string[]\n     */\n    public function foo(): array\n    {\n    }\n}";
         let msg =
             "Method Foo::foo() return type has no value type specified in iterable type array.";
-        assert!(is_add_iterable_type_stale(src, 3, msg));
+        assert!(is_add_iterable_type_stale(src, 5, msg));
     }
 
     #[test]
     fn not_stale_when_no_return_tag() {
-        let src =
-            "    /**\n     * Summary.\n     */\n    public function foo(): array\n    {\n    }";
+        let src = "<?php\nclass Foo {\n    /**\n     * Summary.\n     */\n    public function foo(): array\n    {\n    }\n}";
         let msg =
             "Method Foo::foo() return type has no value type specified in iterable type array.";
-        assert!(!is_add_iterable_type_stale(src, 3, msg));
+        assert!(!is_add_iterable_type_stale(src, 5, msg));
     }
 
     #[test]
     fn not_stale_when_return_tag_has_no_generic() {
-        let src = "    /**\n     * @return array\n     */\n    public function foo(): array\n    {\n    }";
+        let src = "<?php\nclass Foo {\n    /**\n     * @return array\n     */\n    public function foo(): array\n    {\n    }\n}";
         let msg =
             "Method Foo::foo() return type has no value type specified in iterable type array.";
-        assert!(!is_add_iterable_type_stale(src, 3, msg));
+        assert!(!is_add_iterable_type_stale(src, 5, msg));
     }
 
     #[test]
@@ -622,28 +570,10 @@ mod tests {
 
     #[test]
     fn stale_on_modifier_line_with_generic_return() {
-        let src = "    /**\n     * @return array<int, string>\n     */\n    public\n    function foo(): array\n    {\n    }";
+        let src = "<?php\nclass Foo {\n    /**\n     * @return array<int, string>\n     */\n    public\n    function foo(): array\n    {\n    }\n}";
         let msg =
             "Method Foo::foo() return type has no value type specified in iterable type array.";
-        // Diagnostic is on line 3 (the `public` modifier line).
-        assert!(is_add_iterable_type_stale(src, 3, msg));
-    }
-
-    // ── find_enclosing_function_decl_line ───────────────────────────
-
-    #[test]
-    fn finds_function_decl_from_body() {
-        let src =
-            "class Foo {\n    public function bar(): array\n    {\n        return [];\n    }\n}";
-        let lines: Vec<&str> = src.lines().collect();
-        // diag_line = 3 (return statement)
-        assert_eq!(find_enclosing_function_decl_line(&lines, 3), Some(1));
-    }
-
-    #[test]
-    fn returns_none_when_no_function() {
-        let src = "class Foo {\n    public $x = 1;\n}";
-        let lines: Vec<&str> = src.lines().collect();
-        assert_eq!(find_enclosing_function_decl_line(&lines, 1), None);
+        // Diagnostic is on line 5 (the `public` modifier line).
+        assert!(is_add_iterable_type_stale(src, 5, msg));
     }
 }

@@ -216,7 +216,7 @@ impl Backend {
                 .into_iter()
                 .map(|(_, hint)| crate::php_type::CallableParam {
                     type_hint: hint
-                        .map(|h| ctx.resolve_hint_type(&h))
+                        .map(|h| ctx.written_names().resolve_hint(&h))
                         .unwrap_or_else(PhpType::mixed),
                     optional: false,
                     variadic: false,
@@ -279,7 +279,9 @@ impl Backend {
                     .and_then(|c| c.parent_class.as_ref())
                     .map(|p| PhpType::named(atom(p.as_ref())))
             } else {
-                Some(PhpType::named(atom(&ctx.resolve_written_class(name))))
+                Some(PhpType::named(atom(
+                    &ctx.written_names().resolve_class(name),
+                )))
             };
             return class_named.map(|n| PhpType::class_string(Some(n)));
         }
@@ -343,7 +345,7 @@ impl Backend {
             && let Some(class_name) =
                 crate::completion::source::helpers::extract_new_expression_class(trimmed)
         {
-            let resolved_name = ctx.resolve_written_class(&class_name);
+            let resolved_name = ctx.written_names().resolve_class(&class_name);
             return Some(PhpType::named(atom(
                 resolved_name.strip_prefix('\\').unwrap_or(&resolved_name),
             )));
@@ -460,7 +462,7 @@ impl Backend {
         // behind a `use App\Support;`).  A template bound from it is
         // compared against types that arrived fully qualified, so the
         // spelling has to be canonicalised before it is bound.
-        let declared = ctx.resolve_hint_type(&declared);
+        let declared = ctx.written_names().resolve_hint(&declared);
         let narrowed = body_type().filter(|body| {
             crate::class_lookup::is_subtype_of_typed(body, &declared, ctx.class_loader)
         });
@@ -529,7 +531,7 @@ impl Backend {
                     // the file's own spelling of the class name; canonicalise
                     // it so the seeded type matches one resolved any other
                     // way.
-                    let declared = declared.map(|t| ctx.resolve_hint_type(&t));
+                    let declared = declared.map(|t| ctx.written_names().resolve_hint(&t));
                     let ty = match (declared, seed) {
                         (Some(declared), Some(seed))
                             if crate::class_lookup::is_subtype_of_typed(
@@ -1637,7 +1639,7 @@ pub(crate) fn bind_callable_param_template(
     let param_type = crate::completion::source::helpers::extract_closure_param_type_from_text(
         arg_text, position,
     )?;
-    Some(ctx.resolve_written_type(&param_type))
+    Some(ctx.written_names().resolve_type(&param_type))
 }
 
 /// Bind the template a `@param callable(...): …` hint names in its return

@@ -22,12 +22,13 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
+use crate::class_lookup::find_class_at_offset;
 use crate::parser::with_parsed_program;
 use crate::php_type::{PhpType, TypeKind};
-use crate::type_engine::resolver::{LendsLoaders, VarResolutionCtx};
+use crate::type_engine::resolver::VarResolutionCtx;
 use crate::type_engine::variable::foreach_resolution::resolve_expression_type;
 
-use super::helpers::{TypeCheckCtx, collect_type_check, find_innermost_enclosing_class};
+use super::helpers::{TypeCheckCtx, collect_type_check};
 use super::type_errors::is_type_compatible;
 
 /// Diagnostic code used for property type mismatch diagnostics.
@@ -266,7 +267,7 @@ fn check_expression_for_property_assignment(expr: &Expression<'_>, ctx: &mut Pro
             };
 
             let offset = pa.object.span().start.offset;
-            let enclosing = find_innermost_enclosing_class(&ctx.file_ctx.classes, offset);
+            let enclosing = find_class_at_offset(&ctx.file_ctx.classes, offset);
             match enclosing {
                 Some(cls) => (name, cls),
                 None => return,
@@ -294,7 +295,7 @@ fn check_expression_for_property_assignment(expr: &Expression<'_>, ctx: &mut Pro
             };
 
             let offset = spa.class.span().start.offset;
-            let enclosing = find_innermost_enclosing_class(&ctx.file_ctx.classes, offset);
+            let enclosing = find_class_at_offset(&ctx.file_ctx.classes, offset);
             match enclosing {
                 Some(cls) => (prop_name, cls),
                 None => return,
@@ -316,8 +317,8 @@ fn check_expression_for_property_assignment(expr: &Expression<'_>, ctx: &mut Pro
     };
 
     let site = assign.rhs.span().start.offset;
-    let class_loader = ctx.type_ctx.class_loader_at(site);
-    let resolved_class_loader = ctx.type_ctx.resolved_class_loader_at(site);
+    let class_loader = ctx.type_ctx.loaders.class_loader_at(site);
+    let resolved_class_loader = ctx.type_ctx.loaders.resolved_class_loader();
 
     // Resolve `self`/`static`/`parent`/`$this` in the declared property
     // type, then expand any remaining short class names to their
@@ -343,16 +344,10 @@ fn check_expression_for_property_assignment(expr: &Expression<'_>, ctx: &mut Pro
     let rhs_start = rhs_span.start.offset as usize;
     let rhs_end = rhs_span.end.offset as usize;
 
-    let owned_loaders = ctx.backend.diagnostic_loaders_over(
-        ctx.type_ctx.function_loader_at(site),
-        ctx.type_ctx.constant_loader_at(site),
-    );
-    let loaders = owned_loaders.loaders();
-
     let var_ctx = VarResolutionCtx {
         source_imports: Some(ctx.type_ctx.file_ctx.use_map_at(site)),
         backend: Some(ctx.backend),
-        loaders,
+        loaders: ctx.type_ctx.loaders.loaders_at(site),
         resolved_class_cache: Some(&ctx.backend.resolved_class_cache),
         ..VarResolutionCtx::new(
             "",
@@ -438,7 +433,7 @@ impl Backend {
                 if is_type_compatible(
                     &assignment.rhs_type,
                     &assignment.declared_type,
-                    ctx.resolved_class_loader_at(assignment.start as u32),
+                    ctx.loaders.resolved_class_loader(),
                     ctx.strict_types,
                 ) {
                     return None;

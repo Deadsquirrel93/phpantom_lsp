@@ -180,7 +180,7 @@ pub(crate) fn resolve_foreach_iterable_type_raw<'b>(
             foreach_offset,
             &var_name,
         )
-        .map(|t| ctx.resolve_written_type(&t))
+        .map(|t| ctx.written_names().resolve_type(&t))
         {
             return Some(docblock_type);
         }

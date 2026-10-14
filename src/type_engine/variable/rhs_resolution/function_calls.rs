@@ -213,7 +213,7 @@ fn named_function_call<'b>(
                 crate::type_engine::conditional_resolution::ConditionalClassContext {
                     calling: Some(current_class_name),
                     declaring: None,
-                    written_class: Some(&|name: &str| ctx.resolve_written_class(name)),
+                    written_class: Some(&|name: &str| ctx.written_names().resolve_class(name)),
                 },
                 ctx.class_loader,
                 &tpl,
@@ -300,7 +300,7 @@ fn variable_invocation(
     //    `@param callable(int): Response $fn`
     if let Some(raw_type) =
         crate::docblock::find_iterable_raw_type_in_source(ctx.content, offset, var_name)
-            .map(|t| ctx.resolve_written_type(&t))
+            .map(|t| ctx.written_names().resolve_type(&t))
         && let Some(ret_type) = raw_type.callable_return_type()
     {
         let resolved = callable_return_resolution(ret_type, ctx);

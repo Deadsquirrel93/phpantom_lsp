@@ -72,6 +72,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use super::unresolved_member_access::UNRESOLVED_MEMBER_ACCESS_CODE;
+use crate::class_lookup::find_class_at_offset;
 use crate::parser::with_parse_cache;
 
 use tower_lsp::lsp_types::*;
@@ -79,15 +80,13 @@ use tower_lsp::lsp_types::*;
 use crate::Backend;
 use crate::symbol_map::SymbolKind;
 use crate::type_engine::resolver::{
-    CtxLoaders, ResolutionCtx, SubjectOutcome, resolve_subject_outcome, with_chain_resolution_cache,
+    ResolutionCtx, SubjectOutcome, resolve_subject_outcome, with_chain_resolution_cache,
 };
 use crate::types::{AccessKind, ClassInfo, ClassLikeKind};
 use crate::virtual_members::resolve_class_fully_cached;
 
 use super::existence_guards::{compute_existence_guards, compute_isset_empty_argument_ranges};
-use super::helpers::{
-    FileDiagnosticContext, find_innermost_enclosing_class, is_offset_in_ranges, make_diagnostic,
-};
+use super::helpers::{FileDiagnosticContext, is_offset_in_ranges, make_diagnostic};
 use super::member_lookup::{
     display_class_name, has_magic_method_for_access, member_exists, member_exists_relaxed,
     member_is_public,
@@ -187,11 +186,8 @@ impl Backend {
         };
         let local_classes = &ctx.file.classes;
 
-        let class_loaders = self.class_loaders(&ctx.file);
-        let resolved_class_loaders = self.resolved_class_loaders(&ctx.file);
-        let function_loaders = self.function_loaders(&ctx.file);
-        let laravel_macro_this_resolvers =
-            class_loaders.map(|class_loader| self.laravel_macro_this_resolver(class_loader));
+        let loaders = self.file_loaders(&ctx.file);
+        let resolved_class_loader = loaders.resolved_class_loader();
         let resolved_cache = &self.resolved_class_cache;
 
         // ── Compute existence guards ────────────────────────────────────
@@ -269,11 +265,6 @@ impl Backend {
                     }
                     _ => continue,
                 };
-            let class_loader = class_loaders.at(span.start);
-            let resolved_class_loader = resolved_class_loaders.at(span.start);
-            let function_loader = function_loaders.at(span.start);
-            let laravel_macro_this_resolver = laravel_macro_this_resolvers.at(span.start);
-
             // `@see` legally carries URIs, prose, and naming suggestions in
             // addition to FQSENs, so a target that resolves to nothing is
             // not an error.  PHPUnit coverage metadata, which shares the
@@ -320,7 +311,7 @@ impl Backend {
                 AccessKind::Arrow
             };
 
-            let current_class = find_innermost_enclosing_class(local_classes, span.start);
+            let current_class = find_class_at_offset(local_classes, span.start);
 
             // `$this`, `self`, and `static` name whatever class the code
             // is bound to, which is normally the one it sits in — but a
@@ -371,19 +362,7 @@ impl Backend {
                 .or_insert_with(|| {
                     let rctx = ResolutionCtx {
                         is_in_static_method: symbol_map.is_in_static_method(span.start),
-                        ..self.resolution_ctx_at(
-                            current_class,
-                            local_classes,
-                            content,
-                            span.start,
-                            CtxLoaders::new(
-                                resolved_class_loader,
-                                class_loader,
-                                function_loader,
-                                laravel_macro_this_resolver,
-                            )
-                            .with_imports(ctx.file.use_map_at(span.start)),
-                        )
+                        ..loaders.resolution_ctx_at(content, span.start)
                     };
                     resolve_subject_outcome(subject_text, access_kind, &rctx)
                 })
@@ -550,19 +529,7 @@ impl Backend {
                         if result != MemberCheckResult::Ok && is_narrowable_subject {
                             let rctx = ResolutionCtx {
                                 is_in_static_method: symbol_map.is_in_static_method(span.start),
-                                ..self.resolution_ctx_at(
-                                    current_class,
-                                    local_classes,
-                                    content,
-                                    span.start,
-                                    CtxLoaders::new(
-                                        resolved_class_loader,
-                                        class_loader,
-                                        function_loader,
-                                        laravel_macro_this_resolver,
-                                    )
-                                    .with_imports(ctx.file.use_map_at(span.start)),
-                                )
+                                ..loaders.resolution_ctx_at(content, span.start)
                             };
                             let fresh = resolve_subject_outcome(subject_text, access_kind, &rctx);
                             if let SubjectOutcome::Resolved(ref fresh_classes) = fresh {

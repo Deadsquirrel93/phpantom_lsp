@@ -76,7 +76,7 @@ fn resolve_static_property_key_type(
             Some(parent) => parent.to_string(),
             None => return Vec::new(),
         },
-        other => ctx.resolve_written_class(other),
+        other => ctx.written_names().resolve_class(other),
     };
     let owners = crate::type_engine::type_resolution::type_hint_to_classes_typed(
         &PhpType::named(crate::atom::atom(&class_name)),

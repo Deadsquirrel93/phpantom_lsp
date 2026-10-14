@@ -7,8 +7,8 @@ use std::sync::Arc;
 use crate::Backend;
 use crate::definition::member::MemberKind;
 use crate::php_type::PhpType;
-use crate::type_engine::resolver::{CtxLoaders, ResolutionCtx};
-use crate::types::{ClassInfo, FileContext, FunctionInfo};
+use crate::type_engine::resolver::{CtxLoaders, Loaders, ResolutionCtx, VarResolutionCtx};
+use crate::types::{ClassInfo, FileContext, FunctionInfo, PerBlock};
 
 impl Backend {
     /// Return a class-loader closure bound to a [`FileContext`].
@@ -176,10 +176,10 @@ impl Backend {
     /// diagnostics.
     pub(crate) fn laravel_macro_this_resolver<'a, F>(
         &'a self,
-        class_loader: &'a F,
+        class_loader: F,
     ) -> impl Fn(&str) -> Option<Arc<ClassInfo>> + 'a
     where
-        F: Fn(&str) -> Option<Arc<ClassInfo>> + ?Sized,
+        F: Fn(&str) -> Option<Arc<ClassInfo>> + 'a,
     {
         move |target: &str| {
             let facade =
@@ -244,10 +244,20 @@ impl Backend {
         &'a self,
         ctx: &'a FileContext,
     ) -> impl Fn(&str, u32) -> Option<FunctionInfo> + 'a {
+        self.function_loader_in(ctx, &ctx.namespace)
+    }
+
+    /// The function loader for `ctx`'s file with `namespace` in force,
+    /// which binds `$this` in a Pest test's closures.
+    fn function_loader_in<'a>(
+        &'a self,
+        ctx: &'a FileContext,
+        namespace: &'a Option<String>,
+    ) -> impl Fn(&str, u32) -> Option<FunctionInfo> + 'a {
         let load = self.function_loader_with(
             ctx.resolved_names.as_deref(),
             &ctx.symbol_imports.functions,
-            &ctx.namespace,
+            namespace,
         );
         move |name: &str, offset: u32| {
             let mut fi = load(name, offset)?;
@@ -256,24 +266,38 @@ impl Backend {
         }
     }
 
-    /// Return one function-loader closure per `namespace` block of the
-    /// file behind `ctx`; see [`class_loaders`](Self::class_loaders).
-    pub(crate) fn function_loaders<'a>(
-        &'a self,
-        ctx: &'a FileContext,
-    ) -> crate::types::PerBlock<'a, impl Fn(&str, u32) -> Option<FunctionInfo> + 'a> {
-        ctx.per_block(|_, namespace| {
-            let load = self.function_loader_with(
-                ctx.resolved_names.as_deref(),
-                &ctx.symbol_imports.functions,
-                namespace,
-            );
-            move |name: &str, offset: u32| {
-                let mut fi = load(name, offset)?;
-                self.bind_pest_closure_this(&mut fi, ctx.pest_uses.as_deref());
-                Some(fi)
-            }
-        })
+    /// Everything a pass over the whole file behind `ctx` resolves names
+    /// and expressions through; see [`FileLoaders`].
+    pub(crate) fn file_loaders<'a>(&'a self, ctx: &'a FileContext) -> FileLoaders<'a> {
+        FileLoaders {
+            backend: self,
+            file: ctx,
+            class_loaders: ctx.per_block(|use_map, namespace| -> BoxedClassLoader<'a> {
+                Box::new(self.class_loader_with(&ctx.classes, use_map, namespace))
+            }),
+            resolved_class_loader: Box::new(self.resolved_class_loader_with(&ctx.classes)),
+            function_loaders: ctx.per_block(|_, namespace| -> BoxedFunctionLoader<'a> {
+                Box::new(self.function_loader_in(ctx, namespace))
+            }),
+            constant_loaders: ctx.per_block(|use_map, namespace| -> BoxedConstantLoader<'a> {
+                Box::new(self.constant_loader_with(
+                    ctx.resolved_names.as_deref(),
+                    use_map,
+                    &ctx.symbol_imports.constants,
+                    namespace,
+                ))
+            }),
+            placeholders: ctx.per_block(|_, namespace| {
+                crate::class_lookup::placeholder_in_namespace(namespace.as_deref())
+            }),
+            // A macro target is a resolved name, which every block's
+            // loader reads the same way, so one resolver serves them all.
+            macro_this_resolver: Box::new(self.laravel_macro_this_resolver(
+                self.class_loader_with(&ctx.classes, &ctx.use_map, &ctx.namespace),
+            )),
+            config_resolver: Box::new(move |key: &str| self.resolve_config_type(key)),
+            trans_resolver: Box::new(move |key: &str| self.resolve_trans_type(key)),
+        }
     }
 
     /// Return a function-loader closure from individual file-context
@@ -530,5 +554,136 @@ impl Backend {
             return None;
         };
         Some((resolved, kind))
+    }
+}
+
+type BoxedClassLoader<'a> = Box<dyn Fn(&str) -> Option<Arc<ClassInfo>> + 'a>;
+type BoxedFunctionLoader<'a> = Box<dyn Fn(&str, u32) -> Option<FunctionInfo> + 'a>;
+type BoxedConstantLoader<'a> = Box<dyn Fn(&str, u32) -> Option<Option<String>> + 'a>;
+type BoxedKeyResolver<'a> = Box<dyn Fn(&str) -> Option<PhpType> + 'a>;
+
+/// Everything a pass over a whole file resolves names and expressions
+/// through, built once per file by [`Backend::file_loaders`]: a class,
+/// function and constant loader for each `namespace` block (see
+/// [`Backend::class_loaders`]), the loader for already-resolved names, the
+/// Laravel config, translation and macro `$this` resolvers, and for each
+/// block the placeholder class that code outside a class reads as its own.
+///
+/// It hands out the [`VarResolutionCtx`] or [`ResolutionCtx`] for an
+/// offset, built from the loaders of the block the offset is in.
+pub(crate) struct FileLoaders<'a> {
+    backend: &'a Backend,
+    file: &'a FileContext,
+    class_loaders: PerBlock<'a, BoxedClassLoader<'a>>,
+    /// A resolved name means the same class in every block.
+    resolved_class_loader: BoxedClassLoader<'a>,
+    function_loaders: PerBlock<'a, BoxedFunctionLoader<'a>>,
+    constant_loaders: PerBlock<'a, BoxedConstantLoader<'a>>,
+    placeholders: PerBlock<'a, ClassInfo>,
+    macro_this_resolver: BoxedClassLoader<'a>,
+    config_resolver: BoxedKeyResolver<'a>,
+    trans_resolver: BoxedKeyResolver<'a>,
+}
+
+impl<'a> FileLoaders<'a> {
+    /// The class loader for names as written in the block containing
+    /// `offset`.
+    pub(crate) fn class_loader_at(
+        &self,
+        offset: u32,
+    ) -> &(dyn Fn(&str) -> Option<Arc<ClassInfo>> + 'a) {
+        self.class_loaders.at(offset).as_ref()
+    }
+
+    /// The class loader for already-resolved names.
+    pub(crate) fn resolved_class_loader(&self) -> &(dyn Fn(&str) -> Option<Arc<ClassInfo>> + 'a) {
+        self.resolved_class_loader.as_ref()
+    }
+
+    /// The function loader for the block containing `offset`.
+    pub(crate) fn function_loader_at(
+        &self,
+        offset: u32,
+    ) -> &(dyn Fn(&str, u32) -> Option<FunctionInfo> + 'a) {
+        self.function_loaders.at(offset).as_ref()
+    }
+
+    /// The constant loader for the block containing `offset`.
+    pub(crate) fn constant_loader_at(
+        &self,
+        offset: u32,
+    ) -> &(dyn Fn(&str, u32) -> Option<Option<String>> + 'a) {
+        self.constant_loaders.at(offset).as_ref()
+    }
+
+    /// The class the code at `offset` is written in, if any.
+    pub(crate) fn enclosing_class(&self, offset: u32) -> Option<&'a ClassInfo> {
+        crate::class_lookup::find_class_at_offset(&self.file.classes, offset)
+    }
+
+    /// The class the code at `offset` reads as its own: the one it is
+    /// written in, or outside a class a placeholder in its block's
+    /// namespace.
+    pub(crate) fn class_at(&self, offset: u32) -> &ClassInfo {
+        self.enclosing_class(offset)
+            .unwrap_or_else(|| self.placeholders.at(offset))
+    }
+
+    /// The cross-file loaders for the block containing `offset`.
+    pub(crate) fn loaders_at(&self, offset: u32) -> Loaders<'_> {
+        Loaders {
+            function_loader: Some(self.function_loader_at(offset)),
+            constant_loader: Some(self.constant_loader_at(offset)),
+            config_resolver: Some(self.config_resolver.as_ref()),
+            trans_resolver: Some(self.trans_resolver.as_ref()),
+        }
+    }
+
+    /// The [`CtxLoaders`] for the block containing `offset`.
+    pub(crate) fn ctx_loaders_at(&self, offset: u32) -> CtxLoaders<'_> {
+        CtxLoaders::new(
+            self.resolved_class_loader(),
+            self.class_loader_at(offset),
+            self.function_loader_at(offset),
+            self.macro_this_resolver.as_ref(),
+        )
+        .with_imports(self.file.use_map_at(offset))
+    }
+
+    /// The context for resolving an expression written at `offset` of
+    /// `content`, the file these loaders were built for.
+    pub(crate) fn var_ctx_at<'b>(&'b self, content: &'b str, offset: u32) -> VarResolutionCtx<'b> {
+        VarResolutionCtx {
+            source_imports: Some(self.file.use_map_at(offset)),
+            backend: Some(self.backend),
+            loaders: self.loaders_at(offset),
+            resolved_class_cache: Some(&self.backend.resolved_class_cache),
+            ..VarResolutionCtx::new(
+                "",
+                self.class_at(offset),
+                &self.file.classes,
+                content,
+                offset,
+                self.resolved_class_loader(),
+                self.class_loader_at(offset),
+            )
+        }
+    }
+
+    /// The context for resolving a subject at `offset` of `content`; see
+    /// [`Backend::resolution_ctx_at`] for the fields it leaves at their
+    /// defaults.
+    pub(crate) fn resolution_ctx_at<'b>(
+        &'b self,
+        content: &'b str,
+        offset: u32,
+    ) -> ResolutionCtx<'b> {
+        self.backend.resolution_ctx_at(
+            self.enclosing_class(offset),
+            &self.file.classes,
+            content,
+            offset,
+            self.ctx_loaders_at(offset),
+        )
     }
 }

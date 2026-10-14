@@ -384,8 +384,7 @@ pub(crate) fn infer_callable_params_from_static_receiver_fw(
 ) -> Vec<PhpType> {
     let owner = super::super::closure_resolution::static_receiver_class_name(
         class_expr,
-        Some(ctx.current_class),
-        &|name| ctx.resolve_written_class(name),
+        &ctx.written_names(),
     )
     .and_then(|name| {
         super::super::closure_resolution::find_owner_by_name(

@@ -696,3 +696,54 @@ fn adds_throws_in_a_crlf_file() {
         "@throws should land in second()'s docblock:\n{result:?}"
     );
 }
+
+// ── A brace in a string before the throw ────────────────────────────────────
+
+#[test]
+fn adds_throws_when_a_string_before_the_throw_holds_a_brace() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Foo {
+    public function first(): void {
+    }
+
+    public function second(): void {
+        $close = '}';
+        throw new \RuntimeException();
+    }
+}
+"#;
+    backend.update_ast(uri, content);
+
+    inject_phpstan_diag(
+        &backend,
+        uri,
+        7,
+        "Method Foo::second() throws checked exception RuntimeException but it's missing from the PHPDoc @throws tag.",
+        "missingType.checkedException",
+    );
+
+    let actions = get_code_actions_at(&backend, uri, content, 7, 10);
+    let action = find_action(&actions, "Add @throws").expect("should offer Add @throws action");
+    let resolved = resolve_action(&backend, uri, content, action);
+    let result = apply_edits(content, &extract_edits(&resolved));
+
+    assert_eq!(
+        result,
+        r#"<?php
+class Foo {
+    public function first(): void {
+    }
+
+    /**
+     * @throws RuntimeException
+     */
+    public function second(): void {
+        $close = '}';
+        throw new \RuntimeException();
+    }
+}
+"#
+    );
+}

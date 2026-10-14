@@ -177,7 +177,7 @@ pub(super) fn commit_chain_instanceof<'b>(
     ctx: &ForwardWalkCtx<'_>,
 ) -> Vec<String> {
     let scope_resolver = scope.snapshot_resolver();
-    let names = ctx.written_class_names();
+    let names = ctx.written_names();
 
     // Track which variables have been narrowed by instanceof across
     // `&&` operands so we can merge them, plus where each subject's

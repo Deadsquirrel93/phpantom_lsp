@@ -55,10 +55,10 @@ pub(crate) fn seed_params<'b>(
             if let Some((var_type, _name)) =
                 crate::docblock::find_inline_var_docblock(ctx.content, param_offset)
             {
-                let var_type = ctx.resolve_written_type(&var_type);
+                let var_type = ctx.written_names().resolve_type(&var_type);
                 let native = native_type
                     .as_ref()
-                    .map(|written| ctx.resolve_hint_type(written));
+                    .map(|written| ctx.written_names().resolve_hint(written));
                 let effective =
                     crate::docblock::resolve_effective_type_typed(native.as_ref(), Some(&var_type))
                         .unwrap_or(var_type);
@@ -204,7 +204,7 @@ fn seed_implicit_set_value(
         return;
     };
 
-    let hint_type = ctx.resolve_hint_type(&extract_hint_type(hint));
+    let hint_type = ctx.written_names().resolve_hint(&extract_hint_type(hint));
 
     scope.seed("$value", ctx.resolved_types_for(hint_type));
 }
@@ -245,7 +245,7 @@ pub(crate) fn resolve_docblock_param_type(raw: &PhpType, ctx: &ForwardWalkCtx<'_
         ctx.class_loader,
     );
     let raw = expanded.as_ref().unwrap_or(raw);
-    let resolved = ctx.resolve_written_type(raw);
+    let resolved = ctx.written_names().resolve_type(raw);
     let resolved = bind_enclosing_self(&resolved, ctx).unwrap_or(resolved);
     finish_constant_operands(&resolved, ctx).unwrap_or(resolved)
 }
@@ -324,7 +324,7 @@ pub(crate) fn resolve_param_type(
         .or_else(|| {
             written_native
                 .as_ref()
-                .map(|hint| ctx.resolve_hint_type(hint))
+                .map(|hint| ctx.written_names().resolve_hint(hint))
         });
     // A `null` default makes the parameter accept null whatever its type
     // says (`bool $a = null` is `?bool`).
@@ -368,7 +368,7 @@ pub(crate) fn resolve_param_type(
             t,
             ctx.content,
             method_span_start as usize,
-            &|ty| ctx.resolve_written_type(ty),
+            &ctx.written_names(),
         )
     });
 
@@ -453,7 +453,7 @@ pub(crate) fn resolve_param_type(
             ty,
             ctx.content,
             method_span_start as usize,
-            &|ty| ctx.resolve_written_type(ty),
+            &ctx.written_names(),
         );
         // Also substitute inside class-string<T> so that
         // `class-string<T>` with `@template T of Foo` becomes
@@ -462,7 +462,7 @@ pub(crate) fn resolve_param_type(
             ty,
             ctx.content,
             method_span_start as usize,
-            &|ty| ctx.resolve_written_type(ty),
+            &ctx.written_names(),
         )
     });
 
@@ -786,7 +786,7 @@ pub(crate) fn build_type_string_only_result(
             parsed,
             ctx.content,
             method_span_start,
-            &|ty| ctx.resolve_written_type(ty),
+            &ctx.written_names(),
         );
         vec![ResolvedType::from_type_string(parsed)]
     } else {

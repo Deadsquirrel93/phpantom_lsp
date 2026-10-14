@@ -132,7 +132,7 @@ pub(super) fn resolve_array_access_subject(
         ctx.cursor_offset as usize,
         &base_var,
     )
-    .map(|t| ctx.resolve_written_type(&t));
+    .map(|t| ctx.written_names().resolve_type(&t));
     // resolve_variable_types is designed for bare `$variable` names;
     // property chains like `$this->query->joins` are handled by the
     // property_raw_type strategy above.  Skip this strategy for

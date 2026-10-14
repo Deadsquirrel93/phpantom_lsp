@@ -10,6 +10,8 @@ use crate::php_type::PhpType;
 use crate::type_engine::variable::forward_walk::{ExprTypes, ScopeProofs};
 use crate::types::*;
 
+use super::WrittenNames;
+
 // ─── Thread-local chain resolution cache ────────────────────────────────────
 //
 // During a single diagnostic pass a file may contain many chain expressions
@@ -361,62 +363,16 @@ pub(crate) struct CtxLoaders<'a> {
 }
 
 impl<'a> ResolutionCtx<'a> {
-    /// Qualify the class names of a type written in this file; see
-    /// [`VarResolutionCtx::resolve_written_type`].
-    pub(crate) fn resolve_written_type(&self, ty: &PhpType) -> PhpType {
-        let (namespace, local_classes) = self.written_scope();
-        crate::names::resolve_source_php_type_names(
-            ty,
-            namespace,
-            self.source_imports,
+    /// How a class name written at the cursor reads.  Outside a class the
+    /// namespace is the one in force at the cursor.
+    pub(in crate::type_engine) fn written_names(&self) -> WrittenNames<'a> {
+        WrittenNames::new(
+            self.current_class,
+            self.all_classes,
             self.content,
-            crate::names::written_name_region(self.content, self.current_class, self.cursor_offset),
-            local_classes,
-            self.source_class_loader,
-        )
-    }
-
-    /// Qualify the class names of a native type hint written in this file;
-    /// see [`resolve_code_php_type_names`](crate::names::resolve_code_php_type_names).
-    pub(crate) fn resolve_hint_type(&self, ty: &PhpType) -> PhpType {
-        let (namespace, local_classes) = self.written_scope();
-        crate::names::resolve_code_php_type_names(
-            ty,
-            namespace,
+            self.cursor_offset,
             self.source_imports,
-            local_classes,
             self.source_class_loader,
-        )
-    }
-
-    /// Resolve a class name written in this file to its FQN; see
-    /// [`resolve_code_class_name`](crate::names::resolve_code_class_name).
-    /// `self`, `static` and `parent` name the class the code is in.
-    pub(crate) fn resolve_written_class(&self, name: &str) -> String {
-        if let Some(fqn) = crate::class_lookup::resolve_class_keyword(name, self.current_class) {
-            return fqn;
-        }
-        let (namespace, local_classes) = self.written_scope();
-        crate::names::resolve_code_class_name(
-            name,
-            namespace,
-            self.source_imports,
-            local_classes,
-            self.source_class_loader,
-        )
-    }
-
-    /// Resolves the class names a narrowing check writes (`instanceof`,
-    /// `Foo::class`) by the same rule as [`Self::resolve_written_class`].
-    pub(in crate::type_engine) fn written_class_names(
-        &self,
-    ) -> crate::type_engine::types::narrowing::WrittenClassNames<'a> {
-        let (namespace, local_classes) = self.written_scope();
-        crate::type_engine::types::narrowing::WrittenClassNames::new(
-            local_classes,
-            self.source_class_loader,
-            namespace,
-            self.source_imports,
         )
     }
 
@@ -447,17 +403,6 @@ impl<'a> ResolutionCtx<'a> {
             self.backend,
             Loaders::with_function(self.function_loader),
         )
-    }
-
-    /// The namespace a written name is read in, and the file's classes to
-    /// match it against.  Outside a class the namespace is the one in force
-    /// at the cursor.
-    fn written_scope(&self) -> (Option<&'a str>, &'a [Arc<ClassInfo>]) {
-        let namespace = match self.current_class {
-            Some(cls) => cls.file_namespace.as_deref(),
-            None => crate::parser::namespace_at_offset(self.content, self.cursor_offset as usize),
-        };
-        (namespace, self.all_classes)
     }
 }
 
@@ -631,63 +576,14 @@ impl<'a> VarResolutionCtx<'a> {
         }
     }
 
-    /// Resolves the classes a check names as written in this file.
-    pub(in crate::type_engine) fn written_class_names(
-        &self,
-    ) -> crate::type_engine::types::narrowing::WrittenClassNames<'a> {
-        crate::type_engine::types::narrowing::WrittenClassNames::new(
+    /// How a class name written at the cursor reads.
+    pub(in crate::type_engine) fn written_names(&self) -> WrittenNames<'a> {
+        WrittenNames::new(
+            Some(self.current_class),
             self.all_classes,
-            self.source_class_loader,
-            self.current_class.file_namespace.as_deref(),
-            self.source_imports,
-        )
-    }
-
-    /// Qualify the class names of a type written in this file (a native
-    /// hint, a docblock read inside the body); see
-    /// [`resolve_source_php_type_names`](crate::names::resolve_source_php_type_names).
-    pub(crate) fn resolve_written_type(&self, ty: &PhpType) -> PhpType {
-        crate::names::resolve_source_php_type_names(
-            ty,
-            self.current_class.file_namespace.as_deref(),
-            self.source_imports,
             self.content,
-            crate::names::written_name_region(
-                self.content,
-                Some(self.current_class),
-                self.cursor_offset,
-            ),
-            self.all_classes,
-            self.source_class_loader,
-        )
-    }
-
-    /// Qualify the class names of a native type hint written in this file;
-    /// see [`resolve_code_php_type_names`](crate::names::resolve_code_php_type_names).
-    pub(crate) fn resolve_hint_type(&self, ty: &PhpType) -> PhpType {
-        crate::names::resolve_code_php_type_names(
-            ty,
-            self.current_class.file_namespace.as_deref(),
+            self.cursor_offset,
             self.source_imports,
-            self.all_classes,
-            self.source_class_loader,
-        )
-    }
-
-    /// Resolve a class name written in this file to its FQN; see
-    /// [`resolve_code_class_name`](crate::names::resolve_code_class_name).
-    /// `self`, `static` and `parent` name the class the code is in.
-    pub(crate) fn resolve_written_class(&self, name: &str) -> String {
-        if let Some(fqn) =
-            crate::class_lookup::resolve_class_keyword(name, Some(self.current_class))
-        {
-            return fqn;
-        }
-        crate::names::resolve_code_class_name(
-            name,
-            self.current_class.file_namespace.as_deref(),
-            self.source_imports,
-            self.all_classes,
             self.source_class_loader,
         )
     }
