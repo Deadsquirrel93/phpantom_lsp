@@ -571,12 +571,12 @@ impl Backend {
         if let Some(raw) =
             docblock::find_iterable_raw_type_in_source(content, cursor_offset, var_name)
         {
-            return Some(crate::util::resolve_source_php_type_names(
+            return Some(crate::names::resolve_source_php_type_names(
                 &raw,
                 file_ctx.namespace_at(cursor_offset as u32).as_deref(),
                 Some(file_ctx.use_map_at(cursor_offset as u32)),
                 content,
-                crate::util::written_name_region(content, current_class, cursor_offset as u32),
+                crate::names::written_name_region(content, current_class, cursor_offset as u32),
                 &file_ctx.classes,
                 &class_loader,
             ));

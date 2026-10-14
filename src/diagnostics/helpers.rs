@@ -219,7 +219,7 @@ pub(crate) fn is_offset_in_ranges(offset: u32, ranges: &[ByteRange]) -> bool {
 
 // Re-export the canonical `resolve_to_fqn` from `crate::util` so that
 // existing `use super::helpers::resolve_to_fqn` imports keep working.
-pub(crate) use crate::util::resolve_to_fqn;
+pub(crate) use crate::names::resolve_to_fqn;
 
 /// Find the innermost class whose declaration span contains `offset`.
 ///

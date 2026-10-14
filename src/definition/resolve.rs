@@ -748,14 +748,14 @@ impl Backend {
     /// Resolve a short or partially-qualified name to a fully-qualified name
     /// using the file's `use` map and namespace context.
     ///
-    /// This is a thin wrapper around [`crate::util::resolve_to_fqn`] kept
+    /// This is a thin wrapper around [`crate::names::resolve_to_fqn`] kept
     /// for API compatibility with callers that use `Self::resolve_to_fqn`.
     pub fn resolve_to_fqn(
         name: &str,
         use_map: &HashMap<String, String>,
         namespace: &Option<String>,
     ) -> String {
-        crate::util::resolve_to_fqn(name, use_map, namespace)
+        crate::names::resolve_to_fqn(name, use_map, namespace)
     }
 
     /// Resolve a class definition in a file on disk.

@@ -58,7 +58,7 @@ pub(crate) fn build_docblock_for_extraction(
 ) -> String {
     let mut tags: Vec<String> = Vec::new();
     let shorten = |ty: &PhpType| {
-        ty.resolve_names(&|n| crate::util::shorten_from_fqn(n, use_map, file_namespace))
+        ty.resolve_names(&|n| crate::names::shorten_from_fqn(n, use_map, file_namespace))
     };
 
     // Collect @param tags that need enrichment.

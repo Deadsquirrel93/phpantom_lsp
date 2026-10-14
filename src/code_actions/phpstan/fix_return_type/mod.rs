@@ -507,7 +507,7 @@ impl Backend {
 /// For `return.empty`: the diagnostic is stale when the enclosing
 /// function's return type declaration already says `void`.
 ///
-/// Called from `is_stale_phpstan_diagnostic` in `diagnostics/mod.rs`.
+/// Called from `is_stale_phpstan_diagnostic` in `diagnostics/stale.rs`.
 pub(crate) fn is_fix_return_type_stale(content: &str, diag_line: usize, identifier: &str) -> bool {
     let lines: Vec<&str> = content.lines().collect();
 

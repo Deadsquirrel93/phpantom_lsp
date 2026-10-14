@@ -207,7 +207,7 @@ impl Backend {
 /// PHPDoc type from the original message, or the tag has been removed
 /// entirely.
 ///
-/// Called from `is_stale_phpstan_diagnostic` in `diagnostics/mod.rs`.
+/// Called from `is_stale_phpstan_diagnostic` in `diagnostics/stale.rs`.
 pub(crate) fn is_fix_phpdoc_type_stale(
     content: &str,
     diag_line: usize,

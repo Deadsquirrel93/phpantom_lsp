@@ -173,7 +173,7 @@ impl Backend {
                 } else {
                     function_imports
                 };
-                let fqn = crate::util::resolve_to_fqn(name, imports, file_namespace);
+                let fqn = crate::names::resolve_to_fqn(name, imports, file_namespace);
                 let mut candidates: Vec<&str> = vec![*name];
                 if fqn != *name {
                     candidates.push(&fqn);
@@ -233,7 +233,7 @@ impl Backend {
                 Some(positions)
             }
             ByRefCallKind::InstanceMethod(class_name, method_name) => {
-                let fqn = crate::util::resolve_to_fqn(class_name, file_use_map, file_namespace);
+                let fqn = crate::names::resolve_to_fqn(class_name, file_use_map, file_namespace);
                 let cls = self
                     .find_or_load_class(&fqn)
                     .or_else(|| self.find_or_load_class(class_name))?;
@@ -269,7 +269,7 @@ impl Backend {
         if crate::class_lookup::is_class_keyword(class_name) {
             let enclosing_name = enclosing_class_name?;
             let enclosing_fqn =
-                crate::util::resolve_to_fqn(enclosing_name, file_use_map, file_namespace);
+                crate::names::resolve_to_fqn(enclosing_name, file_use_map, file_namespace);
             let enclosing_class = self
                 .find_or_load_class(&enclosing_fqn)
                 .or_else(|| self.find_or_load_class(enclosing_name))?;
@@ -278,7 +278,7 @@ impl Backend {
             return self.find_or_load_class(&fqn);
         }
 
-        let fqn = crate::util::resolve_to_fqn(class_name, file_use_map, file_namespace);
+        let fqn = crate::names::resolve_to_fqn(class_name, file_use_map, file_namespace);
         self.find_or_load_class(&fqn)
             .or_else(|| self.find_or_load_class(class_name))
     }

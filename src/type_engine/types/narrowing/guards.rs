@@ -442,7 +442,7 @@ fn expression_is_never_call(expr: &Expression<'_>, ctx: &ExitCtx<'_>) -> bool {
                 // name against the current namespace before the global
                 // scope, so a same-namespace class must win over a
                 // global class of the same short name.
-                Expression::Identifier(ident) => crate::util::resolve_code_class_name(
+                Expression::Identifier(ident) => crate::names::resolve_code_class_name(
                     bytes_to_str(ident.value()),
                     ctx.current_class.file_namespace.as_deref(),
                     ctx.source_imports,

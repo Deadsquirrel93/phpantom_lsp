@@ -357,7 +357,7 @@ fn resolve_enum_names_in_program(rules: &mut RulesArray, program: &Program<'_>) 
 
     for entry in &mut rules.entries {
         if let Some(name) = &entry.enum_class {
-            entry.enum_class = Some(crate::util::resolve_to_fqn(name, &use_map, &namespace));
+            entry.enum_class = Some(crate::names::resolve_to_fqn(name, &use_map, &namespace));
         }
     }
 }

@@ -128,12 +128,12 @@ impl<'a> ForwardWalkCtx<'a> {
     /// Qualify the class names of a type written in this file; see
     /// [`VarResolutionCtx::resolve_written_type`].
     pub(crate) fn resolve_written_type(&self, ty: &PhpType) -> PhpType {
-        crate::util::resolve_source_php_type_names(
+        crate::names::resolve_source_php_type_names(
             ty,
             self.current_class.file_namespace.as_deref(),
             self.source_imports,
             self.content,
-            crate::util::written_name_region(
+            crate::names::written_name_region(
                 self.content,
                 Some(self.current_class),
                 self.cursor_offset,
@@ -144,9 +144,9 @@ impl<'a> ForwardWalkCtx<'a> {
     }
 
     /// Qualify the class names of a native type hint written in this file;
-    /// see [`resolve_code_php_type_names`](crate::util::resolve_code_php_type_names).
+    /// see [`resolve_code_php_type_names`](crate::names::resolve_code_php_type_names).
     pub(crate) fn resolve_hint_type(&self, ty: &PhpType) -> PhpType {
-        crate::util::resolve_code_php_type_names(
+        crate::names::resolve_code_php_type_names(
             ty,
             self.current_class.file_namespace.as_deref(),
             self.source_imports,
@@ -156,7 +156,7 @@ impl<'a> ForwardWalkCtx<'a> {
     }
 
     /// Resolve a class name written in this file to its FQN; see
-    /// [`resolve_code_class_name`](crate::util::resolve_code_class_name).
+    /// [`resolve_code_class_name`](crate::names::resolve_code_class_name).
     /// `self`, `static` and `parent` name the class the code is in.
     pub(crate) fn resolve_written_class(&self, name: &str) -> String {
         if let Some(fqn) =
@@ -164,7 +164,7 @@ impl<'a> ForwardWalkCtx<'a> {
         {
             return fqn;
         }
-        crate::util::resolve_code_class_name(
+        crate::names::resolve_code_class_name(
             name,
             self.current_class.file_namespace.as_deref(),
             self.source_imports,

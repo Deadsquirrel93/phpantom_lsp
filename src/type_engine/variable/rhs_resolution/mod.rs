@@ -1,39 +1,45 @@
-/// Right-hand-side expression resolution for variable assignments.
-///
-/// This module resolves the type of the right-hand side of an assignment
-/// (`$var = <expr>`) to zero or more [`ResolvedType`] values.  It handles:
-///
-///   - Scalar literals: `1` → `1`, `'hello'` → `'hello'`, etc.
-///   - Array literals: `[new Foo()]` → `list<Foo>`,
-///     `['a' => 1]` → `array{a: int}`
-///   - `new ClassName(…)` → the instantiated class
-///   - Array access: `$arr[0]` → generic element type,
-///     `$arr['key']` → array shape value type,
-///     `$arr['key'][0]` → chained bracket access
-///   - Function calls: `someFunc()` → return type
-///   - Method calls: `$this->method()`, `$obj->method()` → return type
-///   - Static calls: `ClassName::method()` → return type
-///   - Property access: `$this->prop`, `$obj->prop` → property type
-///   - Match expressions: union of all arm types
-///   - Ternary / null-coalescing: union of both branches
-///   - Clone: `clone $expr` → preserves the cloned expression's type
-///
-/// The entry point is [`resolve_rhs_expression`], which dispatches to
-/// specialised helpers based on the AST node kind.
-/// It is shared by assignment tracking, diagnostics, callback inference,
-/// and other expression consumers that need one canonical result.
-///
-/// The dispatch logic lives here; specialised resolution is spread
-/// across sibling files:
-///
-/// - [`instantiation`]: `new ClassName(…)` and constructor template
-///   substitution.
-/// - [`array_access`]: `$arr[0]` / `$arr['key']` generic element / shape
-///   value resolution.
-/// - [`calls`]: function, method, and static call return-type
-///   resolution, plus function-level `@template` substitution.
-/// - [`property_access`]: `$this->prop` / `$obj->prop` resolution and
-///   the `find_*_this_property_assignment*` scanners.
+//! Right-hand-side expression resolution for variable assignments.
+//!
+//! This module resolves the type of the right-hand side of an assignment
+//! (`$var = <expr>`) to zero or more [`ResolvedType`] values.  It handles:
+//!
+//!   - Scalar literals: `1` → `1`, `'hello'` → `'hello'`, etc.
+//!   - Array literals: `[new Foo()]` → `list<Foo>`,
+//!     `['a' => 1]` → `array{a: int}`
+//!   - `new ClassName(…)` → the instantiated class
+//!   - Array access: `$arr[0]` → generic element type,
+//!     `$arr['key']` → array shape value type,
+//!     `$arr['key'][0]` → chained bracket access
+//!   - Function calls: `someFunc()` → return type
+//!   - Method calls: `$this->method()`, `$obj->method()` → return type
+//!   - Static calls: `ClassName::method()` → return type
+//!   - Property access: `$this->prop`, `$obj->prop` → property type
+//!   - Match expressions: union of all arm types
+//!   - Ternary / null-coalescing: union of both branches
+//!   - Clone: `clone $expr` → preserves the cloned expression's type
+//!
+//! The entry point is [`resolve_rhs_expression`], which dispatches to
+//! specialised helpers based on the AST node kind.
+//! It is shared by assignment tracking, diagnostics, callback inference,
+//! and other expression consumers that need one canonical result.
+//!
+//! The dispatch logic lives here; specialised resolution is spread
+//! across sibling files:
+//!
+//! - [`instantiation`]: `new ClassName(…)` and constructor template
+//!   substitution.
+//! - [`array_access`]: `$arr[0]` / `$arr['key']` generic element / shape
+//!   value resolution.
+//! - [`calls`]: function, method, and static call return-type
+//!   resolution, plus function-level `@template` substitution.
+//! - [`property_access`]: `$this->prop` / `$obj->prop` resolution and
+//!   the `find_*_this_property_assignment*` scanners.
+//! - [`unary_prefix`]: casts, `!`, `~`, and `++`/`--`.
+//! - [`magic_constants`]: `__LINE__`, `__CLASS__`, `__METHOD__`, and the
+//!   other magic constants.
+//! - [`literal_text`]: types read from a constant initializer's or an
+//!   array literal's source text.
+
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -42,9 +48,8 @@ use mago_syntax::cst::*;
 
 use crate::atom::{Atom, AtomMap, atom, bytes_to_str};
 use crate::parser::extract_hint_type;
-use crate::php_type::{LiteralValue, PhpType, ShapeEntry, TypeKind, keyword_lowercase};
-use crate::text_scan::split_top_level_arrow;
-use crate::types::{ClassInfo, ClassLikeKind, ResolvedType};
+use crate::php_type::{LiteralValue, PhpType, TypeKind};
+use crate::types::{ClassInfo, ResolvedType};
 
 use crate::type_engine::resolver::VarResolutionCtx;
 use crate::type_engine::type_resolution;
@@ -54,9 +59,11 @@ mod arithmetic;
 mod array_access;
 mod calls;
 mod instantiation;
+mod literal_text;
 mod magic_constants;
 mod property_access;
 mod scalar_fold;
+mod unary_prefix;
 
 pub(crate) use scalar_fold::fold_concat_types;
 
@@ -64,8 +71,15 @@ use arithmetic::resolve_binary_result_type;
 use array_access::resolve_rhs_array_access;
 use calls::{MethodReceiver, resolve_method_call_on_receiver, resolve_rhs_call};
 use instantiation::resolve_rhs_instantiation;
-use magic_constants::{EnclosingFunction, enclosing_context_at};
+use magic_constants::magic_constant_type;
 use property_access::resolve_rhs_property_access;
+use unary_prefix::stepped_numeric_type;
+
+pub(crate) use literal_text::{
+    infer_array_literal_type, infer_type_from_constant_value,
+    infer_type_from_constant_value_resolved,
+};
+pub(crate) use unary_prefix::unary_prefix_result_type;
 
 pub(crate) use arithmetic::{
     ArithmeticOpKind, infer_addition_result_type, infer_arithmetic_result_type,
@@ -1543,649 +1557,6 @@ fn global_constant_type(name: &str, offset: u32, ctx: &VarResolutionCtx<'_>) -> 
     })
 }
 
-/// The type a magic constant holds.
-///
-/// Every magic constant's value is known at the point it is written, so
-/// each resolves to the exact literal rather than its base type:
-/// `__LINE__` to the literal line number, `__NAMESPACE__`/`__FUNCTION__`/
-/// `__METHOD__`/`__TRAIT__`/`__PROPERTY__` to the literal string PHP would
-/// substitute there. `__CLASS__` narrows further to `class-string<Foo>`, the way
-/// `Foo::class` does, so the class identity survives into `new $class`
-/// and `class-string` parameters — the named inner type already pins it
-/// exactly. A trait body only knows it will be *some* class name at
-/// runtime (the using class, not the trait), so `__CLASS__` gets a bare
-/// `class-string` there, and code outside any class-like gets the plain
-/// `string` the empty value is.
-fn magic_constant_type(magic: &MagicConstant<'_>, ctx: &VarResolutionCtx<'_>) -> PhpType {
-    match magic {
-        MagicConstant::Line(_) => {
-            let offset = magic.span().start.offset as usize;
-            let line = crate::text_position::offset_to_position(ctx.content, offset).line + 1;
-            PhpType::literal_int(line.to_string())
-        }
-        MagicConstant::Namespace(_) => {
-            PhpType::literal_string_value(ctx.current_class.file_namespace.as_deref().unwrap_or(""))
-        }
-        MagicConstant::Class(_) if ctx.current_class.name.is_empty() => PhpType::string(),
-        MagicConstant::Class(_) if ctx.current_class.kind == ClassLikeKind::Trait => {
-            PhpType::class_string(None)
-        }
-        MagicConstant::Class(_) => {
-            PhpType::class_string(Some(PhpType::named(ctx.current_class.fqn())))
-        }
-        MagicConstant::Trait(_) if ctx.current_class.kind == ClassLikeKind::Trait => {
-            PhpType::literal_string_value(ctx.current_class.fqn())
-        }
-        MagicConstant::Trait(_) => PhpType::literal_string_value(""),
-        MagicConstant::Function(_) => {
-            PhpType::literal_string_value(enclosing_function_display_name(magic, ctx))
-        }
-        MagicConstant::Method(_) => {
-            let name = enclosing_function_display_name(magic, ctx);
-            if name.is_empty() || ctx.current_class.name.is_empty() {
-                PhpType::literal_string_value(name)
-            } else {
-                PhpType::literal_string_value(format!("{}::{}", ctx.current_class.fqn(), name))
-            }
-        }
-        MagicConstant::Property(_) => {
-            let offset = magic.span().start.offset;
-            PhpType::literal_string_value(
-                enclosing_context_at(ctx.content, offset)
-                    .property
-                    .unwrap_or_default(),
-            )
-        }
-        _ => PhpType::string(),
-    }
-}
-
-/// The bare name `__FUNCTION__`/`__METHOD__` substitute for the function,
-/// method, closure, or arrow function directly enclosing `magic` — its
-/// declared name, `{closure}` for an anonymous one, or the empty string
-/// for top-level code outside any function-like construct.
-fn enclosing_function_display_name(
-    magic: &MagicConstant<'_>,
-    ctx: &VarResolutionCtx<'_>,
-) -> String {
-    let offset = magic.span().start.offset;
-    match enclosing_context_at(ctx.content, offset).function {
-        Some(EnclosingFunction::Named(name)) => name,
-        Some(EnclosingFunction::Closure) => "{closure}".to_string(),
-        None => String::new(),
-    }
-}
-
-/// The type a unary prefix expression produces, for the operators whose
-/// result is determined by the operator plus (for `(object)` and `~`) the
-/// operand type.
-///
-/// A cast or `~` of an operand that holds one known scalar folds to the
-/// value PHP computes (`(int) '1'` is `1`, `~1` is `-2`). `resolve_operand`
-/// is always called for `(object)`, `(array)` and `~`, and for the other casts only
-/// when `operand` is cheap to resolve (a literal, variable, or constant), so
-/// a cast of a call pays nothing for it.
-///
-/// Returns `None` for operators the caller must resolve itself: `-`/`+`
-/// need the full expression resolver to keep signed numeric literals
-/// exact, and `@`/`&`/`++`/`--` take the type of their operand.
-pub(crate) fn unary_prefix_result_type(
-    operator: &unary::UnaryPrefixOperator<'_>,
-    operand: &Expression<'_>,
-    resolve_operand: impl FnOnce() -> Vec<ResolvedType>,
-) -> Option<PhpType> {
-    use unary::UnaryPrefixOperator;
-
-    let base = match operator {
-        UnaryPrefixOperator::ObjectCast(..) => return Some(object_cast_type(resolve_operand())),
-        UnaryPrefixOperator::BitwiseNot(_) => {
-            let resolved = resolve_operand();
-            if let Some(scalar_fold::Scalar::Int(value)) = scalar_fold::single_scalar(&resolved) {
-                return Some(PhpType::literal_int((!value).to_string()));
-            }
-            return Some(bitwise_not_type(&resolved));
-        }
-        UnaryPrefixOperator::IntCast(..) | UnaryPrefixOperator::IntegerCast(..) => PhpType::int(),
-        UnaryPrefixOperator::StringCast(..) | UnaryPrefixOperator::BinaryCast(..) => {
-            PhpType::string()
-        }
-        UnaryPrefixOperator::FloatCast(..)
-        | UnaryPrefixOperator::DoubleCast(..)
-        | UnaryPrefixOperator::RealCast(..) => PhpType::float(),
-        UnaryPrefixOperator::BoolCast(..) | UnaryPrefixOperator::BooleanCast(..) => PhpType::bool(),
-        UnaryPrefixOperator::ArrayCast(..) => return Some(array_cast_type(resolve_operand())),
-        UnaryPrefixOperator::UnsetCast(..) => return Some(PhpType::named(atom("null"))),
-        UnaryPrefixOperator::Not(_) => return Some(PhpType::bool()),
-        _ => return None,
-    };
-    if scalar_fold::is_cheap_scalar_operand(operand)
-        && let Some(folded) = scalar_fold::single_scalar(&resolve_operand())
-            .and_then(|scalar| scalar_fold::fold_cast(operator, &scalar))
-    {
-        return Some(folded);
-    }
-    Some(base)
-}
-
-/// `~` yields a string for string operands and an int otherwise.
-fn bitwise_not_type(operand: &[ResolvedType]) -> PhpType {
-    let is_string = !operand.is_empty()
-        && operand
-            .iter()
-            .all(|rt| rt.type_string.is_subtype_of(&PhpType::string()));
-    if is_string {
-        PhpType::string()
-    } else {
-        PhpType::int()
-    }
-}
-
-/// The type `++`/`--` produces for a numeric operand.
-///
-/// The step widens a literal (`5` becomes `int`, not `6`) but stays inside
-/// the operand's own domain. Non-numeric operands are left unresolved: PHP
-/// increments strings alphanumerically, leaves bools and arrays untouched,
-/// and treats null asymmetrically (`++null` is `1`, `--null` is `null`).
-fn stepped_numeric_type(operand: &[ResolvedType]) -> Option<PhpType> {
-    if operand.is_empty() {
-        return None;
-    }
-    let joined = ResolvedType::types_joined(operand);
-    let mut stepped = Vec::new();
-    for member in joined.union_members() {
-        if member.is_int_subtype() {
-            push_unique_type(&mut stepped, PhpType::int());
-        } else if member.is_float_subtype() {
-            push_unique_type(&mut stepped, PhpType::float());
-        } else {
-            return None;
-        }
-    }
-    match stepped.len() {
-        0 => None,
-        1 => stepped.into_iter().next(),
-        _ => Some(PhpType::union(stepped)),
-    }
-}
-
-fn push_unique_type(types: &mut Vec<PhpType>, member: PhpType) {
-    if !types.iter().any(|existing| existing == &member) {
-        types.push(member);
-    }
-}
-
-/// The object shape `(object) $expr` produces: an array shape casts
-/// key-for-key, a scalar becomes `object{scalar: T}`, and anything else
-/// (including an unresolved operand) falls back to `stdClass`. A cast
-/// always produces a `stdClass` instance, so a shape result keeps
-/// `stdClass`'s class identity via an intersection.
-///
-/// The cast does not preserve literal precision, so shape values widen.
-fn object_cast_type(operand: Vec<ResolvedType>) -> PhpType {
-    let inner =
-        (!operand.is_empty()).then(|| ResolvedType::types_joined(&operand).widen_scalar_literals());
-    let std_class = || PhpType::named(atom("stdClass"));
-    match inner.as_ref().map(PhpType::kind) {
-        // `(object) []` is a `stdClass` with no properties; an `object{}`
-        // shape would say the same thing in a spelling nothing else uses.
-        Some(TypeKind::ArrayShape(entries)) if entries.is_empty() => std_class(),
-        Some(TypeKind::ArrayShape(entries)) => PhpType::intersection(vec![
-            PhpType::object_shape(
-                entries
-                    .iter()
-                    .map(|e| ShapeEntry {
-                        key: e.key.clone(),
-                        value_type: e.value_type.widen_scalar_literals(),
-                        optional: e.optional,
-                    })
-                    .collect(),
-            ),
-            std_class(),
-        ]),
-        Some(_) if inner.as_ref().is_some_and(is_object_cast_scalar_type) => {
-            PhpType::intersection(vec![
-                PhpType::object_shape(vec![ShapeEntry {
-                    key: Some("scalar".to_string()),
-                    value_type: inner.as_ref().unwrap().clone(),
-                    optional: false,
-                }]),
-                std_class(),
-            ])
-        }
-        _ => std_class(),
-    }
-}
-
-/// `(array) $expr`, applied member by member: an array stays as it is,
-/// `null` becomes `[]`, and a scalar becomes the one-entry list holding it.
-/// An object (its properties) or a value of unknown type is some array.
-fn array_cast_type(operand: Vec<ResolvedType>) -> PhpType {
-    fn cast_member(member: &PhpType, scalar: &PhpType, out: &mut Vec<PhpType>) {
-        match member.kind() {
-            TypeKind::Union(members) => {
-                for member in members.iter() {
-                    cast_member(member, scalar, out);
-                }
-            }
-            TypeKind::Nullable(inner) => {
-                cast_member(inner, scalar, out);
-                out.push(PhpType::array_shape(Vec::new()));
-            }
-            _ if member.is_null() => out.push(PhpType::array_shape(Vec::new())),
-            // `iterable` may be a `Traversable`, which casts to its
-            // properties rather than to the values it yields.
-            _ if member.is_array_like() && !member.is_named("iterable") => {
-                out.push(member.clone());
-            }
-            _ if member.is_subtype_of(scalar) => out.push(PhpType::array_shape(vec![ShapeEntry {
-                key: None,
-                value_type: member.clone(),
-                optional: false,
-            }])),
-            _ => out.push(PhpType::array()),
-        }
-    }
-
-    if operand.is_empty() {
-        return PhpType::array();
-    }
-    let scalar = PhpType::union(vec![
-        PhpType::int(),
-        PhpType::float(),
-        PhpType::string(),
-        PhpType::bool(),
-    ]);
-    let mut members = Vec::new();
-    cast_member(&ResolvedType::types_joined(&operand), &scalar, &mut members);
-    // The shape a scalar casts to adds nothing beside an array member that
-    // already holds it: `string|list<string>` casts to `list<string>`.
-    let keep: Vec<bool> = members
-        .iter()
-        .map(|member| {
-            member.shape_entries().is_none()
-                || !members
-                    .iter()
-                    .any(|other| other.shape_entries().is_none() && member.is_subtype_of(other))
-        })
-        .collect();
-    crate::util::retain_by_mask(&mut members, &keep);
-    PhpType::join_runtime_value_types(members)
-}
-
-/// Whether `(object) $expr` on this type produces an `object{scalar: T}`
-/// wrapper rather than a plain `stdClass`.
-fn is_object_cast_scalar_type(ty: &PhpType) -> bool {
-    match ty.kind() {
-        TypeKind::Named(name) => matches!(
-            keyword_lowercase(name).as_str(),
-            "int"
-                | "integer"
-                | "string"
-                | "float"
-                | "double"
-                | "real"
-                | "bool"
-                | "boolean"
-                | "true"
-                | "false"
-        ),
-        TypeKind::Union(members) => {
-            !members.is_empty() && members.iter().all(is_object_cast_scalar_type)
-        }
-        _ => false,
-    }
-}
-
-/// Resolver from an expression's source text to its type, as
-/// [`crate::Backend::resolve_arg_text_to_type`] provides.
-pub(crate) type TextResolver<'a> = &'a dyn Fn(&str) -> Option<PhpType>;
-
-/// The literal an array element that names something resolves to: `'Foo'`
-/// for `Foo::class`, the value a constant or an enum case's `->value`
-/// holds, or the enum an enum case belongs to.
-///
-/// A shape entry has to be exact to mean anything (any other element falls
-/// back to plain `array`, see [`literal_array_shape`]), so a resolved
-/// `class-string<Foo>` is unwrapped down to the class name it names,
-/// matching how PHPStan reads a `::class`
-/// array element: as the literal string, not the wrapper type a bare
-/// `Foo::class` expression resolves to on its own.
-fn resolved_element_literal(value: &str, resolve: TextResolver<'_>) -> Option<PhpType> {
-    let ty = resolve(value)?;
-    match ty.kind() {
-        TypeKind::ClassString(Some(inner)) => match inner.kind() {
-            TypeKind::Named(name) => {
-                Some(PhpType::literal_string_value(name.trim_start_matches('\\')))
-            }
-            _ => None,
-        },
-        TypeKind::Literal(_) => Some(ty),
-        // An object a constant expression names (an enum case, or a `new`
-        // in a global constant) is an instance of exactly that class.
-        TypeKind::Named(_) if !ty.is_keyword() => Some(ty),
-        _ => None,
-    }
-}
-
-/// The class name a `Foo::class` expression names, resolved against the
-/// reading file.
-fn class_const_fetch_name(value: &str, resolve: TextResolver<'_>) -> Option<String> {
-    match resolve(value)?.kind() {
-        TypeKind::ClassString(Some(inner)) => match inner.kind() {
-            TypeKind::Named(name) => Some(name.trim_start_matches('\\').to_string()),
-            _ => None,
-        },
-        _ => None,
-    }
-}
-
-/// The contents of an array literal's brackets, or `None` when the text
-/// is not one.
-fn strip_array_literal(value: &str) -> Option<&str> {
-    if let Some(rest) = value.strip_prefix('[') {
-        return rest.strip_suffix(']');
-    }
-    let rest = value
-        .strip_prefix("array(")
-        .or_else(|| value.strip_prefix("array ("))?;
-    rest.strip_suffix(')')
-}
-
-/// Which elements of an array literal [`literal_array_shape`] may type.
-#[derive(Clone, Copy)]
-enum ArrayElements<'a> {
-    /// A constant's initialiser: literals, plus the names the resolver pins
-    /// down to one exact value (see [`resolved_element_literal`]).
-    Exact(Option<TextResolver<'a>>),
-    /// A call argument, written inline: any element the resolver can type.
-    Any(TextResolver<'a>),
-}
-
-impl<'a> ArrayElements<'a> {
-    fn resolver(self) -> Option<TextResolver<'a>> {
-        match self {
-            ArrayElements::Exact(resolve) => resolve,
-            ArrayElements::Any(resolve) => Some(resolve),
-        }
-    }
-
-    fn value_type(self, value: &str) -> Option<PhpType> {
-        match self {
-            // A constant expression cannot interpolate, but an argument can,
-            // and an interpolated string is not the literal it is spelled as.
-            ArrayElements::Any(resolve) if value.starts_with('"') && value.contains('$') => {
-                resolve(value)
-            }
-            ArrayElements::Any(resolve) => {
-                infer_type_from_constant_value_inner(value, self).or_else(|| resolve(value))
-            }
-            ArrayElements::Exact(resolve) => infer_type_from_constant_value_inner(value, self)
-                .or_else(|| resolved_element_literal(value, resolve?)),
-        }
-    }
-}
-
-/// The shape an array literal describes, when every element of it can be
-/// typed (see [`ArrayElements`]).
-///
-/// Returns `None` as soon as an element cannot, because a shape missing
-/// one of its slots would claim the array is smaller than it is. The
-/// caller then falls back to an unconstrained `array`.
-fn literal_array_shape(inner: &str, elements: ArrayElements<'_>) -> Option<PhpType> {
-    use crate::php_type::ShapeEntry;
-
-    let resolve = elements.resolver();
-    if inner.trim().is_empty() {
-        return Some(PhpType::list_shape(Vec::new()));
-    }
-    let items = crate::type_engine::types::conditional::split_text_args(inner);
-    let mut entries: Vec<ShapeEntry> = Vec::new();
-    let mut keyed = false;
-    for item in items {
-        let item = item.trim();
-        // A trailing comma leaves an empty final item.
-        if item.is_empty() {
-            continue;
-        }
-        // A spread copies a shape's entries across, keeping string keys
-        // and renumbering integer ones onto the end.
-        if let Some(source) = item.strip_prefix("...") {
-            let source = resolve?(source.trim())?;
-            for (key, value_type) in
-                crate::type_engine::variable::raw_type_inference::spread_entries(&source)?
-            {
-                keyed |= key.is_some();
-                put_shape_entry(&mut entries, key, value_type);
-            }
-            continue;
-        }
-        let (key, value) = match split_top_level_arrow(item) {
-            Some((key_text, value_text)) => {
-                keyed = true;
-                let key_text = key_text.trim();
-                let key = literal_shape_key(key_text).or_else(|| {
-                    // A class name is never a decimal integer, so a
-                    // `Foo::class` key stays the string it names.
-                    class_const_fetch_name(key_text, resolve?)
-                })?;
-                (Some(key), value_text)
-            }
-            None => (None, item),
-        };
-        let value_type = elements.value_type(value.trim())?;
-        put_shape_entry(&mut entries, key, value_type);
-    }
-    Some(if keyed {
-        PhpType::array_shape(entries)
-    } else {
-        PhpType::list_shape(entries)
-    })
-}
-
-/// Write `value_type` under `key`, or under the next position when `key` is
-/// `None`. A key written again keeps its place and takes the later value,
-/// as PHP does.
-fn put_shape_entry(entries: &mut Vec<ShapeEntry>, key: Option<String>, value_type: PhpType) {
-    if let Some(existing) = key
-        .as_ref()
-        .and_then(|key| entries.iter_mut().find(|e| e.key.as_ref() == Some(key)))
-    {
-        existing.value_type = value_type;
-        return;
-    }
-    entries.push(ShapeEntry {
-        key,
-        value_type,
-        optional: false,
-    });
-}
-
-/// The key text of a shape entry, for the literal keys PHP allows: a
-/// quoted string or an integer.
-fn literal_shape_key(text: &str) -> Option<String> {
-    if let Some(unquoted) = crate::text_scan::unquote_php_string(text) {
-        return Some(unquoted.to_string());
-    }
-    crate::php_type::parse_php_int_literal(text).map(|value| value.to_string())
-}
-
-/// Infer a scalar type from a constant's initializer value string.
-///
-/// Recognises integer literals (`42`, `-1`, `0xFF`), float literals
-/// (`3.14`, `1e10`), string literals (`'hello'`, `"world"`), boolean
-/// keywords (`true`, `false`), `null`, and array literals (`[...]`,
-/// `array(...)`).  Scalar literals keep their value (`1`, `'foo'`)
-/// rather than widening to the base type, matching how a literal
-/// assignment resolves.  Returns `None` for expressions that cannot be
-/// trivially classified (e.g. concatenation, function calls).
-pub(crate) fn infer_type_from_constant_value(value: &str) -> Option<PhpType> {
-    infer_type_from_constant_value_inner(value, ArrayElements::Exact(None))
-}
-
-/// [`infer_type_from_constant_value`], but an array element that the fixed
-/// literal patterns below can't classify (currently just `Foo::class`) is
-/// offered to `resolve` before the whole array gives up and falls back to
-/// plain `array`. Text scanning alone can tell that `Foo::class` names a
-/// class, but not which one: `Foo` may need qualifying against the
-/// reading file's namespace or `use` imports, which only a resolver with
-/// access to the class loader can do.
-pub(crate) fn infer_type_from_constant_value_resolved(
-    value: &str,
-    resolve: TextResolver<'_>,
-) -> Option<PhpType> {
-    infer_type_from_constant_value_inner(value, ArrayElements::Exact(Some(resolve)))
-}
-
-/// The type of an array literal written as a call argument (`f(['a' =>
-/// $b])`), with each element typed through `resolve`, or `None` when `text`
-/// is not an array literal.
-///
-/// An element `resolve` cannot type leaves the whole literal a plain
-/// `array`.
-pub(crate) fn infer_array_literal_type(text: &str, resolve: TextResolver<'_>) -> Option<PhpType> {
-    let inner = strip_array_literal(text.trim())?;
-    Some(literal_array_shape(inner, ArrayElements::Any(resolve)).unwrap_or_else(PhpType::array))
-}
-
-fn infer_type_from_constant_value_inner(
-    value: &str,
-    elements: ArrayElements<'_>,
-) -> Option<PhpType> {
-    let v = value.trim();
-    if v.is_empty() {
-        return None;
-    }
-
-    // String literals: single or double quoted.
-    if v.len() >= 2
-        && ((v.starts_with('\'') && v.ends_with('\'')) || (v.starts_with('"') && v.ends_with('"')))
-    {
-        // Only keep the value when the text is a single literal.  An
-        // expression that merely starts and ends with a quote (e.g. the
-        // concatenation `'a' . 'b'`) still produces a string, but not
-        // that literal.
-        return if is_single_quoted_literal(v) {
-            Some(PhpType::literal_string_raw(v.to_string()))
-        } else {
-            Some(PhpType::string())
-        };
-    }
-
-    // Array literals.  A list built entirely from literals is a shape:
-    // that is what makes `in_array($x, self::APPROVED, true)` and
-    // `foreach (self::APPROVED as $entry)` see the values the constant
-    // names rather than an unconstrained `array`.
-    if let Some(inner) = strip_array_literal(v) {
-        return Some(literal_array_shape(inner, elements).unwrap_or_else(PhpType::array));
-    }
-
-    let lower = v.to_lowercase();
-
-    // Boolean / null keywords.
-    if lower == "true" || lower == "false" {
-        return Some(PhpType::bool());
-    }
-    if lower == "null" {
-        return Some(PhpType::null());
-    }
-
-    // Numeric literals — try integer first, then float.
-    // Strip optional leading sign for parsing.
-    let (sign, numeric) = if let Some(rest) = v.strip_prefix('-') {
-        ("-", rest)
-    } else if let Some(rest) = v.strip_prefix('+') {
-        ("", rest)
-    } else {
-        ("", v)
-    };
-    let int_literal = |raw: &str| {
-        // Normalise hex/binary/octal/underscored spellings to the
-        // decimal value (`0xFF` → `255`).  Spellings that overflow
-        // `i64` widen to plain `int`.
-        Some(match crate::php_type::parse_php_int_literal(raw) {
-            Some(parsed) => PhpType::literal_int(parsed.to_string()),
-            None => PhpType::int(),
-        })
-    };
-    if numeric.starts_with("0x") || numeric.starts_with("0X") {
-        // Hex integer.
-        if numeric[2..]
-            .chars()
-            .all(|c| c.is_ascii_hexdigit() || c == '_')
-        {
-            return int_literal(v);
-        }
-    }
-    if numeric.starts_with("0b") || numeric.starts_with("0B") {
-        // Binary integer.
-        if numeric[2..]
-            .chars()
-            .all(|c| c == '0' || c == '1' || c == '_')
-        {
-            return int_literal(v);
-        }
-    }
-    if numeric.starts_with("0o") || numeric.starts_with("0O") {
-        // Octal integer (PHP 8.1+).
-        if numeric[2..]
-            .chars()
-            .all(|c| ('0'..='7').contains(&c) || c == '_')
-        {
-            return int_literal(v);
-        }
-    }
-    // Decimal integer (may contain underscores: 1_000_000).
-    if !numeric.is_empty()
-        && numeric.chars().all(|c| c.is_ascii_digit() || c == '_')
-        && numeric.chars().next().is_some_and(|c| c.is_ascii_digit())
-    {
-        return int_literal(v);
-    }
-    // Float: contains `.` or `e`/`E` among digits.
-    if !numeric.is_empty() {
-        let has_dot = numeric.contains('.');
-        let has_exp = numeric.contains('e') || numeric.contains('E');
-        if (has_dot || has_exp)
-            && numeric.chars().all(|c| {
-                c.is_ascii_digit()
-                    || c == '.'
-                    || c == 'e'
-                    || c == 'E'
-                    || c == '+'
-                    || c == '-'
-                    || c == '_'
-            })
-        {
-            // The character check also accepts arithmetic like
-            // `1.0-2.0`; only keep the value when the whole text
-            // parses as one float.
-            return Some(match crate::php_type::parse_php_float_literal(numeric) {
-                Some(_) => PhpType::literal_float(format!("{sign}{numeric}")),
-                None => PhpType::float(),
-            });
-        }
-    }
-
-    None
-}
-
-/// Whether `v` (which starts and ends with the same quote character) is
-/// one string literal, i.e. its opening quote is closed only at the very
-/// end.  `'foo'` → true, `'a' . 'b'` → false.
-fn is_single_quoted_literal(v: &str) -> bool {
-    let quote = v.as_bytes()[0];
-    let inner = &v.as_bytes()[1..v.len() - 1];
-    let mut i = 0;
-    while i < inner.len() {
-        match inner[i] {
-            b'\\' => i += 2,
-            b if b == quote => return false,
-            _ => i += 1,
-        }
-    }
-    true
-}
-
 /// Resolve a pipe expression `$input |> callable(...)` to the callable's
 /// return type.
 ///
@@ -2433,183 +1804,6 @@ mod tests {
         assert_eq!(
             simplified[1].type_string,
             PhpType::literal_string_raw("'tag'")
-        );
-    }
-
-    #[test]
-    fn constant_value_inference_keeps_scalar_literals() {
-        assert_eq!(
-            infer_type_from_constant_value("1"),
-            Some(PhpType::literal_int("1"))
-        );
-        assert_eq!(
-            infer_type_from_constant_value("-42"),
-            Some(PhpType::literal_int("-42"))
-        );
-        assert_eq!(
-            infer_type_from_constant_value("1_000"),
-            Some(PhpType::literal_int("1000"))
-        );
-        assert_eq!(
-            infer_type_from_constant_value("0xFF"),
-            Some(PhpType::literal_int("255"))
-        );
-        // A sign in front of a non-decimal spelling keeps the value too.
-        assert_eq!(
-            infer_type_from_constant_value("-0xFF"),
-            Some(PhpType::literal_int("-255"))
-        );
-        assert_eq!(
-            infer_type_from_constant_value("-0b1010"),
-            Some(PhpType::literal_int("-10"))
-        );
-        assert_eq!(
-            infer_type_from_constant_value("+0o17"),
-            Some(PhpType::literal_int("15"))
-        );
-        assert_eq!(
-            infer_type_from_constant_value("-0_1_0"),
-            Some(PhpType::literal_int("-8"))
-        );
-        assert_eq!(
-            infer_type_from_constant_value("3.14"),
-            Some(PhpType::literal_float("3.14"))
-        );
-        assert_eq!(
-            infer_type_from_constant_value("-1.5e3"),
-            Some(PhpType::literal_float("-1.5e3"))
-        );
-        assert_eq!(
-            infer_type_from_constant_value("'foo'"),
-            Some(PhpType::literal_string_raw("'foo'"))
-        );
-        assert_eq!(
-            infer_type_from_constant_value("\"bar\""),
-            Some(PhpType::literal_string_raw("\"bar\""))
-        );
-    }
-
-    #[test]
-    fn constant_value_inference_widens_non_literals() {
-        // Concatenation that merely starts and ends with a quote.
-        assert_eq!(
-            infer_type_from_constant_value("'a' . 'b'"),
-            Some(PhpType::string())
-        );
-        // A quote escaped at the end does not close the literal.
-        assert_eq!(
-            infer_type_from_constant_value("'it\\'s'"),
-            Some(PhpType::literal_string_raw("'it\\'s'"))
-        );
-        // Integer overflow of i64 widens to plain int.
-        assert_eq!(
-            infer_type_from_constant_value("99999999999999999999"),
-            Some(PhpType::int())
-        );
-        // Float arithmetic passes the character filter but is not one value.
-        assert_eq!(
-            infer_type_from_constant_value("1.0-2.0"),
-            Some(PhpType::float())
-        );
-        // Booleans and null keep their base type.
-        assert_eq!(
-            infer_type_from_constant_value("true"),
-            Some(PhpType::bool())
-        );
-        assert_eq!(
-            infer_type_from_constant_value("null"),
-            Some(PhpType::null())
-        );
-        assert_eq!(infer_type_from_constant_value("self::OTHER"), None);
-    }
-
-    #[test]
-    fn a_literal_array_constant_keeps_its_slots() {
-        let entry = |key: Option<&str>, value_type: PhpType| crate::php_type::ShapeEntry {
-            key: key.map(str::to_string),
-            value_type,
-            optional: false,
-        };
-
-        assert_eq!(
-            infer_type_from_constant_value("[1, 2]"),
-            Some(PhpType::list_shape(vec![
-                entry(None, PhpType::literal_int("1")),
-                entry(None, PhpType::literal_int("2")),
-            ]))
-        );
-        // A trailing comma leaves no empty slot behind.
-        assert_eq!(
-            infer_type_from_constant_value("array('a', 'b',)"),
-            Some(PhpType::list_shape(vec![
-                entry(None, PhpType::literal_string_raw("'a'")),
-                entry(None, PhpType::literal_string_raw("'b'")),
-            ]))
-        );
-        assert_eq!(
-            infer_type_from_constant_value("['name' => 'x', 3 => true]"),
-            Some(PhpType::array_shape(vec![
-                entry(Some("name"), PhpType::literal_string_raw("'x'")),
-                entry(Some("3"), PhpType::bool()),
-            ]))
-        );
-        assert_eq!(
-            infer_type_from_constant_value("[]"),
-            Some(PhpType::list_shape(vec![]))
-        );
-        // A `=>` inside a string is not a key separator.
-        assert_eq!(
-            infer_type_from_constant_value("['a => b']"),
-            Some(PhpType::list_shape(vec![entry(
-                None,
-                PhpType::literal_string_raw("'a => b'")
-            )]))
-        );
-        // An element that would have to be resolved leaves the whole
-        // constant an unconstrained array rather than a shape missing a
-        // slot.
-        assert_eq!(
-            infer_type_from_constant_value("[1, self::OTHER]"),
-            Some(PhpType::array())
-        );
-        assert_eq!(
-            infer_type_from_constant_value("[$key => 1]"),
-            Some(PhpType::array())
-        );
-    }
-
-    #[test]
-    fn a_class_const_fetch_array_element_resolves_via_the_resolver() {
-        let entry = |value_type: PhpType| crate::php_type::ShapeEntry {
-            key: None,
-            value_type,
-            optional: false,
-        };
-        let resolve = |text: &str| -> Option<PhpType> {
-            (text == "Foo::class").then(|| PhpType::class_string(Some(PhpType::named(atom("Foo")))))
-        };
-
-        // Without a resolver, `Foo::class` can't be classified and the
-        // whole array falls back to unconstrained `array`.
-        assert_eq!(
-            infer_type_from_constant_value("[Foo::class]"),
-            Some(PhpType::array())
-        );
-
-        // With one, the element becomes the literal class name PHPStan
-        // itself reads a `::class` array element as.
-        assert_eq!(
-            infer_type_from_constant_value_resolved("[Foo::class]", &resolve),
-            Some(PhpType::list_shape(vec![entry(
-                PhpType::literal_string_value("Foo")
-            )]))
-        );
-
-        // An element the resolver can't turn into a `class-string` still
-        // leaves the whole array unconstrained, same as with no resolver.
-        assert_eq!(
-            infer_type_from_constant_value_resolved("[1, self::OTHER]", &resolve),
-            Some(PhpType::array())
         );
     }
 

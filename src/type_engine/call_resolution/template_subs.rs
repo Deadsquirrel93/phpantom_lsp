@@ -1239,7 +1239,7 @@ fn resolve_operand_constant_value(name: &str, ctx: &ResolutionCtx<'_>) -> Option
         None => {
             let (first, rest) = name.split_once('\\')?;
             let use_map = backend.parse_use_statements(ctx.content);
-            let prefix = crate::util::lookup_import(&use_map, first)?;
+            let prefix = crate::names::lookup_import(&use_map, first)?;
             format!("{prefix}\\{rest}")
         }
     };

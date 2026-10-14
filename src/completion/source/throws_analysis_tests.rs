@@ -620,7 +620,7 @@ fn test_resolve_exception_fqn_from_use_map() {
         "RuntimeException".to_string(),
         "App\\Exceptions\\RuntimeException".to_string(),
     );
-    let result = crate::util::resolve_to_fqn("RuntimeException", &use_map, &None);
+    let result = crate::names::resolve_to_fqn("RuntimeException", &use_map, &None);
     assert_eq!(result, "App\\Exceptions\\RuntimeException".to_string());
 }
 
@@ -628,14 +628,14 @@ fn test_resolve_exception_fqn_from_use_map() {
 fn test_resolve_exception_fqn_from_namespace() {
     let use_map = HashMap::new();
     let ns = Some("App\\Services".to_string());
-    let result = crate::util::resolve_to_fqn("CustomException", &use_map, &ns);
+    let result = crate::names::resolve_to_fqn("CustomException", &use_map, &ns);
     assert_eq!(result, "App\\Services\\CustomException".to_string());
 }
 
 #[test]
 fn test_resolve_exception_fqn_global() {
     let use_map = HashMap::new();
-    let result = crate::util::resolve_to_fqn("RuntimeException", &use_map, &None);
+    let result = crate::names::resolve_to_fqn("RuntimeException", &use_map, &None);
     assert_eq!(result, "RuntimeException".to_string());
 }
 

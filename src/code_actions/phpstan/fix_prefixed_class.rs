@@ -308,7 +308,7 @@ fn find_occurrence(line: &str, name: &str) -> Option<usize> {
 /// A diagnostic is stale when the vendor-prefixed class name no longer
 /// appears on the diagnostic line (in either bare or FQN form).
 ///
-/// Called from `is_stale_phpstan_diagnostic` in `diagnostics/mod.rs`.
+/// Called from `is_stale_phpstan_diagnostic` in `diagnostics/stale.rs`.
 pub(crate) fn is_fix_prefixed_class_stale(content: &str, diag_line: usize, message: &str) -> bool {
     let prefixed = match extract_prefixed_name(message) {
         Some(name) => name,

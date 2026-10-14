@@ -337,7 +337,7 @@ pub(super) fn resolve_class_name_to_fqn(
     name: &str,
     ctx: &FileContext,
 ) -> String {
-    crate::util::resolve_code_class_name(
+    crate::names::resolve_code_class_name(
         name,
         ctx.namespace.as_deref(),
         Some(&ctx.use_map),

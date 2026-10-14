@@ -773,7 +773,7 @@ fn shorten_type_display(
     use_map: &HashMap<String, String>,
     file_namespace: &Option<String>,
 ) -> String {
-    ty.resolve_names(&|name| crate::util::shorten_from_fqn(name, use_map, file_namespace))
+    ty.resolve_names(&|name| crate::names::shorten_from_fqn(name, use_map, file_namespace))
         .to_string()
 }
 

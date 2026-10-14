@@ -688,8 +688,8 @@ impl Backend {
 
                     // Enums implicitly implement UnitEnum or BackedEnum.
                     // We add the interface with a leading backslash so that
-                    // `resolve_name` treats it as fully-qualified and does not
-                    // prepend the current namespace.  `resolve_name` then
+                    // `resolve_to_fqn` treats it as fully-qualified and does not
+                    // prepend the current namespace.  `resolve_to_fqn` then
                     // strips the `\` to produce the canonical form (`BackedEnum`
                     // / `UnitEnum`).  The class_loader / merge_traits_into path
                     // will pick up the interface from the SPL stubs and merge
@@ -1882,7 +1882,7 @@ impl Backend {
 /// PHP implicitly adds `Stringable` to every class and interface that
 /// declares `__toString()`.  Mirror that so hierarchy checks accept such
 /// a class wherever `Stringable` is expected.  The leading backslash
-/// keeps `resolve_name` from prepending the current namespace.
+/// keeps `resolve_to_fqn` from prepending the current namespace.
 pub(super) fn add_implicit_stringable(interfaces: &mut Vec<Atom>, methods: &[MethodInfo]) {
     if methods
         .iter()

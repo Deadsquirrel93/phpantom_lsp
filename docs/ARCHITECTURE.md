@@ -61,12 +61,12 @@ src/
 ├── scope_collector/        # Variable scope-map construction
 ├── classmap_scanner/       # Byte-level PHP scanning for class discovery (no full parse)
 ├── composer.rs             # composer.json / PSR-4 autoload parsing
-├── names.rs                # Name resolution (FQN, use-map, namespace)
+├── names/                  # Name resolution: written names via imports/namespace, docblock template/alias scoping, per-file resolved names
 ├── reference_index.rs      # Workspace-wide reference index for find-references / rename
 ├── reference_counts.rs     # Bounded exact member-reference cache for declaration hints and lenses
 │
 │   # Class & type resolution
-├── resolution.rs           # Multi-phase class/function lookup across files (find_or_load_class)
+├── resolution/             # Multi-phase class/function lookup across files (find_or_load_class), lazy parsing, loader closures
 ├── class_lookup.rs         # Subtype checks (is_subtype_of_typed) and class-lookup helpers
 ├── inheritance/            # Parent/trait/mixin member merging, generics substitution
 ├── virtual_members/        # Synthesized members: phpdoc.rs (@method/@property/@mixin) + laravel/ (one file per Eloquent/framework feature)
@@ -106,7 +106,9 @@ src/
 │
 │   # Diagnostics
 ├── diagnostics/
-│   ├── mod.rs              # Native collection/publishing orchestration + scheduling
+│   ├── mod.rs              # Module map, code naming rules, shared range helpers
+│   ├── collect.rs          # Running the fast and slow collectors over one file
+│   ├── delivery.rs         # Debounced scheduling, two-phase publish, push and pull delivery, the worker
 │   ├── external/           # PHPStan / PHPCS / PHPMD / Mago subprocess pipelines
 │   ├── stale.rs, suppression.rs, helpers.rs, ignore_rules.rs, workspace.rs
 │   └── <collector>.rs      # One module per diagnostic (unknown_classes, unknown_functions,
@@ -374,7 +376,7 @@ two kinds, and each kind has one rule:
   PHP falls back to the global namespace only for functions and constants,
   and PHPStan, Psalm and Mago read docblock names the same way. The source
   loader applies this rule. Resolve a name in code with
-  `util::resolve_code_class_name` (or the contexts' `resolve_written_class`),
+  `names::resolve_code_class_name` (or the contexts' `resolve_written_class`),
   a native hint with `resolve_hint_type`, and a docblock type with
   `resolve_written_type`.
 - **Resolved names** (`ClassInfo::fqn()`, `parent_class`, stored member

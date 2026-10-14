@@ -104,7 +104,7 @@ pub(crate) fn enrichment_snippet(
                     } else {
                         member
                             .resolve_names(&|n| {
-                                crate::util::shorten_from_fqn(n, use_map, file_namespace)
+                                crate::names::shorten_from_fqn(n, use_map, file_namespace)
                             })
                             .to_string()
                     }
@@ -130,7 +130,7 @@ pub(crate) fn enrichment_snippet(
         && let Some(cls) = class_loader(name)
         && !cls.template_params.is_empty()
     {
-        let short_name = crate::util::shorten_from_fqn(name, use_map, file_namespace);
+        let short_name = crate::names::shorten_from_fqn(name, use_map, file_namespace);
         let mut parts = Vec::new();
         for tp in &cls.template_params {
             parts.push(format!("${{{}:{}}}", *tab_stop, tp));
@@ -158,7 +158,7 @@ pub(crate) fn enrichment_plain_typed(
     let enriched = enrichment_plain_typed_fqn(type_hint, class_loader)?;
     Some(
         enriched
-            .resolve_names(&|name| crate::util::shorten_from_fqn(name, use_map, file_namespace)),
+            .resolve_names(&|name| crate::names::shorten_from_fqn(name, use_map, file_namespace)),
     )
 }
 
@@ -450,7 +450,7 @@ fn build_function_snippet(
         // doesn't produce anything useful.
         if let Some(t) = inferred {
             Some(
-                crate::util::shorten_type_for_file(&t, use_map, file_namespace, class_loader)
+                crate::names::shorten_type_for_file(&t, use_map, file_namespace, class_loader)
                     .to_string(),
             )
         } else {
@@ -578,7 +578,7 @@ fn build_function_plain(
         // doesn't produce anything useful.
         inferred
             .map(|t| {
-                crate::util::shorten_type_for_file(&t, use_map, file_namespace, class_loader)
+                crate::names::shorten_type_for_file(&t, use_map, file_namespace, class_loader)
                     .to_string()
             })
             .or_else(|| {

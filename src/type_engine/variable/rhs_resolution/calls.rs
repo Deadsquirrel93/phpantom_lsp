@@ -15,7 +15,7 @@ use crate::types::{ClassInfo, MethodInfo, ResolvedType};
 use crate::virtual_members::laravel::validated_shape;
 
 use crate::type_engine::call_resolution::MethodReturnCtx;
-use crate::type_engine::resolver::{Loaders, VarResolutionCtx};
+use crate::type_engine::resolver::VarResolutionCtx;
 use crate::type_engine::variable::resolution::build_var_resolver_from_ctx;
 
 use super::{
@@ -244,27 +244,7 @@ pub(crate) fn resolve_arg_variable_raw_type(
         return None;
     }
 
-    let default_class;
-    let current_class = match rctx.current_class {
-        Some(cc) => cc,
-        None => {
-            default_class =
-                crate::class_lookup::class_context_placeholder(rctx.content, rctx.cursor_offset);
-            &default_class
-        }
-    };
-    let resolved = crate::type_engine::variable::resolution::resolve_variable_types(
-        var_name,
-        current_class,
-        rctx.all_classes,
-        rctx.content,
-        rctx.cursor_offset,
-        rctx.class_loader,
-        rctx.source_class_loader,
-        rctx.source_imports,
-        rctx.backend,
-        Loaders::with_function(rctx.function_loader),
-    );
+    let resolved = rctx.resolve_variable_at_cursor(var_name);
     if resolved.is_empty() {
         None
     } else {

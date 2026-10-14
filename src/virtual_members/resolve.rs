@@ -81,7 +81,7 @@ impl Drop for PendingGuard<'_> {
 /// case (see [`MAX_POPULATE_WORKERS`]), so this is orders of magnitude
 /// above normal contention and only fires if the owning thread is
 /// abnormally stuck — mirroring `ParseInflight`'s escape hatch in
-/// `resolution.rs`.
+/// `resolution/inflight.rs`.
 const PENDING_WAIT_ESCAPE_HATCH: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// Wait for another thread's first-time resolution of `key` to land in

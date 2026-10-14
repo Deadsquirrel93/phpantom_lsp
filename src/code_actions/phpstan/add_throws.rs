@@ -412,7 +412,7 @@ fn docblock_already_has_throws(
         let rest = tag.description.trim();
         if let Some(type_name) = rest.split_whitespace().next() {
             let tag_fqn =
-                crate::util::resolve_to_fqn(type_name, use_map, file_namespace).to_lowercase();
+                crate::names::resolve_to_fqn(type_name, use_map, file_namespace).to_lowercase();
             if tag_fqn == target_fqn {
                 return true;
             }

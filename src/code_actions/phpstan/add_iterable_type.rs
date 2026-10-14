@@ -572,7 +572,7 @@ impl Backend {
 ///   type (indicated by `<` or `[]` in the tag).
 /// - The diagnostic line no longer exists.
 ///
-/// Called from `is_stale_phpstan_diagnostic` in `diagnostics/mod.rs`.
+/// Called from `is_stale_phpstan_diagnostic` in `diagnostics/stale.rs`.
 pub(crate) fn is_add_iterable_type_stale(content: &str, diag_line: usize, message: &str) -> bool {
     // Only handle the return-type variant.
     if !message.contains("return type") {

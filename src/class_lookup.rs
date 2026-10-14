@@ -96,7 +96,7 @@ fn runs_into_declaration(between: &str) -> bool {
 ///
 /// What it does carry is the namespace enclosing the cursor.  Source-level
 /// class references resolve through
-/// [`resolve_code_class_name`](crate::util::resolve_code_class_name),
+/// [`resolve_code_class_name`](crate::names::resolve_code_class_name),
 /// which reads that namespace from `current_class.file_namespace` so a
 /// same-namespace class outranks a global one of the same short name.  A
 /// bare `ClassInfo::default()` reports no namespace, which would resolve
@@ -185,7 +185,7 @@ pub(crate) fn find_class_by_fqn<'a>(
 /// none.
 ///
 /// A name is resolved the way PHP resolves it in code (see
-/// [`crate::util::resolve_code_class_name`]): through `imports`, else in
+/// [`crate::names::resolve_code_class_name`]): through `imports`, else in
 /// the current namespace, never falling back to a global class when the
 /// imports are known.
 ///
@@ -201,7 +201,7 @@ pub(crate) fn class_expression_name(
 ) -> Option<String> {
     use mago_syntax::cst::Expression;
     match expr {
-        Expression::Identifier(ident) => Some(crate::util::resolve_code_class_name(
+        Expression::Identifier(ident) => Some(crate::names::resolve_code_class_name(
             crate::atom::bytes_to_str(ident.value()),
             current_class.file_namespace.as_deref(),
             imports,

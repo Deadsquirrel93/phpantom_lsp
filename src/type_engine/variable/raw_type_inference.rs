@@ -533,7 +533,7 @@ fn infer_element_type<'b>(
         Expression::Instantiation(inst) => match inst.class {
             Expression::Identifier(ident) => {
                 let name = bytes_to_str(ident.value()).to_string();
-                let fqn = crate::util::resolve_code_class_name(
+                let fqn = crate::names::resolve_code_class_name(
                     &name,
                     ctx.current_class.file_namespace.as_deref(),
                     ctx.source_imports,

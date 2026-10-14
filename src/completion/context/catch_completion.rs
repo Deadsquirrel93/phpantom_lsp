@@ -176,7 +176,7 @@ pub(crate) fn build_catch_completions(
     let partial_lower = ctx.partial.to_lowercase();
 
     for (idx, exc_type) in ctx.suggested_types.iter().enumerate() {
-        let fqn = crate::util::resolve_to_fqn(exc_type, use_map, file_namespace);
+        let fqn = crate::names::resolve_to_fqn(exc_type, use_map, file_namespace);
         let sn = short_name(&fqn);
 
         // Filter by the partial text the user has typed

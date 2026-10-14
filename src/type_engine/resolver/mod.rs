@@ -879,29 +879,7 @@ fn resolve_target_classes_expr_inner(
             // (e.g. `$row['page'] instanceof Page` narrows `$row["page"]`).
             if ctx.scope_var_resolver.is_none() && matches!(base.as_ref(), SubjectExpr::Variable(_))
             {
-                let dummy_class;
-                let effective_class = match current_class {
-                    Some(cc) => cc,
-                    None => {
-                        dummy_class = crate::class_lookup::class_context_placeholder(
-                            ctx.content,
-                            ctx.cursor_offset,
-                        );
-                        &dummy_class
-                    }
-                };
-                let resolved = crate::type_engine::variable::resolution::resolve_variable_types(
-                    &scope_key,
-                    effective_class,
-                    all_classes,
-                    ctx.content,
-                    ctx.cursor_offset,
-                    class_loader,
-                    ctx.source_class_loader,
-                    ctx.source_imports,
-                    ctx.backend,
-                    Loaders::with_function(ctx.function_loader),
-                );
+                let resolved = ctx.resolve_variable_at_cursor(&scope_key);
                 if !resolved.is_empty() {
                     return resolved;
                 }
@@ -1011,29 +989,7 @@ fn resolve_target_classes_expr_inner(
                         Some(ResolvedType::types_joined(&from_scope))
                     }
                 } else {
-                    let dummy_class;
-                    let effective_class = match current_class {
-                        Some(cc) => cc,
-                        None => {
-                            dummy_class = crate::class_lookup::class_context_placeholder(
-                                ctx.content,
-                                ctx.cursor_offset,
-                            );
-                            &dummy_class
-                        }
-                    };
-                    let resolved = crate::type_engine::variable::resolution::resolve_variable_types(
-                        &base_var,
-                        effective_class,
-                        all_classes,
-                        ctx.content,
-                        ctx.cursor_offset,
-                        class_loader,
-                        ctx.source_class_loader,
-                        ctx.source_imports,
-                        ctx.backend,
-                        Loaders::with_function(ctx.function_loader),
-                    );
+                    let resolved = ctx.resolve_variable_at_cursor(&base_var);
                     if resolved.is_empty() {
                         None
                     } else {
@@ -1587,27 +1543,7 @@ fn resolve_this_from_scope(ctx: &ResolutionCtx<'_>) -> Option<Vec<ResolvedType>>
             .filter(|types| !types.is_empty());
     }
 
-    let dummy_class;
-    let effective_class = match ctx.current_class {
-        Some(cc) => cc,
-        None => {
-            dummy_class =
-                crate::class_lookup::class_context_placeholder(ctx.content, ctx.cursor_offset);
-            &dummy_class
-        }
-    };
-    let resolved = crate::type_engine::variable::resolution::resolve_variable_types(
-        "$this",
-        effective_class,
-        ctx.all_classes,
-        ctx.content,
-        ctx.cursor_offset,
-        ctx.class_loader,
-        ctx.source_class_loader,
-        ctx.source_imports,
-        ctx.backend,
-        Loaders::with_function(ctx.function_loader),
-    );
+    let resolved = ctx.resolve_variable_at_cursor("$this");
     (!resolved.is_empty()).then_some(resolved)
 }
 
@@ -2094,27 +2030,7 @@ fn lookup_scope_for_subject(key: &str, ctx: &ResolutionCtx<'_>) -> Option<Vec<Re
     // variable is resolved: the walk threads property and call keys
     // through every check and write on the way there.
     if !forward_walk::is_diagnostic_scope_active() {
-        let dummy_class;
-        let current_class = match ctx.current_class {
-            Some(cc) => cc,
-            None => {
-                dummy_class =
-                    crate::class_lookup::class_context_placeholder(ctx.content, ctx.cursor_offset);
-                &dummy_class
-            }
-        };
-        let types = super::variable::resolution::resolve_variable_types(
-            key,
-            current_class,
-            ctx.all_classes,
-            ctx.content,
-            ctx.cursor_offset,
-            ctx.class_loader,
-            ctx.source_class_loader,
-            ctx.source_imports,
-            ctx.backend,
-            Loaders::with_function(ctx.function_loader),
-        );
+        let types = ctx.resolve_variable_at_cursor(key);
         if !types.is_empty() {
             return Some(types);
         }

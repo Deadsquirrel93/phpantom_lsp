@@ -125,7 +125,7 @@ pub(crate) fn find_uncaught_throw_types_with_context(
                 && offset < c.try_end
                 && c.type_names.iter().any(|ct| {
                     let resolved_ct = canonical_fqn(
-                        crate::util::resolve_to_fqn(&ct.to_string(), use_map, file_namespace),
+                        crate::names::resolve_to_fqn(&ct.to_string(), use_map, file_namespace),
                         class_loader,
                     );
                     // Check for Throwable/Exception (catches everything).
@@ -151,7 +151,7 @@ pub(crate) fn find_uncaught_throw_types_with_context(
         if raw.trim_start_matches('\\').is_empty() {
             None
         } else {
-            let resolved = crate::util::resolve_to_fqn(&raw, use_map, file_namespace);
+            let resolved = crate::names::resolve_to_fqn(&raw, use_map, file_namespace);
             Some(PhpType::named(atom(&canonical_fqn(resolved, class_loader))))
         }
     }
@@ -449,7 +449,7 @@ pub(crate) fn find_cross_file_propagated_throws(
             // Resolve before taking the base name, which drops a leading `\`.
             let resolved = ty
                 .resolve_names(&|name| {
-                    crate::util::resolve_to_fqn(name, ctx.use_map, ctx.file_namespace)
+                    crate::names::resolve_to_fqn(name, ctx.use_map, ctx.file_namespace)
                 })
                 .base_name()
                 .map_or(ty, |base| PhpType::named(atom(base)));
@@ -498,7 +498,7 @@ pub(crate) fn find_cross_file_propagated_throws(
                 let after_name = after_new[name_end..].trim_start();
                 if !class_name.is_empty() && after_name.starts_with('(') {
                     let resolved_class =
-                        crate::util::resolve_to_fqn(class_name, ctx.use_map, ctx.file_namespace);
+                        crate::names::resolve_to_fqn(class_name, ctx.use_map, ctx.file_namespace);
                     let call_key = format!("new:{}", resolved_class);
                     if seen_calls.insert(call_key)
                         && let Some(class_info) =
@@ -610,7 +610,7 @@ pub(crate) fn find_cross_file_propagated_throws(
                     let ident_lower = ident.to_lowercase();
                     if ident_lower != "self" && ident_lower != "static" && ident_lower != "parent" {
                         let resolved_class =
-                            crate::util::resolve_to_fqn(ident, ctx.use_map, ctx.file_namespace);
+                            crate::names::resolve_to_fqn(ident, ctx.use_map, ctx.file_namespace);
                         let call_key = format!("{}::{}", resolved_class, method_name);
                         if seen_calls.insert(call_key) {
                             collect_method_throws(

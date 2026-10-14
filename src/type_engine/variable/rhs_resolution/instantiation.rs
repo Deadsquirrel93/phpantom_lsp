@@ -43,7 +43,7 @@ pub(super) fn resolve_rhs_instantiation(
                 };
                 parent.to_string()
             }
-            other => crate::util::resolve_code_class_name(
+            other => crate::names::resolve_code_class_name(
                 other,
                 ctx.current_class.file_namespace.as_deref(),
                 ctx.source_imports,

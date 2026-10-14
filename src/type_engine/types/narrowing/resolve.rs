@@ -112,7 +112,7 @@ impl<'a> WrittenClassNames<'a> {
         if crate::class_lookup::is_class_keyword(name) {
             return PhpType::named(atom(name));
         }
-        PhpType::named(atom(&crate::util::resolve_code_class_name(
+        PhpType::named(atom(&crate::names::resolve_code_class_name(
             name,
             self.namespace,
             self.imports,

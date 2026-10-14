@@ -296,7 +296,7 @@ pub(crate) struct ResolutionCtx<'a> {
     /// class even when the file imports another `Redis`.
     pub source_class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     /// The `use` imports of the namespace block the cursor is in, which
-    /// [`resolve_code_class_name`](crate::util::resolve_code_class_name)
+    /// [`resolve_code_class_name`](crate::names::resolve_code_class_name)
     /// qualifies a written name no class answers to with.  `None` where
     /// no file context exists.
     pub source_imports: SourceImports<'a>,
@@ -365,22 +365,22 @@ impl<'a> ResolutionCtx<'a> {
     /// [`VarResolutionCtx::resolve_written_type`].
     pub(crate) fn resolve_written_type(&self, ty: &PhpType) -> PhpType {
         let (namespace, local_classes) = self.written_scope();
-        crate::util::resolve_source_php_type_names(
+        crate::names::resolve_source_php_type_names(
             ty,
             namespace,
             self.source_imports,
             self.content,
-            crate::util::written_name_region(self.content, self.current_class, self.cursor_offset),
+            crate::names::written_name_region(self.content, self.current_class, self.cursor_offset),
             local_classes,
             self.source_class_loader,
         )
     }
 
     /// Qualify the class names of a native type hint written in this file;
-    /// see [`resolve_code_php_type_names`](crate::util::resolve_code_php_type_names).
+    /// see [`resolve_code_php_type_names`](crate::names::resolve_code_php_type_names).
     pub(crate) fn resolve_hint_type(&self, ty: &PhpType) -> PhpType {
         let (namespace, local_classes) = self.written_scope();
-        crate::util::resolve_code_php_type_names(
+        crate::names::resolve_code_php_type_names(
             ty,
             namespace,
             self.source_imports,
@@ -390,14 +390,14 @@ impl<'a> ResolutionCtx<'a> {
     }
 
     /// Resolve a class name written in this file to its FQN; see
-    /// [`resolve_code_class_name`](crate::util::resolve_code_class_name).
+    /// [`resolve_code_class_name`](crate::names::resolve_code_class_name).
     /// `self`, `static` and `parent` name the class the code is in.
     pub(crate) fn resolve_written_class(&self, name: &str) -> String {
         if let Some(fqn) = crate::class_lookup::resolve_class_keyword(name, self.current_class) {
             return fqn;
         }
         let (namespace, local_classes) = self.written_scope();
-        crate::util::resolve_code_class_name(
+        crate::names::resolve_code_class_name(
             name,
             namespace,
             self.source_imports,
@@ -417,6 +417,35 @@ impl<'a> ResolutionCtx<'a> {
             self.source_class_loader,
             namespace,
             self.source_imports,
+        )
+    }
+
+    /// [`resolve_variable_types`](crate::type_engine::variable::resolution::resolve_variable_types)
+    /// for `var_name` at the cursor, read inside the current class, or
+    /// inside a placeholder for the cursor's namespace outside one.
+    pub(crate) fn resolve_variable_at_cursor(&self, var_name: &str) -> Vec<ResolvedType> {
+        let placeholder;
+        let current_class = match self.current_class {
+            Some(cls) => cls,
+            None => {
+                placeholder = crate::class_lookup::class_context_placeholder(
+                    self.content,
+                    self.cursor_offset,
+                );
+                &placeholder
+            }
+        };
+        crate::type_engine::variable::resolution::resolve_variable_types(
+            var_name,
+            current_class,
+            self.all_classes,
+            self.content,
+            self.cursor_offset,
+            self.class_loader,
+            self.source_class_loader,
+            self.source_imports,
+            self.backend,
+            Loaders::with_function(self.function_loader),
         )
     }
 
@@ -616,14 +645,14 @@ impl<'a> VarResolutionCtx<'a> {
 
     /// Qualify the class names of a type written in this file (a native
     /// hint, a docblock read inside the body); see
-    /// [`resolve_source_php_type_names`](crate::util::resolve_source_php_type_names).
+    /// [`resolve_source_php_type_names`](crate::names::resolve_source_php_type_names).
     pub(crate) fn resolve_written_type(&self, ty: &PhpType) -> PhpType {
-        crate::util::resolve_source_php_type_names(
+        crate::names::resolve_source_php_type_names(
             ty,
             self.current_class.file_namespace.as_deref(),
             self.source_imports,
             self.content,
-            crate::util::written_name_region(
+            crate::names::written_name_region(
                 self.content,
                 Some(self.current_class),
                 self.cursor_offset,
@@ -634,9 +663,9 @@ impl<'a> VarResolutionCtx<'a> {
     }
 
     /// Qualify the class names of a native type hint written in this file;
-    /// see [`resolve_code_php_type_names`](crate::util::resolve_code_php_type_names).
+    /// see [`resolve_code_php_type_names`](crate::names::resolve_code_php_type_names).
     pub(crate) fn resolve_hint_type(&self, ty: &PhpType) -> PhpType {
-        crate::util::resolve_code_php_type_names(
+        crate::names::resolve_code_php_type_names(
             ty,
             self.current_class.file_namespace.as_deref(),
             self.source_imports,
@@ -646,7 +675,7 @@ impl<'a> VarResolutionCtx<'a> {
     }
 
     /// Resolve a class name written in this file to its FQN; see
-    /// [`resolve_code_class_name`](crate::util::resolve_code_class_name).
+    /// [`resolve_code_class_name`](crate::names::resolve_code_class_name).
     /// `self`, `static` and `parent` name the class the code is in.
     pub(crate) fn resolve_written_class(&self, name: &str) -> String {
         if let Some(fqn) =
@@ -654,7 +683,7 @@ impl<'a> VarResolutionCtx<'a> {
         {
             return fqn;
         }
-        crate::util::resolve_code_class_name(
+        crate::names::resolve_code_class_name(
             name,
             self.current_class.file_namespace.as_deref(),
             self.source_imports,

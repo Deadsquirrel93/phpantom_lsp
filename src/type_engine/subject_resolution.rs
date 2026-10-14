@@ -12,11 +12,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::class_lookup::find_class_at_offset;
+use crate::names::resolve_to_fqn;
 use crate::php_type::PhpType;
 use crate::type_engine::resolver::Loaders;
 use crate::type_engine::subject_expr::SubjectExpr;
 use crate::types::{AccessKind, ClassInfo, ResolvedType};
-use crate::util::resolve_to_fqn;
 
 /// Context for resolving a subject expression to its type.
 pub(crate) struct SubjectResolutionCtx<'a> {

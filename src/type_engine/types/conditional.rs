@@ -126,11 +126,11 @@ impl ConditionalClassContext<'_> {
         class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     ) -> String {
         if let Some(calling) = resolve_self_keyword(name, self.calling) {
-            return crate::util::resolve_name_via_loader(&calling, class_loader);
+            return crate::names::resolve_name_via_loader(&calling, class_loader);
         }
         match self.written_class {
             Some(resolve) => resolve(name),
-            None => crate::util::resolve_name_via_loader(name, class_loader),
+            None => crate::names::resolve_name_via_loader(name, class_loader),
         }
     }
 }

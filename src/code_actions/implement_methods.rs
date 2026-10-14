@@ -665,7 +665,7 @@ fn shorten_type(
 ) -> String {
     let parsed = PhpType::parse(type_str);
     parsed
-        .resolve_names(&|name| crate::util::shorten_from_fqn(name, use_map, file_namespace))
+        .resolve_names(&|name| crate::names::shorten_from_fqn(name, use_map, file_namespace))
         .to_string()
 }
 
@@ -675,7 +675,7 @@ fn shorten_php_type_direct(
     use_map: &HashMap<String, String>,
     file_namespace: &Option<String>,
 ) -> String {
-    ty.resolve_names(&|name| crate::util::shorten_from_fqn(name, use_map, file_namespace))
+    ty.resolve_names(&|name| crate::names::shorten_from_fqn(name, use_map, file_namespace))
         .to_string()
 }
 
@@ -685,7 +685,7 @@ pub(super) fn shorten_single_type(
     use_map: &HashMap<String, String>,
     file_namespace: &Option<String>,
 ) -> String {
-    crate::util::shorten_from_fqn(type_str, use_map, file_namespace)
+    crate::names::shorten_from_fqn(type_str, use_map, file_namespace)
 }
 
 /// Detect the indentation level used inside a class body.

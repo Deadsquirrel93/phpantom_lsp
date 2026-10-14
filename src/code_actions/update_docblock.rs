@@ -106,7 +106,7 @@ fn resolve_type_name_to_fqn(
     file_namespace: &Option<String>,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> String {
-    let resolved = crate::util::resolve_to_fqn(name, use_map, file_namespace);
+    let resolved = crate::names::resolve_to_fqn(name, use_map, file_namespace);
     crate::class_lookup::load_resolved_name(&resolved, class_loader)
         .map(|cls| cls.fqn().to_string())
         .unwrap_or(resolved)
@@ -916,7 +916,7 @@ fn build_updated_docblock(
         let exc_str = exc.to_string();
         let exc_fqn = exc_str.to_lowercase();
         if !existing_fqns.contains(&exc_fqn) {
-            new_throws.push(crate::util::shorten_class_fqn(
+            new_throws.push(crate::names::shorten_class_fqn(
                 &exc_str,
                 use_map,
                 file_namespace,
@@ -980,7 +980,7 @@ fn build_updated_docblock(
                 .as_ref()
                 .is_none_or(|dr| !dr.type_parsed.equivalent(&enriched));
             if differs_from_doc {
-                let enriched = crate::util::shorten_type_for_file(
+                let enriched = crate::names::shorten_type_for_file(
                     &enriched,
                     use_map,
                     file_namespace,

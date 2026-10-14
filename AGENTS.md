@@ -31,7 +31,7 @@ module tree moves around:
 - **Parsing** is in `parser/` (PHP source → `ClassInfo`/`FunctionInfo`)
   and `docblock/` (PHPDoc tags, templates, conditional types).
 - **The data model** is in `types/` and `php_type/`.
-- **Cross-file symbol resolution** is `resolution.rs` (class/function
+- **Cross-file symbol resolution** is `resolution/` (class/function
   lookup), with `composer.rs`/`classmap_scanner/` for autoloading,
   `inheritance/` for merging parent/trait/mixin members, and
   `virtual_members/` for synthesized members (`@method`/`@property`,

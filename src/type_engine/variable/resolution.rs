@@ -404,12 +404,12 @@ pub(crate) fn resolve_variable_php_type(
         docblock::find_var_raw_type_in_source(content, cursor_offset as usize, &prefixed)
         && !is_cursor_in_self_assignment_rhs(content, cursor_offset as usize, &prefixed)
     {
-        Some(crate::util::resolve_source_php_type_names(
+        Some(crate::names::resolve_source_php_type_names(
             &var_type,
             current_class.and_then(|c| c.file_namespace.as_deref()),
             source_imports,
             content,
-            crate::util::written_name_region(content, current_class, cursor_offset),
+            crate::names::written_name_region(content, current_class, cursor_offset),
             all_classes,
             source_class_loader,
         ))
@@ -458,12 +458,12 @@ pub(crate) fn resolve_variable_php_type(
             .or_else(|| find_catch_var_type_at_cursor(&stmts, &prefixed, cursor_offset))
     });
     if let Some(written) = param_type {
-        return Some(crate::util::resolve_source_php_type_names(
+        return Some(crate::names::resolve_source_php_type_names(
             &written,
             effective_class.file_namespace.as_deref(),
             source_imports,
             content,
-            crate::util::written_name_region(content, Some(effective_class), cursor_offset),
+            crate::names::written_name_region(content, Some(effective_class), cursor_offset),
             all_classes,
             source_class_loader,
         ));
@@ -658,7 +658,7 @@ impl ParamSite {
             (Some(settled), Some(written))
                 if settled != written
                     && !param_docblock_narrows_hint(
-                        &crate::util::resolve_php_type_names(&settled, source_class_loader),
+                        &crate::names::resolve_php_type_names(&settled, source_class_loader),
                         &written,
                         self.decl_start,
                         current_class,
@@ -1676,7 +1676,7 @@ pub(super) fn param_docblock_narrows_hint(
     if !docblock_narrowing::hint_names_classes(written) {
         return true;
     }
-    let native = crate::util::resolve_php_type_names(written, source_class_loader);
+    let native = crate::names::resolve_php_type_names(written, source_class_loader);
     let declared_templates = std::cell::OnceCell::new();
     let not_a_class = |name: &str| {
         current_class.template_params.iter().any(|t| t == name)
@@ -1852,7 +1852,7 @@ pub(crate) fn extract_native_type_from_rhs<'b>(
         Expression::Instantiation(inst) => match inst.class {
             Expression::Identifier(ident) => {
                 let name = bytes_to_str(ident.value()).to_string();
-                let fqn = crate::util::resolve_code_class_name(
+                let fqn = crate::names::resolve_code_class_name(
                     &name,
                     ctx.current_class.file_namespace.as_deref(),
                     ctx.source_imports,

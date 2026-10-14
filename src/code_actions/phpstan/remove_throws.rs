@@ -235,7 +235,7 @@ fn build_remove_throws_edit(
             let rest = rest.trim_start();
             let tag_type = rest.split_whitespace().next().unwrap_or("");
             let tag_fqn =
-                crate::util::resolve_to_fqn(tag_type, use_map, file_namespace).to_lowercase();
+                crate::names::resolve_to_fqn(tag_type, use_map, file_namespace).to_lowercase();
 
             if tag_fqn == target_fqn {
                 lines_to_remove.push(i);
