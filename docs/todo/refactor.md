@@ -212,4 +212,54 @@ Each item must include:
 
 # Outstanding items
 
-No outstanding items.
+Filed by a refactoring pass on 2026-10-14 that worked through duplicated
+code in the files changed since 0.11.1 without running the full Step 3
+checklist. Each item touches its own set of files.
+
+## 1. One per-offset resolution context for the diagnostic collectors
+
+Ten collectors build the same resolution environment by hand. Once per
+file they take `class_loaders`, `resolved_class_loaders` and
+`function_loaders` (and often `constant_loader_with` through
+`file_ctx.per_block`); then at every site they pick each loader with
+`.at(offset)`, find the enclosing class (falling back to a
+`ClassInfo::default()`), and fill in
+`VarResolutionCtx { source_imports: Some(file_ctx.use_map_at(offset)),
+backend: Some(self), loaders: …, resolved_class_cache:
+Some(&self.resolved_class_cache), ..VarResolutionCtx::new(…) }`.
+
+Add a struct built once per file, next to `class_loaders` in
+`src/resolution/loaders.rs`, that owns the per-block loaders and hands out
+the `VarResolutionCtx` for an offset. Use it in
+`blade/call_site_inference.rs`, `blade/typed_receiver.rs`,
+`virtual_members/laravel/typed_morph_columns.rs`,
+`backend/laravel/macros.rs`, and `diagnostics/` `unknown_members/mod.rs`,
+`type_errors/mod.rs`, `match_type_errors.rs`, `destructuring_offsets.rs`,
+`deprecated.rs` and `readonly_writes.rs`.
+
+## 2. One way to find the docblock above a function in the code actions
+
+There are three: `find_docblock_above_line` (a byte span,
+`DocblockAbove`) and `find_function_docblock` (line indices,
+`FunctionDocblock`) in `code_actions/docblock_edit.rs`, and
+`find_enclosing_docblock` (`DocblockInfo`) in
+`code_actions/phpstan/add_throws.rs`, which finds the method by counting
+braces back from a line in its body (B617). Locate the declaration through
+the parsed AST, the way `find_enclosing_function_line_range` in
+`add_throws.rs` already does, read the docblock from its span, and give the
+three callers that one model. Files: `code_actions/docblock_edit.rs`,
+`code_actions/phpstan/add_throws.rs`, and the users of
+`find_function_docblock` (`add_iterable_type.rs`,
+`fix_return_type/mod.rs`, `fix_return_type/edits.rs`,
+`remove_unused_return_type.rs`).
+
+## 3. Share the written-name helpers of `ForwardWalkCtx` and `VarResolutionCtx`
+
+`written_class_names`, `resolve_written_type`, `resolve_hint_type` and
+`resolve_written_class` have identical bodies on `VarResolutionCtx`
+(`type_engine/resolver/context.rs`) and on `ForwardWalkCtx`
+(`type_engine/variable/forward_walk/walk_ctx.rs`). All four read the same
+six fields: `current_class`, `source_imports`, `content`, `cursor_offset`,
+`all_classes` and `source_class_loader`. Put those fields behind one small
+view type that carries the four methods, and have both contexts hand it
+out.

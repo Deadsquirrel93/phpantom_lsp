@@ -166,6 +166,24 @@ pub(crate) fn line_starts(content: &str) -> Vec<usize> {
     line_starts
 }
 
+/// Each line of `content` with the byte offset it starts at, the line
+/// stripped of its terminator the way [`str::lines`] strips it.
+///
+/// For a scan that walks lines and needs absolute offsets: adding
+/// `line.len() + 1` per [`str::lines`] line drifts a byte per line on CRLF
+/// files (see [`line_start_byte_offset`]), while this advances by the
+/// terminator actually there.
+pub(crate) fn lines_with_offsets(content: &str) -> impl Iterator<Item = (usize, &str)> {
+    content.split_inclusive('\n').scan(0usize, |next, raw| {
+        let start = *next;
+        *next += raw.len();
+        let line = raw
+            .strip_suffix('\n')
+            .map_or(raw, |line| line.strip_suffix('\r').unwrap_or(line));
+        Some((start, line))
+    })
+}
+
 /// [`LineIndex::position`] over a table built by [`line_starts`] for the
 /// same `content`.
 pub(crate) fn position_in(content: &str, line_starts: &[usize], offset: usize) -> Position {
@@ -495,6 +513,17 @@ mod tests {
         assert_eq!(line_start_byte_offset(content, 1), 5); // after "aaa\r\n"
         assert_eq!(line_start_byte_offset(content, 2), 9); // after "bb\r\n"
         assert_eq!(line_start_byte_offset(content, 3), 12); // after "c\r\n" (EOF)
+    }
+
+    #[test]
+    fn lines_with_offsets_strips_terminators_like_lines() {
+        let content = "aaa\r\nbb\nc";
+        let lines: Vec<(usize, &str)> = lines_with_offsets(content).collect();
+        assert_eq!(lines, vec![(0, "aaa"), (5, "bb"), (8, "c")]);
+        assert_eq!(
+            lines.iter().map(|(_, line)| *line).collect::<Vec<_>>(),
+            content.lines().collect::<Vec<_>>()
+        );
     }
 
     #[test]

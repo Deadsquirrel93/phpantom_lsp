@@ -501,6 +501,21 @@ function other(): void {
     );
 }
 
+#[test]
+fn var_annotation_applies_in_a_crlf_file() {
+    // Every line before the annotation ends in `\r\n`; counting them as
+    // one byte each would place the annotation in an earlier function.
+    let mut php = String::from("<?php\r\n");
+    for i in 0..40 {
+        php.push_str(&format!("function f{i}(): void {{}}\r\n"));
+    }
+    php.push_str(
+        "function test(): void {\r\n    /** @var string $name */\r\n    echo $name;\r\n}\r\n",
+    );
+    let diags = undefined_var_diagnostics(&php);
+    assert!(diags.is_empty(), "Got: {:?}", diags);
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Closures
 // ═══════════════════════════════════════════════════════════════════════════

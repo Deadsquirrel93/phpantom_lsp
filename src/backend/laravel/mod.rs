@@ -18,6 +18,9 @@ mod pivots;
 mod provider_resources;
 mod schema;
 mod storage;
+mod string_key_cache;
+
+pub(crate) use string_key_cache::{LaravelStringKeyBuildLocks, LaravelStringKeyCache};
 
 use crate::Backend;
 use crate::virtual_members::laravel::file_contributions::{Contribution, FileContributions};

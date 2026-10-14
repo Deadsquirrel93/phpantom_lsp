@@ -1,0 +1,305 @@
+//! Reading the `@template` bounds and `@param` docblocks of the
+//! declaration a body belongs to.
+
+use std::sync::Arc;
+
+use crate::docblock;
+use crate::php_type::{PhpType, TypeKind, is_keyword_type};
+use crate::types::ClassInfo;
+
+/// Mark the method/function-level template parameters a type names with
+/// the upper bounds their `@template T of Bound` annotations give them.
+///
+/// This handles the general case where a parameter type IS a template
+/// parameter (e.g. `@param T $query` where `@template T of Builder`).
+/// A bare `T` is an unresolvable named type, so member access on `$query`
+/// would fail with "subject type 'T' could not be resolved".  Each bounded
+/// `T` becomes a [`TemplateParam`](crate::php_type::TypeKind::TemplateParam)
+/// instead, which is still displayed and substituted as `T` but resolves
+/// as its bound, wherever the value travels.
+///
+/// Works on any `PhpType` structure — bare names, unions, intersections,
+/// nullable wrappers, generics, etc. — via `PhpType::substitute`.
+pub(in crate::type_engine::variable) fn substitute_template_param_bounds(
+    ty: PhpType,
+    content: &str,
+    method_start_offset: usize,
+    resolve_written_type: &dyn Fn(&PhpType) -> PhpType,
+) -> PhpType {
+    // Quick check: only act when the type contains at least one bare
+    // identifier that could be a template parameter.  This avoids the
+    // docblock parse for the common case where the type is a concrete
+    // class name or scalar.
+    if !type_may_contain_template_param(&ty) {
+        return ty;
+    }
+
+    let before = &content[..method_start_offset];
+    let docblock = extract_preceding_docblock(before);
+
+    let Some(docblock) = docblock else {
+        return ty;
+    };
+
+    let bounds = docblock::extract_template_params_with_bounds(docblock);
+    if bounds.is_empty() {
+        return ty;
+    }
+
+    let subs = bounded_template_markers(bounds, resolve_written_type);
+    if subs.is_empty() {
+        return ty;
+    }
+
+    ty.substitute(&subs)
+}
+
+/// The markers [`bounded_template_markers`] builds for the declaration
+/// starting at `decl_start`, or `None` when it declares no bounded template.
+pub(crate) fn declaration_template_markers(
+    content: &str,
+    decl_start: usize,
+    resolve_written_type: &dyn Fn(&PhpType) -> PhpType,
+) -> Option<std::sync::Arc<std::collections::HashMap<String, PhpType>>> {
+    let docblock = extract_preceding_docblock(content.get(..decl_start)?)?;
+    if !docblock.contains("template") {
+        return None;
+    }
+    let markers = bounded_template_markers(
+        docblock::extract_template_params_with_bounds(docblock),
+        resolve_written_type,
+    );
+    (!markers.is_empty()).then(|| std::sync::Arc::new(markers))
+}
+
+/// The [`TemplateParam`](crate::php_type::TypeKind::TemplateParam) each
+/// bounded template in `bounds` stands for, keyed by its name.
+///
+/// The bounds are read from the docblock as written, so each one goes
+/// through `resolve_written_type` (the context's
+/// [`resolve_written_type`](crate::type_engine::resolver::VarResolutionCtx::resolve_written_type))
+/// before it stands for a class.
+///
+/// A bound naming another of the declaration's templates (`@template U of
+/// T`) reads through to that template's own bound, so `U` still resolves
+/// to a class.
+fn bounded_template_markers(
+    bounds: Vec<(String, Option<PhpType>)>,
+    resolve_written_type: &dyn Fn(&PhpType) -> PhpType,
+) -> std::collections::HashMap<String, PhpType> {
+    let mut subs: std::collections::HashMap<String, PhpType> = bounds
+        .into_iter()
+        .filter_map(|(name, bound)| {
+            let bound = resolve_written_type(&bound?);
+            let marker = PhpType::template_param(crate::atom::atom(&name), bound);
+            Some((name, marker))
+        })
+        .collect();
+    let chained: Vec<(String, PhpType)> = subs
+        .iter()
+        .filter_map(|(name, marker)| {
+            let (tpl, bound) = marker.as_template_param()?;
+            let substituted = bound.substitute(&subs);
+            (substituted != *bound)
+                .then(|| (name.clone(), PhpType::template_param(tpl, substituted)))
+        })
+        .collect();
+    subs.extend(chained);
+    subs
+}
+
+/// Whether `ty` names one of the `@template` parameters the declaration
+/// starting at `method_start_offset` introduces.
+pub(in crate::type_engine::variable) fn references_method_template(
+    ty: &PhpType,
+    content: &str,
+    method_start_offset: usize,
+) -> bool {
+    if !type_may_contain_template_param(ty) {
+        return false;
+    }
+    extract_preceding_docblock(&content[..method_start_offset]).is_some_and(|docblock| {
+        ty.references_any_template_param(&docblock::extract_template_params(docblock))
+    })
+}
+
+/// Whether `settled`, the type a parameter's docblock settled over its native
+/// hint `written` (as written), may stand in for the hint: every class it
+/// names that the hint does not narrows the hint.
+///
+/// PHP enforces the hint, and loading the declaration makes the same call
+/// for its signature (see
+/// [`docblock_narrowing`](crate::type_engine::types::docblock_narrowing)),
+/// so the body sees the parameter the way its callers do.  The hint is
+/// resolved through `source_class_loader`, the way the docblock's names
+/// were, so that one spelling is one class on both sides.  `decl_start` is
+/// where the declaration starts, for the templates its docblock introduces.
+pub(in crate::type_engine::variable) fn param_docblock_narrows_hint(
+    settled: &PhpType,
+    written: &PhpType,
+    decl_start: usize,
+    current_class: &ClassInfo,
+    content: &str,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    source_class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> bool {
+    use crate::type_engine::types::docblock_narrowing;
+    if !docblock_narrowing::hint_names_classes(written) {
+        return true;
+    }
+    let native = crate::names::resolve_php_type_names(written, source_class_loader);
+    let declared_templates = std::cell::OnceCell::new();
+    let not_a_class = |name: &str| {
+        current_class.template_params.iter().any(|t| t == name)
+            || current_class.type_aliases.keys().any(|alias| alias == name)
+            || declared_templates
+                .get_or_init(|| {
+                    extract_preceding_docblock(&content[..decl_start])
+                        .map(docblock::extract_template_params)
+                        .unwrap_or_default()
+                })
+                .iter()
+                .any(|t| t == name)
+    };
+    docblock_narrowing::narrows_native(settled, &native, &not_a_class, class_loader)
+}
+
+/// Check whether a `PhpType` tree may contain a bare template parameter
+/// name — i.e. a `Named` variant whose value is not a well-known scalar
+/// or pseudo-type.  This is a cheap pre-filter so that we only parse the
+/// docblock when there is a realistic chance of finding a substitution.
+fn type_may_contain_template_param(ty: &PhpType) -> bool {
+    match ty.kind() {
+        TypeKind::Named(name) => {
+            // Well-known scalars/pseudo-types are never template params.
+            !is_keyword_type(name)
+        }
+        TypeKind::Union(members) | TypeKind::Intersection(members) => {
+            members.iter().any(type_may_contain_template_param)
+        }
+        TypeKind::Nullable(inner) => type_may_contain_template_param(inner),
+        TypeKind::Generic(g) => {
+            !crate::php_type::is_keyword_type(&g.name)
+                || g.args.iter().any(type_may_contain_template_param)
+        }
+        _ => false,
+    }
+}
+
+/// Mark method-level template parameters inside `class-string<T>` types
+/// with their upper bounds from `@template T of Bound` annotations.
+///
+/// This enables `$class::` static member access resolution when the
+/// parameter is typed as `class-string<T>` and `T` is bounded by a
+/// concrete class.  Without this substitution, `T` remains an
+/// unresolvable named type and `$class::` yields no completions.
+pub(in crate::type_engine::variable) fn substitute_class_string_template_bounds(
+    ty: PhpType,
+    content: &str,
+    method_start_offset: usize,
+    resolve_written_type: &dyn Fn(&PhpType) -> PhpType,
+) -> PhpType {
+    // Only act on class-string<T> where the inner type is a simple name
+    // (i.e. a potential template parameter).
+    let inner_name = match &ty.kind() {
+        TypeKind::ClassString(Some(inner)) => match inner.kind() {
+            TypeKind::Named(name) => Some(*name),
+            _ => None,
+        },
+        _ => None,
+    };
+
+    let Some(tpl_name) = inner_name else {
+        return ty;
+    };
+
+    // Extract the method's docblock to find template parameter bounds.
+    // The docblock sits immediately before the method declaration, so
+    // we search backward from the method's start offset.
+    let before = &content[..method_start_offset];
+    let docblock = extract_preceding_docblock(before);
+
+    let Some(docblock) = docblock else {
+        return ty;
+    };
+
+    let bounds = docblock::extract_template_params_with_bounds(docblock);
+    match bounded_template_markers(bounds, resolve_written_type).remove(tpl_name.as_str()) {
+        Some(marker) => PhpType::class_string(Some(marker)),
+        None => ty,
+    }
+}
+
+/// The `@param` type the declaration starting at `decl_start` gives
+/// `pname`.
+///
+/// The declaration's own docblock is read first, through the tag parser,
+/// so a vendor tag (`@phpstan-param`, `@psalm-param`) takes precedence
+/// over a plain `@param` for the same parameter the way it does in the
+/// signature.  The backward source scan is the fallback for the shapes
+/// that parser does not see, such as a docblock sharing its line with the
+/// code of a closure.
+pub(crate) fn declared_param_docblock_type(
+    content: &str,
+    decl_start: usize,
+    pname: &str,
+) -> Option<PhpType> {
+    let before = content.get(..decl_start)?;
+    extract_preceding_docblock(before)
+        .and_then(|doc| docblock::extract_param_raw_type(doc, pname))
+        .or_else(|| {
+            // The scan is confined to the declaration's own preamble.  Its
+            // brace counting cannot see a method whose body sits on one
+            // line, so left to itself it would walk on into that method's
+            // docblock and hand its `@param $filter` to this declaration's
+            // unrelated `$filter`.
+            let preamble = &before[declaration_preamble_start(before)..];
+            docblock::find_iterable_raw_type_in_source(preamble, preamble.len(), pname)
+        })
+}
+
+/// Where the text that can document a declaration starting at the end of
+/// `before` begins: just past the last line of code above it that ends a
+/// statement, opens a block, or closes one.
+///
+/// Comment lines are crossed, and so is a closure's own statement when it
+/// runs over several lines (`register(`, `'name',`), which is what lets a
+/// docblock above the statement document the closure.
+fn declaration_preamble_start(before: &str) -> usize {
+    // The text of the declaration's own line before it is always kept: it
+    // is indentation, or the statement a closure is part of.
+    let Some(mut line_end) = before.rfind('\n') else {
+        return 0;
+    };
+    loop {
+        let line_start = before[..line_end].rfind('\n').map_or(0, |i| i + 1);
+        let line = before[line_start..line_end].trim();
+        let is_comment = line.starts_with('*')
+            || line.starts_with("/*")
+            || line.starts_with("//")
+            || line.starts_with('#');
+        if !is_comment && (line.ends_with(';') || line.ends_with('{') || line.ends_with('}')) {
+            return line_end + 1;
+        }
+        if line_start == 0 {
+            return 0;
+        }
+        line_end = line_start - 1;
+    }
+}
+
+/// Extract the docblock comment immediately preceding a given offset.
+///
+/// Scans backward from `before` (the source text up to the method start)
+/// to find the closest `/** ... */` block.  Returns `None` when no
+/// docblock is found or when there is non-whitespace between the
+/// docblock and the method declaration.
+fn extract_preceding_docblock(before: &str) -> Option<&str> {
+    let trimmed = before.trim_end();
+    if !trimmed.ends_with("*/") {
+        return None;
+    }
+    let close_pos = trimmed.len();
+    let open_pos = trimmed.rfind("/**")?;
+    Some(&trimmed[open_pos..close_pos])
+}

@@ -36,12 +36,11 @@ impl Backend {
         // look for the key.
 
         let mut matches: Vec<(usize, u32, u32)> = Vec::new(); // (byte_offset, line, col)
-        let mut byte_offset: usize = 0;
         let mut in_docblock = false;
 
-        for (line_idx, line) in content.lines().enumerate() {
-            let line_len = line.len() + 1; // +1 for newline
-
+        for (line_idx, (byte_offset, line)) in
+            crate::text_position::lines_with_offsets(content).enumerate()
+        {
             // Track docblock boundaries.
             if line.contains("/**") {
                 in_docblock = true;
@@ -59,8 +58,6 @@ impl Backend {
             if line.contains("*/") {
                 in_docblock = false;
             }
-
-            byte_offset += line_len;
         }
 
         // Pick the match closest to the cursor.  When no near_offset
@@ -186,10 +183,10 @@ impl Backend {
 
         // Track whether we're inside one of the target property arrays.
         let mut in_target_property = false;
-        let mut byte_offset: usize = 0;
 
-        for (line_idx, line) in content.lines().enumerate() {
-            let line_len = line.len() + 1;
+        for (line_idx, (byte_offset, line)) in
+            crate::text_position::lines_with_offsets(content).enumerate()
+        {
             let in_range = match class_range {
                 Some((start, end)) => byte_offset >= start && byte_offset < end,
                 None => true,
@@ -228,7 +225,6 @@ impl Backend {
                     }
                 }
             }
-            byte_offset += line_len;
         }
         None
     }

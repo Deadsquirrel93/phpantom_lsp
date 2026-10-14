@@ -66,28 +66,7 @@ pub(crate) fn detect_laravel_route_controller_context(
     }
 
     // ── Step 1: Find the opening quote before the cursor ────────────
-    let mut quote_pos = None;
-    let mut i = cursor_offset;
-    while i > 0 {
-        i -= 1;
-        let ch = bytes[i];
-        if ch == b'\'' || ch == b'"' {
-            let mut backslashes = 0;
-            let mut j = i;
-            while j > 0 && bytes[j - 1] == b'\\' {
-                backslashes += 1;
-                j -= 1;
-            }
-            if backslashes % 2 == 0 {
-                quote_pos = Some(i);
-                break;
-            }
-        }
-        if ch == b'\n' {
-            return None;
-        }
-    }
-    let quote_pos = quote_pos?;
+    let quote_pos = crate::text_scan::open_quote_before(content, cursor_offset)?;
     let prefix = content[quote_pos + 1..cursor_offset].to_string();
 
     // Validate prefix is identifier-like (or empty).
@@ -118,17 +97,9 @@ pub(crate) fn detect_laravel_route_controller_context(
     let mut k = inner.len();
     while k > 0 {
         k -= 1;
-        if inner_bytes[k] == closing_quote_byte {
-            let mut bs = 0;
-            let mut j = k;
-            while j > 0 && inner_bytes[j - 1] == b'\\' {
-                bs += 1;
-                j -= 1;
-            }
-            if bs % 2 == 0 {
-                open_pos = Some(k);
-                break;
-            }
+        if inner_bytes[k] == closing_quote_byte && !crate::text_scan::is_escaped(inner_bytes, k) {
+            open_pos = Some(k);
+            break;
         }
     }
     let open_pos = open_pos?;

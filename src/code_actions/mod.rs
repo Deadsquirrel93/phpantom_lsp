@@ -133,7 +133,9 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 
-pub(crate) use docblock_edit::{DocblockAbove, find_docblock_above_line};
+pub(crate) use docblock_edit::{
+    DocblockAbove, find_docblock_above_line, find_function_docblock, find_function_keyword_line,
+};
 pub(crate) use helpers::{
     CodeActionData, create_file_edit, detect_indent_from_members, document_changes_edit,
     find_identical_occurrences, indent_of_line_at, indent_unit, make_code_action_data,

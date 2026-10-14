@@ -24,6 +24,7 @@ use std::sync::Arc;
 
 use crate::completion::source::code_context::CodeContext;
 use crate::php_type::{PhpType, TypeKind};
+use crate::text_scan::is_escaped;
 use crate::types::{BracketSegment, ClassInfo};
 
 use crate::type_engine::resolver::ResolutionCtx;
@@ -74,17 +75,6 @@ pub(crate) fn enclosing_array_key_call<'a>(
         callee: callee.to_ascii_lowercase(),
         before_callee: before_callee.trim_end(),
     })
-}
-
-/// Whether the byte at `index` is preceded by an odd number of backslashes.
-fn is_escaped(bytes: &[u8], index: usize) -> bool {
-    let mut backslashes = 0;
-    let mut j = index;
-    while j > 0 && bytes[j - 1] == b'\\' {
-        backslashes += 1;
-        j -= 1;
-    }
-    backslashes % 2 == 1
 }
 
 /// The value of a call's first argument when it is a plain string literal,

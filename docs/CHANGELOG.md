@@ -36,6 +36,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`?->` method calls on a `null` value.** `$x?->save()` where `$x` is known to be `null` is no longer reported as a call on `null`, the same as `$x?->name` already was. Laravel strings passed through `?->`, such as the ability in `auth()->user()?->can('edit-post')`, are now checked and navigable like those passed through `->`.
+- **Files with Windows line endings.** In a file saved with `\r\n` line endings, PHPStan quick fixes now edit the line they were offered for, and an inline `@var` annotation applies where it is written instead of in an earlier function.
+- **Element types for a returned array literal.** The quick fix for PHPStan's missing iterable value type now writes `@return array<1|2>` for a method that returns `[1, 2]`, instead of nesting the whole literal as `array<array{1, 2}>`.
 - **Static calls through a variable holding one of several class names.** In `$cls::make()`, where `$cls` may be `Apple::class` or `Pear::class`, the result now includes what `Pear` returns when it only answers the call through `__callStatic`.
 - **`($fn)()` returns what `$fn()` does.** Calling a closure through a parenthesized variable now gives the closure's return type, so passing the result straight to a function is checked like `$fn()` is.
 - **Integer literals too large for `int`.** A constant set to an integer past `PHP_INT_MAX`, such as `const BIG = 99999999999999999999;`, is now a `float`, the way PHP reads it, instead of an `int`.

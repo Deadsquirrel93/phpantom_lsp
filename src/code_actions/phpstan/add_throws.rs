@@ -31,9 +31,10 @@ use tower_lsp::lsp_types::*;
 use crate::Backend;
 use crate::code_actions::CodeActionData;
 use crate::code_actions::make_code_action_data;
+use crate::code_actions::phpstan::phpstan_identifier;
 use crate::completion::use_edit::{analyze_use_block_in, build_use_edit, use_import_conflicts};
 use crate::parser::with_parsed_program;
-use crate::text_position::{byte_range_to_lsp_range, offset_to_position, ranges_overlap};
+use crate::text_position::{byte_range_to_lsp_range, line_start_byte_offset, offset_to_position};
 use crate::util::{strip_fqn_prefix, strip_trailing_modifiers};
 
 /// The PHPStan identifier we match on.
@@ -53,19 +54,11 @@ impl Backend {
         params: &CodeActionParams,
         out: &mut Vec<CodeActionOrCommand>,
     ) {
-        let phpstan_diags: Vec<Diagnostic> = {
-            let cache = self.phpstan_tool.last_diags.lock();
-            cache.get(uri).cloned().unwrap_or_default()
-        };
+        let phpstan_diags = self.phpstan_diags_overlapping(uri, &params.range);
 
         for diag in &phpstan_diags {
-            if !ranges_overlap(&diag.range, &params.range) {
+            let Some(identifier) = phpstan_identifier(diag) else {
                 continue;
-            }
-
-            let identifier = match &diag.code {
-                Some(NumberOrString::String(s)) => s.as_str(),
-                _ => continue,
             };
 
             if identifier != CHECKED_EXCEPTION_ID {
@@ -273,13 +266,7 @@ fn find_enclosing_docblock(content: &str, diag_line: usize) -> Option<DocblockIn
     }
 
     // Convert the diagnostic line to a byte offset to start searching.
-    let mut diag_byte_offset = 0usize;
-    for (i, line) in lines.iter().enumerate() {
-        if i == diag_line {
-            break;
-        }
-        diag_byte_offset += line.len() + 1; // +1 for newline
-    }
+    let diag_byte_offset = line_start_byte_offset(content, diag_line);
 
     let search_area = content.get(..diag_byte_offset)?;
 
@@ -544,19 +531,8 @@ pub(crate) fn find_enclosing_function_line_range(
     diag_line: usize,
 ) -> Option<(usize, usize)> {
     // Convert the diagnostic line to a byte offset (start of line is enough).
-    let mut cursor_offset = 0usize;
-    let mut found = false;
-    for (i, line) in content.lines().enumerate() {
-        if i == diag_line {
-            found = true;
-            break;
-        }
-        cursor_offset += line.len() + 1;
-    }
-    if !found {
-        return None;
-    }
-    let cursor_offset = cursor_offset as u32;
+    content.lines().nth(diag_line)?;
+    let cursor_offset = line_start_byte_offset(content, diag_line) as u32;
 
     with_parsed_program(
         content,

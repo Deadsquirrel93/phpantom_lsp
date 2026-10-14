@@ -1411,10 +1411,8 @@ impl Backend {
                 .collect()
         };
 
-        self.evict_methods_for_fqns(&evict_fqns);
-        self.evict_gti_for_fqns(&evict_fqns);
-        self.populate_method_store(&winning_classes);
-        self.populate_gti_index(&winning_classes);
+        self.symbols.withdraw_class_members(&evict_fqns);
+        self.symbols.index_class_members(&winning_classes);
 
         // Selectively invalidate the resolved-class cache with
         // signature-level granularity.  Full indexing usually hits the

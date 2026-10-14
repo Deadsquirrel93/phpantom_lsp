@@ -9,8 +9,8 @@ use crate::type_engine::types::narrowing;
 use crate::types::{ClassInfo, ResolvedType};
 
 use super::super::rhs_resolution::{
-    ArithmeticOpKind, infer_addition_result_type, infer_arithmetic_result_type,
-    infer_modulo_result_type,
+    ArithmeticOpKind, coalesce_assign_value, infer_addition_result_type,
+    infer_arithmetic_result_type, infer_modulo_result_type,
 };
 
 // ─── Statement processing ───────────────────────────────────────────────────
@@ -960,43 +960,6 @@ fn property_write_dispatches_to_magic_set(
         .iter()
         .filter_map(|rt| rt.class_info.as_deref())
         .any(is_magic)
-}
-
-/// What a `??=` leaves behind, given what its target and its fallback
-/// resolve to.
-///
-/// `??=` keeps the target when it is not null and assigns the fallback
-/// otherwise, so the value is the target's non-null half unioned with the
-/// fallback. The resolved types are combined as they are, rather than
-/// joined into one union *type string*, so the `class_info` already
-/// attached to each operand survives: a rebuilt string carries none, and
-/// a member access on the result would have nothing to resolve against.
-///
-/// Where both sides name the same type (commonly the target's declared
-/// element type, which resolved no class, alongside an argument that did)
-/// the class-backed entry speaks for the pair.
-fn coalesce_assign_value(
-    lhs_types: Vec<ResolvedType>,
-    rhs_types: Vec<ResolvedType>,
-) -> Vec<ResolvedType> {
-    let mut combined: Vec<ResolvedType> = lhs_types
-        .into_iter()
-        .filter(|rt| !rt.type_string.is_null())
-        .map(|mut rt| {
-            if let Some(non_null) = rt.type_string.non_null_type() {
-                rt.type_string = non_null;
-            }
-            rt
-        })
-        .collect();
-    ResolvedType::extend_unique(&mut combined, rhs_types);
-    let class_backed: Vec<PhpType> = combined
-        .iter()
-        .filter(|rt| rt.class_info.is_some())
-        .map(|rt| rt.type_string.clone())
-        .collect();
-    combined.retain(|rt| rt.class_info.is_some() || !class_backed.contains(&rt.type_string));
-    combined
 }
 
 /// Process compound assignment operators (`+=`, `-=`, `/=`, `*=`, etc.).

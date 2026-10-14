@@ -2,6 +2,38 @@
 
 use super::*;
 
+/// The result of resolving a single type reference.
+///
+/// Carries the full PHPStan-style type string (preserving generics,
+/// shapes, scalars, unions) alongside the resolved [`ClassInfo`] when
+/// the type names a class-like.  Consumers pick whichever
+/// representation they need without re-resolving.
+///
+/// This is the core type of the unified type resolution engine.
+/// Instead of maintaining parallel resolvers that return `Vec<ClassInfo>`
+/// (losing the type string) or `Option<String>` (losing the class info),
+/// every expression resolver returns `Vec<ResolvedType>` and each
+/// consumer reads the field it needs.
+#[derive(Clone, Debug)]
+pub struct ResolvedType {
+    /// Structured type expression, e.g. `TypeKind::Generic("Collection", [PhpType::named("int"), PhpType::named("User")])`.
+    ///
+    /// Call `.to_string()` when a display string is needed.
+    pub type_string: PhpType,
+
+    /// Resolved class info, present when the base type names a
+    /// class/interface/trait/enum.  `None` for scalars, shapes
+    /// where the base is `array`, and unresolvable types.
+    pub class_info: Option<Arc<ClassInfo>>,
+
+    /// How many models an Eloquent factory value builds.
+    ///
+    /// [`FactoryCount::Unknown`] for every type that is not a factory,
+    /// which is what the constructors set.  See the enum's own
+    /// documentation for why the state travels with the value.
+    pub factory_count: FactoryCount,
+}
+
 impl ResolvedType {
     /// Create a `ResolvedType` from a [`ClassInfo`], using its name as
     /// the type string.

@@ -655,3 +655,44 @@ class BadgeHelper {
         "remaining diagnostic should be on line 17 (second method)"
     );
 }
+
+// ── CRLF line endings ───────────────────────────────────────────────────────
+
+#[test]
+fn adds_throws_in_a_crlf_file() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = "<?php\r\nclass Foo {\r\n    /**\r\n     * First.\r\n     */\r\n    public function first(): void {\r\n    }\r\n\r\n    /**\r\n     * Second.\r\n     */\r\n    public function second(): void {\r\n        throw new \\RuntimeException();\r\n    }\r\n}\r\n";
+    backend.update_ast(uri, content);
+
+    inject_phpstan_diag(
+        &backend,
+        uri,
+        12,
+        "Method Foo::second() throws checked exception RuntimeException but it's missing from the PHPDoc @throws tag.",
+        "missingType.checkedException",
+    );
+
+    let actions = get_code_actions_at(&backend, uri, content, 12, 10);
+    let action = find_action(&actions, "Add @throws").expect("should offer Add @throws action");
+    let resolved = resolve_action(&backend, uri, content, action);
+    let result = apply_edits(content, &extract_edits(&resolved));
+
+    let lines: Vec<&str> = result.lines().collect();
+    let throws_line = lines
+        .iter()
+        .position(|l| l.contains("@throws RuntimeException"))
+        .unwrap_or_else(|| panic!("should insert @throws:\n{result:?}"));
+    let second_line = lines
+        .iter()
+        .position(|l| l.contains("function second"))
+        .unwrap();
+    let first_line = lines
+        .iter()
+        .position(|l| l.contains("function first"))
+        .unwrap();
+    assert!(
+        first_line < throws_line && throws_line < second_line,
+        "@throws should land in second()'s docblock:\n{result:?}"
+    );
+}

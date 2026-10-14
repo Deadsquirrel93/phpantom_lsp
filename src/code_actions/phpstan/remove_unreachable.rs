@@ -31,9 +31,8 @@
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::code_actions::phpstan::find_brace_match_line;
+use crate::code_actions::phpstan::{find_brace_match_line, phpstan_identifier};
 use crate::code_actions::{CodeActionData, make_code_action_data};
-use crate::text_position::ranges_overlap;
 
 // ── PHPStan identifier ──────────────────────────────────────────────────────
 
@@ -63,23 +62,10 @@ impl Backend {
         params: &CodeActionParams,
         out: &mut Vec<CodeActionOrCommand>,
     ) {
-        let phpstan_diags: Vec<Diagnostic> = {
-            let cache = self.phpstan_tool.last_diags.lock();
-            cache.get(uri).cloned().unwrap_or_default()
-        };
-
-        // Only match diagnostics under the cursor.
-        let cursor_hits: Vec<&Diagnostic> = phpstan_diags
-            .iter()
-            .filter(|diag| {
-                matches!(
-                    &diag.code,
-                    Some(NumberOrString::String(s)) if s == UNREACHABLE_ID
-                ) && ranges_overlap(&diag.range, &params.range)
-            })
-            .collect();
-
-        for diag in &cursor_hits {
+        for diag in self.phpstan_diags_overlapping(uri, &params.range) {
+            if phpstan_identifier(&diag) != Some(UNREACHABLE_ID) {
+                continue;
+            }
             let diag_line = diag.range.start.line as usize;
 
             let extra = serde_json::json!({
@@ -89,7 +75,7 @@ impl Backend {
             out.push(CodeActionOrCommand::CodeAction(CodeAction {
                 title: "Remove unreachable code".to_string(),
                 kind: Some(CodeActionKind::QUICKFIX),
-                diagnostics: Some(vec![(*diag).clone()]),
+                diagnostics: Some(vec![diag]),
                 edit: None,
                 command: None,
                 is_preferred: Some(true),

@@ -702,17 +702,23 @@ fn resolve_assignment_as_value<'b>(
     }
 }
 
-/// The value a `??=` used as a value leaves behind: the target's current
-/// type with `null` stripped, unioned with the fallback's type.
+/// What a `??=` leaves behind, given what its target and its fallback
+/// resolve to.
 ///
-/// Mirrors the forward walker's own `coalesce_assign_value` (in
-/// `forward_walk::assignment`), which combines the same pair for a
-/// statement-level `??=` target. That copy folds the result into a
-/// mutable `ScopeState`; this one only answers "what does this
-/// expression evaluate to" for a caller that treats the assignment as
-/// one operand among others, so it works from two already-resolved
-/// `Vec<ResolvedType>` instead.
-fn coalesce_assign_value(
+/// `??=` keeps the target when it is not null and assigns the fallback
+/// otherwise, so the value is the target's non-null half unioned with the
+/// fallback. The resolved types are combined as they are, rather than
+/// joined into one union *type string*, so the `class_info` already
+/// attached to each operand survives: a rebuilt string carries none, and
+/// a member access on the result would have nothing to resolve against.
+///
+/// Where both sides name the same type (commonly the target's declared
+/// element type, which resolved no class, alongside an argument that did)
+/// the class-backed entry speaks for the pair.
+///
+/// Shared by the `??=` used as a value here and the forward walker's
+/// statement-level `??=`.
+pub(crate) fn coalesce_assign_value(
     lhs_types: Vec<ResolvedType>,
     rhs_types: Vec<ResolvedType>,
 ) -> Vec<ResolvedType> {

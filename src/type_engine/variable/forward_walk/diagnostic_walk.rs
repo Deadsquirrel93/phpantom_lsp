@@ -574,61 +574,25 @@ pub(crate) fn walk_closures_in_call<'b>(
                 None => walk_closures_in_expr(mc.object, outer_scope, ctx, None),
             }
 
-            let method_name = if let ClassLikeMemberSelector::Identifier(ident) = &mc.method {
-                Some(bytes_to_str(ident.value).to_string())
-            } else {
-                None
-            };
-            let obj_span = mc.object.span();
-            walk_closures_in_call_args(
-                &mc.argument_list.arguments,
-                Some(call),
+            walk_closures_in_method_args(
+                call,
+                mc.object,
+                &mc.method,
+                &mc.argument_list,
                 outer_scope,
                 ctx,
-                |arg_idx| {
-                    if let Some(ref name) = method_name {
-                        infer_callable_params_from_receiver_fw(
-                            (obj_span.start.offset, obj_span.end.offset),
-                            name,
-                            arg_idx,
-                            &mc.argument_list,
-                            outer_scope,
-                            ctx,
-                        )
-                    } else {
-                        vec![]
-                    }
-                },
             );
         }
         Call::NullSafeMethod(mc) => {
             walk_closures_in_expr(mc.object, outer_scope, ctx, None);
 
-            let method_name = if let ClassLikeMemberSelector::Identifier(ident) = &mc.method {
-                Some(bytes_to_str(ident.value).to_string())
-            } else {
-                None
-            };
-            let obj_span = mc.object.span();
-            walk_closures_in_call_args(
-                &mc.argument_list.arguments,
-                Some(call),
+            walk_closures_in_method_args(
+                call,
+                mc.object,
+                &mc.method,
+                &mc.argument_list,
                 outer_scope,
                 ctx,
-                |arg_idx| {
-                    if let Some(ref name) = method_name {
-                        infer_callable_params_from_receiver_fw(
-                            (obj_span.start.offset, obj_span.end.offset),
-                            name,
-                            arg_idx,
-                            &mc.argument_list,
-                            outer_scope,
-                            ctx,
-                        )
-                    } else {
-                        vec![]
-                    }
-                },
             );
         }
         Call::StaticMethod(sc) => {
@@ -661,6 +625,41 @@ pub(crate) fn walk_closures_in_call<'b>(
             );
         }
     }
+}
+
+/// Walk the closures among the arguments of an instance method call,
+/// written with `->` or `?->`, typing their parameters from the method
+/// the receiver resolves to.
+fn walk_closures_in_method_args<'b>(
+    call: &'b Call<'b>,
+    object: &'b Expression<'b>,
+    method: &'b ClassLikeMemberSelector<'b>,
+    argument_list: &'b ArgumentList<'b>,
+    outer_scope: &ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    let method_name = match method {
+        ClassLikeMemberSelector::Identifier(ident) => Some(bytes_to_str(ident.value)),
+        _ => None,
+    };
+    let obj_span = object.span();
+    walk_closures_in_call_args(
+        &argument_list.arguments,
+        Some(call),
+        outer_scope,
+        ctx,
+        |arg_idx| match method_name {
+            Some(name) => infer_callable_params_from_receiver_fw(
+                (obj_span.start.offset, obj_span.end.offset),
+                name,
+                arg_idx,
+                argument_list,
+                outer_scope,
+                ctx,
+            ),
+            None => vec![],
+        },
+    );
 }
 
 /// Walk the arguments of a call expression, invoking `infer_fn` for
@@ -1237,23 +1236,7 @@ pub(crate) fn walk_top_level_statements<'a, 'b: 'a>(
     default_class: &ClassInfo,
     diag_ctx: &DiagnosticWalkCtx<'_>,
 ) {
-    let ctx = ForwardWalkCtx {
-        current_class: default_class,
-        all_classes: diag_ctx.local_classes,
-        content: diag_ctx.content,
-        cursor_offset: u32::MAX,
-        class_loader: diag_ctx.class_loader,
-        source_class_loader: diag_ctx.source_class_loader,
-        source_imports: Some(diag_ctx.source_imports),
-        backend: diag_ctx.backend,
-        loaders: diag_ctx.loaders,
-        resolved_class_cache: diag_ctx.resolved_class_cache,
-        enclosing_return_type: None,
-        top_level_scope: None,
-        in_loop: false,
-        template_markers: None,
-        cursor_scope: None,
-    };
+    let ctx = diag_ctx.forward_walk_ctx(default_class);
 
     let mut top_level_scope = ScopeState::new();
 
@@ -1740,20 +1723,7 @@ pub(crate) fn walk_anonymous_class_member_bodies<'b>(
 
     let anon_ctx = ForwardWalkCtx {
         current_class: anon_class.as_ref(),
-        all_classes: ctx.all_classes,
-        content: ctx.content,
-        cursor_offset: ctx.cursor_offset,
-        class_loader: ctx.class_loader,
-        source_class_loader: ctx.source_class_loader,
-        source_imports: ctx.source_imports,
-        backend: ctx.backend,
-        loaders: ctx.loaders,
-        resolved_class_cache: ctx.resolved_class_cache,
-        enclosing_return_type: None,
-        top_level_scope: None,
-        in_loop: false,
-        template_markers: None,
-        cursor_scope: None,
+        ..ctx.fresh()
     };
 
     for member in anon.members.iter() {

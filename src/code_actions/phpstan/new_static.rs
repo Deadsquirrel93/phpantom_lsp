@@ -25,8 +25,9 @@
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::code_actions::phpstan::phpstan_identifier;
 use crate::code_actions::{CodeActionData, indent_of_line_at, make_code_action_data};
-use crate::text_position::{offset_to_position, ranges_overlap};
+use crate::text_position::offset_to_position;
 
 /// The PHPStan identifier we match on.
 const NEW_STATIC_ID: &str = "new.static";
@@ -51,19 +52,11 @@ impl Backend {
         params: &CodeActionParams,
         out: &mut Vec<CodeActionOrCommand>,
     ) {
-        let phpstan_diags: Vec<Diagnostic> = {
-            let cache = self.phpstan_tool.last_diags.lock();
-            cache.get(uri).cloned().unwrap_or_default()
-        };
+        let phpstan_diags = self.phpstan_diags_overlapping(uri, &params.range);
 
         for diag in &phpstan_diags {
-            if !ranges_overlap(&diag.range, &params.range) {
+            let Some(identifier) = phpstan_identifier(diag) else {
                 continue;
-            }
-
-            let identifier = match &diag.code {
-                Some(NumberOrString::String(s)) => s.as_str(),
-                _ => continue,
             };
 
             if identifier != NEW_STATIC_ID {
@@ -248,7 +241,7 @@ fn find_enclosing_class(content: &str, diag_line: usize) -> Option<EnclosingClas
     }
 
     // Convert the diagnostic line to a byte offset.
-    let diag_byte_offset: usize = lines.iter().take(diag_line).map(|l| l.len() + 1).sum();
+    let diag_byte_offset = crate::text_position::line_start_byte_offset(content, diag_line);
 
     let search_area = &content[..diag_byte_offset.min(content.len())];
 

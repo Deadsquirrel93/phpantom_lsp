@@ -58,31 +58,7 @@ pub(crate) fn detect_array_callable_context(
     }
 
     // ── Step 1: Find the opening quote before the cursor ────────────
-    let mut quote_pos = None;
-    let mut i = cursor_offset;
-    while i > 0 {
-        i -= 1;
-        let ch = bytes[i];
-        if ch == b'\'' || ch == b'"' {
-            // Make sure this isn't an escaped quote.
-            let mut backslashes = 0;
-            let mut j = i;
-            while j > 0 && bytes[j - 1] == b'\\' {
-                backslashes += 1;
-                j -= 1;
-            }
-            if backslashes % 2 == 0 {
-                quote_pos = Some(i);
-                break;
-            }
-        }
-        // Stop at newlines — strings don't span lines.
-        if ch == b'\n' {
-            return None;
-        }
-    }
-
-    let quote_pos = quote_pos?;
+    let quote_pos = crate::text_scan::open_quote_before(content, cursor_offset)?;
     let string_content_start = quote_pos + 1;
 
     // The partial text typed so far (the method name prefix).

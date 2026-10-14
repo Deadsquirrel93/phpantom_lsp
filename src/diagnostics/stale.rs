@@ -327,7 +327,7 @@ fn enclosing_docblock_text(content: &str, diag_line: usize) -> String {
     };
 
     // Compute the byte offset of the `function` keyword on that line.
-    let line_byte_start: usize = lines.iter().take(func_line).map(|l| l.len() + 1).sum();
+    let line_byte_start = crate::text_position::line_start_byte_offset(content, func_line);
     let func_kw_rel = match lines[func_line].find("function") {
         Some(p) => p,
         None => return String::new(),

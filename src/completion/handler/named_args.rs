@@ -60,15 +60,7 @@ impl Backend {
                     .map(Arc::new)
                     .collect();
                 if !patched_classes.is_empty() {
-                    let patched_ctx = FileContext {
-                        classes: patched_classes,
-                        use_map: ctx.use_map.clone(),
-                        symbol_imports: ctx.symbol_imports.clone(),
-                        namespace: ctx.namespace.clone(),
-                        namespace_spans: ctx.namespace_spans.clone(),
-                        resolved_names: ctx.resolved_names.clone(),
-                        pest_uses: ctx.pest_uses.clone(),
-                    };
+                    let patched_ctx = ctx.with_classes(patched_classes);
                     params =
                         self.resolve_named_arg_params(&na_ctx, &patched, position, &patched_ctx);
                 }

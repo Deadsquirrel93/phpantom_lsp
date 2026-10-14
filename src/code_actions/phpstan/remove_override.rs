@@ -22,8 +22,9 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::code_actions::phpstan::contains_php_attribute;
+use crate::code_actions::phpstan::phpstan_identifier;
 use crate::code_actions::{CodeActionData, make_code_action_data};
-use crate::text_position::{offset_to_position, ranges_overlap};
+use crate::text_position::{line_start_byte_offset, offset_to_position};
 use crate::util::strip_fqn_prefix;
 
 /// PHPStan identifiers we match on.
@@ -47,10 +48,7 @@ impl Backend {
         params: &CodeActionParams,
         out: &mut Vec<CodeActionOrCommand>,
     ) {
-        let phpstan_diags: Vec<Diagnostic> = {
-            let cache = self.phpstan_tool.last_diags.lock();
-            cache.get(uri).cloned().unwrap_or_default()
-        };
+        let phpstan_diags = self.phpstan_diags_overlapping(uri, &params.range);
 
         // Group matching diagnostics by line so that overlapping
         // identifiers (e.g. `property.override` and
@@ -60,13 +58,8 @@ impl Backend {
             std::collections::BTreeMap::new();
 
         for diag in &phpstan_diags {
-            if !ranges_overlap(&diag.range, &params.range) {
+            let Some(identifier) = phpstan_identifier(diag) else {
                 continue;
-            }
-
-            let identifier = match &diag.code {
-                Some(NumberOrString::String(s)) => s.as_str(),
-                _ => continue,
             };
 
             if identifier != METHOD_OVERRIDE_ID
@@ -229,9 +222,9 @@ fn build_remove_override_edit(content: &str, attr_line: usize) -> Option<TextEdi
     let trimmed = line_text.trim();
 
     if is_sole_override_attribute(trimmed) {
-        let start = line_byte_offset(content, attr_line);
+        let start = line_start_byte_offset(content, attr_line);
         let end = if attr_line + 1 < lines.len() {
-            line_byte_offset(content, attr_line + 1)
+            line_start_byte_offset(content, attr_line + 1)
         } else {
             content.len()
         };
@@ -256,7 +249,7 @@ fn build_remove_override_edit(content: &str, attr_line: usize) -> Option<TextEdi
             .collect();
         let replacement = format!("{}{}", indent, new_line);
 
-        let start = line_byte_offset(content, attr_line);
+        let start = line_start_byte_offset(content, attr_line);
         let end = start + line_text.len();
 
         let start_pos = offset_to_position(content, start);
@@ -326,19 +319,6 @@ fn remove_override_from_attribute_list(trimmed: &str) -> Option<String> {
     }
 
     Some(format!("#[{}]", kept.join(", ")))
-}
-
-/// Compute the byte offset of the start of the given line number
-/// (0-based).
-fn line_byte_offset(content: &str, line: usize) -> usize {
-    let mut offset = 0;
-    for (i, l) in content.lines().enumerate() {
-        if i == line {
-            return offset;
-        }
-        offset += l.len() + 1; // +1 for newline
-    }
-    content.len()
 }
 
 /// Check whether a `method.override` / `property.override` diagnostic

@@ -10558,6 +10558,31 @@ function test(?string $s): void {
     );
 }
 
+/// The method-call spelling of the case above: `$s?->foo()` never calls
+/// `foo` when `$s` is `null`, while plain `->` on the same subject is
+/// still flagged.
+#[test]
+fn no_scalar_member_access_on_nullsafe_call_on_null_typed_subject() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+function test(?string $s): void {
+    if ($s === null) {
+        echo $s?->foo();
+        echo $s->bar();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    let messages: Vec<&str> = diags.iter().map(|d| d.message.as_str()).collect();
+    assert_eq!(
+        messages,
+        vec!["Cannot access method 'bar' on type 'null'"],
+        "only the plain `->` call should be flagged, got: {:?}",
+        diags
+    );
+}
+
 /// `$this->unknownMethod()->next()` inside a class — only
 /// `unknownMethod` should be flagged.
 #[test]

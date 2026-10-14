@@ -612,7 +612,7 @@ pub fn find_inline_var_docblock(
 /// opening `/**` of a *multi-line* docblock readable — chaining
 /// `strip_suffix("*/").unwrap_or(trimmed)` onto the prefix strip would
 /// restore the `/**` whenever the line does not also close the block.
-fn strip_docblock_line_delimiters(trimmed: &str) -> &str {
+pub(crate) fn strip_docblock_line_delimiters(trimmed: &str) -> &str {
     let inner = trimmed.strip_prefix("/**").unwrap_or(trimmed);
     let inner = inner.strip_suffix("*/").unwrap_or(inner);
     inner.trim().trim_start_matches('*').trim()

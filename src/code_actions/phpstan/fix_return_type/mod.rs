@@ -48,12 +48,12 @@ pub(crate) use inference::enrichment_return_type;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::code_actions::phpstan::add_iterable_type::{
+use crate::code_actions::phpstan::phpstan_identifier;
+use crate::code_actions::{CodeActionData, make_code_action_data};
+use crate::code_actions::{
     find_function_docblock, find_function_keyword_line as find_func_keyword_line,
 };
-use crate::code_actions::{CodeActionData, make_code_action_data};
 use crate::php_type::PhpType;
-use crate::text_position::ranges_overlap;
 
 use edits::{
     build_change_return_type_edits_to, build_strip_return_expr_edit,
@@ -111,19 +111,11 @@ impl Backend {
         params: &CodeActionParams,
         out: &mut Vec<CodeActionOrCommand>,
     ) {
-        let phpstan_diags: Vec<Diagnostic> = {
-            let cache = self.phpstan_tool.last_diags.lock();
-            cache.get(uri).cloned().unwrap_or_default()
-        };
+        let phpstan_diags = self.phpstan_diags_overlapping(uri, &params.range);
 
         for diag in &phpstan_diags {
-            if !ranges_overlap(&diag.range, &params.range) {
+            let Some(identifier) = phpstan_identifier(diag) else {
                 continue;
-            }
-
-            let identifier = match &diag.code {
-                Some(NumberOrString::String(s)) => s.as_str(),
-                _ => continue,
             };
 
             let diag_line = diag.range.start.line as usize;
@@ -404,88 +396,13 @@ impl Backend {
                 // When the effective type is richer than the native hint,
                 // add a `@return` docblock tag.
                 if let Some(ref eff_type) = inferred.effective {
-                    let eff = eff_type.to_string();
                     let func_line = find_func_keyword_line(&lines, paren_line).unwrap_or(diag_line);
                     let docblock_info = find_function_docblock(&lines, func_line);
-
-                    if docblock_info.has_docblock {
-                        if !docblock_info.has_return_tag {
-                            // Insert @return into the existing docblock.
-                            let doc_end = docblock_info.doc_end_line;
-                            let close_line = lines[doc_end];
-
-                            if docblock_info.doc_start_line == doc_end {
-                                // Single-line docblock: convert to multi-line.
-                                let trimmed = close_line.trim();
-                                let inner = trimmed
-                                    .strip_prefix("/**")
-                                    .and_then(|s| s.strip_suffix("*/"))
-                                    .map(|s| s.trim())
-                                    .unwrap_or("");
-
-                                let indent = &docblock_info.indent;
-                                let mut new_doc = format!("{}/**\n", indent);
-                                if !inner.is_empty() {
-                                    new_doc.push_str(&format!("{} * {}\n", indent, inner));
-                                    new_doc.push_str(&format!("{} *\n", indent));
-                                }
-                                new_doc.push_str(&format!("{} * @return {}\n", indent, eff));
-                                new_doc.push_str(&format!("{} */", indent));
-
-                                edits.push(TextEdit {
-                                    range: Range {
-                                        start: Position::new(doc_end as u32, 0),
-                                        end: Position::new(doc_end as u32, close_line.len() as u32),
-                                    },
-                                    new_text: new_doc,
-                                });
-                            } else {
-                                // Multi-line docblock: insert @return before `*/`.
-                                let indent = &docblock_info.indent;
-
-                                let prev_line = if doc_end > docblock_info.doc_start_line {
-                                    lines[doc_end - 1].trim()
-                                } else {
-                                    ""
-                                };
-                                let prev_trimmed = prev_line.trim_start_matches('*').trim();
-                                let needs_separator = !prev_trimmed.is_empty()
-                                    && !prev_trimmed.starts_with("@return")
-                                    && !prev_trimmed.starts_with("@throws")
-                                    && prev_trimmed.starts_with('@');
-
-                                let mut insert_text = String::new();
-                                if needs_separator {
-                                    insert_text.push_str(&format!("{} *\n", indent));
-                                }
-                                insert_text.push_str(&format!("{} * @return {}\n", indent, eff));
-
-                                edits.push(TextEdit {
-                                    range: Range {
-                                        start: Position::new(doc_end as u32, 0),
-                                        end: Position::new(doc_end as u32, 0),
-                                    },
-                                    new_text: insert_text,
-                                });
-                            }
-                        }
-                        // If the docblock already has a @return tag, we
-                        // don't overwrite it — the user intentionally
-                        // wrote it.
-                    } else {
-                        // No existing docblock — create one.
-                        let indent = &docblock_info.indent;
-                        let new_doc = format!(
-                            "{}/**\n{} * @return {}\n{} */\n",
-                            indent, indent, eff, indent
-                        );
-                        edits.push(TextEdit {
-                            range: Range {
-                                start: Position::new(func_line as u32, 0),
-                                end: Position::new(func_line as u32, 0),
-                            },
-                            new_text: new_doc,
-                        });
+                    // An existing `@return` tag is left alone: the user
+                    // wrote it on purpose.
+                    if !docblock_info.has_return_tag {
+                        edits
+                            .push(docblock_info.add_return_tag_edit(&lines, &eff_type.to_string()));
                     }
                 }
 

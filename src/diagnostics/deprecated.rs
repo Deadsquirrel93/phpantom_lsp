@@ -262,102 +262,60 @@ impl Backend {
                     let resolved =
                         resolve_class_fully_cached(&base_class, resolved_class_loader, cache);
 
-                    if *is_method_call {
-                        // Check method deprecation — try base_class first
-                        // (preserves scope methods), fall back to resolved.
-                        if let Some(method) = base_class
+                    // A method, or a property and then a static constant of
+                    // that name.  Each is looked up on base_class first,
+                    // which preserves scope methods, then on resolved.
+                    let deprecated = if *is_method_call {
+                        base_class
                             .get_method(member_name)
                             .or_else(|| resolved.get_method(member_name))
-                            && let Some(msg) = method.deprecation_message()
-                            && !is_within_deprecated_scope(
-                                self,
-                                local_classes,
-                                resolved_class_loader,
-                                cache,
-                                content,
-                                span.start,
-                            )
-                            && let Some(range) = self.offset_range_to_lsp_range(
-                                uri,
-                                content,
-                                span.start as usize,
-                                span.end as usize,
-                            )
-                        {
-                            let class_fqn = resolved.fqn();
-                            out.push(deprecated_diagnostic(
-                                range,
-                                member_name,
-                                Some(&class_fqn),
-                                msg,
-                                method.see_refs(),
-                            ));
-                        }
+                            .and_then(|method| {
+                                Some((method.deprecation_message()?, method.see_refs()))
+                            })
                     } else {
-                        // Property or constant access — try base_class
-                        // first (same rationale as above), fall back to
-                        // resolved.
-                        if let Some(prop) = base_class
+                        base_class
                             .properties
                             .iter()
                             .find(|p| p.name == *member_name)
                             .or_else(|| resolved.properties.iter().find(|p| p.name == *member_name))
-                            && let Some(msg) = &prop.deprecation_message
-                            && !is_within_deprecated_scope(
-                                self,
-                                local_classes,
-                                resolved_class_loader,
-                                cache,
-                                content,
-                                span.start,
-                            )
-                            && let Some(range) = self.offset_range_to_lsp_range(
-                                uri,
-                                content,
-                                span.start as usize,
-                                span.end as usize,
-                            )
-                        {
-                            let class_fqn = resolved.fqn();
-                            out.push(deprecated_diagnostic(
-                                range,
-                                member_name,
-                                Some(&class_fqn),
-                                msg,
-                                &prop.see_refs,
-                            ));
-                            continue;
-                        }
-
-                        // Try constant (static access like Foo::BAR)
-                        if *is_static
-                            && let Some(constant) =
-                                resolved.constants.iter().find(|c| c.name == *member_name)
-                            && let Some(msg) = &constant.deprecation_message
-                            && !is_within_deprecated_scope(
-                                self,
-                                local_classes,
-                                resolved_class_loader,
-                                cache,
-                                content,
-                                span.start,
-                            )
-                            && let Some(range) = self.offset_range_to_lsp_range(
-                                uri,
-                                content,
-                                span.start as usize,
-                                span.end as usize,
-                            )
-                        {
-                            let class_fqn = resolved.fqn();
-                            out.push(deprecated_diagnostic(
-                                range,
-                                member_name,
-                                Some(&class_fqn),
-                                msg,
-                                &constant.see_refs,
-                            ));
-                        }
+                            .and_then(|prop| {
+                                Some((prop.deprecation_message.as_deref()?, &prop.see_refs[..]))
+                            })
+                            .or_else(|| {
+                                let constant = resolved
+                                    .constants
+                                    .iter()
+                                    .find(|c| *is_static && c.name == *member_name)?;
+                                Some((
+                                    constant.deprecation_message.as_deref()?,
+                                    &constant.see_refs[..],
+                                ))
+                            })
+                    };
+                    if let Some((msg, see_refs)) = deprecated
+                        && !is_within_deprecated_scope(
+                            self,
+                            local_classes,
+                            resolved_class_loader,
+                            cache,
+                            content,
+                            span.start,
+                        )
+                        && let Some(range) = self.offset_range_to_lsp_range(
+                            uri,
+                            content,
+                            span.start as usize,
+                            span.end as usize,
+                        )
+                    {
+                        let class_fqn = resolved.fqn();
+                        out.push(deprecated_diagnostic(
+                            range,
+                            member_name,
+                            Some(&class_fqn),
+                            msg,
+                            see_refs,
+                        ));
                     }
                 }
 

@@ -36,13 +36,7 @@ pub(super) fn collect_var_annotations(content: &str) -> Vec<(String, u32)> {
     let mut vars = Vec::new();
     // Look for patterns like: @var SomeType $varName
     // The regex-like scan: find `@var ` followed by a type, then `$name`.
-    let mut line_start = 0usize;
-    for line in content.lines() {
-        // `lines()` strips the line terminator; track the running byte
-        // offset so we can report absolute positions.
-        let this_line_start = line_start;
-        line_start += line.len() + 1; // +1 for the stripped '\n'
-
+    for (this_line_start, line) in crate::text_position::lines_with_offsets(content) {
         // Find the `@var` tag and extract the variable name after the type.
         if let Some((var_pos, tag_len)) = crate::docblock::find_var_tag(line) {
             let after_var_off = var_pos + tag_len;

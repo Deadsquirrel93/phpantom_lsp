@@ -1586,3 +1586,36 @@ class Foo {
         result
     );
 }
+
+// ── CRLF line endings ───────────────────────────────────────────────────────
+
+#[test]
+fn return_void_strips_expression_in_a_crlf_file() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = "<?php\r\nclass Foo {\r\n    public function first(): int {\r\n        return 1;\r\n    }\r\n\r\n    public function run(): void {\r\n        return $this->doWork();\r\n    }\r\n}\r\n";
+    backend.update_ast(uri, content);
+
+    inject_phpstan_diag(
+        &backend,
+        uri,
+        7,
+        "Method Foo::run() with return type void returns void but should not return anything.",
+        "return.void",
+    );
+
+    let actions = get_code_actions_on_line(&backend, uri, content, 7);
+    let action = find_action(&actions, "Remove return statement")
+        .expect("should offer 'Remove return statement'");
+    let resolved = resolve_action(&backend, uri, content, action);
+    let result = apply_edits(content, &extract_edits(&resolved));
+
+    assert!(
+        result.contains("    public function run(): void {\r\n        $this->doWork();\r\n    }"),
+        "the expression should stay as a statement in run():\n{result:?}"
+    );
+    assert!(
+        result.contains("        return 1;\r\n"),
+        "first() should be untouched:\n{result:?}"
+    );
+}

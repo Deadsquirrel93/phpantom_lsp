@@ -328,15 +328,7 @@ impl Backend {
                     .map(Arc::new)
                     .collect::<Vec<_>>();
                 let patched_offset = position_to_offset(&patched, position);
-                let patched_ctx = FileContext {
-                    classes: patched_classes_storage.clone(),
-                    use_map: file_ctx.use_map.clone(),
-                    symbol_imports: file_ctx.symbol_imports.clone(),
-                    namespace: file_ctx.namespace.clone(),
-                    namespace_spans: file_ctx.namespace_spans.clone(),
-                    resolved_names: file_ctx.resolved_names.clone(),
-                    pest_uses: file_ctx.pest_uses.clone(),
-                };
+                let patched_ctx = file_ctx.with_classes(patched_classes_storage.clone());
                 match self.resolve_variable_raw_type(
                     &ctx.var_name,
                     &patched,

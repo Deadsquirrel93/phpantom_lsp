@@ -409,14 +409,11 @@ impl Backend {
         // hierarchy stop serving children that no longer extend a parent.
         // For a first-time load `old_fqns` is empty and both calls
         // early-return.
-        self.evict_methods_for_fqns(&old_fqns);
-        self.evict_gti_for_fqns(&old_fqns);
+        self.symbols.withdraw_class_members(&old_fqns);
         // Same for a name this parse took over from another file: those
         // entries describe the declaration that just lost.
-        self.evict_methods_for_fqns(&reowned_fqns);
-        self.evict_gti_for_fqns(&reowned_fqns);
-        self.populate_method_store(&winning_classes);
-        self.populate_gti_index(&winning_classes);
+        self.symbols.withdraw_class_members(&reowned_fqns);
+        self.symbols.index_class_members(&winning_classes);
 
         // Remove newly-discovered FQNs from the negative-result cache.
         {

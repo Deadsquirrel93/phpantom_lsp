@@ -21,12 +21,12 @@
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::code_actions::phpstan::add_iterable_type::{
+use crate::code_actions::phpstan::phpstan_identifier;
+use crate::code_actions::{CodeActionData, make_code_action_data};
+use crate::code_actions::{
     find_function_docblock, find_function_keyword_line as find_func_keyword_line,
 };
-use crate::code_actions::{CodeActionData, make_code_action_data};
 use crate::php_type::{PhpType, TypeKind};
-use crate::text_position::ranges_overlap;
 
 // ── PHPStan identifier ──────────────────────────────────────────────────────
 
@@ -365,21 +365,13 @@ impl Backend {
         params: &CodeActionParams,
         out: &mut Vec<CodeActionOrCommand>,
     ) {
-        let phpstan_diags: Vec<Diagnostic> = {
-            let cache = self.phpstan_tool.last_diags.lock();
-            cache.get(uri).cloned().unwrap_or_default()
-        };
+        let phpstan_diags = self.phpstan_diags_overlapping(uri, &params.range);
 
         let lines: Vec<&str> = content.lines().collect();
 
         for diag in &phpstan_diags {
-            if !ranges_overlap(&diag.range, &params.range) {
+            let Some(identifier) = phpstan_identifier(diag) else {
                 continue;
-            }
-
-            let identifier = match &diag.code {
-                Some(NumberOrString::String(s)) => s.as_str(),
-                _ => continue,
             };
 
             if identifier != UNUSED_RETURN_TYPE_ID {

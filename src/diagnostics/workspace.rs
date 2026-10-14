@@ -1333,7 +1333,10 @@ impl Backend {
     }
 
     /// The single-file worker that shares a source's per-file cache.
-    fn external_tool_for_source(&self, source: &str) -> Option<&crate::ExternalToolWorker> {
+    fn external_tool_for_source(
+        &self,
+        source: &str,
+    ) -> Option<&crate::backend::external_tool_worker::ExternalToolWorker> {
         Some(match source {
             "phpstan" => &self.phpstan_tool,
             "phpcs" => &self.phpcs_tool,

@@ -621,6 +621,35 @@ pub(crate) fn split_top_level_arrow(item: &str) -> Option<(&str, &str)> {
     Some((&item[..index], &item[index + 2..]))
 }
 
+/// Whether the byte at `index` is preceded by an odd number of
+/// backslashes, and so escaped.
+pub(crate) fn is_escaped(bytes: &[u8], index: usize) -> bool {
+    let mut backslashes = 0;
+    let mut j = index;
+    while j > 0 && bytes[j - 1] == b'\\' {
+        backslashes += 1;
+        j -= 1;
+    }
+    backslashes % 2 == 1
+}
+
+/// The offset of the unescaped quote that opens the string literal
+/// `cursor` sits in, looking no further back than the start of the line:
+/// a string argument being typed does not span lines.
+pub(crate) fn open_quote_before(content: &str, cursor: usize) -> Option<usize> {
+    let bytes = content.as_bytes();
+    let mut i = cursor.min(bytes.len());
+    while i > 0 {
+        i -= 1;
+        match bytes[i] {
+            b'\'' | b'"' if !is_escaped(bytes, i) => return Some(i),
+            b'\n' => return None,
+            _ => {}
+        }
+    }
+    None
+}
+
 /// Find the position of the opening delimiter that matches the closing
 /// delimiter at `close_pos`, scanning backward.
 ///
@@ -658,17 +687,8 @@ pub(crate) fn find_matching_backward(
                 if pos > 0 {
                     pos -= 1;
                     while pos > 0 {
-                        if bytes[pos] == quote {
-                            // Check for escape — count preceding backslashes
-                            let mut bs = 0;
-                            let mut check = pos;
-                            while check > 0 && bytes[check - 1] == b'\\' {
-                                bs += 1;
-                                check -= 1;
-                            }
-                            if bs % 2 == 0 {
-                                break; // unescaped quote — string start
-                            }
+                        if bytes[pos] == quote && !is_escaped(bytes, pos) {
+                            break; // unescaped quote — string start
                         }
                         pos -= 1;
                     }

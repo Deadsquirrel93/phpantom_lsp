@@ -69,6 +69,7 @@ pub use tags::{
 };
 pub(crate) use tags::{
     find_var_tag, is_compatible_refinement_typed, merge_param_docblock_into_parameters,
+    strip_docblock_line_delimiters,
 };
 
 // Template / generics / type alias tags

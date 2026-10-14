@@ -226,13 +226,7 @@ impl Backend {
 
         // Drop coalescing state for this file so the maps don't grow unbounded
         // across an editing session.
-        let suffix = format!("\u{0}{uri}");
-        {
-            let coalesce = &self.whole_file_coalesce;
-            coalesce.latest.lock().retain(|k, _| !k.ends_with(&suffix));
-            coalesce.locks.lock().retain(|k, _| !k.ends_with(&suffix));
-            coalesce.last.lock().retain(|k, _| !k.ends_with(&suffix));
-        }
+        self.whole_file_coalesce.forget_uri(&uri);
 
         if crate::resource_navigation::is_resource_document(&uri) {
             if let Some(content) = self.get_file_content(&uri) {

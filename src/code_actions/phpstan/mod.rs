@@ -72,6 +72,37 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::code_actions::CodeActionData;
+use crate::text_position::{line_start_byte_offset, ranges_overlap};
+
+impl Backend {
+    /// The cached PHPStan diagnostics for `uri` that overlap `range`, the
+    /// ones a code action requested there can act on.
+    ///
+    /// Only those are cloned out of the cache, rather than every PHPStan
+    /// diagnostic in the file once per action kind.
+    pub(super) fn phpstan_diags_overlapping(&self, uri: &str, range: &Range) -> Vec<Diagnostic> {
+        let cache = self.phpstan_tool.last_diags.lock();
+        cache
+            .get(uri)
+            .map(|diags| {
+                diags
+                    .iter()
+                    .filter(|diag| ranges_overlap(&diag.range, range))
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+}
+
+/// The PHPStan identifier a diagnostic carries as its code, such as
+/// `return.type`.
+pub(super) fn phpstan_identifier(diag: &Diagnostic) -> Option<&str> {
+    match &diag.code {
+        Some(NumberOrString::String(s)) => Some(s),
+        _ => None,
+    }
+}
 
 // ── Method-insertion-point helpers ──────────────────────────────────────────
 //
@@ -196,7 +227,7 @@ pub(super) fn find_method_insertion_point(
     // Compute the line byte offset for the first attribute (or first
     // modifier/function line if no attributes).
     let target_line = first_attr_line;
-    let insert_offset = line_byte_offset(content, target_line);
+    let insert_offset = line_start_byte_offset(content, target_line);
 
     // Indentation of the method declaration (use the function keyword
     // line's indentation as the canonical one).
@@ -211,7 +242,7 @@ pub(super) fn find_method_insertion_point(
 
     // attrs_end_offset: byte offset just past the last attribute line.
     let attrs_end_offset = if first_attr_line < first_decl_line {
-        line_byte_offset(content, first_decl_line)
+        line_start_byte_offset(content, first_decl_line)
     } else {
         first_token_offset
     };
@@ -246,19 +277,6 @@ pub(super) fn is_modifier_line(trimmed: &str) -> bool {
 /// Check if a trimmed line is a PHP attribute line (`#[...]`).
 pub(super) fn is_attribute_line(trimmed: &str) -> bool {
     trimmed.starts_with("#[")
-}
-
-/// Compute the byte offset of the start of the given line number
-/// (0-based).
-pub(super) fn line_byte_offset(content: &str, line: usize) -> usize {
-    let mut offset = 0;
-    for (i, l) in content.lines().enumerate() {
-        if i == line {
-            return offset;
-        }
-        offset += l.len() + 1; // +1 for newline
-    }
-    content.len()
 }
 
 /// Check if a `#[...]` line contains a specific PHP attribute name.
@@ -532,11 +550,7 @@ impl Backend {
 
         for cached_d in cached {
             // Must be the same identifier.
-            let ident = match &cached_d.code {
-                Some(NumberOrString::String(s)) => s.as_str(),
-                _ => continue,
-            };
-            if ident != "missingType.checkedException" {
+            if phpstan_identifier(cached_d) != Some("missingType.checkedException") {
                 continue;
             }
 

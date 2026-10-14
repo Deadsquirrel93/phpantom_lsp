@@ -201,6 +201,129 @@ impl SymbolIndex {
     }
 }
 
+impl SymbolIndex {
+    /// Record `classes` in the method store and the go-to-implementation
+    /// index.
+    pub(crate) fn index_class_members(&self, classes: &[Arc<ClassInfo>]) {
+        self.populate_method_store(classes);
+        self.populate_gti_index(classes);
+    }
+
+    /// Withdraw what [`index_class_members`](Self::index_class_members)
+    /// recorded for the classes named `fqns`, before they are re-indexed or
+    /// dropped.
+    pub(crate) fn withdraw_class_members(&self, fqns: &[String]) {
+        self.evict_methods_for_fqns(fqns);
+        self.evict_gti_for_fqns(fqns);
+    }
+
+    /// Populate the method store from a slice of classes.
+    ///
+    /// For each class, inserts every method under the key
+    /// `(class_fqn, method.name)`.  Called from `update_ast_inner`
+    /// and `parse_and_cache_content_versioned` after classes are parsed.
+    fn populate_method_store(&self, classes: &[Arc<ClassInfo>]) {
+        let mut store = self.method_store.write();
+        for cls in classes {
+            let fqn = cls.fqn().to_string();
+            for method in &cls.methods {
+                let key = (fqn.clone(), method.name.to_string());
+                store.insert(key, Arc::clone(method));
+            }
+        }
+    }
+
+    /// Remove all method store entries whose class FQN matches any of
+    /// the given FQNs.
+    ///
+    /// Called before re-populating after a file re-parse so that renamed
+    /// or deleted methods do not linger.
+    fn evict_methods_for_fqns(&self, fqns: &[String]) {
+        if fqns.is_empty() {
+            return;
+        }
+        let mut store = self.method_store.write();
+        for fqn in fqns {
+            store.retain(|k, _| k.0 != *fqn);
+        }
+    }
+
+    /// Populate the GTI (go-to-implementation) reverse inheritance index
+    /// for the given classes.  For each class, inserts the class's FQN
+    /// into the child list of every parent (parent_class, interfaces,
+    /// used_traits), and records the same edges under the class itself in
+    /// `gti_parents_index` so they can be withdrawn again without
+    /// searching for them.
+    fn populate_gti_index(&self, classes: &[Arc<ClassInfo>]) {
+        let mut gti = self.gti_index.write();
+        let mut parents_index = self.gti_parents_index.write();
+        for cls in classes {
+            if cls.name.starts_with("__anonymous@") {
+                continue;
+            }
+            if cls.parent_class.is_none() && cls.interfaces.is_empty() && cls.used_traits.is_empty()
+            {
+                continue;
+            }
+
+            let child_fqn = cls.fqn().to_string();
+            let registered = parents_index.entry(child_fqn.clone()).or_default();
+
+            for parent in cls
+                .parent_class
+                .iter()
+                .chain(cls.interfaces.iter())
+                .chain(cls.used_traits.iter())
+            {
+                let parent_fqn: &str = parent;
+                // The edge is deduplicated against the child's own parents,
+                // a list as long as its `extends`/`implements`/`use`
+                // clauses, rather than against the parent's child list,
+                // which grows with the number of implementors.
+                if registered.iter().any(|p| p == parent_fqn) {
+                    continue;
+                }
+                registered.push(parent_fqn.to_string());
+                match gti.get_mut(parent_fqn) {
+                    Some(children) => children.push(child_fqn.clone()),
+                    None => {
+                        gti.insert(parent_fqn.to_string(), vec![child_fqn.clone()]);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Remove all GTI entries where one of `fqns` appears as a child.
+    /// Called before re-populating when a file is re-parsed.
+    ///
+    /// Only the parents each class was registered under are touched, so the
+    /// cost is the size of the re-parsed file's inheritance clauses rather
+    /// than the size of the workspace.
+    fn evict_gti_for_fqns(&self, fqns: &[String]) {
+        if fqns.is_empty() {
+            return;
+        }
+        let mut gti = self.gti_index.write();
+        let mut parents_index = self.gti_parents_index.write();
+        for fqn in fqns {
+            let Some(parents) = parents_index.remove(fqn.as_str()) else {
+                continue;
+            };
+            for parent in parents {
+                let Some(children) = gti.get_mut(&parent) else {
+                    continue;
+                };
+                children.retain(|child| child != fqn);
+                // Remove empty entries to avoid unbounded growth.
+                if children.is_empty() {
+                    gti.remove(&parent);
+                }
+            }
+        }
+    }
+}
+
 /// The class indexes, mutated together.
 ///
 /// A class name can be declared by more than one file, which is how a

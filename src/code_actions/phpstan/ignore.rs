@@ -18,8 +18,8 @@ use std::collections::HashMap;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::code_actions::phpstan::phpstan_identifier;
 use crate::code_actions::{CodeActionData, make_code_action_data};
-use crate::text_position::ranges_overlap;
 
 /// PHPStan identifier prefix for unmatched ignore errors.
 ///
@@ -43,10 +43,7 @@ impl Backend {
     ) {
         // Look at all cached PHPStan diagnostics for the file; overlap
         // with the requested range is checked per-diagnostic below.
-        let phpstan_diags: Vec<Diagnostic> = {
-            let cache = self.phpstan_tool.last_diags.lock();
-            cache.get(uri).cloned().unwrap_or_default()
-        };
+        let phpstan_diags = self.phpstan_diags_overlapping(uri, &params.range);
 
         // ── Add @phpstan-ignore ─────────────────────────────────────────
         // For each PHPStan diagnostic overlapping the request range that
@@ -56,13 +53,8 @@ impl Backend {
         // a single code action with all of them attached.
         let mut ignore_groups: HashMap<(u32, String), Vec<Diagnostic>> = HashMap::new();
         for diag in &phpstan_diags {
-            if !ranges_overlap(&diag.range, &params.range) {
+            let Some(identifier) = phpstan_identifier(diag) else {
                 continue;
-            }
-
-            let identifier = match &diag.code {
-                Some(NumberOrString::String(s)) => s.as_str(),
-                _ => continue,
             };
 
             // Skip diagnostics without a specific identifier.
@@ -116,13 +108,8 @@ impl Backend {
         // ── Remove unnecessary @phpstan-ignore ──────────────────────────
         // When PHPStan reports an unmatched ignore, offer to remove it.
         for diag in &phpstan_diags {
-            if !ranges_overlap(&diag.range, &params.range) {
+            let Some(identifier) = phpstan_identifier(diag) else {
                 continue;
-            }
-
-            let identifier = match &diag.code {
-                Some(NumberOrString::String(s)) => s.as_str(),
-                _ => continue,
             };
 
             if !identifier.starts_with(UNMATCHED_IGNORE_PREFIX) {
@@ -561,6 +548,7 @@ fn is_ignorable(diag: &Diagnostic) -> bool {
 #[allow(clippy::bool_assert_comparison)]
 mod tests {
     use super::*;
+    use crate::text_position::ranges_overlap;
     use serde_json::json;
 
     // ── parse_unmatched_identifier ──────────────────────────────────

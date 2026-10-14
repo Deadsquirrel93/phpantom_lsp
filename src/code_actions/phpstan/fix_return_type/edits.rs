@@ -4,7 +4,7 @@
 
 use tower_lsp::lsp_types::{Position, Range, TextEdit};
 
-use crate::code_actions::phpstan::add_iterable_type::{
+use crate::code_actions::{
     find_function_docblock, find_function_keyword_line as find_func_keyword_line,
 };
 use crate::docblock::type_strings::split_type_token;
@@ -50,10 +50,7 @@ pub(super) fn build_strip_return_expr_edit(content: &str, diag_line: usize) -> O
     }
 
     // Compute the byte offset within `content` where this line starts.
-    let line_start_byte: usize = lines[..diag_line]
-        .iter()
-        .map(|l| l.len() + 1) // +1 for newline
-        .sum();
+    let line_start_byte = crate::text_position::line_start_byte_offset(content, diag_line);
 
     let return_byte = line_start_byte + return_col;
 
@@ -310,105 +307,11 @@ pub(super) fn build_update_return_type_edits_split(
     let docblock_info = find_function_docblock(&lines, func_line);
 
     if docblock_info.has_docblock && docblock_info.has_return_tag {
-        // Replace the existing @return tag's type.
-        if let Some(tag_line) = docblock_info.return_tag_line {
-            let line_text = lines[tag_line];
-            if let Some(at_pos) = line_text.find("@return") {
-                let after_return = &line_text[at_pos + "@return".len()..];
-                let type_start = after_return
-                    .find(|c: char| !c.is_whitespace())
-                    .unwrap_or(after_return.len());
-                let type_text = &after_return[type_start..];
-                let (_, remainder) = split_type_token(type_text);
-                let description = remainder.to_string();
-
-                let new_line = format!(
-                    "{}@return {}{}",
-                    &line_text[..at_pos],
-                    full_type,
-                    description
-                );
-
-                edits.push(TextEdit {
-                    range: Range {
-                        start: Position::new(tag_line as u32, 0),
-                        end: Position::new(tag_line as u32, line_text.len() as u32),
-                    },
-                    new_text: new_line,
-                });
-            }
-        }
+        edits.extend(docblock_info.replace_return_type_edit(&lines, &full_type));
     } else if has_docblock_type {
         // Only create/insert a @return tag when the effective type
         // differs from the native type.
-        let indent = &docblock_info.indent;
-
-        if docblock_info.has_docblock {
-            let doc_end = docblock_info.doc_end_line;
-            let close_line = lines[doc_end];
-
-            if docblock_info.doc_start_line == doc_end {
-                let trimmed = close_line.trim();
-                let inner = trimmed
-                    .strip_prefix("/**")
-                    .and_then(|s| s.strip_suffix("*/"))
-                    .map(|s| s.trim())
-                    .unwrap_or("");
-
-                let mut new_doc = format!("{}/**\n", indent);
-                if !inner.is_empty() {
-                    new_doc.push_str(&format!("{} * {}\n", indent, inner));
-                    new_doc.push_str(&format!("{} *\n", indent));
-                }
-                new_doc.push_str(&format!("{} * @return {}\n", indent, full_type));
-                new_doc.push_str(&format!("{} */", indent));
-
-                edits.push(TextEdit {
-                    range: Range {
-                        start: Position::new(doc_end as u32, 0),
-                        end: Position::new(doc_end as u32, close_line.len() as u32),
-                    },
-                    new_text: new_doc,
-                });
-            } else {
-                let prev_line = if doc_end > docblock_info.doc_start_line {
-                    lines[doc_end - 1].trim()
-                } else {
-                    ""
-                };
-                let prev_trimmed = prev_line.trim_start_matches('*').trim();
-                let needs_separator = !prev_trimmed.is_empty()
-                    && !prev_trimmed.starts_with("@return")
-                    && !prev_trimmed.starts_with("@throws")
-                    && prev_trimmed.starts_with('@');
-
-                let mut insert_text = String::new();
-                if needs_separator {
-                    insert_text.push_str(&format!("{} *\n", indent));
-                }
-                insert_text.push_str(&format!("{} * @return {}\n", indent, full_type));
-
-                edits.push(TextEdit {
-                    range: Range {
-                        start: Position::new(doc_end as u32, 0),
-                        end: Position::new(doc_end as u32, 0),
-                    },
-                    new_text: insert_text,
-                });
-            }
-        } else {
-            let new_doc = format!(
-                "{}/**\n{} * @return {}\n{} */\n",
-                indent, indent, full_type, indent
-            );
-            edits.push(TextEdit {
-                range: Range {
-                    start: Position::new(func_line as u32, 0),
-                    end: Position::new(func_line as u32, 0),
-                },
-                new_text: new_doc,
-            });
-        }
+        edits.push(docblock_info.add_return_tag_edit(&lines, &full_type));
     }
 
     if edits.is_empty() {
@@ -464,109 +367,11 @@ pub(super) fn build_update_return_type_edits(
     let docblock_info = find_function_docblock(&lines, func_line);
 
     if docblock_info.has_docblock && docblock_info.has_return_tag {
-        // Replace the existing @return tag's type.
-        if let Some(tag_line) = docblock_info.return_tag_line {
-            let line_text = lines[tag_line];
-            if let Some(at_pos) = line_text.find("@return") {
-                let after_return = &line_text[at_pos + "@return".len()..];
-                let type_start = after_return
-                    .find(|c: char| !c.is_whitespace())
-                    .unwrap_or(after_return.len());
-                let type_text = &after_return[type_start..];
-                let (_, remainder) = split_type_token(type_text);
-                let description = remainder.to_string();
-
-                let new_line = format!(
-                    "{}@return {}{}",
-                    &line_text[..at_pos],
-                    actual_str,
-                    description
-                );
-
-                edits.push(TextEdit {
-                    range: Range {
-                        start: Position::new(tag_line as u32, 0),
-                        end: Position::new(tag_line as u32, line_text.len() as u32),
-                    },
-                    new_text: new_line,
-                });
-            }
-        }
+        edits.extend(docblock_info.replace_return_type_edit(&lines, &actual_str));
     } else if has_generics {
         // Only create/insert a @return tag when the actual type has
         // generics — otherwise the native type hint is sufficient.
-        let indent = &docblock_info.indent;
-
-        if docblock_info.has_docblock {
-            // Docblock exists but has no @return tag — insert one.
-            let doc_end = docblock_info.doc_end_line;
-            let close_line = lines[doc_end];
-
-            if docblock_info.doc_start_line == doc_end {
-                // Single-line docblock: convert to multi-line.
-                let trimmed = close_line.trim();
-                let inner = trimmed
-                    .strip_prefix("/**")
-                    .and_then(|s| s.strip_suffix("*/"))
-                    .map(|s| s.trim())
-                    .unwrap_or("");
-
-                let mut new_doc = format!("{}/**\n", indent);
-                if !inner.is_empty() {
-                    new_doc.push_str(&format!("{} * {}\n", indent, inner));
-                    new_doc.push_str(&format!("{} *\n", indent));
-                }
-                new_doc.push_str(&format!("{} * @return {}\n", indent, actual_str));
-                new_doc.push_str(&format!("{} */", indent));
-
-                edits.push(TextEdit {
-                    range: Range {
-                        start: Position::new(doc_end as u32, 0),
-                        end: Position::new(doc_end as u32, close_line.len() as u32),
-                    },
-                    new_text: new_doc,
-                });
-            } else {
-                // Multi-line docblock: insert @return before `*/`.
-                let prev_line = if doc_end > docblock_info.doc_start_line {
-                    lines[doc_end - 1].trim()
-                } else {
-                    ""
-                };
-                let prev_trimmed = prev_line.trim_start_matches('*').trim();
-                let needs_separator = !prev_trimmed.is_empty()
-                    && !prev_trimmed.starts_with("@return")
-                    && !prev_trimmed.starts_with("@throws")
-                    && prev_trimmed.starts_with('@');
-
-                let mut insert_text = String::new();
-                if needs_separator {
-                    insert_text.push_str(&format!("{} *\n", indent));
-                }
-                insert_text.push_str(&format!("{} * @return {}\n", indent, actual_str));
-
-                edits.push(TextEdit {
-                    range: Range {
-                        start: Position::new(doc_end as u32, 0),
-                        end: Position::new(doc_end as u32, 0),
-                    },
-                    new_text: insert_text,
-                });
-            }
-        } else {
-            // No existing docblock — create one with `@return`.
-            let new_doc = format!(
-                "{}/**\n{} * @return {}\n{} */\n",
-                indent, indent, actual_str, indent
-            );
-            edits.push(TextEdit {
-                range: Range {
-                    start: Position::new(func_line as u32, 0),
-                    end: Position::new(func_line as u32, 0),
-                },
-                new_text: new_doc,
-            });
-        }
+        edits.push(docblock_info.add_return_tag_edit(&lines, &actual_str));
     }
 
     if edits.is_empty() {
