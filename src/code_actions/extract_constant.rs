@@ -23,8 +23,8 @@ use crate::code_actions::naming::string_to_screaming_snake;
 use crate::code_actions::{CodeActionData, make_code_action_data};
 use crate::php_type::PhpType;
 use crate::text_position::{offset_to_position, position_to_byte_offset};
+use crate::type_engine::variable::rhs_resolution::infer_type_from_constant_value;
 use crate::types::PhpVersion;
-use crate::util::infer_type_from_literal;
 
 // ─── Literal detection ──────────────────────────────────────────────────────
 
@@ -271,48 +271,35 @@ fn literal_type_name(value: &str) -> Option<PhpType> {
         return None;
     }
 
-    // Negative numeric — strip the `-` prefix and delegate for the
-    // absolute part so `infer_type_from_literal` handles the rest.
+    // Negative numeric — strip the `-` prefix (and any space after it)
+    // and classify the absolute part.
     if let Some(stripped) = t.strip_prefix('-') {
-        let abs = stripped.trim_start();
-        if let Some(ty) = infer_type_from_literal(abs) {
-            if ty.is_int() {
-                return Some(PhpType::int());
-            }
-            if ty.is_float() {
-                return Some(PhpType::float());
-            }
-        }
-        return None;
+        return literal_base_type(stripped.trim_start()).filter(|ty| ty.is_int() || ty.is_float());
     }
 
-    // Delegate to the shared literal type inference utility.
     // This must run BEFORE the concat check because `3.14` contains
     // `.` which `is_concat_expression` would misinterpret as the PHP
     // concatenation operator.
-    if let Some(ty) = infer_type_from_literal(t) {
-        if ty.is_int() {
-            return Some(PhpType::int());
-        }
-        if ty.is_float() {
-            return Some(PhpType::float());
-        }
-        if ty.is_bool() {
-            return Some(PhpType::bool());
-        }
-        if ty.is_string_type() {
-            return Some(PhpType::string());
-        }
+    if let Some(ty) = literal_base_type(t)
+        && (ty.is_int() || ty.is_float() || ty.is_bool() || ty.is_string_type())
+    {
+        return Some(ty);
     }
 
     // Concat expression — result is string but syntax is complex.
-    // Checked after the shared util so that floats like `3.14` are
-    // not misclassified as concatenation (`3 . 14`).
+    // Checked after the literal classifier so that floats like `3.14`
+    // are not misclassified as concatenation (`3 . 14`).
     if is_concat_expression(t) {
         return Some(PhpType::string());
     }
 
     None
+}
+
+/// The base type of the literal written as `text`: `int` for `42`,
+/// `string` for `'a'`.
+fn literal_base_type(text: &str) -> Option<PhpType> {
+    infer_type_from_constant_value(text).map(|ty| ty.widen_scalar_literals())
 }
 
 /// Ensure the generated name doesn't collide with existing constants.

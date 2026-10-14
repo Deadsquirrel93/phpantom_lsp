@@ -386,7 +386,7 @@ nested closures typed from an expected return type, generator escapes.
 
 **Where to look:** ours: `forward_walk/closures.rs`,
 `forward_walk/callable_inference.rs`, `diagnostic_walk.rs`
-(`walk_closures_in_call`, `seed_closure_params`), `rhs_resolution/calls.rs`
+(`walk_closures_in_call`, `seed_closure_params`), `rhs_resolution/function_calls.rs`
 (`$f()` reads only the variable's callable return type today).
 
 ---

@@ -23,8 +23,6 @@ use std::path::{Path, PathBuf};
 
 use tower_lsp::lsp_types::*;
 
-use crate::php_type::PhpType;
-
 /// Run `f` inside [`panic::catch_unwind`], logging and swallowing any
 /// panic.
 ///
@@ -304,82 +302,6 @@ pub(crate) fn contains_function_keyword(line: &str) -> bool {
         || !trimmed.as_bytes()[after_pos].is_ascii_alphanumeric()
             && trimmed.as_bytes()[after_pos] != b'_';
     before_ok && after_ok
-}
-
-/// Infer a [`PhpType`] from a literal expression string.
-///
-/// Recognises integer, float, boolean, null, and string literals as
-/// well as empty arrays (`[]`).  Returns `None` for anything that
-/// is not a simple literal — callers should fall back to the full
-/// type resolver for those cases.
-pub(crate) fn infer_type_from_literal(expr: &str) -> Option<PhpType> {
-    // Integer literal (decimal, hex, octal, binary — all parse as i64
-    // after stripping underscores for PHP 7.4+ numeric separators).
-    let clean = expr.replace('_', "");
-    if clean.parse::<i64>().is_ok() {
-        return Some(PhpType::int());
-    }
-    // Hex / octal / binary that i64 doesn't cover directly.
-    if (clean.starts_with("0x") || clean.starts_with("0X"))
-        && i64::from_str_radix(&clean[2..], 16).is_ok()
-    {
-        return Some(PhpType::int());
-    }
-    if (clean.starts_with("0b") || clean.starts_with("0B"))
-        && i64::from_str_radix(&clean[2..], 2).is_ok()
-    {
-        return Some(PhpType::int());
-    }
-    // Octal
-    if clean.starts_with('0')
-        && clean.len() > 1
-        && clean[1..].chars().all(|c| c.is_ascii_digit())
-        && i64::from_str_radix(&clean[1..], 8).is_ok()
-    {
-        return Some(PhpType::int());
-    }
-
-    // Float literal (must contain `.`, `e`, or `E` to distinguish from int).
-    if (clean.contains('.') || clean.contains('e') || clean.contains('E'))
-        && clean.parse::<f64>().is_ok()
-    {
-        return Some(PhpType::float());
-    }
-
-    // Negative numeric literals.
-    if let Some(stripped) = expr.strip_prefix('-') {
-        let abs = stripped.trim_start();
-        if let Some(inner) = infer_type_from_literal(abs)
-            && (inner.is_int() || inner.is_float())
-        {
-            return Some(inner);
-        }
-    }
-
-    // Boolean literals.
-    if expr.eq_ignore_ascii_case("true") || expr.eq_ignore_ascii_case("false") {
-        return Some(PhpType::bool());
-    }
-
-    // Null.
-    if expr.eq_ignore_ascii_case("null") {
-        return Some(PhpType::null());
-    }
-
-    // String literals (single- or double-quoted).
-    if (expr.starts_with('\'') && expr.ends_with('\''))
-        || (expr.starts_with('"') && expr.ends_with('"'))
-    {
-        return Some(PhpType::string());
-    }
-
-    // Empty array literal.
-    if expr == "[]" {
-        return Some(PhpType::array());
-    }
-
-    // Not a simple literal.
-    None
 }
 
 /// Find the concrete method body block that contains `offset` within

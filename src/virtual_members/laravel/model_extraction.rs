@@ -900,12 +900,24 @@ fn parse_attributes_array(text: &str) -> Vec<(String, PhpType, String)> {
             continue;
         }
 
-        if let Some(php_type) = crate::util::infer_type_from_literal(value_part) {
+        if let Some(php_type) = attribute_default_type(value_part) {
             results.push((key, php_type, value_part.to_string()));
         }
     }
 
     results
+}
+
+/// The type an attribute default written as `value` gives its column: the
+/// base type of a scalar literal (`'user'` is a `string`), `null`, or
+/// `array` for an empty `[]`.  A populated array literal gives none.
+fn attribute_default_type(value: &str) -> Option<PhpType> {
+    if value == "[]" {
+        return Some(PhpType::array());
+    }
+    crate::type_engine::variable::rhs_resolution::infer_type_from_constant_value(value)
+        .filter(|ty| !ty.is_array_like())
+        .map(|ty| ty.widen_scalar_literals())
 }
 
 /// Extract timestamp configuration from a model class.

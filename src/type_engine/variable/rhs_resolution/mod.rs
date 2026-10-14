@@ -30,8 +30,14 @@
 //!   substitution.
 //! - [`array_access`]: `$arr[0]` / `$arr['key']` generic element / shape
 //!   value resolution.
-//! - [`calls`]: function, method, and static call return-type
-//!   resolution, plus function-level `@template` substitution.
+//! - [`calls`]: the call dispatcher, function-level `@template`
+//!   substitution, and the argument raw-type helpers template binding
+//!   reads call arguments through.
+//! - [`function_calls`], [`method_calls`], [`static_calls`]: return-type
+//!   resolution for each call form, with [`owner_method_call`] resolving
+//!   one owner class's method for both instance and static calls.
+//! - [`laravel_calls`]: Laravel helpers and accessors whose arguments
+//!   decide their return type.
 //! - [`property_access`]: `$this->prop` / `$obj->prop` resolution and
 //!   the `find_*_this_property_assignment*` scanners.
 //! - [`unary_prefix`]: casts, `!`, `~`, and `++`/`--`.
@@ -58,20 +64,26 @@ use crate::util::strip_fqn_prefix;
 mod arithmetic;
 mod array_access;
 mod calls;
+mod function_calls;
 mod instantiation;
+mod laravel_calls;
 mod literal_text;
 mod magic_constants;
+mod method_calls;
+mod owner_method_call;
 mod property_access;
 mod scalar_fold;
+mod static_calls;
 mod unary_prefix;
 
 pub(crate) use scalar_fold::fold_concat_types;
 
 use arithmetic::resolve_binary_result_type;
 use array_access::resolve_rhs_array_access;
-use calls::{MethodReceiver, resolve_method_call_on_receiver, resolve_rhs_call};
+use calls::resolve_rhs_call;
 use instantiation::resolve_rhs_instantiation;
 use magic_constants::magic_constant_type;
+use method_calls::{MethodReceiver, resolve_method_call_on_receiver};
 use property_access::resolve_rhs_property_access;
 use unary_prefix::stepped_numeric_type;
 
@@ -1123,7 +1135,7 @@ fn resolve_method_chain<'b>(
     let mut receiver: Option<MethodReceiver> = None;
     for link in links.iter().rev() {
         let (owners, receiver_resolved) =
-            receiver.unwrap_or_else(|| calls::resolve_method_receiver(link.object, ctx));
+            receiver.unwrap_or_else(|| method_calls::resolve_method_receiver(link.object, ctx));
         let nullability = ReceiverNullability::of(&receiver_resolved);
         let mut resolved = resolve_method_call_on_receiver(
             link.object,

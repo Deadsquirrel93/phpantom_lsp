@@ -36,6 +36,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Static calls through a variable holding one of several class names.** In `$cls::make()`, where `$cls` may be `Apple::class` or `Pear::class`, the result now includes what `Pear` returns when it only answers the call through `__callStatic`.
+- **`($fn)()` returns what `$fn()` does.** Calling a closure through a parenthesized variable now gives the closure's return type, so passing the result straight to a function is checked like `$fn()` is.
+- **Integer literals too large for `int`.** A constant set to an integer past `PHP_INT_MAX`, such as `const BIG = 99999999999999999999;`, is now a `float`, the way PHP reads it, instead of an `int`.
 - **Function and constant imports no longer stand in for a class.** A `use function` or `use const` import spelled like a class, such as `use function Laravel\Prompts\table;` next to a class `Table`, no longer makes that class name resolve to the function or constant. A type hint that spells an imported class in a different case, such as `money` for `Money`, now names the imported class.
 - **A template no longer reaches other classes in its file.** A docblock name such as `@var Node $n` inside `namespace App` now means `App\Node` even when another class in the same file declares `@template Node`, instead of the global `Node` class.
 - **Chained calls on container lookups keep their class.** `$container->get(Foo::class)->bar()` now resolves to `Foo` when the method's return type also depends on an optional argument left out of the call, as Symfony's `ContainerInterface::get()` does.

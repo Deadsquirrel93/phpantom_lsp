@@ -268,11 +268,11 @@ fn infer_type_from_constant_value_inner(
     };
     let int_literal = |raw: &str| {
         // Normalise hex/binary/octal/underscored spellings to the
-        // decimal value (`0xFF` → `255`).  Spellings that overflow
-        // `i64` widen to plain `int`.
+        // decimal value (`0xFF` → `255`).  A spelling too large for an
+        // `int` is a float, as PHP reads it.
         Some(match crate::php_type::parse_php_int_literal(raw) {
             Some(parsed) => PhpType::literal_int(parsed.to_string()),
-            None => PhpType::int(),
+            None => PhpType::float(),
         })
     };
     if numeric.starts_with("0x") || numeric.starts_with("0X") {
@@ -424,10 +424,14 @@ mod tests {
             infer_type_from_constant_value("'it\\'s'"),
             Some(PhpType::literal_string_raw("'it\\'s'"))
         );
-        // Integer overflow of i64 widens to plain int.
+        // An integer literal too large for `int` is a float, as PHP reads it.
         assert_eq!(
             infer_type_from_constant_value("99999999999999999999"),
-            Some(PhpType::int())
+            Some(PhpType::float())
+        );
+        assert_eq!(
+            infer_type_from_constant_value("0xFFFFFFFFFFFFFFFFF"),
+            Some(PhpType::float())
         );
         // Float arithmetic passes the character filter but is not one value.
         assert_eq!(

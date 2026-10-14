@@ -424,6 +424,53 @@ function test(): void {
     );
 }
 
+// ─── Calling a closure held in a parenthesized variable ─────────────────────
+
+#[test]
+fn flags_result_of_parenthesized_closure_variable_call() {
+    let php = r#"<?php
+class Customer {}
+function takes_int(int $x): void {}
+
+function test(): void {
+    $factory = function (): Customer { return new Customer(); };
+    takes_int(($factory)());
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        diags.iter().any(|d| d.message.contains("got Customer")),
+        "($factory)() should return what $factory() does, got: {diags:?}"
+    );
+}
+
+// ─── Static call on a union of class-strings ────────────────────────────────
+
+#[test]
+fn static_call_on_class_string_union_keeps_magic_method_results() {
+    let php = r#"<?php
+class Apple {
+    public static function make(): Apple { return new Apple(); }
+}
+class Pear {
+    public static function __callStatic(string $name, array $args): Pear { return new Pear(); }
+}
+function takes_int(int $x): void {}
+
+function test(bool $flag): void {
+    $cls = $flag ? Apple::class : Pear::class;
+    takes_int($cls::make());
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("Apple") && d.message.contains("Pear")),
+        "Pear::make() goes through __callStatic, so the call returns Apple|Pear, got: {diags:?}"
+    );
+}
+
 // ─── No diagnostic: object param with class instance ────────────────────────
 
 #[test]
