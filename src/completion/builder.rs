@@ -600,11 +600,12 @@ pub(crate) fn is_ancestor_of(
     let Some(cc) = current_class else {
         return false;
     };
-    if cc.name == target_class.name {
+    let target_fqn = target_class.fqn();
+    if cc.fqn().eq_ignore_ascii_case(&target_fqn) {
         return true;
     }
     // Walk the parent chain of the current class to see if the target
-    // is an ancestor.
+    // is an ancestor.  `parent_class` holds the resolved FQN.
     let mut ancestor_name = cc.parent_class;
     let mut depth = 0u32;
     while let Some(ref name) = ancestor_name {
@@ -612,12 +613,11 @@ pub(crate) fn is_ancestor_of(
         if depth > 20 {
             break;
         }
-        // ClassInfo.name stores the short name (e.g. "BaseService")
-        // while parent_class stores the FQN (e.g. "App\\BaseService").
-        // Compare against both the full name and the short (last segment)
-        // so that cross-file inheritance is detected correctly.
-        let short = name.rsplit('\\').next().unwrap_or(name);
-        if target_class.name == *name || target_class.name == short {
+        if name
+            .strip_prefix('\\')
+            .unwrap_or(name)
+            .eq_ignore_ascii_case(&target_fqn)
+        {
             return true;
         }
         ancestor_name = class_loader(name).and_then(|ci| ci.parent_class);
@@ -1118,9 +1118,10 @@ mod tests {
     }
 
     #[test]
-    fn fqn_parent_matches_short_name_target() {
+    fn fqn_parent_matches_namespaced_target() {
         let parent_target = ClassInfo {
             name: atom("BaseService"),
+            file_namespace: Some(atom("App")),
             ..ClassInfo::default()
         };
         let child = ClassInfo {

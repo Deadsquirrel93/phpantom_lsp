@@ -97,6 +97,29 @@ struct FunctionWithDocblock {
     docblock_position: Position,
 }
 
+impl DocParam {
+    /// The parameter name without the variadic `...` prefix.
+    fn bare_name(&self) -> &str {
+        self.name.strip_prefix("...").unwrap_or(&self.name)
+    }
+}
+
+impl FunctionWithDocblock {
+    /// The `@param` tag documenting the signature parameter `name`.
+    fn doc_param(&self, name: &str) -> Option<&DocParam> {
+        self.doc_params.iter().find(|dp| dp.bare_name() == name)
+    }
+}
+
+/// Body-derived facts that both the staleness check and the rewrite read.
+/// Each costs a parse of the file, so they are computed once per request.
+struct BodyFacts {
+    /// Body-inferred `@return` type that should replace the current tag.
+    enriched_return: Option<PhpType>,
+    /// Uncaught exception FQNs that have no `@throws` tag yet.
+    missing_throws: Vec<String>,
+}
+
 /// Resolve a type name written in the file to its FQN: through the
 /// use-map, else the namespace, then the declared spelling of the class
 /// that names, when one loads.
@@ -152,7 +175,7 @@ impl Backend {
         let class_loader = self.class_loader(&ctx);
         let function_loader = self.function_loader(&ctx);
 
-        let needs_update = check_needs_update(
+        let facts = analyse_body(
             &info,
             content,
             &ctx.classes,
@@ -162,20 +185,13 @@ impl Backend {
             &ctx.use_map,
             &ctx.namespace,
         );
-        if !needs_update {
+
+        if !check_needs_update(&info, &facts, &class_loader, &ctx.use_map, &ctx.namespace) {
             return;
         }
 
-        let new_docblock = build_updated_docblock(
-            &info,
-            content,
-            &ctx.classes,
-            &class_loader,
-            Some(self),
-            Some(&function_loader),
-            &ctx.use_map,
-            &ctx.namespace,
-        );
+        let new_docblock =
+            build_updated_docblock(&info, &facts, &class_loader, &ctx.use_map, &ctx.namespace);
         if new_docblock == info.docblock_text {
             return;
         }
@@ -528,9 +544,10 @@ fn parse_doc_throws_from_info(info: &DocblockInfo) -> Vec<String> {
 
 // ── Diff and update logic ───────────────────────────────────────────────────
 
-/// Check whether the docblock needs updating.
+/// Run the body analyses (`@return` enrichment and uncaught throws) for
+/// the function under the cursor.
 #[allow(clippy::too_many_arguments)]
-fn check_needs_update(
+fn analyse_body(
     info: &FunctionWithDocblock,
     content: &str,
     local_classes: &[Arc<ClassInfo>],
@@ -539,34 +556,85 @@ fn check_needs_update(
     function_loader: FunctionLoader<'_>,
     use_map: &HashMap<String, String>,
     file_namespace: &Option<String>,
-) -> bool {
-    // Build a list of existing doc param names.
-    let doc_param_names: Vec<&str> = info
-        .doc_params
+) -> BodyFacts {
+    let enriched_return = match &info.sig_return {
+        Some(sig_ret)
+            if !sig_ret.is_void()
+                && !info
+                    .doc_return
+                    .as_ref()
+                    .is_some_and(|dr| dr.type_parsed.has_type_structure()) =>
+        {
+            enrichment_return_type(
+                content,
+                info.docblock_position,
+                local_classes,
+                class_loader,
+                Some(use_map),
+                backend,
+                function_loader,
+            )
+            .filter(|enriched| {
+                !enriched.is_void()
+                    && !enriched.is_mixed()
+                    && !enriched.equivalent(sig_ret)
+                    && info
+                        .doc_return
+                        .as_ref()
+                        .is_none_or(|dr| !dr.type_parsed.equivalent(enriched))
+            })
+        }
+        _ => None,
+    };
+
+    let uncaught = throws_analysis::find_uncaught_throw_types_with_context(
+        content,
+        info.docblock_position,
+        Some(&ThrowsContext {
+            class_loader,
+            function_loader,
+            use_map,
+            file_namespace,
+        }),
+    );
+    let existing_fqns: Vec<String> = info
+        .doc_throws
         .iter()
-        .map(|p| {
-            let n = p.name.as_str();
-            n.strip_prefix("...").unwrap_or(n)
-        })
+        .map(|t| resolve_type_name_to_fqn(t, use_map, file_namespace, class_loader).to_lowercase())
+        .collect();
+    let missing_throws = uncaught
+        .iter()
+        // The throws analysis already resolved it.
+        .map(|exc| exc.to_string())
+        .filter(|exc| !existing_fqns.contains(&exc.to_lowercase()))
         .collect();
 
-    let sig_param_names: Vec<String> = info.sig_params.iter().map(|p| p.name.clone()).collect();
+    BodyFacts {
+        enriched_return,
+        missing_throws,
+    }
+}
 
+/// Check whether the docblock needs updating.
+fn check_needs_update(
+    info: &FunctionWithDocblock,
+    facts: &BodyFacts,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    use_map: &HashMap<String, String>,
+    file_namespace: &Option<String>,
+) -> bool {
     // When the docblock already has at least one @param tag the user has
     // opted-in to documenting parameters, so every signature param is
     // relevant.  When the docblock has *zero* @param tags we only consider
     // params that need enrichment (matching generate-docblock behaviour).
-    let has_any_doc_params = !doc_param_names.is_empty();
+    let has_any_doc_params = !info.doc_params.is_empty();
 
     if has_any_doc_params {
         // Check for missing, extra, or reordered params.
-        if doc_param_names.len() != sig_param_names.len() {
+        let doc_names = info.doc_params.iter().map(DocParam::bare_name);
+        let sig_names = info.sig_params.iter().map(|p| p.name.as_str());
+        if !doc_names.eq(sig_names) {
             return true;
-        }
-        for (doc_name, sig_name) in doc_param_names.iter().zip(sig_param_names.iter()) {
-            if *doc_name != sig_name.as_str() {
-                return true;
-            }
         }
     } else {
         // No @param tags at all — only flag if a param needs enrichment.
@@ -581,11 +649,7 @@ fn check_needs_update(
     // Check for type contradictions in @param tags.
     for sig_param in &info.sig_params {
         if let Some(native_type) = &sig_param.type_hint
-            && let Some(doc_param) = info.doc_params.iter().find(|dp| {
-                let n = dp.name.as_str();
-                let n = n.strip_prefix("...").unwrap_or(n);
-                n == sig_param.name
-            })
+            && let Some(doc_param) = info.doc_param(&sig_param.name)
             && is_type_contradiction(&doc_param.type_parsed, native_type)
         {
             return true;
@@ -596,11 +660,7 @@ fn check_needs_update(
     // `Closure` that should become `(Closure(): mixed)`, or a class with templates).
     // Skip when the doc type is already more specific (contains `<` or `(`).
     for sig_param in &info.sig_params {
-        if let Some(doc_param) = info.doc_params.iter().find(|dp| {
-            let n = dp.name.as_str();
-            let n = n.strip_prefix("...").unwrap_or(n);
-            n == sig_param.name
-        }) {
+        if let Some(doc_param) = info.doc_param(&sig_param.name) {
             // If the doc type already carries generic params or a callable
             // signature, it is already enriched — no update needed.
             if doc_param.type_parsed.has_type_structure() {
@@ -631,63 +691,7 @@ fn check_needs_update(
         }
     }
 
-    // Check if the @return tag needs body-based enrichment.
-    if let Some(sig_ret) = &info.sig_return
-        && !sig_ret.is_void()
-    {
-        let doc_already_rich = info
-            .doc_return
-            .as_ref()
-            .is_some_and(|dr| dr.type_parsed.has_type_structure());
-        if !doc_already_rich
-            && let Some(enriched) = enrichment_return_type(
-                content,
-                info.docblock_position,
-                local_classes,
-                class_loader,
-                Some(use_map),
-                backend,
-                function_loader,
-            )
-            && !enriched.is_void()
-            && !enriched.is_mixed()
-            && !enriched.equivalent(sig_ret)
-        {
-            let differs_from_doc = info
-                .doc_return
-                .as_ref()
-                .is_none_or(|dr| !dr.type_parsed.equivalent(&enriched));
-            if differs_from_doc {
-                return true;
-            }
-        }
-    }
-
-    // Check for missing @throws tags.
-    let uncaught = throws_analysis::find_uncaught_throw_types_with_context(
-        content,
-        info.docblock_position,
-        Some(&ThrowsContext {
-            class_loader,
-            function_loader,
-            use_map,
-            file_namespace,
-        }),
-    );
-    let existing_fqns: Vec<String> = info
-        .doc_throws
-        .iter()
-        .map(|t| resolve_type_name_to_fqn(t, use_map, file_namespace, class_loader).to_lowercase())
-        .collect();
-    for exc in &uncaught {
-        // The throws analysis already resolved it.
-        let exc_fqn = exc.to_string().to_lowercase();
-        if !existing_fqns.contains(&exc_fqn) {
-            return true;
-        }
-    }
-
-    false
+    facts.enriched_return.is_some() || !facts.missing_throws.is_empty()
 }
 
 /// Check if a docblock type contradicts a native type hint.
@@ -736,14 +740,10 @@ fn is_type_contradiction(doc_type: &PhpType, native_type: &PhpType) -> bool {
 }
 
 /// Build the updated docblock text.
-#[allow(clippy::too_many_arguments)]
 fn build_updated_docblock(
     info: &FunctionWithDocblock,
-    content: &str,
-    local_classes: &[Arc<ClassInfo>],
+    facts: &BodyFacts,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    backend: Option<&Backend>,
-    function_loader: FunctionLoader<'_>,
     use_map: &HashMap<String, String>,
     file_namespace: &Option<String>,
 ) -> String {
@@ -778,11 +778,7 @@ fn build_updated_docblock(
         .iter()
         .filter_map(|sig| {
             // Try to preserve the existing description for this param.
-            let existing = info.doc_params.iter().find(|dp| {
-                let n = dp.name.as_str();
-                let n = n.strip_prefix("...").unwrap_or(n);
-                n == sig.name
-            });
+            let existing = info.doc_param(&sig.name);
 
             let has_any_doc_params = !info.doc_params.is_empty();
 
@@ -894,39 +890,10 @@ fn build_updated_docblock(
     }
 
     // Add missing @throws tags.
-    let uncaught = throws_analysis::find_uncaught_throw_types_with_context(
-        content,
-        info.docblock_position,
-        Some(&ThrowsContext {
-            class_loader,
-            function_loader,
-            use_map,
-            file_namespace,
-        }),
-    );
-    let existing_fqns: Vec<String> = info
-        .doc_throws
-        .iter()
-        .map(|t| resolve_type_name_to_fqn(t, use_map, file_namespace, class_loader).to_lowercase())
-        .collect();
-
-    let mut new_throws: Vec<String> = Vec::new();
-    for exc in &uncaught {
-        // The throws analysis already resolved it.
-        let exc_str = exc.to_string();
-        let exc_fqn = exc_str.to_lowercase();
-        if !existing_fqns.contains(&exc_fqn) {
-            new_throws.push(crate::names::shorten_class_fqn(
-                &exc_str,
-                use_map,
-                file_namespace,
-            ));
-        }
-    }
-
-    if !new_throws.is_empty() {
+    if !facts.missing_throws.is_empty() {
         let throws_insert_pos = find_throws_insert_position(&lines);
-        for (i, exc) in new_throws.iter().enumerate() {
+        for (i, exc) in facts.missing_throws.iter().enumerate() {
+            let exc = crate::names::shorten_class_fqn(exc, use_map, file_namespace);
             lines.insert(
                 throws_insert_pos + i,
                 DocLine::OtherTag(format!("@throws {}", exc)),
@@ -954,65 +921,34 @@ fn build_updated_docblock(
     }
 
     // Body-based @return enrichment.
-    if let Some(sig_ret) = &info.sig_return
-        && !sig_ret.is_void()
-    {
-        let has_rich_return = info
-            .doc_return
-            .as_ref()
-            .is_some_and(|dr| dr.type_parsed.has_type_structure());
-        if !has_rich_return
-            && let Some(enriched) = enrichment_return_type(
-                content,
-                info.docblock_position,
-                local_classes,
-                class_loader,
-                Some(use_map),
-                backend,
-                function_loader,
-            )
-            && !enriched.is_void()
-            && !enriched.is_mixed()
-            && !enriched.equivalent(sig_ret)
-        {
-            let differs_from_doc = info
-                .doc_return
-                .as_ref()
-                .is_none_or(|dr| !dr.type_parsed.equivalent(&enriched));
-            if differs_from_doc {
-                let enriched = crate::names::shorten_type_for_file(
-                    &enriched,
-                    use_map,
-                    file_namespace,
-                    class_loader,
-                );
-                // Update existing @return line or insert a new one.
-                let mut updated_existing = false;
-                for line in &mut lines {
-                    if let DocLine::Return(text) = line {
-                        // Preserve any description text after the type.
-                        let desc = info
-                            .doc_return
-                            .as_ref()
-                            .map(|dr| dr.description.as_str())
-                            .unwrap_or("");
-                        if desc.is_empty() {
-                            *text = format!("@return {}", enriched);
-                        } else {
-                            *text = format!("@return {} {}", enriched, desc);
-                        }
-                        updated_existing = true;
-                        break;
-                    }
+    if let Some(enriched) = &facts.enriched_return {
+        let enriched =
+            crate::names::shorten_type_for_file(enriched, use_map, file_namespace, class_loader);
+        // Update existing @return line or insert a new one.
+        let mut updated_existing = false;
+        for line in &mut lines {
+            if let DocLine::Return(text) = line {
+                // Preserve any description text after the type.
+                let desc = info
+                    .doc_return
+                    .as_ref()
+                    .map(|dr| dr.description.as_str())
+                    .unwrap_or("");
+                if desc.is_empty() {
+                    *text = format!("@return {}", enriched);
+                } else {
+                    *text = format!("@return {} {}", enriched, desc);
                 }
-                if !updated_existing {
-                    let close_pos = lines
-                        .iter()
-                        .position(|l| matches!(l, DocLine::Close))
-                        .unwrap_or(lines.len());
-                    lines.insert(close_pos, DocLine::Return(format!("@return {}", enriched)));
-                }
+                updated_existing = true;
+                break;
             }
+        }
+        if !updated_existing {
+            let close_pos = lines
+                .iter()
+                .position(|l| matches!(l, DocLine::Close))
+                .unwrap_or(lines.len());
+            lines.insert(close_pos, DocLine::Return(format!("@return {}", enriched)));
         }
     }
 

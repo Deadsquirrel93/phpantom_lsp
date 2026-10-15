@@ -185,6 +185,51 @@ pub struct WorkspaceScanResult {
     pub(crate) package_roots: Vec<(PathBuf, crate::ClassCompletionOrigin, String)>,
 }
 
+impl WorkspaceScanResult {
+    /// Fold `other`'s classes, functions and constants into `self`,
+    /// keeping `self`'s entry when both define the same name.
+    ///
+    /// Origins ride alongside the winning path: one is only recorded for
+    /// an entry of `other` that actually wins, so a symbol's recorded
+    /// origin always matches the file it resolves to. `other`'s
+    /// `package_roots` are dropped.
+    pub(crate) fn absorb_missing(&mut self, other: WorkspaceScanResult) {
+        fn absorb(
+            into: &mut HashMap<String, PathBuf>,
+            into_origins: &mut HashMap<String, crate::ClassCompletionOrigin>,
+            from: HashMap<String, PathBuf>,
+            from_origins: &HashMap<String, crate::ClassCompletionOrigin>,
+        ) {
+            for (name, path) in from {
+                if let std::collections::hash_map::Entry::Vacant(e) = into.entry(name) {
+                    if let Some(&origin) = from_origins.get(e.key()) {
+                        into_origins.insert(e.key().clone(), origin);
+                    }
+                    e.insert(path);
+                }
+            }
+        }
+        absorb(
+            &mut self.classmap,
+            &mut self.class_origins,
+            other.classmap,
+            &other.class_origins,
+        );
+        absorb(
+            &mut self.function_index,
+            &mut self.function_origins,
+            other.function_index,
+            &other.function_origins,
+        );
+        absorb(
+            &mut self.constant_index,
+            &mut self.constant_origins,
+            other.constant_index,
+            &other.constant_origins,
+        );
+    }
+}
+
 // ─── Public API ─────────────────────────────────────────────────────────────
 
 /// Scan a single PHP file and return the fully-qualified class names it

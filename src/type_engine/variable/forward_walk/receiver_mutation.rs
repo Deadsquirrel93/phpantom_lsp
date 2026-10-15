@@ -1249,22 +1249,11 @@ pub(crate) fn static_receiver_class_names(
     expr: &Expression<'_>,
     ctx: &ForwardWalkCtx<'_>,
 ) -> Vec<String> {
-    match expr {
-        Expression::Self_(_) | Expression::Static(_) if !ctx.current_class.name.is_empty() => {
-            vec![
-                ctx.current_class.name.to_string(),
-                ctx.current_class.fqn().to_string(),
-            ]
-        }
-        Expression::Parent(_) => ctx
-            .current_class
-            .parent_class
-            .map(|name| vec![name.to_string()])
-            .unwrap_or_default(),
-        Expression::Identifier(ident) => vec![bytes_to_str(ident.value()).to_string()],
-        Expression::Parenthesized(inner) => static_receiver_class_names(inner.expression, ctx),
-        _ => Vec::new(),
-    }
+    ctx.written_names()
+        .static_receiver_class_name(expr)
+        .filter(|fqn| !fqn.is_empty())
+        .into_iter()
+        .collect()
 }
 
 /// The class a static receiver (`Foo::`, `self::`, `new Foo`) names.

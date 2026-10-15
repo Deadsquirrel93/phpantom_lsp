@@ -36,9 +36,10 @@ use crate::types::*;
 use crate::virtual_members::laravel::{has_scope_attribute, relationship_return_type};
 
 use super::attributes;
+use super::signature::{Signature, extract_signature};
 use super::{
-    DeprecationInfo, DocblockCtx, extract_hint_type, extract_parameters, extract_property_info,
-    extract_visibility, is_available_for_version, is_removed_for_version, merge_deprecation_info,
+    DeprecationInfo, DocblockCtx, extract_hint_type, extract_property_info, extract_visibility,
+    is_removed_for_version, merge_deprecation_info,
 };
 
 /// Docblock-derived metadata common to all class-like declarations.
@@ -153,6 +154,16 @@ fn bind_promoted_var_type(
         if !method_template_bindings.contains(&binding) {
             method_template_bindings.push(binding);
         }
+    }
+}
+
+/// The FQN of a class name written in code, read against the file's
+/// imports and namespace.  Without a [`DocblockCtx`] to read it against,
+/// the name is taken as written.
+fn resolve_written_class(name: &str, doc_ctx: Option<&DocblockCtx<'_>>) -> String {
+    match doc_ctx {
+        Some(ctx) => crate::names::resolve_to_fqn(name, &ctx.use_map, &ctx.namespace),
+        None => name.strip_prefix('\\').unwrap_or(name).to_string(),
     }
 }
 
@@ -911,35 +922,6 @@ impl Backend {
         class_template_params: &[Atom],
         class_template_param_bounds: &AtomMap<PhpType>,
     ) -> ExtractedMembers {
-        /// Resolve a short class name to its FQN using the file's use-map
-        /// and namespace from [`DocblockCtx`].  When no context is
-        /// available the name is returned as-is.
-        fn resolve_name_via_ctx(name: &str, doc_ctx: Option<&DocblockCtx<'_>>) -> String {
-            // Already fully-qualified — strip the leading `\`.
-            if let Some(stripped) = name.strip_prefix('\\') {
-                return stripped.to_string();
-            }
-            let Some(ctx) = doc_ctx else {
-                return name.to_string();
-            };
-            // Check use-map (handles both unqualified and qualified names).
-            if let Some(pos) = name.find('\\') {
-                let first = &name[..pos];
-                let rest = &name[pos..];
-                if let Some(fqn) = ctx.use_map.get(first) {
-                    return format!("{fqn}{rest}");
-                }
-            } else if let Some(fqn) = ctx.use_map.get(name) {
-                return fqn.clone();
-            }
-            // Prepend current namespace if available.
-            if let Some(ref ns) = ctx.namespace {
-                format!("{ns}\\{name}")
-            } else {
-                name.to_string()
-            }
-        }
-
         let mut methods = Vec::new();
         let mut properties = Vec::new();
         let mut constants = Vec::new();
@@ -952,231 +934,48 @@ impl Backend {
         for member in members {
             match member {
                 ClassLikeMember::Method(method) => {
-                    // Skip methods whose #[PhpStormStubsElementAvailable]
-                    // range excludes the target PHP version.
-                    if let Some(ctx) = doc_ctx
-                        && let Some(ver) = ctx.php_version
-                        && !is_available_for_version(&method.attribute_lists, ctx, ver)
-                    {
-                        continue;
-                    }
-
-                    // Skip methods whose docblock has `@removed X.Y`
-                    // where X.Y <= the target PHP version.
-                    if let Some(ctx) = doc_ctx
-                        && let Some(ver) = ctx.php_version
-                        && is_removed_for_version(method, ctx, ver)
-                    {
-                        continue;
-                    }
-
-                    let name = atom_bytes(method.name.value);
-                    let name_offset = method.name.span.start.offset;
-                    let php_version = doc_ctx.and_then(|ctx| ctx.php_version);
-                    let mut parameters = extract_parameters(
+                    let name = method.name.value;
+                    let is_constructor = name == b"__construct".as_slice();
+                    let Some(Signature {
+                        mut parameters,
+                        native_return_type,
+                        return_type,
+                        conditional_return,
+                        docblock_text: method_docblock_text,
+                        docblock: method_docblock_info,
+                        template_params: mut method_template_params,
+                        template_param_bounds: method_template_param_bounds,
+                        template_param_defaults: method_template_param_defaults,
+                        template_bindings: mut method_template_bindings,
+                    }) = extract_signature(
+                        method,
+                        &method.attribute_lists,
                         &method.parameter_list,
-                        doc_ctx.map(|ctx| ctx.content),
-                        php_version,
+                        method.return_type_hint.as_ref(),
                         doc_ctx,
-                    );
-                    let raw_native_return_type = method
-                        .return_type_hint
-                        .as_ref()
-                        .map(|rth| extract_hint_type(&rth.hint));
-
-                    // Check for a #[LanguageLevelTypeAware] override on the
-                    // method's return type.  When present, it replaces the
-                    // native type hint with the version-appropriate string.
-                    let lang_level_return = if let Some(ctx) = doc_ctx
-                        && let Some(ver) = ctx.php_version
-                    {
-                        super::extract_language_level_type(&method.attribute_lists, ctx, ver)
-                    } else {
-                        None
+                        if is_constructor {
+                            class_template_params
+                        } else {
+                            &[]
+                        },
+                    )
+                    else {
+                        continue;
                     };
-                    // The `#[LanguageLevelTypeAware]` attribute is JetBrains'
-                    // authoritative, version-resolved return type, so the
-                    // accompanying legacy `@return` docblock must not widen it.
-                    let return_from_lang_level = lang_level_return.is_some();
-                    let native_return_type = lang_level_return.or(raw_native_return_type);
+
+                    let name = atom_bytes(name);
+                    let name_offset = method.name.span.start.offset;
                     let is_static = method.modifiers.iter().any(|m| m.is_static());
                     let is_final = method.modifiers.iter().any(|m| m.is_final());
                     let visibility = extract_visibility(method.modifiers.iter());
 
-                    // Parse the method's docblock once and reuse the
-                    // structured `DocblockInfo` across all extraction
-                    // helpers below instead of re-parsing the raw text
-                    // for every tag kind.
-                    let method_docblock_text = doc_ctx.and_then(|ctx| {
-                        docblock::get_docblock_text_for_node(ctx.trivias, ctx.content, method)
-                    });
-                    let method_docblock_info =
-                        method_docblock_text.and_then(docblock::parse_docblock_for_tags);
-
-                    // Look up the PHPDoc `@return` tag (if any) and apply
-                    // type override logic.  Also extract PHPStan conditional
-                    // return types if present.  Also check for `@deprecated`.
-                    // Additionally extract method-level `@template` params
-                    // and their `@param` bindings for general template
-                    // substitution at call sites.
-                    let (
-                        return_type,
-                        conditional_return,
-                        deprecation_message,
-                        method_deprecated_replacement,
-                        mut method_template_params,
-                        method_template_param_bounds,
-                        method_template_param_defaults,
-                        mut method_template_bindings,
-                    ) = if let Some(ref info) = method_docblock_info {
-                        let parsed_doc_type = docblock::extract_return_type_from_info(info);
-                        let effective = if return_from_lang_level {
-                            native_return_type.clone()
-                        } else {
-                            docblock::resolve_effective_type_typed(
-                                native_return_type.as_ref(),
-                                parsed_doc_type.as_ref(),
-                            )
-                        };
-
-                        // Apply #[ArrayShape] override if present.
-                        let effective = if let Some(ctx) = doc_ctx {
-                            effective.map(|ty| {
-                                super::apply_array_shape_override(ty, &method.attribute_lists, ctx)
-                            })
-                        } else {
-                            effective
-                        };
-
-                        let conditional = docblock::extract_conditional_return_type_from_info(info);
-
-                        // Extract method-level @template params, their bounds,
-                        // and @param bindings for generic type substitution.
-                        let tpl_params_full =
-                            docblock::extract_template_params_full_from_info(info);
-                        let tpl_params: Vec<Atom> =
-                            tpl_params_full.iter().map(|(n, ..)| atom(n)).collect();
-                        let tpl_param_defaults: Box<[(Atom, PhpType)]> = tpl_params_full
-                            .iter()
-                            .filter_map(|(n, _, _, d)| d.clone().map(|d| (atom(n), d)))
-                            .collect();
-                        let tpl_param_bounds: AtomMap<PhpType> = tpl_params_full
-                            .into_iter()
-                            .filter_map(|(n, b, ..)| b.map(|b| (atom(&n), b)))
-                            .collect();
-                        let tpl_bindings: Vec<(Atom, Atom)> = if !tpl_params.is_empty() {
-                            let tpl_strs: Vec<String> =
-                                tpl_params.iter().map(|a| a.to_string()).collect();
-                            docblock::extract_template_param_bindings_from_info(info, &tpl_strs)
-                                .into_iter()
-                                .map(|(a, b)| (atom(&a), atom(&b)))
-                                .collect()
-                        } else {
-                            vec![]
-                        };
-
-                        // For constructors, also check for bindings between
-                        // the *class-level* template params and the
-                        // constructor's `@param` annotations.  This handles
-                        // the common pattern:
-                        //   /** @template T */
-                        //   class Foo {
-                        //       /** @param T $bar */
-                        //       public function __construct($bar) {}
-                        //   }
-                        // where `T` is declared on the class but bound via
-                        // the constructor's `@param T $bar`.
-                        let (tpl_params, tpl_bindings): (Vec<Atom>, Vec<(Atom, Atom)>) = if name
-                            == "__construct"
-                            && tpl_bindings.is_empty()
-                            && !class_template_params.is_empty()
-                        {
-                            let class_tpl_str: Vec<String> = class_template_params
-                                .iter()
-                                .map(|a| a.to_string())
-                                .collect();
-                            let class_bindings =
-                                docblock::extract_template_param_bindings_from_info(
-                                    info,
-                                    &class_tpl_str,
-                                );
-                            if !class_bindings.is_empty() {
-                                (
-                                    class_template_params.to_vec(),
-                                    class_bindings
-                                        .into_iter()
-                                        .map(|(a, b)| (atom(&a), atom(&b)))
-                                        .collect(),
-                                )
-                            } else {
-                                (tpl_params, tpl_bindings)
-                            }
-                        } else {
-                            (tpl_params, tpl_bindings)
-                        };
-
-                        // If no explicit conditional return type was found,
-                        // try to synthesize one from method-level @template
-                        // annotations.  For example:
-                        //   @template T
-                        //   @param class-string<T> $class
-                        //   @return T
-                        // becomes a conditional that resolves T from the
-                        // call-site argument (e.g. find(User::class) → User).
-                        let conditional = conditional.or_else(|| {
-                            let tpl_param_strings: Vec<String> =
-                                tpl_params.iter().map(|a| a.to_string()).collect();
-                            docblock::synthesize_template_conditional_from_info(
-                                info,
-                                &tpl_param_strings,
-                                effective.as_ref(),
-                                false,
-                            )
-                        });
-
-                        let depr_info = merge_deprecation_info(
-                            docblock::extract_deprecation_message_from_info(info),
-                            &method.attribute_lists,
-                            doc_ctx,
-                        );
-                        let deprecation_message = depr_info.message;
-
-                        (
-                            effective,
-                            conditional,
-                            deprecation_message,
-                            depr_info.replacement,
-                            tpl_params,
-                            tpl_param_bounds,
-                            tpl_param_defaults,
-                            tpl_bindings,
-                        )
-                    } else {
-                        // No docblock, but we still need to check for
-                        // #[Deprecated] attribute on the method itself.
-                        let depr_info =
-                            merge_deprecation_info(None, &method.attribute_lists, doc_ctx);
-
-                        // Apply #[ArrayShape] override even without a docblock.
-                        let effective_ret = if let Some(ctx) = doc_ctx {
-                            native_return_type.clone().map(|ty| {
-                                super::apply_array_shape_override(ty, &method.attribute_lists, ctx)
-                            })
-                        } else {
-                            native_return_type.clone()
-                        };
-
-                        (
-                            effective_ret,
-                            None,
-                            depr_info.message,
-                            depr_info.replacement,
-                            Vec::<Atom>::new(),
-                            AtomMap::<PhpType>::default(),
-                            Box::<[(Atom, PhpType)]>::default(),
-                            Vec::<(Atom, Atom)>::new(),
-                        )
-                    };
+                    let depr_info = merge_deprecation_info(
+                        method_docblock_info
+                            .as_ref()
+                            .and_then(docblock::extract_deprecation_message_from_info),
+                        &method.attribute_lists,
+                        doc_ctx,
+                    );
 
                     // Extract promoted properties from constructor parameters.
                     // A promoted property is a constructor parameter with a
@@ -1186,7 +985,7 @@ impl Backend {
                     // can provide a more specific type than the native hint
                     // (e.g. `@param list<User> $users` vs native `array $users`).
                     // We apply `resolve_effective_type()` to pick the winner.
-                    if name == "__construct" {
+                    if is_constructor {
                         for param in method.parameter_list.parameters.iter() {
                             if param.is_promoted_property() {
                                 let raw_name = bytes_to_str(param.variable.name).to_string();
@@ -1262,8 +1061,10 @@ impl Backend {
                                     if let Expression::Instantiation(inst) = dv.value
                                         && let Expression::Identifier(ident) = inst.class
                                     {
-                                        let raw = bytes_to_str(ident.value()).to_string();
-                                        let fqn = resolve_name_via_ctx(&raw, doc_ctx);
+                                        let fqn = resolve_written_class(
+                                            bytes_to_str(ident.value()),
+                                            doc_ctx,
+                                        );
                                         return Some(PhpType::named(atom(&fqn)));
                                     }
                                     None
@@ -1425,8 +1226,8 @@ impl Backend {
                             links,
                             see_refs,
                             conditional_return,
-                            deprecation_message,
-                            deprecated_replacement: method_deprecated_replacement,
+                            deprecation_message: depr_info.message,
+                            deprecated_replacement: depr_info.replacement,
                             not_deprecated: method_docblock_info.as_ref().is_some_and(|i| {
                                 i.first_tag_by_kind(docblock::TagKind::NotDeprecated)
                                     .is_some()
@@ -1781,8 +1582,10 @@ impl Backend {
                     let assigned_type = match assign.rhs {
                         Expression::Instantiation(inst) => {
                             if let Expression::Identifier(class_ident) = inst.class {
-                                let raw = bytes_to_str(class_ident.value()).to_string();
-                                let fqn = resolve_name_via_ctx(&raw, doc_ctx);
+                                let fqn = resolve_written_class(
+                                    bytes_to_str(class_ident.value()),
+                                    doc_ctx,
+                                );
                                 Some(PhpType::named(atom(&fqn)))
                             } else {
                                 None

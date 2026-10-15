@@ -38,10 +38,13 @@
 ///   against the Blade discovery index from the raw template source.
 /// - [`resolve`]: Core entry points — symbol-map lookup, name resolution,
 ///   same-file / PSR-4 definition lookup, `self`/`static`/`parent` handling,
-///   standalone function definition resolution, and variable definition
+///   and variable definition
 ///   resolution (`$var` jump-to-definition, assignment / parameter /
 ///   foreach / catch detection, and type-hint resolution at definition
 ///   sites).
+/// - [`global_symbols`]: Standalone constant and function definitions —
+///   candidate lookup in the global maps, lazy parsing of autoload files,
+///   and the jump to the stored name offset.
 /// - [`member`]: Member-access resolution — `->`, `?->`, `::` operator
 ///   detection, subject extraction, member classification, inheritance-chain
 ///   walking (parent classes, traits, mixins), and member position lookup.
@@ -54,6 +57,7 @@
 use tower_lsp::lsp_types::{Location, Position, Range, Url};
 
 mod blade_component;
+mod global_symbols;
 pub(crate) mod implementation;
 pub(crate) mod member;
 mod resolve;

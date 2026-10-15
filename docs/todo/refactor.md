@@ -212,4 +212,110 @@ Each item must include:
 
 # Outstanding items
 
-No outstanding items.
+Filed by the Step 3 analysis on 2026-10-15, run over every source file
+changed since 0.11.1. Items 1-2 are prerequisites for Sprint 8 tasks
+(D26, BL1); the rest came out of the change-set sweep. Each item touches
+its own set of files.
+
+## 1. Share the constructor-initialisation facts with D26
+
+`class_init_facts` and `ClassInitFacts`
+(`src/diagnostics/readonly_writes.rs:132-150, 271-330`) work out which
+properties a class's constructor is guaranteed to have initialised
+(promoted parameters plus unconditional top-level `$this->x = …`). D26's
+declaration-side check needs exactly that set. Move both, with `is_this`,
+into a module of their own under `src/diagnostics/` as `pub(crate)` so
+D26 builds on them instead of writing a second scan.
+
+## 2. Split the use-line deletion edits out of `remove_unused_import.rs`
+
+`src/code_actions/remove_unused_import.rs` has 688 production lines doing
+two jobs: the code action handlers (37-193) and the edit builders that
+delete a `use` line, a group member or a Blade `@use` directive (194-688),
+which `fix.rs` also calls through the re-export in `code_actions/mod.rs`.
+BL1 changes both halves. Move 194-688 (`range_touches_use_import`,
+`build_line_deletion_edit`, `build_use_directive_deletion_edit` and their
+private helpers) with their unit tests into
+`src/code_actions/use_line_deletion.rs`.
+
+## 3. Remove per-edit and per-call waste in indexing and resolution
+
+- `symbols.method_store` (`src/symbol_index.rs:225-249`) is filled on
+  every parse and evicted on every edit with a full-map `retain` per
+  FQN, but nothing outside tests and `mem_audit.rs` reads it. Delete
+  `MethodStore`, its population and eviction, the tests that assert on it
+  (`indexing/watch.rs`, `resolution/tests.rs`, `parser/ast_update.rs`),
+  its `mem_audit.rs` probe, and the "first step toward" comment in
+  `src/types/method.rs:13-19`.
+- `src/parser/ast_update.rs:1525-1531` scans every class in
+  `uri_classes_index` on an edit that evicts classes, allocating
+  `class.fqn().to_string()` per class for a linear `contains`. Binary
+  search the already sorted `evicted_fqns` by `&str`, or look the evicted
+  FQNs up through their URIs.
+- `rhs_resolution/static_calls.rs:93-98` deep-clones the owner class
+  (`Arc::unwrap_or_clone` on a cached `Arc`) on every `Foo::bar()`
+  resolution though `static_call_on_class` takes `&ClassInfo`; the same
+  happens in `closure_resolution.rs` (`find_owner_by_name`, ~590-600, 715,
+  719) and `forward_walk/callable_inference.rs:400`. Keep the `Arc`
+  (`ResolvedType::from_arc`).
+
+## 4. Split the large type-engine files along their seams
+
+- `src/type_engine/types/conditional.rs` (1,935 production lines): move
+  the 230-line `class-string` branch (309-540) into its own function and
+  the argument-form classification (742-1090) into
+  `conditional/arg_form.rs`.
+- `src/type_engine/variable/forward_walk/assignment.rs` (1,960): move the
+  assert, guard and `@phpstan-self-out` narrowing (1393-1960) to
+  `forward_walk/assert_narrowing.rs`.
+- `src/parser/ast_update.rs`: `apply_ast_index_updates_batch` (988-1672)
+  is one 684-line function. Extract its function/define publication
+  (1189-1376), resolved-class cache invalidation (1417-1572) and Laravel
+  candidate refresh (1574-1640) phases.
+- `src/type_engine/call_resolution/template_subs.rs`: move constant and
+  type-operator operand evaluation (1138-1391) to
+  `call_resolution/constant_operands.rs`.
+- `src/php_type/normalize.rs`: move the runtime-value join and
+  containment (265-333, 407-681) to `php_type/runtime_join.rs`.
+
+## 5. Move logic out of four `mod.rs` files
+
+- `src/type_engine/variable/rhs_resolution/mod.rs`: the branch and arm
+  helpers (274-1083) to `rhs_resolution/branches.rs`.
+- `src/inheritance/mod.rs`: `resolve_class_with_inheritance` (173-621)
+  and the rebind code (621-779) to files of their own.
+- `src/virtual_members/laravel/mod.rs` (~1,100 lines of logic after the
+  `mod` declarations): collection rewriting (379-640) to
+  `collections.rs`, `expand_model_type` and its helpers (641-890) to
+  `model_type.rs`, table-name derivation and pluralisation (936-1018) to
+  `table_names.rs`.
+- `src/hover/mod.rs`: the Laravel and Blade hover (626-1002:
+  `hover_laravel_string_key`, `blade_block_detail`,
+  `gate_ability_detail`, `try_model_property_hover`) to `hover/laravel.rs`
+  next to `laravel_trans.rs`.
+
+## 6. Split `virtual_members/laravel/provider_resources.rs`
+
+2,779 lines (~1,640 production) built around one ~400-line closure in
+`extract_provider_resources` (421-819), doing four jobs: the data model
+and `ProviderScans` (1-420), container bindings (583-667, 821-910,
+1356-1540), Blade and view registration (930-1170), and spatie
+package-tools plus path resolution (1195-1356, 1543-1640). Make it a
+directory with `mod.rs` (the model), `extract.rs`, `bindings.rs`,
+`views.rs`, `package_tools.rs` and `paths.rs`. Build `PathContext` once
+instead of three times inside the closure (484, 514, 677) and have
+`resolve_path_arg` take it rather than the same five arguments at six
+call sites.
+
+## 7. Test placement
+
+Seven tests in `src/parser/ast_update.rs` (2035-2110, 2201, 2247) use only
+`Backend::new_test` and `update_ast`; move them to `tests/integration/`.
+
+## 8. Small leftovers
+
+- `src/php_type/normalize.rs:766-777`: the doc comment for
+  `has_duplicate_members` is merged into `absorb_exact_class_names`'s.
+- `resolved_type_with_lookup`
+  (`src/type_engine/variable/rhs_resolution/mod.rs:508`) never uses its
+  `_current_class_name` parameter.

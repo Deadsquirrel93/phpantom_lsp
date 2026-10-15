@@ -18,7 +18,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::atom::{Atom, AtomSet};
 use crate::inheritance;
-use crate::inheritance::ClassRef;
+use crate::inheritance::{ClassRef, bind_template_args};
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::{
     ClassInfo, ConstantInfo, MAX_INHERITANCE_DEPTH, MAX_MIXIN_DEPTH, MethodInfo, PropertyInfo,
@@ -338,9 +338,7 @@ impl VirtualMemberProvider for PHPDocProvider {
         let mut seen_props: AtomSet = AtomSet::default();
         let seen_consts: AtomSet = class.constants.iter().map(|c| c.name).collect();
 
-        // No generic substitution applies to the class's own tags, nor to
-        // tags inherited from a trait: `@use Trait<T>` substitution is the
-        // inheritance merge's job, and it does not reach docblock tags.
+        // No generic substitution applies to the class's own tags.
         let no_subs: HashMap<String, PhpType> = HashMap::new();
 
         // ── Phase 1: @method and @property tags (higher precedence) ─────
@@ -372,15 +370,18 @@ impl VirtualMemberProvider for PHPDocProvider {
             };
 
             if let Some(doc) = trait_info.doc_members.as_deref() {
+                // The trait's tags are written against its own template
+                // parameters, which the class's `@use Trait<…>` binds.
+                let trait_subs = build_trait_substitution_map(class, &trait_info, &no_subs);
                 for m in &doc.methods {
                     if seen_methods.insert(m.name) {
-                        methods.push(Arc::clone(m));
+                        methods.push(substituted_doc_method(m, &trait_subs));
                     }
                 }
 
                 for (name, type_hint) in &doc.properties {
                     if seen_props.insert(*name) {
-                        properties.push(doc_tag_property(*name, type_hint.as_ref(), &no_subs));
+                        properties.push(doc_tag_property(*name, type_hint.as_ref(), &trait_subs));
                     }
                 }
             }
@@ -457,7 +458,7 @@ impl VirtualMemberProvider for PHPDocProvider {
                         continue;
                     };
                     let trait_subs =
-                        build_trait_substitution_map(&parent, &trait_info, trait_name, &level_subs);
+                        build_trait_substitution_map(&parent, &trait_info, &level_subs);
                     for m in &doc.methods {
                         if seen_methods.insert(m.name) {
                             methods.push(substituted_doc_method(m, &trait_subs));
@@ -718,8 +719,7 @@ fn collect_trait_mixin_members(
                     continue;
                 }
                 if let Some(trait_info) = class_loader(trait_name) {
-                    let trait_subs =
-                        build_trait_substitution_map(consumer, &trait_info, trait_name, subs);
+                    let trait_subs = build_trait_substitution_map(consumer, &trait_info, subs);
                     queue.push((trait_info, trait_subs));
                 }
             }
@@ -1351,30 +1351,7 @@ fn build_interface_substitution_map(
     class: &ClassInfo,
     iface: &ClassInfo,
 ) -> HashMap<String, PhpType> {
-    if iface.template_params.is_empty() {
-        return HashMap::new();
-    }
-
-    let iface_short = short_name(&iface.name);
-
-    let type_args = class
-        .implements_generics
-        .iter()
-        .find(|(name, _)| short_name(name) == iface_short)
-        .map(|(_, args)| args);
-
-    let type_args = match type_args {
-        Some(args) => args,
-        None => return HashMap::new(),
-    };
-
-    let mut map = HashMap::new();
-    for (i, param_name) in iface.template_params.iter().enumerate() {
-        if let Some(arg) = type_args.get(i) {
-            map.insert(param_name.to_string(), arg.clone());
-        }
-    }
-    map
+    bind_template_args(iface, &class.implements_generics, &HashMap::new()).unwrap_or_default()
 }
 
 /// Build a substitution map for an interface's parent interface (interface extends).
@@ -1387,35 +1364,8 @@ fn build_interface_extends_substitution_map(
     parent_iface: &ClassInfo,
     active_subs: &HashMap<String, PhpType>,
 ) -> HashMap<String, PhpType> {
-    if parent_iface.template_params.is_empty() {
-        return active_subs.clone();
-    }
-
-    let parent_short = short_name(&parent_iface.name);
-
-    let type_args = child_iface
-        .extends_generics
-        .iter()
-        .find(|(name, _)| short_name(name) == parent_short)
-        .map(|(_, args)| args);
-
-    let type_args = match type_args {
-        Some(args) => args,
-        None => return active_subs.clone(),
-    };
-
-    let mut map = HashMap::new();
-    for (i, param_name) in parent_iface.template_params.iter().enumerate() {
-        if let Some(arg) = type_args.get(i) {
-            let resolved = if active_subs.is_empty() {
-                arg.clone()
-            } else {
-                arg.substitute(active_subs)
-            };
-            map.insert(param_name.to_string(), resolved);
-        }
-    }
-    map
+    bind_template_args(parent_iface, &child_iface.extends_generics, active_subs)
+        .unwrap_or_else(|| active_subs.clone())
 }
 
 /// Map a used trait's template parameters onto the consuming class's
@@ -1429,42 +1379,17 @@ fn build_interface_extends_substitution_map(
 fn build_trait_substitution_map(
     consumer: &ClassInfo,
     trait_info: &ClassInfo,
-    trait_name: &str,
     active_subs: &HashMap<String, PhpType>,
 ) -> HashMap<String, PhpType> {
-    if trait_info.template_params.is_empty() {
-        return active_subs.clone();
-    }
-
-    let trait_short = short_name(trait_name);
-    let Some(type_args) = consumer
-        .use_generics
-        .iter()
-        .find(|(name, _)| short_name(name) == trait_short)
-        .map(|(_, args)| args)
-    else {
-        return active_subs.clone();
-    };
-
-    let mut map = HashMap::new();
-    for (i, param_name) in trait_info.template_params.iter().enumerate() {
-        if let Some(arg) = type_args.get(i) {
-            let resolved = if active_subs.is_empty() {
-                arg.clone()
-            } else {
-                arg.substitute(active_subs)
-            };
-            map.insert(param_name.to_string(), resolved);
-        }
-    }
-    map
+    bind_template_args(trait_info, &consumer.use_generics, active_subs)
+        .unwrap_or_else(|| active_subs.clone())
 }
 
 /// Build a substitution map for mixin generic resolution by zipping the
 /// parent class's `@template` parameters with the type arguments the
 /// child provides via `@extends` / `@implements` generics.
 ///
-/// Mirrors [`crate::inheritance::build_substitution_map`], with an extra
+/// This is [`crate::inheritance::build_substitution_map`] with an extra
 /// fallback to template bounds when a `@mixin` names a template parameter
 /// (see the comment on `parent_has_template_param_mixin` below).
 fn build_mixin_substitution_map(
@@ -1473,26 +1398,15 @@ fn build_mixin_substitution_map(
     active_subs: &HashMap<String, PhpType>,
     origin_bounds: &crate::atom::AtomMap<PhpType>,
 ) -> HashMap<String, PhpType> {
-    if parent.template_params.is_empty() {
+    let Some(mut map) = bind_template_args(
+        parent,
+        current
+            .extends_generics
+            .iter()
+            .chain(current.implements_generics.iter()),
+        active_subs,
+    ) else {
         return active_subs.clone();
-    }
-
-    let parent_short = short_name(&parent.name);
-
-    // Find `@extends`/`@implements` generics matching this parent.
-    let type_args = current
-        .extends_generics
-        .iter()
-        .chain(current.implements_generics.iter())
-        .find(|(name, _)| {
-            let name_short = short_name(name);
-            name_short == parent_short
-        })
-        .map(|(_, args)| args);
-
-    let type_args = match type_args {
-        Some(args) => args,
-        None => return active_subs.clone(),
     };
 
     // Check whether the parent has any @mixin whose name is itself a
@@ -1514,39 +1428,27 @@ fn build_mixin_substitution_map(
             .iter()
             .any(|t| t.as_str() == m.as_str())
     });
+    if !parent_has_template_param_mixin {
+        return map;
+    }
 
-    let mut map = HashMap::new();
-    for (i, param_name) in parent.template_params.iter().enumerate() {
-        if let Some(arg) = type_args.get(i) {
-            let mut resolved = if active_subs.is_empty() {
-                arg.clone()
-            } else {
-                arg.substitute(active_subs)
-            };
-
-            // Fall back to the template bound only when the parent
-            // uses the template param directly as a mixin name.
-            //
-            // Prefer the bound declared on the walk-origin class (the
-            // most-derived class whose members are being resolved) over
-            // the intermediate level's bound.  In a straight-through chain
-            // (`@extends Parent<TNode>` at every level) each class may
-            // tighten the constraint, e.g. `AbstractNode<TNode of ASTNode>`
-            // → `CallableNode<TNode of AbstractCallable>`.  The mixin lives
-            // on the ancestor with the loosest bound, but the concrete
-            // members available come from the origin's tighter bound, so
-            // that is the one to resolve against.
-            if parent_has_template_param_mixin
-                && let Some(name) = resolved.base_name()
-                && let Some(tp) = current.template_params.iter().find(|t| t.as_str() == name)
-                && let Some(bound) = origin_bounds
-                    .get(tp)
-                    .or_else(|| current.template_param_bounds.get(tp))
-            {
-                resolved = bound.clone();
-            }
-
-            map.insert(param_name.to_string(), resolved);
+    // Prefer the bound declared on the walk-origin class (the
+    // most-derived class whose members are being resolved) over the
+    // intermediate level's bound.  In a straight-through chain
+    // (`@extends Parent<TNode>` at every level) each class may tighten
+    // the constraint, e.g. `AbstractNode<TNode of ASTNode>` →
+    // `CallableNode<TNode of AbstractCallable>`.  The mixin lives on the
+    // ancestor with the loosest bound, but the concrete members available
+    // come from the origin's tighter bound, so that is the one to resolve
+    // against.
+    for resolved in map.values_mut() {
+        if let Some(name) = resolved.base_name()
+            && let Some(tp) = current.template_params.iter().find(|t| t.as_str() == name)
+            && let Some(bound) = origin_bounds
+                .get(tp)
+                .or_else(|| current.template_param_bounds.get(tp))
+        {
+            *resolved = bound.clone();
         }
     }
 

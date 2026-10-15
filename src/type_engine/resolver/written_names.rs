@@ -2,7 +2,9 @@
 
 use std::sync::Arc;
 
-use crate::atom::atom;
+use mago_syntax::cst::Expression;
+
+use crate::atom::{atom, bytes_to_str};
 use crate::php_type::PhpType;
 use crate::types::ClassInfo;
 
@@ -58,11 +60,6 @@ impl<'a> WrittenNames<'a> {
             cursor_offset,
             source_class_loader,
         }
-    }
-
-    /// The class the code is in, if any.
-    pub(in crate::type_engine) fn current_class(&self) -> Option<&'a ClassInfo> {
-        self.current_class
     }
 
     /// Names left as written, for a caller with no file to read them in.
@@ -136,5 +133,36 @@ impl<'a> WrittenNames<'a> {
             return PhpType::named(atom(name));
         }
         PhpType::named(atom(&self.resolve_class(name)))
+    }
+
+    /// The FQN of the class a static receiver expression (`self`,
+    /// `static`, `parent`, or a class identifier, as in `X::foo()`,
+    /// `X::class` or `instanceof X`) names, reading `self`, `static` and
+    /// `parent` against the enclosing class.
+    pub(in crate::type_engine) fn static_receiver_class_name(
+        &self,
+        class_expr: &Expression<'_>,
+    ) -> Option<String> {
+        match class_expr {
+            Expression::Self_(_) | Expression::Static(_) => {
+                self.current_class.map(|cc| cc.fqn().to_string())
+            }
+            Expression::Identifier(ident) => Some(self.resolve_class(bytes_to_str(ident.value()))),
+            Expression::Parent(_) => self
+                .current_class
+                .and_then(|cc| cc.parent_class.map(|a| a.to_string())),
+            Expression::Parenthesized(inner) => self.static_receiver_class_name(inner.expression),
+            _ => None,
+        }
+    }
+
+    /// The class [`Self::static_receiver_class_name`] names, loaded by
+    /// its FQN through `class_loader`.
+    pub(in crate::type_engine) fn static_receiver_class(
+        &self,
+        class_expr: &Expression<'_>,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    ) -> Option<Arc<ClassInfo>> {
+        class_loader(&self.static_receiver_class_name(class_expr)?)
     }
 }

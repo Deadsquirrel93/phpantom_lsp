@@ -1060,7 +1060,7 @@ fn declare_statement_end(bytes: &[u8], from: usize) -> Option<usize> {
 
 /// The offset of the first byte at or after `at` that is neither
 /// whitespace nor part of a comment.
-fn skip_php_trivia(bytes: &[u8], mut at: usize) -> usize {
+pub(crate) fn skip_php_trivia(bytes: &[u8], mut at: usize) -> usize {
     loop {
         while bytes.get(at).is_some_and(u8::is_ascii_whitespace) {
             at += 1;

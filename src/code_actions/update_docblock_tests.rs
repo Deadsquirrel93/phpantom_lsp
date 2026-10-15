@@ -20,9 +20,31 @@ fn no_class_loader() -> impl Fn(&str) -> Option<Arc<ClassInfo>> {
     |_| None
 }
 
-/// No function loader (for unit tests).
-fn no_function_loader() -> FunctionLoader<'static> {
-    None
+/// Run the body analyses with no backend, function loader, or imports.
+fn body_facts(
+    info: &FunctionWithDocblock,
+    php: &str,
+    cl: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> BodyFacts {
+    analyse_body(info, php, &[], cl, None, None, &HashMap::new(), &None)
+}
+
+fn needs_update(
+    info: &FunctionWithDocblock,
+    php: &str,
+    cl: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> bool {
+    let facts = body_facts(info, php, cl);
+    check_needs_update(info, &facts, cl, &HashMap::new(), &None)
+}
+
+fn updated_docblock(
+    info: &FunctionWithDocblock,
+    php: &str,
+    cl: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> String {
+    let facts = body_facts(info, php, cl);
+    build_updated_docblock(info, &facts, cl, &HashMap::new(), &None)
 }
 
 #[test]
@@ -40,16 +62,7 @@ class Foo {
     let pos = php.find("@param string").unwrap() as u32;
     let info = find_info(php, pos).unwrap();
     let cl = no_class_loader();
-    assert!(check_needs_update(
-        &info,
-        php,
-        &[],
-        &cl,
-        None,
-        no_function_loader(),
-        &HashMap::new(),
-        &None,
-    ));
+    assert!(needs_update(&info, php, &cl));
 }
 
 #[test]
@@ -66,16 +79,7 @@ class Foo {
     let pos = php.find("@param string").unwrap() as u32;
     let info = find_info(php, pos).unwrap();
     let cl = no_class_loader();
-    assert!(check_needs_update(
-        &info,
-        php,
-        &[],
-        &cl,
-        None,
-        no_function_loader(),
-        &HashMap::new(),
-        &None,
-    ));
+    assert!(needs_update(&info, php, &cl));
 }
 
 #[test]
@@ -92,16 +96,7 @@ class Foo {
     let pos = php.find("@param int").unwrap() as u32;
     let info = find_info(php, pos).unwrap();
     let cl = no_class_loader();
-    assert!(check_needs_update(
-        &info,
-        php,
-        &[],
-        &cl,
-        None,
-        no_function_loader(),
-        &HashMap::new(),
-        &None,
-    ));
+    assert!(needs_update(&info, php, &cl));
 }
 
 #[test]
@@ -118,16 +113,7 @@ class Foo {
     let pos = php.find("@param string").unwrap() as u32;
     let info = find_info(php, pos).unwrap();
     let cl = no_class_loader();
-    assert!(!check_needs_update(
-        &info,
-        php,
-        &[],
-        &cl,
-        None,
-        no_function_loader(),
-        &HashMap::new(),
-        &None,
-    ));
+    assert!(!needs_update(&info, php, &cl));
 }
 
 #[test]
@@ -143,16 +129,7 @@ class Foo {
     let pos = php.find("@param string").unwrap() as u32;
     let info = find_info(php, pos).unwrap();
     let cl = no_class_loader();
-    assert!(check_needs_update(
-        &info,
-        php,
-        &[],
-        &cl,
-        None,
-        no_function_loader(),
-        &HashMap::new(),
-        &None,
-    ));
+    assert!(needs_update(&info, php, &cl));
 }
 
 #[test]
@@ -168,16 +145,7 @@ class Foo {
     let pos = php.find("@param non-empty-string").unwrap() as u32;
     let info = find_info(php, pos).unwrap();
     let cl = no_class_loader();
-    assert!(!check_needs_update(
-        &info,
-        php,
-        &[],
-        &cl,
-        None,
-        no_function_loader(),
-        &HashMap::new(),
-        &None,
-    ));
+    assert!(!needs_update(&info, php, &cl));
 }
 
 #[test]
@@ -193,16 +161,7 @@ class Foo {
     let pos = php.find("@return void").unwrap() as u32;
     let info = find_info(php, pos).unwrap();
     let cl = no_class_loader();
-    assert!(check_needs_update(
-        &info,
-        php,
-        &[],
-        &cl,
-        None,
-        no_function_loader(),
-        &HashMap::new(),
-        &None,
-    ));
+    assert!(needs_update(&info, php, &cl));
 }
 
 #[test]
@@ -218,16 +177,7 @@ class Foo {
     let pos = php.find("@return string").unwrap() as u32;
     let info = find_info(php, pos).unwrap();
     let cl = no_class_loader();
-    assert!(check_needs_update(
-        &info,
-        php,
-        &[],
-        &cl,
-        None,
-        no_function_loader(),
-        &HashMap::new(),
-        &None,
-    ));
+    assert!(needs_update(&info, php, &cl));
 }
 
 #[test]
@@ -255,16 +205,7 @@ function bar(string $a, int $b, bool $c): void {}
     let pos = php.find("@param string").unwrap() as u32;
     let info = find_info(php, pos).unwrap();
     let cl = no_class_loader();
-    assert!(check_needs_update(
-        &info,
-        php,
-        &[],
-        &cl,
-        None,
-        no_function_loader(),
-        &HashMap::new(),
-        &None,
-    ));
+    assert!(needs_update(&info, php, &cl));
 }
 
 #[test]
@@ -282,16 +223,7 @@ class Foo {
     let pos = php.find("@param string").unwrap() as u32;
     let info = find_info(php, pos).unwrap();
     let cl = no_class_loader();
-    let updated = build_updated_docblock(
-        &info,
-        php,
-        &[],
-        &cl,
-        None,
-        no_function_loader(),
-        &HashMap::new(),
-        &None,
-    );
+    let updated = updated_docblock(&info, php, &cl);
     assert!(
         updated.contains("The first param"),
         "Should preserve description: {}",
@@ -323,16 +255,7 @@ class Foo {
     let pos = php.find("@param string").unwrap() as u32;
     let info = find_info(php, pos).unwrap();
     let cl = no_class_loader();
-    let updated = build_updated_docblock(
-        &info,
-        php,
-        &[],
-        &cl,
-        None,
-        no_function_loader(),
-        &HashMap::new(),
-        &None,
-    );
+    let updated = updated_docblock(&info, php, &cl);
     assert!(
         !updated.contains("$old"),
         "Should remove old param: {}",
@@ -355,16 +278,7 @@ class Foo {
     let pos = php.find("@return string").unwrap() as u32;
     let info = find_info(php, pos).unwrap();
     let cl = no_class_loader();
-    let updated = build_updated_docblock(
-        &info,
-        php,
-        &[],
-        &cl,
-        None,
-        no_function_loader(),
-        &HashMap::new(),
-        &None,
-    );
+    let updated = updated_docblock(&info, php, &cl);
     assert!(
         updated.contains("@return int Some description"),
         "Should update return type: {}",
@@ -387,16 +301,7 @@ class Foo {
     let pos = php.find("@return void").unwrap() as u32;
     let info = find_info(php, pos).unwrap();
     let cl = no_class_loader();
-    let updated = build_updated_docblock(
-        &info,
-        php,
-        &[],
-        &cl,
-        None,
-        no_function_loader(),
-        &HashMap::new(),
-        &None,
-    );
+    let updated = updated_docblock(&info, php, &cl);
     assert!(
         !updated.contains("@return"),
         "Should remove @return void: {}",
@@ -418,16 +323,7 @@ class Foo {
     let info = find_info(php, pos).unwrap();
     let cl = no_class_loader();
     // Variadic params should match — no update needed.
-    assert!(!check_needs_update(
-        &info,
-        php,
-        &[],
-        &cl,
-        None,
-        no_function_loader(),
-        &HashMap::new(),
-        &None,
-    ));
+    assert!(!needs_update(&info, php, &cl));
 }
 
 #[test]
@@ -444,16 +340,7 @@ class Foo {
     let info = find_info(php, pos).unwrap();
     let cl = no_class_loader();
     // array<int, string> refines array — no contradiction.
-    assert!(!check_needs_update(
-        &info,
-        php,
-        &[],
-        &cl,
-        None,
-        no_function_loader(),
-        &HashMap::new(),
-        &None,
-    ));
+    assert!(!needs_update(&info, php, &cl));
 }
 
 #[test]
@@ -473,16 +360,7 @@ class Foo {
     let pos = php.find("@template T").unwrap() as u32;
     let info = find_info(php, pos).unwrap();
     let cl = no_class_loader();
-    let updated = build_updated_docblock(
-        &info,
-        php,
-        &[],
-        &cl,
-        None,
-        no_function_loader(),
-        &HashMap::new(),
-        &None,
-    );
+    let updated = updated_docblock(&info, php, &cl);
     assert!(
         updated.contains("@template T"),
         "Should preserve @template: {}",
@@ -547,16 +425,7 @@ class Foo {
     let pos = php.find("@param string").unwrap() as u32;
     let info = find_info(php, pos).unwrap();
     let cl = no_class_loader();
-    assert!(check_needs_update(
-        &info,
-        php,
-        &[],
-        &cl,
-        None,
-        no_function_loader(),
-        &HashMap::new(),
-        &None,
-    ));
+    assert!(needs_update(&info, php, &cl));
 }
 
 #[test]
@@ -572,16 +441,7 @@ class Foo {
     let pos = php.find("@param string").unwrap() as u32;
     let info = find_info(php, pos).unwrap();
     let cl = no_class_loader();
-    let updated = build_updated_docblock(
-        &info,
-        php,
-        &[],
-        &cl,
-        None,
-        no_function_loader(),
-        &HashMap::new(),
-        &None,
-    );
+    let updated = updated_docblock(&info, php, &cl);
     // All $names should be aligned at the same column.
     assert!(
         updated.contains("@param string       $a"),
@@ -616,16 +476,7 @@ class Foo {
     let pos = php.find("@param string").unwrap() as u32;
     let info = find_info(php, pos).unwrap();
     let cl = no_class_loader();
-    let updated = build_updated_docblock(
-        &info,
-        php,
-        &[],
-        &cl,
-        None,
-        no_function_loader(),
-        &HashMap::new(),
-        &None,
-    );
+    let updated = updated_docblock(&info, php, &cl);
     // Should NOT have a blank line between /** and the first @param.
     let lines: Vec<&str> = updated.lines().collect();
     assert_eq!(
@@ -654,16 +505,7 @@ class Foo {
     let pos = php.find("@param string").unwrap() as u32;
     let info = find_info(php, pos).unwrap();
     let cl = no_class_loader();
-    let updated = build_updated_docblock(
-        &info,
-        php,
-        &[],
-        &cl,
-        None,
-        no_function_loader(),
-        &HashMap::new(),
-        &None,
-    );
+    let updated = updated_docblock(&info, php, &cl);
     assert!(
         updated.contains("(Closure(): mixed)"),
         "Should enrich Closure: {}",
@@ -693,16 +535,7 @@ class Foo {
     let pos = php.find("@param string").unwrap() as u32;
     let info = find_info(php, pos).unwrap();
     let cl = no_class_loader();
-    let updated = build_updated_docblock(
-        &info,
-        php,
-        &[],
-        &cl,
-        None,
-        no_function_loader(),
-        &HashMap::new(),
-        &None,
-    );
+    let updated = updated_docblock(&info, php, &cl);
     assert!(
         updated.contains("@throws RuntimeException"),
         "Should add missing @throws: {}",
@@ -730,16 +563,7 @@ class Foo {
     let info = find_info(php, pos).unwrap();
     let cl = no_class_loader();
     assert!(
-        !check_needs_update(
-            &info,
-            php,
-            &[],
-            &cl,
-            None,
-            no_function_loader(),
-            &HashMap::new(),
-            &None
-        ),
+        !needs_update(&info, php, &cl),
         "Should not need update when throws already documented"
     );
 }
@@ -762,16 +586,7 @@ class Foo {
         "Should find function info when cursor is inside the docblock"
     );
     let cl = no_class_loader();
-    assert!(check_needs_update(
-        &info.unwrap(),
-        php,
-        &[],
-        &cl,
-        None,
-        no_function_loader(),
-        &HashMap::new(),
-        &None,
-    ));
+    assert!(needs_update(&info.unwrap(), php, &cl));
 }
 
 #[test]
@@ -893,16 +708,7 @@ class Foo {
     let info = find_info(php, pos).unwrap();
     let cl = no_class_loader();
     assert!(
-        check_needs_update(
-            &info,
-            php,
-            &[],
-            &cl,
-            None,
-            no_function_loader(),
-            &HashMap::new(),
-            &None
-        ),
+        needs_update(&info, php, &cl),
         "should need update to add `mixed` type to @param $name"
     );
     // The param must still be recognised (not duplicated).
@@ -926,16 +732,7 @@ class Foo {
     let info = find_info(php, pos).unwrap();
     let cl = no_class_loader();
     assert!(
-        check_needs_update(
-            &info,
-            php,
-            &[],
-            &cl,
-            None,
-            no_function_loader(),
-            &HashMap::new(),
-            &None
-        ),
+        needs_update(&info, php, &cl),
         "should need update because $b is missing"
     );
     assert_eq!(info.doc_params.len(), 1);
@@ -960,16 +757,7 @@ class Foo {
     let info = find_info(php, pos).unwrap();
     let cl = no_class_loader();
     assert!(
-        !check_needs_update(
-            &info,
-            php,
-            &[],
-            &cl,
-            None,
-            no_function_loader(),
-            &HashMap::new(),
-            &None
-        ),
+        !needs_update(&info, php, &cl),
         "should not suggest adding @param for a fully-typed non-templated class param"
     );
 }
@@ -988,16 +776,7 @@ class Foo {
     let info = find_info(php, pos).unwrap();
     let cl = no_class_loader();
     assert!(
-        !check_needs_update(
-            &info,
-            php,
-            &[],
-            &cl,
-            None,
-            no_function_loader(),
-            &HashMap::new(),
-            &None
-        ),
+        !needs_update(&info, php, &cl),
         "should not suggest adding @param for scalar-typed params"
     );
 }
@@ -1018,16 +797,7 @@ class Foo {
     let info = find_info(php, pos).unwrap();
     let cl = no_class_loader();
     assert!(
-        check_needs_update(
-            &info,
-            php,
-            &[],
-            &cl,
-            None,
-            no_function_loader(),
-            &HashMap::new(),
-            &None
-        ),
+        needs_update(&info, php, &cl),
         "should suggest adding @param for an untyped param"
     );
 }
@@ -1048,16 +818,7 @@ class Foo {
     let info = find_info(php, pos).unwrap();
     let cl = no_class_loader();
     assert!(
-        check_needs_update(
-            &info,
-            php,
-            &[],
-            &cl,
-            None,
-            no_function_loader(),
-            &HashMap::new(),
-            &None
-        ),
+        needs_update(&info, php, &cl),
         "should suggest adding @param for an array param"
     );
 }

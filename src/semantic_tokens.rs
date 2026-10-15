@@ -296,11 +296,11 @@ impl Backend {
                     } else if self.is_template_param(name, span.start, symbol_map) {
                         (TT_TYPE_PARAMETER, 0)
                     } else {
-                        let mods = self.resolve_class_modifiers(name, *is_fqn, ctx, span.start);
+                        let (tt, mods) =
+                            self.resolve_class_reference_token(name, *is_fqn, ctx, span.start);
                         if mode == SemanticTokensMode::Contextual && mods == 0 {
                             continue;
                         }
-                        let tt = self.resolve_class_token_type(name, *is_fqn, ctx, span.start);
                         (tt, mods)
                     }
                 }
@@ -309,10 +309,8 @@ impl Backend {
                     if mode == SemanticTokensMode::Contextual {
                         continue;
                     }
-                    let tt = self.resolve_declaration_token_type(name, uri, ctx);
-                    let mut mods = TM_DECLARATION;
-                    mods |= self.resolve_class_declaration_modifiers(name, uri, ctx);
-                    (tt, mods)
+                    let (tt, mods) = resolve_declaration_token(name, span.start, ctx);
+                    (tt, mods | TM_DECLARATION)
                 }
 
                 SymbolKind::MemberAccess {
@@ -549,114 +547,30 @@ impl Backend {
         tokens
     }
 
-    /// Resolve a class reference name to the appropriate token type
-    /// (class, interface, enum, or type).
-    fn resolve_class_token_type(
+    /// Resolve a class reference to its token type (class, interface,
+    /// enum, or type) and modifiers (deprecated).  An unresolved
+    /// reference is a plain class.
+    fn resolve_class_reference_token(
         &self,
         name: &str,
         is_fqn: bool,
         ctx: &crate::types::FileContext,
         offset: u32,
-    ) -> u32 {
+    ) -> (u32, u32) {
         let fqn = if is_fqn {
             name.to_string()
         } else {
             ctx.resolve_name_at(name, offset)
         };
 
-        // First check in-file classes (fast path).
-        for class in &ctx.classes {
-            let class_fqn = match &class.file_namespace {
-                Some(ns) => format!("{}\\{}", ns, class.name),
-                None => class.name.to_string(),
-            };
-            if class_fqn == fqn || class.name == fqn {
-                return kind_to_token_type(class.kind);
-            }
+        // First check in-file classes (fast path), then the global class
+        // index / stubs.
+        match ctx.classes.iter().find(|class| class.fqn() == fqn.as_str()) {
+            Some(class) => class_token(class),
+            None => self
+                .find_or_load_class(&fqn)
+                .map_or((TT_CLASS, 0), |class| class_token(&class)),
         }
-
-        // Try resolving from the global class index / stubs.
-        if let Some(class_info) = self.find_or_load_class(&fqn) {
-            return kind_to_token_type(class_info.kind);
-        }
-
-        // Fall back to CLASS for unresolved references.
-        TT_CLASS
-    }
-
-    /// Resolve modifiers for a class reference (e.g. deprecated).
-    fn resolve_class_modifiers(
-        &self,
-        name: &str,
-        is_fqn: bool,
-        ctx: &crate::types::FileContext,
-        offset: u32,
-    ) -> u32 {
-        let fqn = if is_fqn {
-            name.to_string()
-        } else {
-            ctx.resolve_name_at(name, offset)
-        };
-
-        // Check in-file classes.
-        for class in &ctx.classes {
-            let class_fqn = match &class.file_namespace {
-                Some(ns) => format!("{}\\{}", ns, class.name),
-                None => class.name.to_string(),
-            };
-            if class_fqn == fqn || class.name == fqn {
-                if class.deprecation_message.is_some() {
-                    return TM_DEPRECATED;
-                }
-                return 0;
-            }
-        }
-
-        if let Some(class_info) = self.find_or_load_class(&fqn)
-            && class_info.deprecation_message.is_some()
-        {
-            return TM_DEPRECATED;
-        }
-
-        0
-    }
-
-    /// Resolve the token type for a class declaration by looking up
-    /// the class in the file's AST.
-    fn resolve_declaration_token_type(
-        &self,
-        name: &str,
-        _uri: &str,
-        ctx: &crate::types::FileContext,
-    ) -> u32 {
-        for class in &ctx.classes {
-            if class.name == name {
-                return kind_to_token_type(class.kind);
-            }
-        }
-        TT_CLASS
-    }
-
-    /// Resolve modifiers for a class declaration (deprecated, abstract).
-    fn resolve_class_declaration_modifiers(
-        &self,
-        name: &str,
-        _uri: &str,
-        ctx: &crate::types::FileContext,
-    ) -> u32 {
-        let mut mods = 0u32;
-        for class in &ctx.classes {
-            if class.name == name {
-                if class.deprecation_message.is_some() {
-                    mods |= TM_DEPRECATED;
-                }
-                if class.is_abstract {
-                    mods |= TM_ABSTRACT;
-                }
-                break;
-            }
-        }
-        mods
     }
 
     /// Resolve member-level token type and modifiers by looking up the
@@ -1127,6 +1041,37 @@ fn member_extra_modifiers(
 }
 
 /// Map a [`ClassLikeKind`] to a semantic token type index.
+/// The token type and modifiers a class's kind and deprecation give it.
+fn class_token(class: &ClassInfo) -> (u32, u32) {
+    let mods = if class.deprecation_message.is_some() {
+        TM_DEPRECATED
+    } else {
+        0
+    };
+    (kind_to_token_type(class.kind), mods)
+}
+
+/// The token type and modifiers (deprecated, abstract) for the
+/// declaration of the class `name` whose name sits at `offset`.
+fn resolve_declaration_token(
+    name: &str,
+    offset: u32,
+    ctx: &crate::types::FileContext,
+) -> (u32, u32) {
+    ctx.classes
+        .iter()
+        .find(|class| {
+            class.name == name && class.keyword_offset <= offset && offset < class.start_offset
+        })
+        .map_or((TT_CLASS, 0), |class| {
+            let (tt, mut mods) = class_token(class);
+            if class.is_abstract {
+                mods |= TM_ABSTRACT;
+            }
+            (tt, mods)
+        })
+}
+
 fn kind_to_token_type(kind: ClassLikeKind) -> u32 {
     match kind {
         ClassLikeKind::Class => TT_CLASS,

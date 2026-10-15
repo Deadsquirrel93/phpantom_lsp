@@ -152,6 +152,28 @@ fn resolved_class_fqn(name: &str, class_loader: &dyn Fn(&str) -> Option<Arc<Clas
 /// When the conditional's subject (e.g. `TAsync`) is not a method parameter
 /// but a class-level template parameter with a default value, the default
 /// is used to evaluate the condition.
+/// Whether a `($this is C ? …)` conditional takes its then branch for the
+/// receiver type `this_ty`, `self` in the condition naming `declaring`.
+/// `None` when the receiver type cannot decide it.
+fn this_condition_holds(
+    this_ty: &PhpType,
+    condition: &PhpType,
+    negated: bool,
+    declaring: Option<&str>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Option<bool> {
+    let condition = match declaring {
+        Some(declaring) => Cow::Owned(condition.replace_bare_self(declaring)),
+        None => Cow::Borrowed(condition),
+    };
+    let satisfied = if condition.is_null() {
+        this_ty.is_null()
+    } else {
+        type_condition_result(this_ty, &condition, class_loader)?
+    };
+    Some(satisfied ^ negated)
+}
+
 pub fn resolve_conditional_with_text_args_and_defaults(
     conditional: &PhpType,
     params: &[ParameterInfo],
@@ -205,18 +227,15 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                 let Some(this_ty) = tpl.this_type else {
                     return undecided_answer();
                 };
-                let condition = match class_ctx.declaring {
-                    Some(declaring) => Cow::Owned(condition.replace_bare_self(declaring)),
-                    None => Cow::Borrowed(condition),
-                };
-                let decided = if condition.is_null() {
-                    Some(this_ty.is_null())
-                } else {
-                    type_condition_result(this_ty, &condition, class_loader)
-                };
-                return match decided {
-                    Some(satisfied) if satisfied ^ *negated => resolve_branch(then_type),
-                    Some(_) => resolve_branch(else_type),
+                return match this_condition_holds(
+                    this_ty,
+                    condition,
+                    *negated,
+                    class_ctx.declaring,
+                    class_loader,
+                ) {
+                    Some(true) => resolve_branch(then_type),
+                    Some(false) => resolve_branch(else_type),
                     None => undecided_answer(),
                 };
             }
@@ -1674,18 +1693,19 @@ pub fn resolve_conditional_without_args_and_defaults(
             // matching branch in
             // [`resolve_conditional_with_text_args_and_defaults`].
             if target.eq_ignore_ascii_case("$this") {
-                let Some(this_ctx) = this_ctx else {
-                    return union_branch_types(recurse(then_type), recurse(else_type));
-                };
-                let condition = condition.replace_bare_self(this_ctx.declaring_class_name);
-                let decided = if condition.is_null() {
-                    Some(this_ctx.this_type.is_null())
-                } else {
-                    type_condition_result(this_ctx.this_type, &condition, this_ctx.class_loader)
-                };
+                let decided = this_ctx.and_then(|this_ctx| {
+                    this_condition_holds(
+                        this_ctx.this_type,
+                        condition,
+                        *negated,
+                        Some(this_ctx.declaring_class_name),
+                        this_ctx.class_loader,
+                    )
+                });
                 return match decided {
-                    Some(satisfied) if satisfied ^ *negated => recurse(then_type),
-                    Some(_) => recurse(else_type),
+                    Some(true) => recurse(then_type),
+                    Some(false) => recurse(else_type),
+                    None if cond.else_when_undecided => recurse(else_type),
                     None => union_branch_types(recurse(then_type), recurse(else_type)),
                 };
             }

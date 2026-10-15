@@ -1,15 +1,19 @@
 //! Shared docblock-location helpers for code actions.
 //!
 //! Several PHPStan quickfixes need to locate the `/** … */` block that sits
-//! directly above a function, method, or property signature so they can
-//! rewrite or remove tags inside it.  This module owns what they share:
+//! directly above a class, function, method, or property signature so they
+//! can rewrite or remove tags inside it.  This module owns what they share:
 //! [`DocblockAbove`], the block as the byte span of its lines with edits
-//! that rewrite it or drop lines from it, and [`FunctionDocblock`], the
-//! block of a function or method found through the parsed file (or where a
-//! new one goes), with edits that set its `@return` and add a `@throws`.
+//! that rewrite it or drop lines from it; [`FunctionDocblock`], the block of
+//! a function or method found through the parsed file (or where a new one
+//! goes), with edits that set its `@return` and add a `@throws`; and
+//! [`ClassDocblock`], the same for a class declaration, with an edit that
+//! adds a tag.
 
 use std::borrow::Borrow;
 
+use mago_span::HasSpan;
+use mago_syntax::cst::{Class, Program};
 use tower_lsp::lsp_types::{Range, TextEdit};
 
 use crate::code_actions::cursor_context::{FunctionKinds, find_enclosing_function};
@@ -216,16 +220,137 @@ fn prev_line_start(content: &str, line_start: usize) -> Option<usize> {
     Some(pos)
 }
 
+/// Where a new docblock goes above a declaration: the start of its first
+/// line, at that line's indentation.
+struct DocblockPlacement {
+    /// Byte offset of the start of the declaration's first line (its first
+    /// attribute, modifier or keyword).
+    insert_at: usize,
+    /// Indentation of the declaration's first line.
+    indent: String,
+}
+
+impl DocblockPlacement {
+    /// The placement above the declaration whose first token starts at
+    /// `decl_start`.
+    fn above(content: &str, decl_start: usize) -> Self {
+        let insert_at = content[..decl_start].rfind('\n').map_or(0, |nl| nl + 1);
+        let indent = content[insert_at..decl_start]
+            .chars()
+            .take_while(|c| c.is_whitespace())
+            .collect();
+        Self { insert_at, indent }
+    }
+
+    /// The edit that adds the tag line `tag` to `docblock`: before its
+    /// closing line, after a blank `*` line when the line before it holds a
+    /// tag other than those in `joins`; spreading a one-line docblock over
+    /// several; or as a new docblock above the declaration when there is
+    /// none.
+    fn add_tag_edit(
+        &self,
+        content: &str,
+        docblock: Option<&DocblockAbove>,
+        tag: &str,
+        joins: &[&str],
+    ) -> TextEdit {
+        let indent = &self.indent;
+        let Some(docblock) = docblock else {
+            return insert_edit(
+                content,
+                self.insert_at,
+                format!("{indent}/**\n{indent} * {tag}\n{indent} */\n"),
+            );
+        };
+
+        let lines: Vec<(usize, &str)> = docblock.lines().collect();
+        let (close_start, close_line) = lines[lines.len() - 1];
+        if lines.len() == 1 {
+            let inner = close_line
+                .trim()
+                .strip_prefix("/**")
+                .and_then(|s| s.strip_suffix("*/"))
+                .map(str::trim)
+                .unwrap_or("");
+            let mut new_doc = format!("{indent}/**\n");
+            if !inner.is_empty() {
+                new_doc.push_str(&format!("{indent} * {inner}\n{indent} *\n"));
+            }
+            new_doc.push_str(&format!("{indent} * {tag}\n{indent} */"));
+            return TextEdit {
+                range: byte_range_to_lsp_range(
+                    content,
+                    close_start,
+                    close_start + close_line.len(),
+                ),
+                new_text: new_doc,
+            };
+        }
+
+        let previous = lines[lines.len() - 2]
+            .1
+            .trim()
+            .trim_start_matches('*')
+            .trim();
+        let needs_separator =
+            previous.starts_with('@') && !joins.iter().any(|join| previous.starts_with(join));
+        let mut insert_text = String::new();
+        if needs_separator {
+            insert_text.push_str(&format!("{indent} *\n"));
+        }
+        insert_text.push_str(&format!("{indent} * {tag}\n"));
+        insert_edit(content, close_start, insert_text)
+    }
+}
+
+/// The `/** … */` block the parser attaches to `decl`: the one preceding its
+/// first attribute, modifier or keyword with nothing but whitespace and
+/// comments in between.
+///
+/// A block that shares a line with code is not one an edit can rewrite
+/// line by line, so the declaration counts as having none.
+fn docblock_of(program: &Program<'_>, content: &str, decl: &impl HasSpan) -> Option<DocblockAbove> {
+    crate::symbol_map::docblock::get_docblock_text_with_offset(
+        program.trivia.as_slice(),
+        content,
+        decl,
+    )
+    .and_then(|(text, open)| {
+        DocblockAbove::on_own_lines(content, open as usize, open as usize + text.len())
+    })
+}
+
+/// The docblock of a class declaration, or where one goes when it has none.
+pub(crate) struct ClassDocblock {
+    /// The block above the declaration, when it has one.
+    pub(crate) docblock: Option<DocblockAbove>,
+    placement: DocblockPlacement,
+}
+
+impl ClassDocblock {
+    /// The docblock of `class`, read from the `program` parsed from
+    /// `content`.
+    pub(crate) fn of(program: &Program<'_>, content: &str, class: &Class<'_>) -> Self {
+        Self {
+            docblock: docblock_of(program, content, class),
+            placement: DocblockPlacement::above(content, class.span().start.offset as usize),
+        }
+    }
+
+    /// The edit that adds the tag line `tag`, set apart from a tag that
+    /// closes the docblock.
+    pub(crate) fn add_tag_edit(&self, content: &str, tag: &str) -> TextEdit {
+        self.placement
+            .add_tag_edit(content, self.docblock.as_ref(), tag, &[])
+    }
+}
+
 /// The docblock of a function or method, or where one goes when it has
 /// none.
 pub(crate) struct FunctionDocblock {
     /// The block above the declaration, when it has one.
     pub(crate) docblock: Option<DocblockAbove>,
-    /// Byte offset of the start of the declaration's first line (its first
-    /// attribute, modifier or keyword), where a new block is inserted.
-    insert_at: usize,
-    /// Indentation of the declaration's first line.
-    indent: String,
+    placement: DocblockPlacement,
 }
 
 impl FunctionDocblock {
@@ -296,58 +421,9 @@ impl FunctionDocblock {
         self.add_tag_edit(content, &format!("@throws {name}"), &["@throws"])
     }
 
-    /// The edit that adds the tag line `tag`: before the closing line of the
-    /// docblock, after a blank `*` line when the line before it holds a tag
-    /// other than those in `joins`; spreading a one-line docblock over
-    /// several; or as a new docblock above the declaration when there is
-    /// none.
     fn add_tag_edit(&self, content: &str, tag: &str, joins: &[&str]) -> TextEdit {
-        let indent = &self.indent;
-        let Some(docblock) = &self.docblock else {
-            return insert_edit(
-                content,
-                self.insert_at,
-                format!("{indent}/**\n{indent} * {tag}\n{indent} */\n"),
-            );
-        };
-
-        let lines: Vec<(usize, &str)> = docblock.lines().collect();
-        let (close_start, close_line) = lines[lines.len() - 1];
-        if lines.len() == 1 {
-            let inner = close_line
-                .trim()
-                .strip_prefix("/**")
-                .and_then(|s| s.strip_suffix("*/"))
-                .map(str::trim)
-                .unwrap_or("");
-            let mut new_doc = format!("{indent}/**\n");
-            if !inner.is_empty() {
-                new_doc.push_str(&format!("{indent} * {inner}\n{indent} *\n"));
-            }
-            new_doc.push_str(&format!("{indent} * {tag}\n{indent} */"));
-            return TextEdit {
-                range: byte_range_to_lsp_range(
-                    content,
-                    close_start,
-                    close_start + close_line.len(),
-                ),
-                new_text: new_doc,
-            };
-        }
-
-        let previous = lines[lines.len() - 2]
-            .1
-            .trim()
-            .trim_start_matches('*')
-            .trim();
-        let needs_separator =
-            previous.starts_with('@') && !joins.iter().any(|join| previous.starts_with(join));
-        let mut insert_text = String::new();
-        if needs_separator {
-            insert_text.push_str(&format!("{indent} *\n"));
-        }
-        insert_text.push_str(&format!("{indent} * {tag}\n"));
-        insert_edit(content, close_start, insert_text)
+        self.placement
+            .add_tag_edit(content, self.docblock.as_ref(), tag, joins)
     }
 }
 
@@ -359,39 +435,18 @@ fn insert_edit(content: &str, offset: usize, new_text: String) -> TextEdit {
 }
 
 /// The docblock of the innermost function-like declaration of `kinds`
-/// whose span contains `offset`, as the parser reads it: the `/** … */`
-/// block that precedes the declaration's first attribute, modifier or
-/// keyword with nothing but whitespace and comments in between.
-///
-/// A block that shares a line with code is not one an edit can rewrite
-/// line by line, so the function counts as having none.
+/// whose span contains `offset`, as [`docblock_of`] reads it.
 pub(crate) fn function_docblock_at(
     content: &str,
     offset: usize,
     kinds: FunctionKinds,
 ) -> Option<FunctionDocblock> {
-    let (decl_start, docblock) =
-        crate::parser::with_parsed_program(content, "function_docblock_at", |program, content| {
-            let decl = find_enclosing_function(&program.statements, offset as u32, kinds)?.span;
-            let docblock = crate::symbol_map::docblock::get_docblock_text_with_offset(
-                program.trivia.as_slice(),
-                content,
-                &decl,
-            )
-            .and_then(|(text, open)| {
-                DocblockAbove::on_own_lines(content, open as usize, open as usize + text.len())
-            });
-            Some((decl.start.offset as usize, docblock))
-        })?;
-    let insert_at = content[..decl_start].rfind('\n').map_or(0, |nl| nl + 1);
-    let indent = content[insert_at..decl_start]
-        .chars()
-        .take_while(|c| c.is_whitespace())
-        .collect();
-    Some(FunctionDocblock {
-        docblock,
-        insert_at,
-        indent,
+    crate::parser::with_parsed_program(content, "function_docblock_at", |program, content| {
+        let decl = find_enclosing_function(&program.statements, offset as u32, kinds)?.span;
+        Some(FunctionDocblock {
+            docblock: docblock_of(program, content, &decl),
+            placement: DocblockPlacement::above(content, decl.start.offset as usize),
+        })
     })
 }
 

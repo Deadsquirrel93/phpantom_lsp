@@ -12918,6 +12918,187 @@ class Demo {
 }
 
 #[test]
+fn hover_virtual_method_short_implements_args_bind_trailing_template() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+namespace App;
+
+class User {}
+
+/**
+ * @template TKey of array-key
+ * @template TValue
+ * @method TValue first()
+ */
+interface Coll {}
+
+/**
+ * @implements Coll<User>
+ */
+class Users implements Coll {
+    public function __call(string $name, array $args) {}
+}
+
+class Demo {
+    public function test(Users $users): void {
+        $result = $users->first();
+        $result;
+    }
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 22, 9).expect("expected hover on $result");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("User") && !text.contains("TValue"),
+        "a single @implements argument should bind the trailing TValue, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_closure_param_keeps_hyphenated_pseudo_type() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+/**
+ * @param callable(positive-int): void $cb
+ */
+function eachCount(callable $cb): void {}
+
+eachCount(function ($n) {
+    $n;
+});
+"#;
+
+    let hover = hover_at(&backend, uri, content, 7, 5).expect("expected hover on $n");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("positive-int"),
+        "a closure parameter inferred as positive-int should keep it, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_property_typed_from_constructor_new_matches_import_case_insensitively() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+namespace App\Models {
+    class User {}
+}
+
+namespace Ns {
+    use App\Models\User;
+
+    class Holder {
+        public $user;
+
+        public function __construct() {
+            $this->user = new user();
+        }
+
+        public function test(): void {
+            $u = $this->user;
+            $u;
+        }
+    }
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 17, 13).expect("expected hover on $u");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("namespace App\\Models;") && text.contains("$u = User"),
+        "`new user()` should resolve through the `use App\\Models\\User` import, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_virtual_method_own_trait_use_args_substitute() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+namespace App;
+
+class User {}
+
+/**
+ * @template TValue
+ * @method TValue first()
+ */
+trait HasItems {}
+
+class Users {
+    /** @use HasItems<User> */
+    use HasItems;
+
+    public function __call(string $name, array $args) {}
+}
+
+class Demo {
+    public function test(Users $users): void {
+        $result = $users->first();
+        $result;
+    }
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 21, 9).expect("expected hover on $result");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("User") && !text.contains("TValue"),
+        "the class's own @use arguments should reach the trait's @method tags, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_virtual_method_short_use_args_bind_trailing_template() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+namespace App;
+
+class User {}
+
+/**
+ * @template TKey of array-key
+ * @template TValue
+ * @method TValue first()
+ */
+trait HasItems {}
+
+class Base {
+    /** @use HasItems<User> */
+    use HasItems;
+
+    public function __call(string $name, array $args) {}
+}
+
+class Users extends Base {}
+
+class Demo {
+    public function test(Users $users): void {
+        $result = $users->first();
+        $result;
+    }
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 24, 9).expect("expected hover on $result");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("User") && !text.contains("TValue"),
+        "a single @use argument should bind the trailing TValue, got: {}",
+        text
+    );
+}
+
+#[test]
 fn hover_property_through_or_instanceof() {
     let backend = create_test_backend();
     let uri = "file:///test.php";

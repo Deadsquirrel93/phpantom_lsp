@@ -14,7 +14,7 @@ use crate::types::{ClassInfo, ResolvedType};
 // from a call's target method/function, reusing the receiver and static-
 // receiver resolution shared with `closure_resolution.rs`'s
 // `@param-closure-this` lookup (`resolve_receiver_types`,
-// `static_receiver_class_name`, `find_owner_by_name`).  They operate with
+// `WrittenNames::static_receiver_class_name`, `find_owner_by_name`).  They operate with
 // a `ForwardWalkCtx` + `ScopeState` instead of a `VarResolutionCtx`,
 // building a temporary `VarResolutionCtx` with a scope-based variable
 // resolver injected so that variable lookups during receiver resolution
@@ -29,13 +29,7 @@ pub(crate) fn infer_callable_params_from_function_fw(
     scope: &ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) -> Vec<PhpType> {
-    let scope_locals = &scope.locals;
-    let scope_resolver = |var_name: &str| -> Vec<ResolvedType> {
-        scope_locals
-            .get(&atom(var_name))
-            .cloned()
-            .unwrap_or_default()
-    };
+    let scope_resolver = scope_variable_resolver(scope);
     let var_ctx = ctx.var_ctx_for_with_scope(
         "$__infer",
         ctx.cursor_offset,
@@ -87,13 +81,7 @@ pub(crate) fn infer_callable_params_from_receiver_fw(
     ctx: &ForwardWalkCtx<'_>,
 ) -> Vec<PhpType> {
     let (obj_start, obj_end) = obj_span;
-    let scope_locals = &scope.locals;
-    let scope_resolver = |var_name: &str| -> Vec<ResolvedType> {
-        scope_locals
-            .get(&atom(var_name))
-            .cloned()
-            .unwrap_or_default()
-    };
+    let scope_resolver = scope_variable_resolver(scope);
     let var_ctx =
         ctx.var_ctx_for_with_scope("$__infer", obj_start, &scope_resolver, Some(scope.proofs()));
     let rctx = var_ctx.as_resolution_ctx();
@@ -131,32 +119,18 @@ pub(crate) fn infer_callable_params_from_receiver_fw(
     // We extract those args, pair them with the class's @template
     // params (e.g. `TModel`), and substitute so that callable params
     // like `Closure(Builder<TModel>)` become `Closure(Builder<Product>)`.
-    let mut template_subs = build_receiver_template_subs(&resolved_types, &receiver_classes, ctx);
+    let template_subs = build_receiver_template_subs(&resolved_types, &receiver_classes, ctx);
+    let params = substitute_call_templates(
+        params,
+        template_subs,
+        receiver_classes.first().map(|owner| &**owner),
+        method_name,
+        argument_list,
+        &rctx,
+        ctx,
+    );
 
-    // A method-level `@template` is bound by this call's own arguments
-    // instead, so `@param callable(T): void $fn` only becomes concrete once
-    // the argument that binds `T` is resolved.
-    if let Some(owner) = receiver_classes.first() {
-        template_subs.extend(method_template_subs_for_call(
-            owner,
-            method_name,
-            argument_list,
-            &rctx,
-            ctx,
-        ));
-    }
-
-    // Apply template substitution, then replace `$this`/`static`
-    // tokens with the receiver's full type.
-    let params = if !template_subs.is_empty() {
-        params
-            .into_iter()
-            .map(|p| p.substitute(&template_subs))
-            .collect()
-    } else {
-        params
-    };
-
+    // Replace `$this`/`static` tokens with the receiver's full type.
     let params = if let Some(receiver) = receiver_classes.first() {
         let receiver_type = super::super::closure_resolution::build_receiver_self_type_pub(
             receiver,
@@ -227,7 +201,7 @@ pub(crate) fn filter_resolvable_inferred_params(
             } else {
                 ty.clone()
             };
-            if has_unresolvable_base(&ty, ctx) {
+            if has_unresolvable_base(&ty) {
                 PhpType::mixed()
             } else {
                 ty
@@ -238,57 +212,37 @@ pub(crate) fn filter_resolvable_inferred_params(
 
 /// Recursively check whether any base name in the type is
 /// unresolvable (see [`is_unresolvable_class_name`]).
-pub(crate) fn has_unresolvable_base(ty: &PhpType, ctx: &ForwardWalkCtx<'_>) -> bool {
+fn has_unresolvable_base(ty: &PhpType) -> bool {
     match ty.kind() {
-        TypeKind::Named(name) => is_unresolvable_class_name(name, ctx),
+        TypeKind::Named(name) => is_unresolvable_class_name(name),
         TypeKind::Generic(g) => {
-            is_unresolvable_class_name(&g.name, ctx)
-                || g.args.iter().any(|a| has_unresolvable_base(a, ctx))
+            is_unresolvable_class_name(&g.name) || g.args.iter().any(has_unresolvable_base)
         }
         TypeKind::Union(parts) | TypeKind::Intersection(parts) => {
-            parts.iter().any(|p| has_unresolvable_base(p, ctx))
+            parts.iter().any(has_unresolvable_base)
         }
-        TypeKind::Nullable(inner) => has_unresolvable_base(inner, ctx),
+        TypeKind::Nullable(inner) => has_unresolvable_base(inner),
         TypeKind::Callable(c) => {
             if let Some(ret) = &c.return_type
-                && has_unresolvable_base(ret, ctx)
+                && has_unresolvable_base(ret)
             {
                 return true;
             }
-            c.params
-                .iter()
-                .any(|p| has_unresolvable_base(&p.type_hint, ctx))
+            c.params.iter().any(|p| has_unresolvable_base(&p.type_hint))
         }
         _ => false,
     }
 }
 
 /// A class name is "unresolvable" when it is hyphenated (e.g.
-/// `collection-of`, `non-empty-list`) and not one of the PHPStan
-/// pseudo-types the type engine handles elsewhere.  Hyphenated names
-/// can never be valid PHP class names, so flagging them is safe;
-/// non-hyphenated names that fail resolution might just be missing
-/// from the index (vendor code, etc.) and must not trigger the guard.
-pub(crate) fn is_unresolvable_class_name(name: &str, _ctx: &ForwardWalkCtx<'_>) -> bool {
-    if name.contains('-') {
-        // Pseudo-types that are handled elsewhere in the type engine
-        // keep their meaning; don't flag them.
-        let lower = name.to_ascii_lowercase();
-        if lower == "class-string"
-            || lower == "array-key"
-            || lower == "non-empty-string"
-            || lower == "non-empty-array"
-            || lower == "non-empty-list"
-            || lower == "non-falsy-string"
-            || lower == "numeric-string"
-            || lower == "literal-string"
-            || lower == "callable-string"
-        {
-            return false;
-        }
-        return true;
-    }
-    false
+/// `collection-of`) and not one of the PHPStan pseudo-types the type
+/// engine knows (`non-empty-list`, `positive-int`, `int-mask`, …).
+/// Hyphenated names can never be valid PHP class names, so flagging them
+/// is safe; non-hyphenated names that fail resolution might just be
+/// missing from the index (vendor code, etc.) and must not trigger the
+/// guard.
+fn is_unresolvable_class_name(name: &str) -> bool {
+    name.contains('-') && !crate::php_type::is_keyword_type(name)
 }
 
 /// Build a template substitution map from the receiver's resolved types.
@@ -356,6 +310,51 @@ pub(crate) fn build_receiver_template_subs(
     HashMap::new()
 }
 
+/// Reads a variable's types from the forward walker's scope, for a
+/// resolution context built mid-walk.
+fn scope_variable_resolver(scope: &ScopeState) -> impl Fn(&str) -> Vec<ResolvedType> + '_ {
+    |var_name: &str| {
+        scope
+            .locals
+            .get(&atom(var_name))
+            .cloned()
+            .unwrap_or_default()
+    }
+}
+
+/// Substitute the receiver's template values (`template_subs`) and the
+/// method's own `@template` params into a callee's callable `params`.
+///
+/// A method-level `@template` is bound by this call's own arguments, so
+/// `@param callable(T): void $fn` only becomes concrete once the argument
+/// that binds `T` is resolved.
+fn substitute_call_templates(
+    params: Vec<PhpType>,
+    mut template_subs: HashMap<String, PhpType>,
+    owner: Option<&ClassInfo>,
+    method_name: &str,
+    argument_list: &ArgumentList<'_>,
+    rctx: &crate::type_engine::resolver::ResolutionCtx<'_>,
+    ctx: &ForwardWalkCtx<'_>,
+) -> Vec<PhpType> {
+    if let Some(owner) = owner {
+        template_subs.extend(method_template_subs_for_call(
+            owner,
+            method_name,
+            argument_list,
+            rctx,
+            ctx,
+        ));
+    }
+    if template_subs.is_empty() {
+        return params;
+    }
+    params
+        .into_iter()
+        .map(|p| p.substitute(&template_subs))
+        .collect()
+}
+
 /// Build the substitution map for a method's own `@template` params from
 /// the call-site argument texts, so a `@param callable(T): X` signature
 /// hands the closure the type `T` was bound to.
@@ -382,17 +381,16 @@ pub(crate) fn infer_callable_params_from_static_receiver_fw(
     scope: &ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) -> Vec<PhpType> {
-    let owner = super::super::closure_resolution::static_receiver_class_name(
-        class_expr,
-        &ctx.written_names(),
-    )
-    .and_then(|name| {
-        super::super::closure_resolution::find_owner_by_name(
-            &name,
-            ctx.all_classes,
-            ctx.class_loader,
-        )
-    });
+    let owner = ctx
+        .written_names()
+        .static_receiver_class_name(class_expr)
+        .and_then(|name| {
+            super::super::closure_resolution::find_owner_by_name(
+                &name,
+                ctx.all_classes,
+                ctx.class_loader,
+            )
+        });
     if let Some(ref cls) = owner {
         // For relation-query methods, override with Builder<RelatedModel>.
         if crate::virtual_members::laravel::relation_query_method(method_name).is_some()
@@ -424,7 +422,7 @@ pub(crate) fn infer_callable_params_from_static_receiver_fw(
         // `Closure(Collection<int, Customer>)`.
         let receiver_type =
             super::super::closure_resolution::build_receiver_self_type_pub(cls, ctx.class_loader);
-        let mut template_subs = if let TypeKind::Generic(g) = receiver_type.kind()
+        let template_subs = if let TypeKind::Generic(g) = receiver_type.kind()
             && !g.args.is_empty()
             && !cls.template_params.is_empty()
         {
@@ -433,37 +431,22 @@ pub(crate) fn infer_callable_params_from_static_receiver_fw(
             HashMap::new()
         };
 
-        // The method's own `@template` params are bound by this call's
-        // arguments, the same as for an instance call.
-        let scope_locals = &scope.locals;
-        let scope_resolver = |var_name: &str| -> Vec<ResolvedType> {
-            scope_locals
-                .get(&atom(var_name))
-                .cloned()
-                .unwrap_or_default()
-        };
+        let scope_resolver = scope_variable_resolver(scope);
         let var_ctx = ctx.var_ctx_for_with_scope(
             "$__infer",
             ctx.cursor_offset,
             &scope_resolver,
             Some(scope.proofs()),
         );
-        template_subs.extend(method_template_subs_for_call(
-            cls,
+        let params = substitute_call_templates(
+            params,
+            template_subs,
+            Some(cls),
             method_name,
             argument_list,
             &var_ctx.as_resolution_ctx(),
             ctx,
-        ));
-
-        let params = if !template_subs.is_empty() {
-            params
-                .into_iter()
-                .map(|p| p.substitute(&template_subs))
-                .collect()
-        } else {
-            params
-        };
+        );
 
         let params = params
             .into_iter()

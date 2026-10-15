@@ -37,7 +37,21 @@ No outstanding items.
 
 ## Narrowing
 
-No outstanding items.
+### B622. Whether a by-reference callback runs now is read from the current file's text only
+
+**Impact: Low-Medium · Complexity: Medium**
+
+`src/type_engine/variable/forward_walk/by_ref.rs` decides whether a
+callback argument is invoked immediately (so its by-reference writes
+reach the variables after the call) by re-walking the current file's AST
+with `with_parsed_program` and text-scanning the docblock above the callee
+for `@param-immediately-invoked-callable` /
+`@param-later-invoked-callable`. A callee declared in another file never
+has its tag seen and gets the default, and methods are matched by short
+class name within the current file. The re-parse also runs per call when
+no parse cache is active. The docblock parser already reads both tags
+(`docblock/parser.rs`): carry the invocation mode on `ParameterInfo` and
+look it up through the function loader and the resolved class.
 
 ## Array types
 
@@ -60,6 +74,21 @@ No outstanding items.
 No outstanding items.
 
 ## Miscellaneous
+
+### B624. The `new static` quick fixes can edit the wrong class
+
+**Impact: Low · Complexity: Medium**
+
+`find_class_keyword_before` (`src/code_actions/phpstan/new_static.rs`)
+finds the enclosing class by taking the last whitespace-delimited `class`
+word before the diagnostic line, rejecting only `::class` and `new class`.
+The word "class" in a comment or string inside the method (`// the class
+is final`) is taken as the declaration, and a `new static` inside a trait
+reaches back to an earlier class in the same file. The `final`, tag and
+docblock edits then land on that line. Locate the class through the
+parsed file instead (its start offset, `is_final`/`is_abstract` and
+constructor are all on `ClassInfo`); refactor.md item 14 covers the
+rewrite.
 
 ### B616. PHPStan quick fixes write `\n` line endings into `\r\n` files
 

@@ -251,10 +251,7 @@ pub(crate) fn eager_callback_arguments<'a>(
     );
     let rctx = var_ctx.as_resolution_ctx();
     let receivers = if is_static {
-        let name = super::super::closure_resolution::static_receiver_class_name(
-            receiver,
-            &ctx.written_names(),
-        )?;
+        let name = ctx.written_names().static_receiver_class_name(receiver)?;
         let owner = super::super::closure_resolution::find_owner_by_name(
             &name,
             ctx.all_classes,

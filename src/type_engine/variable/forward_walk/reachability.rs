@@ -255,20 +255,8 @@ fn static_class_of(expr: &Expression<'_>, ctx: &ForwardWalkCtx<'_>) -> Option<Ar
             if !bytes_to_str(constant.value).eq_ignore_ascii_case("class") {
                 return None;
             }
-            match access.class {
-                Expression::Self_(_) | Expression::Static(_) => {
-                    (ctx.class_loader)(&ctx.current_class.fqn())
-                }
-                Expression::Parent(_) => {
-                    let parent = ctx.current_class.parent_class.as_ref()?;
-                    (ctx.class_loader)(parent)
-                }
-                Expression::Identifier(ident) => {
-                    let name = bytes_to_str(ident.value());
-                    (ctx.class_loader)(&ctx.written_names().resolve_class(name))
-                }
-                _ => None,
-            }
+            ctx.written_names()
+                .static_receiver_class(access.class, ctx.class_loader)
         }
         _ => string_literal_value(expr).and_then(|name| (ctx.class_loader)(&name)),
     }

@@ -116,23 +116,11 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
             };
             // Resolve the receiver to a class, handling `self`, `static`,
             // `parent`, and subclass names.
-            let receiver = match static_call.class {
-                Expression::Identifier(ident) => {
-                    let name = bytes_to_str(ident.value());
-                    (ctx.class_loader)(&ctx.written_names().resolve_class(name))
-                }
-                Expression::Self_(_) | Expression::Static(_) => {
-                    (ctx.class_loader)(&ctx.current_class.fqn())
-                }
-                Expression::Parent(_) => match ctx.current_class.parent_class.as_ref() {
-                    Some(parent) => (ctx.class_loader)(parent),
-                    None => return,
-                },
-                _ => return,
-            };
-            let class_info = match receiver {
-                Some(ci) => ci,
-                None => return,
+            let Some(class_info) = ctx
+                .written_names()
+                .static_receiver_class(static_call.class, ctx.class_loader)
+            else {
+                return;
             };
             // Search the trait/parent chain so assertions declared on an
             // ancestor (e.g. PHPUnit's `Assert`) are found.  Uses raw class

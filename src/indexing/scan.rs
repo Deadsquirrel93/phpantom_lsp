@@ -568,40 +568,7 @@ impl Backend {
             ..Default::default()
         };
 
-        // Origins ride alongside the winning path: only record one for a
-        // vendor entry when it actually wins the merge (i.e. the project
-        // scan didn't already provide this FQN), so a symbol's recorded
-        // origin always matches the file it resolves to.
-        for (fqcn, path) in vendor_scan.classmap {
-            if let std::collections::hash_map::Entry::Vacant(e) =
-                result.classmap.entry(fqcn.clone())
-            {
-                e.insert(path);
-                if let Some(&origin) = vendor_scan.class_origins.get(&fqcn) {
-                    result.class_origins.insert(fqcn, origin);
-                }
-            }
-        }
-        for (fqn, path) in vendor_scan.function_index {
-            if let std::collections::hash_map::Entry::Vacant(e) =
-                result.function_index.entry(fqn.clone())
-            {
-                e.insert(path);
-                if let Some(&origin) = vendor_scan.function_origins.get(&fqn) {
-                    result.function_origins.insert(fqn, origin);
-                }
-            }
-        }
-        for (name, path) in vendor_scan.constant_index {
-            if let std::collections::hash_map::Entry::Vacant(e) =
-                result.constant_index.entry(name.clone())
-            {
-                e.insert(path);
-                if let Some(&origin) = vendor_scan.constant_origins.get(&name) {
-                    result.constant_origins.insert(name, origin);
-                }
-            }
-        }
+        result.absorb_missing(vendor_scan);
 
         result
     }

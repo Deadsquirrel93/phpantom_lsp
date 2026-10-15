@@ -1486,18 +1486,7 @@ pub(crate) fn process_assert_narrowing<'b>(
         let var_name = bytes_to_str(dv.name).to_string();
         if scope.get(&var_name).is_empty() {
             // Variable not in scope — seed it with the asserted type.
-            let class_name = match bin.rhs {
-                Expression::Identifier(ident) => Some(
-                    ctx.written_names()
-                        .resolve_class(bytes_to_str(ident.value())),
-                ),
-                Expression::Self_(_) | Expression::Static(_) => {
-                    Some(ctx.current_class.fqn().to_string())
-                }
-                Expression::Parent(_) => ctx.current_class.parent_class.map(|a| a.to_string()),
-                _ => None,
-            };
-            if let Some(name) = class_name {
+            if let Some(name) = ctx.written_names().static_receiver_class_name(bin.rhs) {
                 let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
                     &PhpType::named(atom(&name)),
                     &ctx.current_class.fqn(),

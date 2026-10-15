@@ -10,11 +10,11 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 
 use super::cursor_context::{ClassLikeContextKind, CursorContext, find_cursor_context};
-use super::implement_methods::{detect_class_indent, shorten_single_type};
 use super::make_code_action_data;
 use crate::Backend;
 use crate::atom::atom;
 use crate::class_lookup::find_class_at_offset;
+use crate::signature_render::{detect_class_indent, shorten_single_type};
 use crate::text_position::offset_to_position;
 use crate::types::{ClassInfo, ClassLikeKind, MethodInfo, Visibility};
 

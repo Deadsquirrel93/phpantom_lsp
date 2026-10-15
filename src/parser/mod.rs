@@ -12,6 +12,7 @@
 //! - [`stub_attributes`]: phpstorm-stubs version, type and shape attributes,
 //!   and `#[Deprecated]`
 //! - [`functions`]: Standalone function and `define()` constant extraction
+//! - [`signature`]: Signature extraction shared by functions and methods
 //! - [`use_statements`]: `use` statement and namespace extraction
 //! - [`ast_update`]: The `update_ast` orchestrator
 //! - [`name_resolution`]: Qualifying the names a parsed declaration spells
@@ -32,6 +33,7 @@ mod functions;
 mod initializers;
 mod name_resolution;
 mod parse_cache;
+mod signature;
 mod stub_attributes;
 mod use_statements;
 
@@ -331,17 +333,8 @@ fn qualify_class_default(
     if name.starts_with('\\') || crate::class_lookup::is_class_keyword(name) {
         return format!("{name}::class");
     }
-    let (first_seg, rest) = match name.find('\\') {
-        Some(pos) => (&name[..pos], &name[pos..]),
-        None => (name, ""),
-    };
-    if let Some(base) = crate::names::lookup_import(use_map, first_seg) {
-        return format!("\\{base}{rest}::class");
-    }
-    match namespace {
-        Some(ns) => format!("\\{ns}\\{name}::class"),
-        None => format!("\\{name}::class"),
-    }
+    let fqn = crate::names::resolve_to_fqn(name, use_map, namespace);
+    format!("\\{fqn}::class")
 }
 
 /// Extract visibility from a set of modifiers.

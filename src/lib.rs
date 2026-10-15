@@ -307,6 +307,7 @@ pub mod semantic_export;
 mod semantic_tokens;
 mod server;
 mod signature_help;
+mod signature_render;
 pub mod stub_patches;
 pub mod stubs;
 mod symbol_index;

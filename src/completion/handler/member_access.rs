@@ -278,7 +278,7 @@ impl Backend {
         ctx: &FileContext,
     ) -> Option<Vec<CompletionItem>> {
         use crate::completion::context::override_completion::{
-            NameOverrideCompletionOpts, build_constant_override_completions,
+            OverrideCompletionOpts, build_constant_override_completions,
             build_override_completions, build_property_override_completions,
             collect_overridable_constants, collect_overridable_methods,
             collect_overridable_properties, enclosing_class_at_position,
@@ -303,47 +303,34 @@ impl Backend {
         let class_loader = self.resolved_class_loader(ctx);
 
         let (partial, range) = extract_method_name_partial(content, position)?;
+        let php_version = self.php_version();
+        let indent = indent_for_position(content, position, class);
+        let opts = OverrideCompletionOpts {
+            use_map: &ctx.use_map,
+            file_namespace: &ctx.namespace,
+            indent: &indent,
+            replace_range: range,
+            php_version,
+            line_start: line_start_position(content, position),
+            include_declaration: false,
+        };
 
         if is_after_function_keyword(content, position) {
             let methods = collect_overridable_methods(class, &partial, &class_loader);
             if methods.is_empty() {
                 return None;
             }
-            let indent = indent_for_position(content, position, class);
-            let items = build_override_completions(
-                &methods,
-                &crate::completion::context::override_completion::OverrideCompletionOpts {
-                    use_map: &ctx.use_map,
-                    file_namespace: &ctx.namespace,
-                    indent: &indent,
-                    replace_range: range,
-                    php_version: self.php_version(),
-                    line_start: line_start_position(content, position),
-                    include_declaration: false,
-                },
-            );
+            let items = build_override_completions(&methods, &opts);
             return if items.is_empty() { None } else { Some(items) };
         }
 
         if is_after_const_keyword(content, position) {
             let constants =
-                collect_overridable_constants(class, &partial, self.php_version(), &class_loader);
+                collect_overridable_constants(class, &partial, php_version, &class_loader);
             if constants.is_empty() {
                 return None;
             }
-            let indent = indent_for_position(content, position, class);
-            let items = build_constant_override_completions(
-                &constants,
-                &NameOverrideCompletionOpts {
-                    use_map: &ctx.use_map,
-                    file_namespace: &ctx.namespace,
-                    indent: &indent,
-                    replace_range: range,
-                    php_version: self.php_version(),
-                    line_start: line_start_position(content, position),
-                    include_declaration: false,
-                },
-            );
+            let items = build_constant_override_completions(&constants, &opts);
             return if items.is_empty() { None } else { Some(items) };
         }
 
@@ -352,19 +339,7 @@ impl Backend {
             if props.is_empty() {
                 return None;
             }
-            let indent = indent_for_position(content, position, class);
-            let items = build_property_override_completions(
-                &props,
-                &NameOverrideCompletionOpts {
-                    use_map: &ctx.use_map,
-                    file_namespace: &ctx.namespace,
-                    indent: &indent,
-                    replace_range: range,
-                    php_version: self.php_version(),
-                    line_start: line_start_position(content, position),
-                    include_declaration: false,
-                },
-            );
+            let items = build_property_override_completions(&props, &opts);
             return if items.is_empty() { None } else { Some(items) };
         }
 
@@ -388,12 +363,12 @@ impl Backend {
         ctx: &FileContext,
     ) -> Option<Vec<CompletionItem>> {
         use crate::completion::context::override_completion::{
-            NameOverrideCompletionOpts, OverrideCompletionOpts,
-            build_constant_override_completions, build_override_completions,
-            build_property_override_completions, class_body_partial_starts_with_dollar,
-            collect_overridable_constants, collect_overridable_methods,
-            collect_overridable_properties, extract_method_name_partial, indent_for_position,
-            is_class_body_member_start, line_start_position,
+            OverrideCompletionOpts, build_constant_override_completions,
+            build_override_completions, build_property_override_completions,
+            class_body_partial_starts_with_dollar, collect_overridable_constants,
+            collect_overridable_methods, collect_overridable_properties,
+            extract_method_name_partial, indent_for_position, is_class_body_member_start,
+            line_start_position,
         };
         use crate::types::ClassLikeKind;
 
@@ -469,40 +444,26 @@ impl Backend {
         let class_loader = self.resolved_class_loader(ctx);
 
         let indent = indent_for_position(content, position, class);
-        let line_start = line_start_position(content, position);
         let php_version = self.php_version();
+        let opts = OverrideCompletionOpts {
+            use_map: &ctx.use_map,
+            file_namespace: &ctx.namespace,
+            indent: &indent,
+            replace_range: range,
+            php_version,
+            line_start: line_start_position(content, position),
+            include_declaration: true,
+        };
 
         if !dollar_prefixed {
             let methods = collect_overridable_methods(class, &partial, &class_loader);
-            items.extend(build_override_completions(
-                &methods,
-                &OverrideCompletionOpts {
-                    use_map: &ctx.use_map,
-                    file_namespace: &ctx.namespace,
-                    indent: &indent,
-                    replace_range: range,
-                    php_version,
-                    line_start,
-                    include_declaration: true,
-                },
-            ));
+            items.extend(build_override_completions(&methods, &opts));
         }
 
         // Enums cannot have properties, not even via traits.
         if !matches!(class.kind, ClassLikeKind::Enum) {
             let props = collect_overridable_properties(class, &partial, &class_loader);
-            let mut prop_items = build_property_override_completions(
-                &props,
-                &NameOverrideCompletionOpts {
-                    use_map: &ctx.use_map,
-                    file_namespace: &ctx.namespace,
-                    indent: &indent,
-                    replace_range: range,
-                    php_version,
-                    line_start,
-                    include_declaration: true,
-                },
-            );
+            let mut prop_items = build_property_override_completions(&props, &opts);
             // The replace range covers the typed `$`, so the filter text
             // must include it for the client-side match to succeed.
             if dollar_prefixed {
@@ -518,18 +479,7 @@ impl Backend {
         if !dollar_prefixed {
             let constants =
                 collect_overridable_constants(class, &partial, php_version, &class_loader);
-            items.extend(build_constant_override_completions(
-                &constants,
-                &NameOverrideCompletionOpts {
-                    use_map: &ctx.use_map,
-                    file_namespace: &ctx.namespace,
-                    indent: &indent,
-                    replace_range: range,
-                    php_version,
-                    line_start,
-                    include_declaration: true,
-                },
-            ));
+            items.extend(build_constant_override_completions(&constants, &opts));
         }
 
         Some(items)

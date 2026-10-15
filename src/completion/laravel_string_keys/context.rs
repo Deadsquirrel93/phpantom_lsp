@@ -10,6 +10,7 @@ use tower_lsp::lsp_types::Position;
 
 use crate::symbol_map::LaravelStringKind;
 use crate::text_position::position_to_offset;
+use crate::text_scan::{is_escaped, skip_php_trivia};
 
 pub(super) struct LaravelStringKeyContext<'a> {
     pub(super) kind: LaravelStringKind,
@@ -35,15 +36,6 @@ pub(super) struct StringArgumentContext<'a> {
     pub(super) shape: StringArgumentShape,
 }
 
-#[inline]
-pub(super) fn is_unescaped(bytes: &[u8], index: usize) -> bool {
-    let mut before = index;
-    while before > 0 && bytes[before - 1] == b'\\' {
-        before -= 1;
-    }
-    (index - before).is_multiple_of(2)
-}
-
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum PhpLexState {
     Code,
@@ -66,7 +58,7 @@ pub(super) fn enclosing_call_open_paren(content: &str) -> Option<usize> {
         index -= 1;
         let byte = bytes[index];
         if let Some(active_quote) = quote {
-            if byte == active_quote && is_unescaped(bytes, index) {
+            if byte == active_quote && !is_escaped(bytes, index) {
                 quote = None;
             }
             continue;
@@ -129,7 +121,7 @@ pub(super) fn callable_before_array_argument(before_quote: &str) -> Option<(&str
         index -= 1;
         let byte = bytes[index];
         if let Some(quote) = string_quote {
-            if byte == quote && is_unescaped(bytes, index) {
+            if byte == quote && !is_escaped(bytes, index) {
                 string_quote = None;
             }
             continue;
@@ -175,46 +167,13 @@ pub(super) fn string_literal_is_array_key(content: &str, cursor: usize, quote: u
     let bytes = content.as_bytes();
     let mut index = cursor;
     while index < bytes.len() {
-        if bytes[index] == quote && is_unescaped(bytes, index) {
-            let after_literal = skip_php_trivia_forward(content, index + 1);
+        if bytes[index] == quote && !is_escaped(bytes, index) {
+            let after_literal = skip_php_trivia(bytes, index + 1);
             return content[after_literal..].starts_with("=>");
         }
         index += 1;
     }
     false
-}
-
-/// Skip whitespace and PHP comments without allocating or scanning beyond the
-/// first real token. Comments are valid between an array key and its `=>`.
-pub(super) fn skip_php_trivia_forward(content: &str, mut index: usize) -> usize {
-    let bytes = content.as_bytes();
-    loop {
-        while bytes.get(index).is_some_and(u8::is_ascii_whitespace) {
-            index += 1;
-        }
-        match bytes.get(index..index.saturating_add(2)) {
-            Some(b"//") => {
-                index += 2;
-                while bytes.get(index).is_some_and(|byte| *byte != b'\n') {
-                    index += 1;
-                }
-            }
-            Some(b"/*") => {
-                index += 2;
-                while index < bytes.len() && bytes.get(index..index + 2) != Some(b"*/") {
-                    index += 1;
-                }
-                index = (index + 2).min(bytes.len());
-            }
-            _ if bytes.get(index) == Some(&b'#') => {
-                index += 1;
-                while bytes.get(index).is_some_and(|byte| *byte != b'\n') {
-                    index += 1;
-                }
-            }
-            _ => return index,
-        }
-    }
 }
 
 pub(super) fn string_argument_context<'a>(
@@ -513,13 +472,13 @@ pub(super) fn last_attribute_open_before(content: &str, end: usize) -> Option<us
                 _ => index += 1,
             },
             PhpLexState::SingleQuoted => {
-                if byte == b'\'' && is_unescaped(bytes, index) {
+                if byte == b'\'' && !is_escaped(bytes, index) {
                     state = PhpLexState::Code;
                 }
                 index += 1;
             }
             PhpLexState::DoubleQuoted => {
-                if byte == b'"' && is_unescaped(bytes, index) {
+                if byte == b'"' && !is_escaped(bytes, index) {
                     state = PhpLexState::Code;
                 }
                 index += 1;
@@ -577,7 +536,7 @@ pub(super) fn attribute_class_start(before_paren: &str, name_start: usize) -> Op
 
     for (index, byte) in bytes.iter().copied().enumerate() {
         if let Some(active) = quote {
-            if byte == active && is_unescaped(bytes, index) {
+            if byte == active && !is_escaped(bytes, index) {
                 quote = None;
             }
             continue;
@@ -660,12 +619,12 @@ pub(super) fn receiver_chain_start(prefix: &str) -> usize {
                 }
             }
             PhpLexState::SingleQuoted => {
-                if byte == b'\'' && is_unescaped(bytes, index) {
+                if byte == b'\'' && !is_escaped(bytes, index) {
                     state = PhpLexState::Code;
                 }
             }
             PhpLexState::DoubleQuoted => {
-                if byte == b'"' && is_unescaped(bytes, index) {
+                if byte == b'"' && !is_escaped(bytes, index) {
                     state = PhpLexState::Code;
                 }
             }
@@ -768,14 +727,14 @@ pub(super) fn is_method_chain_suffix(suffix: &str) -> bool {
         let byte = bytes[index];
         match state {
             PhpLexState::SingleQuoted => {
-                if byte == b'\'' && is_unescaped(bytes, index) {
+                if byte == b'\'' && !is_escaped(bytes, index) {
                     state = PhpLexState::Code;
                 }
                 index += 1;
                 continue;
             }
             PhpLexState::DoubleQuoted => {
-                if byte == b'"' && is_unescaped(bytes, index) {
+                if byte == b'"' && !is_escaped(bytes, index) {
                     state = PhpLexState::Code;
                 }
                 index += 1;
@@ -900,7 +859,7 @@ pub(super) fn detect_laravel_string_key_context_inner<'a>(
     while i > 0 {
         i -= 1;
         let ch = bytes[i];
-        if (ch == b'\'' || ch == b'"') && is_unescaped(bytes, i) {
+        if (ch == b'\'' || ch == b'"') && !is_escaped(bytes, i) {
             quote_pos = Some(i);
             break;
         }

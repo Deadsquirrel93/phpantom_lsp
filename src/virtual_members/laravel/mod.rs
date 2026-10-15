@@ -107,6 +107,7 @@ pub(crate) mod array_file;
 mod auth;
 mod builder;
 mod builder_injection;
+mod cast_literals;
 mod casts;
 mod commands;
 mod completion_cache;
@@ -1059,6 +1060,38 @@ fn push_or_replace_property(properties: &mut Vec<PropertyInfo>, property: Proper
     }
 }
 
+/// The virtual property accessor `method` synthesizes as `prop_name`,
+/// backed by the schema column of that name when the table has one.
+fn accessor_property(
+    method: &crate::types::MethodInfo,
+    prop_name: &str,
+    property_type: Option<&PhpType>,
+    schema_table: Option<&SchemaTable>,
+    mutator_methods: &HashMap<String, String>,
+) -> PropertyInfo {
+    let method_name = method.name.to_string();
+    let mutator = mutator_methods.get(prop_name).cloned();
+    let column = schema_column_source(schema_table, prop_name);
+    let source = if column.is_some() {
+        PropertySource::Accessor {
+            method: method_name,
+            mutator,
+            column,
+        }
+    } else {
+        PropertySource::ComputedProperty {
+            method: method_name,
+            mutator,
+        }
+    };
+    PropertyInfo {
+        deprecation_message: method.deprecation_message().map(str::to_owned),
+        description: method.description.clone(),
+        source: Some(source),
+        ..PropertyInfo::virtual_property_typed(prop_name, property_type)
+    }
+}
+
 impl VirtualMemberProvider for LaravelModelProvider {
     /// Returns `true` if the class extends `Illuminate\Database\Eloquent\Model`.
     fn applies_to(
@@ -1282,30 +1315,15 @@ impl VirtualMemberProvider for LaravelModelProvider {
             // ── Legacy accessors (getXAttribute) ────────────────────
             if is_legacy_accessor(method) {
                 let prop_name = legacy_accessor_property_name(&method.name);
-                let column = schema_column_source(schema_table.as_ref(), &prop_name);
-                let source = if column.is_some() {
-                    PropertySource::Accessor {
-                        method: method.name.to_string(),
-                        mutator: mutator_methods.get(&prop_name).cloned(),
-                        column,
-                    }
-                } else {
-                    PropertySource::ComputedProperty {
-                        method: method.name.to_string(),
-                        mutator: mutator_methods.get(&prop_name).cloned(),
-                    }
-                };
                 push_or_replace_property(
                     &mut properties,
-                    PropertyInfo {
-                        deprecation_message: method.deprecation_message().map(str::to_owned),
-                        description: method.description.clone(),
-                        source: Some(source),
-                        ..PropertyInfo::virtual_property_typed(
-                            &prop_name,
-                            method.return_type.as_ref(),
-                        )
-                    },
+                    accessor_property(
+                        method,
+                        &prop_name,
+                        method.return_type.as_ref(),
+                        schema_table.as_ref(),
+                        &mutator_methods,
+                    ),
                 );
                 continue;
             }
@@ -1314,27 +1332,15 @@ impl VirtualMemberProvider for LaravelModelProvider {
             if is_modern_accessor(method) {
                 let prop_name = camel_to_snake(&method.name);
                 let accessor_type = extract_modern_accessor_type(method);
-                let column = schema_column_source(schema_table.as_ref(), &prop_name);
-                let source = if column.is_some() {
-                    PropertySource::Accessor {
-                        method: method.name.to_string(),
-                        mutator: mutator_methods.get(&prop_name).cloned(),
-                        column,
-                    }
-                } else {
-                    PropertySource::ComputedProperty {
-                        method: method.name.to_string(),
-                        mutator: mutator_methods.get(&prop_name).cloned(),
-                    }
-                };
                 push_or_replace_property(
                     &mut properties,
-                    PropertyInfo {
-                        deprecation_message: method.deprecation_message().map(str::to_owned),
-                        description: method.description.clone(),
-                        source: Some(source),
-                        ..PropertyInfo::virtual_property_typed(&prop_name, Some(&accessor_type))
-                    },
+                    accessor_property(
+                        method,
+                        &prop_name,
+                        Some(&accessor_type),
+                        schema_table.as_ref(),
+                        &mutator_methods,
+                    ),
                 );
                 continue;
             }

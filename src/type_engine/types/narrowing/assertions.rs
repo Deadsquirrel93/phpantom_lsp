@@ -127,20 +127,8 @@ fn resolve_static_receiver_class(
     class_expr: &Expression<'_>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Option<Arc<ClassInfo>> {
-    match class_expr {
-        Expression::Identifier(ident) => {
-            let name = bytes_to_str(ident.value());
-            (ctx.class_loader)(&ctx.written_names().resolve_class(name))
-        }
-        Expression::Self_(_) | Expression::Static(_) => {
-            (ctx.class_loader)(&ctx.current_class.fqn())
-        }
-        Expression::Parent(_) => {
-            let parent = ctx.current_class.parent_class.as_ref()?;
-            (ctx.class_loader)(parent)
-        }
-        _ => None,
-    }
+    ctx.written_names()
+        .static_receiver_class(class_expr, ctx.class_loader)
 }
 
 /// Resolve the receiver class of an instance method call (the `$x` in
