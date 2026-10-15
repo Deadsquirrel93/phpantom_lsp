@@ -36,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Generators written as closure arguments.** A `yield` or `return` inside a string or a comment no longer counts toward the generator type of a closure passed as an argument, and `yield fn ($x) => $x` is read as yielding an arrow function rather than a key and a value. Closure parameters with a default value containing a comma, such as `string $sep = ','`, are no longer split in two.
 - **Functions declared in `else` branches are checked.** A function declared in the `elseif` or `else` branch of an `if`, or in an `if` nested inside another, now gets the same diagnostics as any other function. Before, only the first branch was checked.
 - **`?->` method calls on a `null` value.** `$x?->save()` where `$x` is known to be `null` is no longer reported as a call on `null`, the same as `$x?->name` already was. Laravel strings passed through `?->`, such as the ability in `auth()->user()?->can('edit-post')`, are now checked and navigable like those passed through `->`.
 - **Files with Windows line endings.** In a file saved with `\r\n` line endings, PHPStan quick fixes now edit the line they were offered for, and an inline `@var` annotation applies where it is written instead of in an earlier function.

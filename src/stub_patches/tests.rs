@@ -13,30 +13,7 @@ fn empty_class(name: &str) -> ClassInfo {
 fn empty_function(name: &str) -> FunctionInfo {
     FunctionInfo {
         name: atom(name),
-        name_offset: 0,
-        parameters: Vec::new().into(),
-        return_type: None,
-        native_return_type: None,
-        description: None,
-        return_description: None,
-        links: Vec::new(),
-        see_refs: Vec::new(),
-        namespace: None,
-        conditional_return: None,
-        type_assertions: Vec::new(),
-        deprecation_message: None,
-        deprecated_replacement: None,
-        throws: Vec::new(),
-        template_params: Vec::new(),
-        template_param_bounds: Default::default(),
-        template_bindings: Vec::new(),
-        template_param_defaults: Default::default(),
-        is_polyfill: false,
-        overloads: Vec::new(),
-        is_pure: false,
-        is_impure: false,
-        reads_func_args: false,
-        unverified_doc_types: Default::default(),
+        ..Default::default()
     }
 }
 

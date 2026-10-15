@@ -111,8 +111,9 @@ impl TemplateVariance {
 /// Visibility of a class member (method, property, or constant).
 ///
 /// In PHP, members without an explicit visibility modifier default to `Public`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Visibility {
+    #[default]
     Public,
     Protected,
     Private,

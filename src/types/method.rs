@@ -20,7 +20,7 @@ pub type MethodStoreKey = (String, String);
 pub type MethodStore = Arc<parking_lot::RwLock<HashMap<MethodStoreKey, Arc<MethodInfo>>>>;
 
 /// Stores extracted method information from a parsed PHP class.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct MethodInfo {
     /// The method name (e.g. "updateText").
     pub name: Atom,

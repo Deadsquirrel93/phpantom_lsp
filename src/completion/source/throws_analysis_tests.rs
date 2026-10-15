@@ -5,7 +5,7 @@ use super::catch::*;
 use super::*;
 use crate::atom::atom;
 use crate::php_type::PhpType;
-use crate::types::{ClassInfo, ClassLikeKind, FunctionInfo, MethodExtras, MethodInfo, Visibility};
+use crate::types::{ClassInfo, FunctionInfo, MethodExtras, MethodInfo};
 use tower_lsp::lsp_types::Position;
 
 // ── Low-level scanning tests ────────────────────────────────────────
@@ -796,77 +796,23 @@ fn make_class_with_throws(name: &str, methods: Vec<(&str, Vec<&str>)>) -> Arc<Cl
         .into_iter()
         .map(|(method_name, throws)| MethodInfo {
             name: crate::atom::atom(method_name),
-            name_offset: 0,
-            parameters: Vec::new().into(),
-            return_type: None,
-            native_return_type: None,
-            description: None,
-            is_static: false,
-            visibility: Visibility::Public,
-            has_scope_attribute: false,
-            is_abstract: false,
-            is_final: false,
-            is_virtual: false,
-            is_macro: false,
-            is_inferred_return: false,
-            is_pure: false,
-            is_impure: false,
-            reads_func_args: false,
             extras: MethodExtras {
                 throws: throws.into_iter().map(PhpType::parse).collect(),
                 ..Default::default()
             }
             .into_option(),
+            ..Default::default()
         })
         .collect();
 
     Arc::new(ClassInfo {
-        kind: ClassLikeKind::Class,
         name: crate::atom::atom(name),
         methods: method_infos
             .into_iter()
             .map(Arc::new)
             .collect::<Vec<_>>()
             .into(),
-        method_index: Default::default(),
-        indexed_method_count: 0,
-        properties: Default::default(),
-        constants: Default::default(),
-        start_offset: 0,
-        end_offset: 0,
-        keyword_offset: 0,
-        decl_start_offset: 0,
-        parent_class: None,
-        interfaces: Vec::new(),
-        used_traits: Vec::new(),
-        mixins: Vec::new(),
-        mixin_generics: Vec::new(),
-        require_extends: None,
-        require_implements: Vec::new(),
-        is_final: false,
-        is_abstract: false,
-        is_readonly: false,
-        deprecation_message: None,
-        deprecated_replacement: None,
-        links: Vec::new(),
-        see_refs: Vec::new(),
-        template_params: Vec::new(),
-        template_param_bounds: Default::default(),
-        template_param_defaults: Default::default(),
-        extends_generics: Vec::new(),
-        implements_generics: Vec::new(),
-        use_generics: Vec::new(),
-        type_aliases: Default::default(),
-        unverified_doc_types: Default::default(),
-        trait_precedences: Vec::new(),
-        trait_aliases: Vec::new(),
-        class_docblock: None,
-        doc_members: None,
-        file_namespace: None,
-        backed_type: None,
-        attribute_targets: 0,
-        laravel: None,
-        fqn: None,
+        ..Default::default()
     })
 }
 
@@ -1190,30 +1136,8 @@ fn test_find_cross_file_propagated_throws_function_call() {
 
     let func_info = FunctionInfo {
         name: crate::atom::atom("riskyFunction"),
-        name_offset: 0,
-        parameters: Vec::new().into(),
-        return_type: None,
-        native_return_type: None,
-        description: None,
-        return_description: None,
-        links: Vec::new(),
-        see_refs: Vec::new(),
-        namespace: None,
-        conditional_return: None,
-        type_assertions: Vec::new(),
-        deprecation_message: None,
-        deprecated_replacement: None,
-        template_params: Vec::new(),
-        template_param_bounds: Default::default(),
-        template_bindings: Vec::new(),
-        template_param_defaults: Default::default(),
         throws: vec![PhpType::parse("DatabaseException")],
-        is_polyfill: false,
-        overloads: vec![],
-        is_pure: false,
-        is_impure: false,
-        reads_func_args: false,
-        unverified_doc_types: Default::default(),
+        ..Default::default()
     };
 
     let class_loader = |_name: &str| -> Option<Arc<ClassInfo>> { None };
@@ -1335,30 +1259,8 @@ fn test_find_cross_file_propagated_throws_mixed_patterns() {
 
     let func_info = FunctionInfo {
         name: crate::atom::atom("helperFunction"),
-        name_offset: 0,
-        parameters: Vec::new().into(),
-        return_type: None,
-        native_return_type: None,
-        description: None,
-        return_description: None,
-        links: Vec::new(),
-        see_refs: Vec::new(),
-        namespace: None,
-        conditional_return: None,
-        type_assertions: Vec::new(),
-        deprecation_message: None,
-        deprecated_replacement: None,
-        template_params: Vec::new(),
-        template_param_bounds: Default::default(),
-        template_bindings: Vec::new(),
-        template_param_defaults: Default::default(),
         throws: vec![PhpType::parse("HelperException")],
-        is_polyfill: false,
-        overloads: vec![],
-        is_pure: false,
-        is_impure: false,
-        reads_func_args: false,
-        unverified_doc_types: Default::default(),
+        ..Default::default()
     };
 
     let function_loader = move |name: &str, _offset: u32| -> Option<FunctionInfo> {

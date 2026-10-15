@@ -298,7 +298,6 @@ fn test_apply_substitution_to_method_modifies_return_and_params() {
 
     let mut method = MethodInfo {
         name: crate::atom::atom("first"),
-        name_offset: 0,
         parameters: vec![crate::types::ParameterInfo {
             name: crate::atom::atom("$key"),
             is_required: false,
@@ -313,20 +312,7 @@ fn test_apply_substitution_to_method_modifies_return_and_params() {
         }]
         .into(),
         return_type: Some(PhpType::parse("TValue")),
-        native_return_type: None,
-        description: None,
-        is_static: false,
-        visibility: Visibility::Public,
-        has_scope_attribute: false,
-        is_abstract: false,
-        is_final: false,
-        is_virtual: false,
-        is_macro: false,
-        is_inferred_return: false,
-        is_pure: false,
-        is_impure: false,
-        reads_func_args: false,
-        extras: None,
+        ..Default::default()
     };
 
     apply_substitution_to_method(&mut method, &subs);

@@ -68,7 +68,7 @@ pub(crate) struct ResolvedCallableTarget {
 ///
 /// This is used for global / namespaced functions defined outside of classes,
 /// typically found in files listed by Composer's `autoload_files.php`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct FunctionInfo {
     /// The function name (e.g. "array_map", "myHelper").
     pub name: Atom,
