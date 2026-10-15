@@ -44,6 +44,7 @@ fn test_find_throw_statements_skips_comments() {
     let body = r#"
         // throw new CommentException();
         /* throw new BlockException(); */
+        # throw new HashException();
         throw new RealException("msg");
     "#;
     let throws = find_throw_statements(body);

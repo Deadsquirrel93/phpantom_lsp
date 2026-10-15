@@ -212,40 +212,4 @@ Each item must include:
 
 # Outstanding items
 
-Filed by a refactoring pass on 2026-10-15 that worked through duplicated
-code without running the full Step 3 checklist. Each item touches its own
-set of files.
-
-## 1. One enrichment decision for generated docblocks
-
-`enrichment_snippet` (a string with tab stops) and
-`enrichment_plain_typed_fqn` (a `PhpType`) in
-`src/completion/phpdoc/generation/build.rs` make the same decisions twice:
-a missing type becomes `mixed`, a bare `array` becomes `array<mixed>`, a
-bare callable gets a `(): mixed` signature, union members are enriched one
-by one, and a templated class gets its template parameters. Decide once,
-building the enriched `PhpType`, and render it either way through the
-`DocForm` in the same file, so the snippet and plain-text docblocks cannot
-drift apart. Files: `completion/phpdoc/generation/build.rs` and the four
-`enrichment_snippet` callers in `completion/phpdoc/mod.rs`.
-
-## 2. One code-offset scan for the text-based throws analysis
-
-Four byte loops in `src/completion/source/throws_analysis/` open with the
-same string, `//` and `/* */` skipping (`find_throw_statements`,
-`find_throw_expression_types` and `find_propagated_throws` in
-`scanning.rs`, `find_cross_file_propagated_throws` in `cross_file.rs`),
-and `catch.rs` repeats it twice more. None of them skips a `#` comment,
-which `text_scan::skip_php_comment` handles. Give them one iterator over
-the offsets outside strings and comments, built on `skip_php_comment` and
-`skip_string_forward`, and use `text_scan::keyword_ends_at` for their
-`throw` / `new` word-boundary checks.
-
-## 3. One state machine for the two classmap scanners
-
-`find_symbols` and `find_classes` in `src/classmap_scanner/lexer.rs`
-repeat about 120 lines of the same string, comment, heredoc and
-namespace handling. Merge them into one scanner generic over a
-`const SYMBOLS: bool`, so the PSR-4 path still compiles to the code it
-runs today, and compare a vendor scan before and after to confirm startup
-time does not move.
+No outstanding items.

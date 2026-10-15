@@ -542,6 +542,54 @@ pub(crate) fn find_unmatched_close_bytes(
     None
 }
 
+/// The byte offsets of `bytes` that are code: not inside a quote
+/// (`'…'` or `"…"`, with backslash escapes) or a PHP comment (see
+/// [`skip_php_comment`]).
+///
+/// A scanner that consumes a whole token at the offset it was handed can
+/// jump past it with [`skip_to`](Self::skip_to).
+pub(crate) struct CodeOffsets<'a> {
+    bytes: &'a [u8],
+    pos: usize,
+}
+
+impl<'a> CodeOffsets<'a> {
+    pub(crate) fn new(bytes: &'a [u8]) -> Self {
+        CodeOffsets { bytes, pos: 0 }
+    }
+
+    /// Resume the scan at `pos`, which must not be inside a quote or a
+    /// comment.
+    pub(crate) fn skip_to(&mut self, pos: usize) {
+        self.pos = self.pos.max(pos);
+    }
+}
+
+impl Iterator for CodeOffsets<'_> {
+    type Item = usize;
+
+    fn next(&mut self) -> Option<usize> {
+        while self.pos < self.bytes.len() {
+            let pos = self.pos;
+            if let Some(past) = skip_php_comment(self.bytes, pos) {
+                self.pos = past;
+            } else if matches!(self.bytes[pos], b'\'' | b'"') {
+                self.pos = skip_string_forward(self.bytes, pos);
+            } else {
+                self.pos = pos + 1;
+                return Some(pos);
+            }
+        }
+        None
+    }
+}
+
+/// Whether the word `keyword` starts at `pos` in `bytes`, with no
+/// identifier byte on either side of it.
+pub(crate) fn keyword_starts_at(bytes: &[u8], pos: usize, keyword: &[u8]) -> bool {
+    bytes[pos..].starts_with(keyword) && keyword_ends_at(bytes, pos + keyword.len(), keyword)
+}
+
 /// What a top-level scan makes of the byte it is looking at.
 pub(crate) enum ScanStep {
     /// Step over this many bytes without interpreting them further.

@@ -671,11 +671,9 @@ pub fn build_phpdoc_completions(
                                 .unwrap_or_else(|| shorten_php_type(th, use_map, file_namespace));
 
                             // Snippet insert text with tab stops on template params.
-                            let mut tab_stop = 1u32;
                             let snippet_type = smart.class_loader.and_then(|cl| {
                                 generation::enrichment_snippet(
                                     Some(th),
-                                    &mut tab_stop,
                                     cl,
                                     use_map,
                                     file_namespace,
@@ -739,15 +737,8 @@ pub fn build_phpdoc_completions(
                         .unwrap_or_else(|| shorten_php_type(ret, use_map, file_namespace));
 
                     // Snippet insert text with tab stops on template params.
-                    let mut tab_stop = 1u32;
                     let snippet_type = smart.class_loader.and_then(|cl| {
-                        generation::enrichment_snippet(
-                            Some(ret),
-                            &mut tab_stop,
-                            cl,
-                            use_map,
-                            file_namespace,
-                        )
+                        generation::enrichment_snippet(Some(ret), cl, use_map, file_namespace)
                     });
 
                     let (insert, fmt) = if let Some(snippet) = snippet_type {
@@ -846,15 +837,8 @@ pub fn build_phpdoc_completions(
                     .unwrap_or_else(|| shorten_php_type(th, use_map, file_namespace));
 
                 // Snippet insert text with tab stops on template params.
-                let mut tab_stop = 1u32;
                 let snippet_type = smart.class_loader.and_then(|cl| {
-                    generation::enrichment_snippet(
-                        Some(th),
-                        &mut tab_stop,
-                        cl,
-                        use_map,
-                        file_namespace,
-                    )
+                    generation::enrichment_snippet(Some(th), cl, use_map, file_namespace)
                 });
 
                 let (insert, fmt) = if let Some(snippet) = snippet_type {
@@ -897,13 +881,11 @@ pub fn build_phpdoc_completions(
                         })
                         .unwrap_or_else(|| shorten_php_type(parsed_ty, use_map, file_namespace));
 
-                    let mut tab_stop = 1u32;
                     let snippet_type = smart
                         .class_loader
                         .and_then(|cl| {
                             generation::enrichment_snippet(
                                 Some(parsed_ty),
-                                &mut tab_stop,
                                 cl,
                                 use_map,
                                 file_namespace,

@@ -13,91 +13,75 @@ fn no_classes(_name: &str) -> Option<Arc<ClassInfo>> {
 
 #[test]
 fn enrichment_missing_type_produces_mixed() {
-    let mut ts = 1;
-    let result = enrichment_snippet(None, &mut ts, &no_classes, &HashMap::new(), &None);
+    let result = enrichment_snippet(None, &no_classes, &HashMap::new(), &None);
     assert_eq!(result, Some("${1:mixed}".to_string()));
-    assert_eq!(ts, 2);
 }
 
 #[test]
 fn enrichment_array_produces_array_tabstop() {
-    let mut ts = 1;
     let hint = PhpType::parse("array");
-    let result = enrichment_snippet(Some(&hint), &mut ts, &no_classes, &HashMap::new(), &None);
+    let result = enrichment_snippet(Some(&hint), &no_classes, &HashMap::new(), &None);
     assert_eq!(result, Some("array<${1:mixed}>".to_string()));
-    assert_eq!(ts, 2);
 }
 
 #[test]
 fn enrichment_scalar_returns_none() {
-    let mut ts = 1;
     let hint = PhpType::parse("string");
-    let result = enrichment_snippet(Some(&hint), &mut ts, &no_classes, &HashMap::new(), &None);
+    let result = enrichment_snippet(Some(&hint), &no_classes, &HashMap::new(), &None);
     assert!(result.is_none());
-    assert_eq!(ts, 1, "tab stop should not advance for skipped types");
 }
 
 #[test]
 fn enrichment_union_without_array_returns_none() {
-    let mut ts = 1;
     let hint = PhpType::parse("string|int");
-    let result = enrichment_snippet(Some(&hint), &mut ts, &no_classes, &HashMap::new(), &None);
+    let result = enrichment_snippet(Some(&hint), &no_classes, &HashMap::new(), &None);
     assert!(result.is_none());
 }
 
 #[test]
 fn enrichment_union_with_array_enriches_parts() {
-    let mut ts = 1;
     let hint = PhpType::parse("array|string");
-    let result = enrichment_snippet(Some(&hint), &mut ts, &no_classes, &HashMap::new(), &None);
+    let result = enrichment_snippet(Some(&hint), &no_classes, &HashMap::new(), &None);
     assert_eq!(result, Some("array<${1:mixed}>|string".to_string()));
 }
 
 #[test]
 fn enrichment_union_with_closure_enriches_parts() {
-    let mut ts = 1;
     let hint = PhpType::parse("Closure|null");
-    let result = enrichment_snippet(Some(&hint), &mut ts, &no_classes, &HashMap::new(), &None);
+    let result = enrichment_snippet(Some(&hint), &no_classes, &HashMap::new(), &None);
     assert_eq!(result, Some("(Closure(): ${1:mixed})|null".to_string()));
 }
 
 #[test]
 fn enrichment_nullable_returns_none() {
-    let mut ts = 1;
     let hint = PhpType::parse("?string");
-    let result = enrichment_snippet(Some(&hint), &mut ts, &no_classes, &HashMap::new(), &None);
+    let result = enrichment_snippet(Some(&hint), &no_classes, &HashMap::new(), &None);
     assert!(result.is_none());
 }
 
 #[test]
 fn enrichment_void_returns_none() {
-    let mut ts = 1;
     let hint = PhpType::parse("void");
-    let result = enrichment_snippet(Some(&hint), &mut ts, &no_classes, &HashMap::new(), &None);
+    let result = enrichment_snippet(Some(&hint), &no_classes, &HashMap::new(), &None);
     assert!(result.is_none());
 }
 
 #[test]
 fn enrichment_closure_produces_callable_placeholder() {
-    let mut ts = 1;
     let hint = PhpType::parse("Closure");
-    let result = enrichment_snippet(Some(&hint), &mut ts, &no_classes, &HashMap::new(), &None);
+    let result = enrichment_snippet(Some(&hint), &no_classes, &HashMap::new(), &None);
     assert_eq!(result, Some("(Closure(): ${1:mixed})".to_string()));
-    assert_eq!(ts, 2);
 }
 
 #[test]
 fn enrichment_callable_produces_callable_placeholder() {
-    let mut ts = 1;
     let hint = PhpType::parse("callable");
-    let result = enrichment_snippet(Some(&hint), &mut ts, &no_classes, &HashMap::new(), &None);
+    let result = enrichment_snippet(Some(&hint), &no_classes, &HashMap::new(), &None);
     assert_eq!(result, Some("(callable(): ${1:mixed})".to_string()));
-    assert_eq!(ts, 2);
 }
 
 #[test]
 fn enrichment_class_without_templates_returns_none() {
-    let mut ts = 1;
     // Class exists but has no template params.
     let loader = |name: &str| -> Option<Arc<ClassInfo>> {
         if name == "User" {
@@ -110,13 +94,12 @@ fn enrichment_class_without_templates_returns_none() {
         }
     };
     let hint = PhpType::parse("User");
-    let result = enrichment_snippet(Some(&hint), &mut ts, &loader, &HashMap::new(), &None);
+    let result = enrichment_snippet(Some(&hint), &loader, &HashMap::new(), &None);
     assert!(result.is_none());
 }
 
 #[test]
 fn enrichment_class_with_templates_produces_generic() {
-    let mut ts = 1;
     let loader = |name: &str| -> Option<Arc<ClassInfo>> {
         if name == "Collection" {
             Some(Arc::new(ClassInfo {
@@ -129,17 +112,15 @@ fn enrichment_class_with_templates_produces_generic() {
         }
     };
     let hint = PhpType::parse("Collection");
-    let result = enrichment_snippet(Some(&hint), &mut ts, &loader, &HashMap::new(), &None);
+    let result = enrichment_snippet(Some(&hint), &loader, &HashMap::new(), &None);
     assert_eq!(
         result,
         Some("Collection<${1:TKey}, ${2:TValue}>".to_string())
     );
-    assert_eq!(ts, 3);
 }
 
 #[test]
 fn enrichment_snippet_shortens_class_via_use_map() {
-    let mut ts = 1;
     let loader = |name: &str| -> Option<Arc<ClassInfo>> {
         if name == "App\\Collection" {
             Some(Arc::new(ClassInfo {
@@ -154,7 +135,7 @@ fn enrichment_snippet_shortens_class_via_use_map() {
     let hint = PhpType::parse("App\\Collection");
     let mut use_map = HashMap::new();
     use_map.insert("Collection".to_string(), "App\\Collection".to_string());
-    let result = enrichment_snippet(Some(&hint), &mut ts, &loader, &use_map, &None);
+    let result = enrichment_snippet(Some(&hint), &loader, &use_map, &None);
     assert_eq!(
         result,
         Some("Collection<${1:TKey}, ${2:TValue}>".to_string())

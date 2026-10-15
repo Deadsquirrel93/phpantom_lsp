@@ -13,9 +13,7 @@
 use crate::atom::atom;
 use crate::completion::source::comment_position::position_to_byte_offset;
 use crate::php_type::PhpType;
-use crate::text_scan::{
-    find_matching_forward, skip_block_comment, skip_line_comment, skip_string_forward,
-};
+use crate::text_scan::{CodeOffsets, find_matching_forward, is_ident_byte, keyword_starts_at};
 use tower_lsp::lsp_types::Position;
 
 /// Information about a `throw` statement (or throw-expression) found in
@@ -39,59 +37,36 @@ pub(crate) struct ThrowInfo {
 pub(crate) fn find_throw_statements(body: &str) -> Vec<ThrowInfo> {
     let mut results = Vec::new();
     let bytes = body.as_bytes();
-    let len = bytes.len();
-    let mut pos = 0;
 
-    while pos < len {
-        // Skip string literals
-        if bytes[pos] == b'\'' || bytes[pos] == b'"' {
-            pos = skip_string_forward(bytes, pos);
-            continue;
-        }
-
-        // Skip line comments
-        if pos + 1 < len && bytes[pos] == b'/' && bytes[pos + 1] == b'/' {
-            pos = skip_line_comment(bytes, pos);
-            continue;
-        }
-
-        // Skip block comments
-        if pos + 1 < len && bytes[pos] == b'/' && bytes[pos + 1] == b'*' {
-            pos = skip_block_comment(bytes, pos);
-            continue;
-        }
-
-        // Look for `throw` keyword
-        if pos + 5 <= len && &body[pos..pos + 5] == "throw" {
-            let before_ok =
-                pos == 0 || !bytes[pos - 1].is_ascii_alphanumeric() && bytes[pos - 1] != b'_';
-            let after_ok = pos + 5 >= len
-                || (!bytes[pos + 5].is_ascii_alphanumeric() && bytes[pos + 5] != b'_');
-            if before_ok && after_ok {
-                let after_throw = body[pos + 5..].trim_start();
-                if after_throw.starts_with("new ")
-                    || after_throw.starts_with("new\t")
-                    || after_throw.starts_with("new\n")
-                {
-                    let after_new = after_throw[3..].trim_start();
-                    let type_end = after_new
-                        .find(|c: char| !c.is_alphanumeric() && c != '\\' && c != '_')
-                        .unwrap_or(after_new.len());
-                    let type_name = &after_new[..type_end];
-                    if !type_name.is_empty() {
-                        results.push(ThrowInfo {
-                            type_name: PhpType::named(atom(type_name)),
-                            offset: pos,
-                        });
-                    }
-                }
+    for pos in CodeOffsets::new(bytes) {
+        if let Some(after_new) = throw_new_at(body, pos) {
+            let type_end = after_new
+                .find(|c: char| !c.is_alphanumeric() && c != '\\' && c != '_')
+                .unwrap_or(after_new.len());
+            let type_name = &after_new[..type_end];
+            if !type_name.is_empty() {
+                results.push(ThrowInfo {
+                    type_name: PhpType::named(atom(type_name)),
+                    offset: pos,
+                });
             }
         }
-
-        pos += 1;
     }
 
     results
+}
+
+/// The text after the `throw` keyword at `pos` in `body`, whitespace
+/// trimmed, or `None` when no `throw` keyword starts there.
+pub(super) fn after_throw_at(body: &str, pos: usize) -> Option<&str> {
+    keyword_starts_at(body.as_bytes(), pos, b"throw").then(|| body[pos + 5..].trim_start())
+}
+
+/// The text after `throw new` at `pos` in `body`, whitespace trimmed, or
+/// `None` when no `throw new` starts there.
+fn throw_new_at(body: &str, pos: usize) -> Option<&str> {
+    let after_throw = after_throw_at(body, pos)?;
+    keyword_starts_at(after_throw.as_bytes(), 0, b"new").then(|| after_throw[3..].trim_start())
 }
 
 /// Find `throw $this->method(…)` / `throw self::method(…)` /
@@ -103,80 +78,51 @@ pub(crate) fn find_throw_expression_types(body: &str, file_content: &str) -> Vec
     let mut results = Vec::new();
     let method_patterns: &[&str] = &["$this->", "self::", "static::"];
 
-    let bytes = body.as_bytes();
-    let len = bytes.len();
-    let mut pos = 0;
-
-    while pos < len {
-        if bytes[pos] == b'\'' || bytes[pos] == b'"' {
-            pos = skip_string_forward(bytes, pos);
+    for pos in CodeOffsets::new(body.as_bytes()) {
+        let Some(after_throw) = after_throw_at(body, pos) else {
+            continue;
+        };
+        // Skip `throw new` (handled by find_throw_statements)
+        if keyword_starts_at(after_throw.as_bytes(), 0, b"new") {
             continue;
         }
-        if pos + 1 < len && bytes[pos] == b'/' && bytes[pos + 1] == b'/' {
-            pos = skip_line_comment(bytes, pos);
-            continue;
-        }
-        if pos + 1 < len && bytes[pos] == b'/' && bytes[pos + 1] == b'*' {
-            pos = skip_block_comment(bytes, pos);
-            continue;
-        }
-
-        // Look for `throw` keyword
-        if pos + 5 <= len && &body[pos..pos + 5] == "throw" {
-            let before_ok =
-                pos == 0 || !bytes[pos - 1].is_ascii_alphanumeric() && bytes[pos - 1] != b'_';
-            let after_ok = pos + 5 >= len
-                || (!bytes[pos + 5].is_ascii_alphanumeric() && bytes[pos + 5] != b'_');
-            if before_ok && after_ok {
-                let after_throw = body[pos + 5..].trim_start();
-                // Skip `throw new` (handled by find_throw_statements)
-                let is_new = after_throw.starts_with("new ")
-                    || after_throw.starts_with("new\t")
-                    || after_throw.starts_with("new\n");
-                if !is_new {
-                    let mut matched = false;
-                    // Try method-call patterns first: $this->m(), self::m(), static::m()
-                    for pat in method_patterns {
-                        if let Some(rest) = after_throw.strip_prefix(pat) {
-                            let name_end = rest
-                                .find(|c: char| !c.is_alphanumeric() && c != '_')
-                                .unwrap_or(rest.len());
-                            let method_name = &rest[..name_end];
-                            if !method_name.is_empty()
-                                && let Some(ret_type) =
-                                    find_method_return_type(file_content, method_name)
-                            {
-                                results.push(ThrowInfo {
-                                    type_name: ret_type,
-                                    offset: pos,
-                                });
-                            }
-                            matched = true;
-                            break;
-                        }
-                    }
-                    // Bare function call: `throw makeException(…)`
-                    if !matched {
-                        let name_end = after_throw
-                            .find(|c: char| !c.is_alphanumeric() && c != '_' && c != '\\')
-                            .unwrap_or(after_throw.len());
-                        let func_name = after_throw[..name_end].trim_start_matches('\\');
-                        let after_name = after_throw[name_end..].trim_start();
-                        if !func_name.is_empty()
-                            && after_name.starts_with('(')
-                            && let Some(ret_type) = find_method_return_type(file_content, func_name)
-                        {
-                            results.push(ThrowInfo {
-                                type_name: ret_type,
-                                offset: pos,
-                            });
-                        }
-                    }
+        let mut matched = false;
+        // Try method-call patterns first: $this->m(), self::m(), static::m()
+        for pat in method_patterns {
+            if let Some(rest) = after_throw.strip_prefix(pat) {
+                let name_end = rest
+                    .find(|c: char| !c.is_alphanumeric() && c != '_')
+                    .unwrap_or(rest.len());
+                let method_name = &rest[..name_end];
+                if !method_name.is_empty()
+                    && let Some(ret_type) = find_method_return_type(file_content, method_name)
+                {
+                    results.push(ThrowInfo {
+                        type_name: ret_type,
+                        offset: pos,
+                    });
                 }
+                matched = true;
+                break;
             }
         }
-
-        pos += 1;
+        // Bare function call: `throw makeException(…)`
+        if !matched {
+            let name_end = after_throw
+                .find(|c: char| !c.is_alphanumeric() && c != '_' && c != '\\')
+                .unwrap_or(after_throw.len());
+            let func_name = after_throw[..name_end].trim_start_matches('\\');
+            let after_name = after_throw[name_end..].trim_start();
+            if !func_name.is_empty()
+                && after_name.starts_with('(')
+                && let Some(ret_type) = find_method_return_type(file_content, func_name)
+            {
+                results.push(ThrowInfo {
+                    type_name: ret_type,
+                    offset: pos,
+                });
+            }
+        }
     }
 
     results
@@ -198,30 +144,11 @@ pub(crate) fn find_propagated_throws(body: &str, file_content: &str) -> Vec<Thro
     let patterns: &[&str] = &["$this->", "self::", "static::"];
 
     let bytes = body.as_bytes();
-    let len = bytes.len();
-    let mut pos = 0;
 
-    while pos < len {
-        if bytes[pos] == b'\'' || bytes[pos] == b'"' {
-            pos = skip_string_forward(bytes, pos);
-            continue;
-        }
-        if pos + 1 < len && bytes[pos] == b'/' && bytes[pos + 1] == b'/' {
-            pos = skip_line_comment(bytes, pos);
-            continue;
-        }
-        if pos + 1 < len && bytes[pos] == b'/' && bytes[pos + 1] == b'*' {
-            pos = skip_block_comment(bytes, pos);
-            continue;
-        }
-
+    for pos in CodeOffsets::new(bytes) {
         for pat in patterns {
-            if pos + pat.len() <= len && &body[pos..pos + pat.len()] == *pat {
-                let before_ok = if *pat == "$this->" {
-                    true
-                } else {
-                    pos == 0 || !bytes[pos - 1].is_ascii_alphanumeric() && bytes[pos - 1] != b'_'
-                };
+            if bytes[pos..].starts_with(pat.as_bytes()) {
+                let before_ok = *pat == "$this->" || pos == 0 || !is_ident_byte(bytes[pos - 1]);
                 if !before_ok {
                     break;
                 }
@@ -248,8 +175,6 @@ pub(crate) fn find_propagated_throws(body: &str, file_content: &str) -> Vec<Thro
                 break;
             }
         }
-
-        pos += 1;
     }
 
     results

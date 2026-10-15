@@ -2,7 +2,6 @@
 //! from a classified declaration, plus the type-enrichment helpers
 //! that decide when a native type hint needs a PHPDoc tag at all.
 
-use crate::atom::atom;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -17,18 +16,8 @@ use crate::types::{ClassInfo, FunctionLoader};
 
 // ─── Type Enrichment Helpers ────────────────────────────────────────────────
 
-/// Check whether a `PhpType` is a bare callable/Closure keyword (no signature).
-fn is_callable_keyword(pt: &PhpType) -> bool {
-    pt.is_callable()
-}
-
-/// Check whether a `PhpType` is a bare `array` keyword (no generic params).
-fn is_bare_array(pt: &PhpType) -> bool {
-    pt.is_bare_array()
-}
-
 /// Extract the callable display name from a `PhpType` that satisfies
-/// `is_callable_keyword`.
+/// [`PhpType::is_callable`].
 fn callable_display_name(pt: &PhpType) -> &str {
     match pt.kind() {
         TypeKind::Named(s) => s.as_str(),
@@ -36,86 +25,75 @@ fn callable_display_name(pt: &PhpType) -> &str {
     }
 }
 
-/// Determine whether a native type hint "needs enrichment" via a PHPDoc
-/// tag, and if so return the tag type string to use.
+/// Decide whether a native type hint "needs enrichment" via a PHPDoc tag,
+/// and if so build the type the tag should carry.
 ///
 /// Returns `None` when the native type is fully expressed (scalars,
-/// union types, intersection types, non-generic classes).
+/// nullable and intersection types, unions without a bare `array` or
+/// callable member, non-generic classes). Otherwise:
+/// - Missing type → `mixed`
+/// - `array` → `array<mixed>`
+/// - `Closure` / `callable` → `Closure(): mixed`
+/// - a union → each bare `array` / callable member enriched as above
+/// - a class with templates → `ClassName<T1, T2>`
 ///
-/// Returns `Some(tag_text)` when a PHPDoc tag should be emitted:
-/// - Missing type → `"${N:mixed}"` (snippet) or `"mixed"` (plain)
-/// - `array` → `"${N:array}"` (snippet) or `"array"` (plain)
-/// - Class with templates → `"ClassName<${N:T1}, ${N+1:T2}>"` or plain equivalent
-pub(crate) fn enrichment_snippet(
+/// Each part the user is expected to fill in (the `mixed` placeholders
+/// and the template parameters) is built by `fill` from its default, so
+/// the snippet form can put a tab stop there. Class names are written
+/// through `shorten`.
+fn enrich_type(
     type_hint: Option<&PhpType>,
-    tab_stop: &mut u32,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    use_map: &HashMap<String, String>,
-    file_namespace: &Option<String>,
-) -> Option<String> {
-    let pt = match type_hint {
-        None => {
-            let s = format!("${{{}:mixed}}", *tab_stop);
-            *tab_stop += 1;
-            return Some(s);
-        }
-        Some(t) => t,
+    shorten: &dyn Fn(&str) -> String,
+    fill: &mut dyn FnMut(&str) -> PhpType,
+) -> Option<PhpType> {
+    let Some(pt) = type_hint else {
+        return Some(fill("mixed"));
     };
 
     // `void` is never enriched for return types (caller handles skip).
-    // `array` always needs enrichment.
-    if is_bare_array(pt) {
-        let s = format!("array<${{{}:mixed}}>", *tab_stop);
-        *tab_stop += 1;
-        return Some(s);
+    if pt.is_bare_array() {
+        return Some(PhpType::generic_array_val(fill("mixed")));
     }
 
-    // `Closure` / `callable` need a callable-signature placeholder.
-    if is_callable_keyword(pt) {
-        let name = callable_display_name(pt);
-        let s = format!("({}(): ${{{}:mixed}})", name, *tab_stop);
-        *tab_stop += 1;
-        return Some(s);
+    if pt.is_callable() {
+        return Some(PhpType::callable_spec(
+            callable_display_name(pt),
+            vec![],
+            Some(fill("mixed")),
+        ));
     }
 
     // Union types — enrich individual callable / array parts.
-    // Use union_members to correctly handle generic nesting
-    // (e.g. `Collection<int|string, User>|null` must not be split on the inner `|`).
+    // `union_members` keeps generic nesting intact
+    // (`Collection<int|string, User>|null` is not split on the inner `|`).
     let members = pt.union_members();
     if members.len() > 1 {
-        let needs = members
+        if !members
             .iter()
-            .any(|member| is_bare_array(member) || is_callable_keyword(member));
-        if needs {
-            let enriched_parts: Vec<String> = members
-                .iter()
-                .map(|member| {
-                    if is_callable_keyword(member) {
-                        let name = callable_display_name(member);
-                        format!("({}(): ${{{}:mixed}})", name, {
-                            let t = *tab_stop;
-                            *tab_stop += 1;
-                            t
-                        })
-                    } else if is_bare_array(member) {
-                        let s = format!("array<${{{}:mixed}}>", *tab_stop);
-                        *tab_stop += 1;
-                        s
-                    } else {
-                        member
-                            .resolve_names(&|n| {
-                                crate::names::shorten_from_fqn(n, use_map, file_namespace)
-                            })
-                            .to_string()
-                    }
-                })
-                .collect();
-            return Some(enriched_parts.join("|"));
+            .any(|member| member.is_bare_array() || member.is_callable())
+        {
+            return None;
         }
-        return None;
+        let enriched = members
+            .iter()
+            .map(|member| {
+                if member.is_callable() {
+                    PhpType::callable_spec(
+                        callable_display_name(member),
+                        vec![],
+                        Some(fill("mixed")),
+                    )
+                } else if member.is_bare_array() {
+                    PhpType::generic_array_val(fill("mixed"))
+                } else {
+                    member.resolve_names(shorten)
+                }
+            })
+            .collect();
+        return Some(PhpType::union(enriched));
     }
 
-    // Intersection types (&), nullable (?Type) — skip.
     if matches!(pt.kind(), TypeKind::Intersection(_) | TypeKind::Nullable(_)) {
         return None;
     }
@@ -130,20 +108,27 @@ pub(crate) fn enrichment_snippet(
         && let Some(cls) = class_loader(name)
         && !cls.template_params.is_empty()
     {
-        let short_name = crate::names::shorten_from_fqn(name, use_map, file_namespace);
-        let mut parts = Vec::new();
-        for tp in &cls.template_params {
-            parts.push(format!("${{{}:{}}}", *tab_stop, tp));
-            *tab_stop += 1;
-        }
-        return Some(format!("{}<{}>", short_name, parts.join(", ")));
+        let args = cls.template_params.iter().map(|tp| fill(tp)).collect();
+        return Some(PhpType::generic(shorten(name), args));
     }
 
     None
 }
 
-/// Structured version of [`enrichment_plain`] returning a [`PhpType`]
-/// instead of a display string.
+/// The enriched type for `type_hint` (see [`enrich_type`]) as snippet
+/// text, with tab stops numbered from 1 over the parts the user is
+/// expected to fill in.
+pub(crate) fn enrichment_snippet(
+    type_hint: Option<&PhpType>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    use_map: &HashMap<String, String>,
+    file_namespace: &Option<String>,
+) -> Option<String> {
+    DocForm::snippet().enrichment_text(type_hint, class_loader, use_map, file_namespace)
+}
+
+/// The enriched type for `type_hint` (see [`enrich_type`]) as a
+/// [`PhpType`], with class names shortened for the file.
 ///
 /// Use this when the enriched type needs to be compared structurally
 /// (via [`PhpType::equivalent`]) rather than by string equality. The
@@ -155,90 +140,15 @@ pub(crate) fn enrichment_plain_typed(
     use_map: &HashMap<String, String>,
     file_namespace: &Option<String>,
 ) -> Option<PhpType> {
-    let enriched = enrichment_plain_typed_fqn(type_hint, class_loader)?;
-    Some(
-        enriched
-            .resolve_names(&|name| crate::names::shorten_from_fqn(name, use_map, file_namespace)),
+    enrich_type(
+        type_hint,
+        class_loader,
+        &|name| crate::names::shorten_from_fqn(name, use_map, file_namespace),
+        &mut |default| PhpType::parse(default),
     )
 }
 
-/// Compute the enriched type with fully-qualified class names, before the
-/// file's `use`-map and namespace shorten them for display.
-fn enrichment_plain_typed_fqn(
-    type_hint: Option<&PhpType>,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> Option<PhpType> {
-    let pt = match type_hint {
-        None => return Some(PhpType::mixed()),
-        Some(t) => t,
-    };
-
-    if is_bare_array(pt) {
-        return Some(PhpType::generic_array_val(PhpType::mixed()));
-    }
-
-    if is_callable_keyword(pt) {
-        return Some(PhpType::callable_spec(
-            callable_display_name(pt),
-            vec![],
-            Some(PhpType::mixed()),
-        ));
-    }
-
-    // Union types — enrich individual callable / array parts.
-    let members = pt.union_members();
-    if members.len() > 1 {
-        let needs = members
-            .iter()
-            .any(|member| is_bare_array(member) || is_callable_keyword(member));
-        if needs {
-            let enriched: Vec<PhpType> = members
-                .iter()
-                .map(|member| {
-                    if is_callable_keyword(member) {
-                        PhpType::callable_spec(
-                            callable_display_name(member),
-                            vec![],
-                            Some(PhpType::mixed()),
-                        )
-                    } else if is_bare_array(member) {
-                        PhpType::generic_array_val(PhpType::mixed())
-                    } else {
-                        (*member).clone()
-                    }
-                })
-                .collect();
-            return Some(PhpType::union(enriched));
-        }
-        return None;
-    }
-
-    if matches!(pt.kind(), TypeKind::Intersection(_) | TypeKind::Nullable(_)) {
-        return None;
-    }
-
-    // Scalar / built-in types never have template parameters.
-    if pt.is_scalar() {
-        return None;
-    }
-
-    // Try to load the class and check for templates.
-    if let Some(name) = pt.base_name()
-        && let Some(cls) = class_loader(name)
-        && !cls.template_params.is_empty()
-    {
-        let args: Vec<PhpType> = cls
-            .template_params
-            .iter()
-            .map(|s| PhpType::named(atom(s.as_ref())))
-            .collect();
-        return Some(PhpType::generic(name, args));
-    }
-
-    None
-}
-
-/// Plain-text version of `enrichment_snippet` (no tab stops).
+/// Plain-text version of [`enrichment_snippet`] (no tab stops).
 ///
 /// Also used by tag completion (`build_phpdoc_completions`) to enrich
 /// `@param`, `@return`, and `@var` type hints with template parameters.
@@ -252,25 +162,17 @@ pub(crate) fn enrichment_plain(
     file_namespace: &Option<String>,
 ) -> Option<String> {
     let typed = enrichment_plain_typed(type_hint, class_loader, use_map, file_namespace)?;
-
-    // Callable types need parentheses in PHPDoc notation, which
-    // PhpType::Display does not add.
     Some(enrichment_type_to_plain(&typed))
 }
 
-/// Format an enriched `PhpType` as a plain-text PHPDoc type string.
+/// Format an enriched `PhpType` as a PHPDoc type string.
 ///
-/// Callable types are wrapped in parentheses (`(Closure(): mixed)`)
-/// to match PHPDoc inline callable notation. Union members are
-/// formatted individually and joined with `|`.
+/// A callable is wrapped in parentheses (`(Closure(): mixed)`) to match
+/// PHPDoc inline callable notation, which `PhpType`'s `Display` only
+/// does for a callable inside a union.
 fn enrichment_type_to_plain(ty: &PhpType) -> String {
     match ty.kind() {
         TypeKind::Callable { .. } => format!("({})", ty),
-        TypeKind::Union(members) => members
-            .iter()
-            .map(enrichment_type_to_plain)
-            .collect::<Vec<_>>()
-            .join("|"),
         _ => ty.to_string(),
     }
 }
@@ -318,8 +220,26 @@ impl DocForm<'_> {
         }
     }
 
-    /// The enriched type for `type_hint` (see [`enrichment_plain`]), with
-    /// the width it renders at, which aligns the `@param` names.
+    /// The enriched type for `type_hint` (see [`enrich_type`]) as text in
+    /// this form, a tab stop over each part the user is expected to fill in.
+    pub(super) fn enrichment_text(
+        &mut self,
+        type_hint: Option<&PhpType>,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        use_map: &HashMap<String, String>,
+        file_namespace: &Option<String>,
+    ) -> Option<String> {
+        let enriched = enrich_type(
+            type_hint,
+            class_loader,
+            &|name| crate::names::shorten_from_fqn(name, use_map, file_namespace),
+            &mut |default| PhpType::raw(self.field(default)),
+        )?;
+        Some(enrichment_type_to_plain(&enriched))
+    }
+
+    /// [`enrichment_text`](Self::enrichment_text) with the width it
+    /// renders at, which aligns the `@param` names.
     fn enrich(
         &mut self,
         type_hint: Option<&PhpType>,
@@ -327,27 +247,17 @@ impl DocForm<'_> {
         use_map: &HashMap<String, String>,
         file_namespace: &Option<String>,
     ) -> Option<(String, usize)> {
-        match self {
-            DocForm::Snippet { next_tab_stop } => {
-                let text = enrichment_snippet(
-                    type_hint,
-                    next_tab_stop,
-                    class_loader,
-                    use_map,
-                    file_namespace,
-                )?;
-                // The `${N:...}` markers inflate the snippet's length, so
-                // measure the plain text it renders as.
-                let width = enrichment_plain(type_hint, class_loader, use_map, file_namespace)
-                    .map_or(text.len(), |plain| plain.len());
-                Some((text, width))
+        let text = self.enrichment_text(type_hint, class_loader, use_map, file_namespace)?;
+        let width = match self {
+            // The `${N:...}` markers inflate the snippet's length, so
+            // measure the plain text it renders as.
+            DocForm::Snippet { .. } => {
+                enrichment_plain(type_hint, class_loader, use_map, file_namespace)
+                    .map_or(text.len(), |plain| plain.len())
             }
-            DocForm::Plain { .. } => {
-                let text = enrichment_plain(type_hint, class_loader, use_map, file_namespace)?;
-                let width = text.len();
-                Some((text, width))
-            }
-        }
+            DocForm::Plain { .. } => text.len(),
+        };
+        Some((text, width))
     }
 
     /// The docblock made of `lines`.

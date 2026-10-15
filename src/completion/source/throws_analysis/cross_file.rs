@@ -23,7 +23,7 @@ use tower_lsp::lsp_types::Position;
 
 use crate::completion::source::comment_position::position_to_byte_offset;
 use crate::php_type::PhpType;
-use crate::text_scan::{skip_block_comment, skip_line_comment, skip_string_forward};
+use crate::text_scan::{CodeOffsets, is_ident_byte, keyword_starts_at};
 use crate::types::{ClassInfo, FunctionLoader};
 
 use super::catch::{CatchInfo, find_catch_blocks, find_throw_variable_types};
@@ -462,60 +462,38 @@ pub(crate) fn find_cross_file_propagated_throws(
 
     let bytes = body.as_bytes();
     let len = bytes.len();
-    let mut pos = 0;
+    let mut offsets = CodeOffsets::new(bytes);
 
-    while pos < len {
-        // Skip strings.
-        if bytes[pos] == b'\'' || bytes[pos] == b'"' {
-            pos = skip_string_forward(bytes, pos);
-            continue;
-        }
-        // Skip line comments.
-        if pos + 1 < len && bytes[pos] == b'/' && bytes[pos + 1] == b'/' {
-            pos = skip_line_comment(bytes, pos);
-            continue;
-        }
-        // Skip block comments.
-        if pos + 1 < len && bytes[pos] == b'/' && bytes[pos + 1] == b'*' {
-            pos = skip_block_comment(bytes, pos);
-            continue;
-        }
-
+    while let Some(mut pos) = offsets.next() {
         // ── Pattern: `new ClassName(…)` ─────────────────────────────
-        if pos + 3 < len && &body[pos..pos + 3] == "new" {
-            let before_ok =
-                pos == 0 || !bytes[pos - 1].is_ascii_alphanumeric() && bytes[pos - 1] != b'_';
-            let after_ok = pos + 3 >= len
-                || (!bytes[pos + 3].is_ascii_alphanumeric() && bytes[pos + 3] != b'_');
-            if before_ok && after_ok {
-                let call_start = pos;
-                let after_new = body[pos + 3..].trim_start();
-                // Extract class name (may be namespaced with `\`).
-                let name_end = after_new
-                    .find(|c: char| !c.is_alphanumeric() && c != '_' && c != '\\')
-                    .unwrap_or(after_new.len());
-                let class_name = &after_new[..name_end];
-                let after_name = after_new[name_end..].trim_start();
-                if !class_name.is_empty() && after_name.starts_with('(') {
-                    let resolved_class =
-                        crate::names::resolve_to_fqn(class_name, ctx.use_map, ctx.file_namespace);
-                    let call_key = format!("new:{}", resolved_class);
-                    if seen_calls.insert(call_key)
-                        && let Some(class_info) =
-                            crate::class_lookup::load_resolved_name(&resolved_class, class_loader)
-                        && let Some(ctor) = class_info.get_method("__construct")
-                    {
-                        for exc_type in ctor.throws() {
-                            results.push(ThrowInfo {
-                                type_name: as_written_fqn(exc_type),
-                                offset: call_start,
-                            });
-                        }
+        if keyword_starts_at(bytes, pos, b"new") {
+            let call_start = pos;
+            let after_new = body[pos + 3..].trim_start();
+            // Extract class name (may be namespaced with `\`).
+            let name_end = after_new
+                .find(|c: char| !c.is_alphanumeric() && c != '_' && c != '\\')
+                .unwrap_or(after_new.len());
+            let class_name = &after_new[..name_end];
+            let after_name = after_new[name_end..].trim_start();
+            if !class_name.is_empty() && after_name.starts_with('(') {
+                let resolved_class =
+                    crate::names::resolve_to_fqn(class_name, ctx.use_map, ctx.file_namespace);
+                let call_key = format!("new:{}", resolved_class);
+                if seen_calls.insert(call_key)
+                    && let Some(class_info) =
+                        crate::class_lookup::load_resolved_name(&resolved_class, class_loader)
+                    && let Some(ctor) = class_info.get_method("__construct")
+                {
+                    for exc_type in ctor.throws() {
+                        results.push(ThrowInfo {
+                            type_name: as_written_fqn(exc_type),
+                            offset: call_start,
+                        });
                     }
                 }
-                pos += 3;
-                continue;
             }
+            offsets.skip_to(pos + 3);
+            continue;
         }
 
         // ── Pattern: `$variable->method()` ──────────────────────────
@@ -523,9 +501,10 @@ pub(crate) fn find_cross_file_propagated_throws(
             let var_start = pos;
             pos += 1;
             // Collect variable name characters.
-            while pos < len && (bytes[pos].is_ascii_alphanumeric() || bytes[pos] == b'_') {
+            while pos < len && is_ident_byte(bytes[pos]) {
                 pos += 1;
             }
+            offsets.skip_to(pos);
             let var_name = &body[var_start..pos];
 
             // Check for `->` immediately after (whitespace-tolerant).
@@ -592,6 +571,7 @@ pub(crate) fn find_cross_file_propagated_throws(
             {
                 pos += 1;
             }
+            offsets.skip_to(pos);
             let ident = &body[ident_start..pos];
 
             let after_ident = body[pos..].trim_start();
@@ -659,11 +639,7 @@ pub(crate) fn find_cross_file_propagated_throws(
                     }
                 }
             }
-
-            continue;
         }
-
-        pos += 1;
     }
 
     results
