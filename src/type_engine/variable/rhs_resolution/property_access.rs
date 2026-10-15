@@ -740,82 +740,21 @@ pub(super) fn find_this_property_assignment_in_toplevel<'b>(
                     return Some(found);
                 }
             }
-            Statement::Namespace(ns) => {
-                if let Some(found) = find_this_property_assignment_in_toplevel(
-                    ns.statements().iter(),
-                    prop_name,
-                    cursor_offset,
-                ) {
-                    return Some(found);
-                }
-            }
-            Statement::If(if_stmt) => {
-                // A class (and thus the enclosing method) can be declared
-                // inside a conditional.  Try every branch; the recursive
-                // call's cursor-containment check skips branches that
-                // don't enclose the cursor.
-                let search = |inner: &'b Statement<'b>| {
+            // A class (and thus the enclosing method) can be declared
+            // inside a namespace block or a conditional.  The recursive
+            // call's cursor-containment check skips branches that don't
+            // enclose the cursor.
+            _ => {
+                if let Some(found) = crate::parser::find_map_nested_statement(stmt, |inner| {
                     find_this_property_assignment_in_toplevel(
                         std::iter::once(inner),
                         prop_name,
                         cursor_offset,
                     )
-                };
-                match &if_stmt.body {
-                    IfBody::Statement(body) => {
-                        if let Some(found) = search(body.statement) {
-                            return Some(found);
-                        }
-                        for elseif in body.else_if_clauses.iter() {
-                            if let Some(found) = search(elseif.statement) {
-                                return Some(found);
-                            }
-                        }
-                        if let Some(ref else_clause) = body.else_clause
-                            && let Some(found) = search(else_clause.statement)
-                        {
-                            return Some(found);
-                        }
-                    }
-                    IfBody::ColonDelimited(body) => {
-                        if let Some(found) = find_this_property_assignment_in_toplevel(
-                            body.statements.iter(),
-                            prop_name,
-                            cursor_offset,
-                        ) {
-                            return Some(found);
-                        }
-                        for elseif in body.else_if_clauses.iter() {
-                            if let Some(found) = find_this_property_assignment_in_toplevel(
-                                elseif.statements.iter(),
-                                prop_name,
-                                cursor_offset,
-                            ) {
-                                return Some(found);
-                            }
-                        }
-                        if let Some(ref else_clause) = body.else_clause
-                            && let Some(found) = find_this_property_assignment_in_toplevel(
-                                else_clause.statements.iter(),
-                                prop_name,
-                                cursor_offset,
-                            )
-                        {
-                            return Some(found);
-                        }
-                    }
-                }
-            }
-            Statement::Block(block) => {
-                if let Some(found) = find_this_property_assignment_in_toplevel(
-                    block.statements.iter(),
-                    prop_name,
-                    cursor_offset,
-                ) {
+                }) {
                     return Some(found);
                 }
             }
-            _ => {}
         }
     }
     None

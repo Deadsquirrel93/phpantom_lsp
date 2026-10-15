@@ -1,6 +1,6 @@
 //! Small helpers for walking the mago-syntax AST: seeing through
 //! parentheses and negation, reading array literals, and visiting class
-//! members and `if` branches.
+//! members, `if` branches and nested statement lists.
 
 /// Unwrap parenthesized expressions to their inner expression.
 pub(crate) fn unwrap_parens<'a>(
@@ -145,4 +145,126 @@ pub(crate) fn try_for_each_if_branch<B>(
         visit(statements)?;
     }
     std::ops::ControlFlow::Continue(())
+}
+
+/// Call `visit` with each statement list nested directly inside `stmt`
+/// that runs in the enclosing scope: a block, a namespace or `declare`
+/// body, every `if` branch, a loop body, each `switch` case, and the
+/// `try`, `catch` and `finally` blocks.
+///
+/// Function, class and closure bodies open a scope of their own and are
+/// not visited; a walker that wants them matches those arms itself.
+pub(crate) fn for_each_nested_statement_list<'s, 'ast>(
+    stmt: &'s mago_syntax::cst::Statement<'ast>,
+    mut visit: impl FnMut(&'s [mago_syntax::cst::Statement<'ast>]),
+) {
+    let _ = try_for_each_nested_statement_list(stmt, |statements| {
+        visit(statements);
+        std::ops::ControlFlow::<()>::Continue(())
+    });
+}
+
+/// Whether `pred` holds for any statement nested directly inside `stmt`,
+/// in the sense of [`for_each_nested_statement_list`].
+pub(crate) fn any_nested_statement<'s, 'ast>(
+    stmt: &'s mago_syntax::cst::Statement<'ast>,
+    mut pred: impl FnMut(&'s mago_syntax::cst::Statement<'ast>) -> bool,
+) -> bool {
+    find_map_nested_statement(stmt, |inner| pred(inner).then_some(())).is_some()
+}
+
+/// The first `Some` that `f` returns for a statement nested directly
+/// inside `stmt`, in the sense of [`for_each_nested_statement_list`].
+pub(crate) fn find_map_nested_statement<'s, 'ast, T>(
+    stmt: &'s mago_syntax::cst::Statement<'ast>,
+    mut f: impl FnMut(&'s mago_syntax::cst::Statement<'ast>) -> Option<T>,
+) -> Option<T> {
+    try_for_each_nested_statement_list(stmt, |statements| {
+        match statements.iter().find_map(&mut f) {
+            Some(found) => std::ops::ControlFlow::Break(found),
+            None => std::ops::ControlFlow::Continue(()),
+        }
+    })
+    .break_value()
+}
+
+/// [`for_each_nested_statement_list`] for a walker that stops early: the
+/// first list `visit` breaks on ends the walk and its value comes back.
+pub(crate) fn try_for_each_nested_statement_list<'s, 'ast, B>(
+    stmt: &'s mago_syntax::cst::Statement<'ast>,
+    mut visit: impl FnMut(&'s [mago_syntax::cst::Statement<'ast>]) -> std::ops::ControlFlow<B>,
+) -> std::ops::ControlFlow<B> {
+    use mago_syntax::cst::Statement;
+    use mago_syntax::cst::control_flow::r#if::IfBody;
+    use mago_syntax::cst::declare::DeclareBody;
+    use std::slice::from_ref;
+    match stmt {
+        Statement::Block(block) => visit(block.statements.as_slice()),
+        Statement::Namespace(ns) => visit(ns.statements().as_slice()),
+        Statement::Declare(declare) => match &declare.body {
+            DeclareBody::Statement(inner) => visit(from_ref(*inner)),
+            DeclareBody::ColonDelimited(body) => visit(body.statements.as_slice()),
+        },
+        Statement::If(if_stmt) => match &if_stmt.body {
+            IfBody::Statement(body) => {
+                visit(from_ref(body.statement))?;
+                for clause in body.else_if_clauses.iter() {
+                    visit(from_ref(clause.statement))?;
+                }
+                match &body.else_clause {
+                    Some(clause) => visit(from_ref(clause.statement)),
+                    None => std::ops::ControlFlow::Continue(()),
+                }
+            }
+            IfBody::ColonDelimited(body) => {
+                visit(body.statements.as_slice())?;
+                for clause in body.else_if_clauses.iter() {
+                    visit(clause.statements.as_slice())?;
+                }
+                match &body.else_clause {
+                    Some(clause) => visit(clause.statements.as_slice()),
+                    None => std::ops::ControlFlow::Continue(()),
+                }
+            }
+        },
+        Statement::While(w) => visit(w.body.statements()),
+        Statement::DoWhile(dw) => visit(from_ref(dw.statement)),
+        Statement::For(f) => visit(f.body.statements()),
+        Statement::Foreach(f) => visit(f.body.statements()),
+        Statement::Switch(switch) => {
+            for case in switch.body.cases() {
+                visit(case.statements())?;
+            }
+            std::ops::ControlFlow::Continue(())
+        }
+        Statement::Try(try_stmt) => {
+            visit(try_stmt.block.statements.as_slice())?;
+            for catch in try_stmt.catch_clauses.iter() {
+                visit(catch.block.statements.as_slice())?;
+            }
+            match &try_stmt.finally_clause {
+                Some(finally) => visit(finally.block.statements.as_slice()),
+                None => std::ops::ControlFlow::Continue(()),
+            }
+        }
+        _ => std::ops::ControlFlow::Continue(()),
+    }
+}
+
+/// Call `visit` with each function declared inside `stmt`'s nested
+/// statement lists, at any depth of blocks and control flow (the
+/// `if (!function_exists('f')) { function f() {} }` polyfill pattern), but
+/// not inside another function or class.
+pub(crate) fn for_each_nested_function<'s, 'ast>(
+    stmt: &'s mago_syntax::cst::Statement<'ast>,
+    visit: &mut impl FnMut(&'s mago_syntax::cst::function_like::function::Function<'ast>),
+) {
+    for_each_nested_statement_list(stmt, |statements| {
+        for inner in statements {
+            match inner {
+                mago_syntax::cst::Statement::Function(function) => visit(function),
+                _ => for_each_nested_function(inner, visit),
+            }
+        }
+    });
 }

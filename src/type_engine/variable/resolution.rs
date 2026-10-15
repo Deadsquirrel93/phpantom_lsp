@@ -795,59 +795,9 @@ fn try_resolve_in_nested_function(
     }
     match stmt {
         Statement::Function(func) => try_resolve_in_function(func, ctx),
-        Statement::Block(block) => {
-            for inner in block.statements.iter() {
-                if let Some(results) = try_resolve_in_nested_function(inner, ctx) {
-                    return Some(results);
-                }
-            }
-            None
-        }
-        Statement::If(if_stmt) => {
-            match &if_stmt.body {
-                IfBody::Statement(body) => {
-                    if let Some(results) = try_resolve_in_nested_function(body.statement, ctx) {
-                        return Some(results);
-                    }
-                    for else_if in body.else_if_clauses.iter() {
-                        if let Some(results) =
-                            try_resolve_in_nested_function(else_if.statement, ctx)
-                        {
-                            return Some(results);
-                        }
-                    }
-                    if let Some(else_clause) = &body.else_clause
-                        && let Some(results) =
-                            try_resolve_in_nested_function(else_clause.statement, ctx)
-                    {
-                        return Some(results);
-                    }
-                }
-                IfBody::ColonDelimited(body) => {
-                    for inner in body.statements.iter() {
-                        if let Some(results) = try_resolve_in_nested_function(inner, ctx) {
-                            return Some(results);
-                        }
-                    }
-                    for else_if in body.else_if_clauses.iter() {
-                        for inner in else_if.statements.iter() {
-                            if let Some(results) = try_resolve_in_nested_function(inner, ctx) {
-                                return Some(results);
-                            }
-                        }
-                    }
-                    if let Some(else_clause) = &body.else_clause {
-                        for inner in else_clause.statements.iter() {
-                            if let Some(results) = try_resolve_in_nested_function(inner, ctx) {
-                                return Some(results);
-                            }
-                        }
-                    }
-                }
-            }
-            None
-        }
-        _ => None,
+        _ => crate::parser::find_map_nested_statement(stmt, |inner| {
+            try_resolve_in_nested_function(inner, ctx)
+        }),
     }
 }
 

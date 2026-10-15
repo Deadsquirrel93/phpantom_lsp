@@ -843,21 +843,9 @@ fn mark_keys_written(
 fn statement_may_continue(stmt: &Statement<'_>) -> bool {
     match stmt {
         Statement::Continue(_) => true,
-        Statement::Block(block) => block.statements.iter().any(statement_may_continue),
-        Statement::If(if_stmt) => match &if_stmt.body {
-            IfBody::Statement(body) => {
-                statement_may_continue(body.statement)
-                    || body
-                        .else_if_clauses
-                        .iter()
-                        .any(|clause| statement_may_continue(clause.statement))
-                    || body
-                        .else_clause
-                        .as_ref()
-                        .is_some_and(|clause| statement_may_continue(clause.statement))
-            }
-            IfBody::ColonDelimited(_) => true,
-        },
+        Statement::Block(_) | Statement::If(_) => {
+            crate::parser::any_nested_statement(stmt, statement_may_continue)
+        }
         Statement::Expression(_) | Statement::Echo(_) | Statement::Return(_) => false,
         // Anything else (a nested loop, `switch`, `try`) is taken to possibly
         // hold one, rather than walking every shape it comes in.

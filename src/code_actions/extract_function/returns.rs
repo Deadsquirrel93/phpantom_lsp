@@ -77,89 +77,7 @@ pub(crate) fn analyse_returns(
 pub(crate) fn selection_stmt_contains_return(stmt: &Statement<'_>) -> bool {
     match stmt {
         Statement::Return(_) => true,
-        Statement::If(if_stmt) => match &if_stmt.body {
-            IfBody::Statement(body) => {
-                selection_stmt_contains_return(body.statement)
-                    || body
-                        .else_if_clauses
-                        .iter()
-                        .any(|c| selection_stmt_contains_return(c.statement))
-                    || body
-                        .else_clause
-                        .as_ref()
-                        .is_some_and(|c| selection_stmt_contains_return(c.statement))
-            }
-            IfBody::ColonDelimited(body) => {
-                body.statements
-                    .iter()
-                    .any(|s| selection_stmt_contains_return(s))
-                    || body.else_if_clauses.iter().any(|c| {
-                        c.statements
-                            .iter()
-                            .any(|s| selection_stmt_contains_return(s))
-                    })
-                    || body.else_clause.as_ref().is_some_and(|c| {
-                        c.statements
-                            .iter()
-                            .any(|s| selection_stmt_contains_return(s))
-                    })
-            }
-        },
-        Statement::Foreach(f) => match &f.body {
-            ForeachBody::Statement(s) => selection_stmt_contains_return(s),
-            ForeachBody::ColonDelimited(b) => b
-                .statements
-                .iter()
-                .any(|s| selection_stmt_contains_return(s)),
-        },
-        Statement::While(w) => match &w.body {
-            WhileBody::Statement(s) => selection_stmt_contains_return(s),
-            WhileBody::ColonDelimited(b) => b
-                .statements
-                .iter()
-                .any(|s| selection_stmt_contains_return(s)),
-        },
-        Statement::DoWhile(dw) => selection_stmt_contains_return(dw.statement),
-        Statement::For(f) => match &f.body {
-            ForBody::Statement(s) => selection_stmt_contains_return(s),
-            ForBody::ColonDelimited(b) => b
-                .statements
-                .iter()
-                .any(|s| selection_stmt_contains_return(s)),
-        },
-        Statement::Switch(sw) => sw.body.cases().iter().any(|c| match c {
-            SwitchCase::Expression(e) => e
-                .statements
-                .iter()
-                .any(|s| selection_stmt_contains_return(s)),
-            SwitchCase::Default(d) => d
-                .statements
-                .iter()
-                .any(|s| selection_stmt_contains_return(s)),
-        }),
-        Statement::Try(t) => {
-            t.block
-                .statements
-                .iter()
-                .any(|s| selection_stmt_contains_return(s))
-                || t.catch_clauses.iter().any(|c| {
-                    c.block
-                        .statements
-                        .iter()
-                        .any(|s| selection_stmt_contains_return(s))
-                })
-                || t.finally_clause.as_ref().is_some_and(|f| {
-                    f.block
-                        .statements
-                        .iter()
-                        .any(|s| selection_stmt_contains_return(s))
-                })
-        }
-        Statement::Block(b) => b
-            .statements
-            .iter()
-            .any(|s| selection_stmt_contains_return(s)),
-        _ => false,
+        _ => crate::parser::any_nested_statement(stmt, selection_stmt_contains_return),
     }
 }
 
@@ -247,89 +165,11 @@ pub(crate) fn collect_returns_from_stmt<'a>(
             });
             out.push(expr_text);
         }
-        Statement::If(if_stmt) => match &if_stmt.body {
-            IfBody::Statement(body) => {
-                collect_returns_from_stmt(content, body.statement, out);
-                for c in &body.else_if_clauses {
-                    collect_returns_from_stmt(content, c.statement, out);
-                }
-                if let Some(c) = &body.else_clause {
-                    collect_returns_from_stmt(content, c.statement, out);
-                }
+        _ => crate::parser::for_each_nested_statement_list(stmt, |nested| {
+            for inner in nested {
+                collect_returns_from_stmt(content, inner, out);
             }
-            IfBody::ColonDelimited(body) => {
-                for s in &body.statements {
-                    collect_returns_from_stmt(content, s, out);
-                }
-                for c in &body.else_if_clauses {
-                    for s in &c.statements {
-                        collect_returns_from_stmt(content, s, out);
-                    }
-                }
-                if let Some(c) = &body.else_clause {
-                    for s in &c.statements {
-                        collect_returns_from_stmt(content, s, out);
-                    }
-                }
-            }
-        },
-        Statement::Foreach(f) => match &f.body {
-            ForeachBody::Statement(s) => collect_returns_from_stmt(content, s, out),
-            ForeachBody::ColonDelimited(b) => {
-                for s in &b.statements {
-                    collect_returns_from_stmt(content, s, out);
-                }
-            }
-        },
-        Statement::While(w) => match &w.body {
-            WhileBody::Statement(s) => collect_returns_from_stmt(content, s, out),
-            WhileBody::ColonDelimited(b) => {
-                for s in &b.statements {
-                    collect_returns_from_stmt(content, s, out);
-                }
-            }
-        },
-        Statement::DoWhile(dw) => collect_returns_from_stmt(content, dw.statement, out),
-        Statement::For(f) => match &f.body {
-            ForBody::Statement(s) => collect_returns_from_stmt(content, s, out),
-            ForBody::ColonDelimited(b) => {
-                for s in &b.statements {
-                    collect_returns_from_stmt(content, s, out);
-                }
-            }
-        },
-        Statement::Switch(sw) => {
-            for c in sw.body.cases().iter() {
-                let stmts = match c {
-                    SwitchCase::Expression(e) => &e.statements,
-                    SwitchCase::Default(d) => &d.statements,
-                };
-                for s in stmts.iter() {
-                    collect_returns_from_stmt(content, s, out);
-                }
-            }
-        }
-        Statement::Try(t) => {
-            for s in &t.block.statements {
-                collect_returns_from_stmt(content, s, out);
-            }
-            for c in &t.catch_clauses {
-                for s in &c.block.statements {
-                    collect_returns_from_stmt(content, s, out);
-                }
-            }
-            if let Some(f) = &t.finally_clause {
-                for s in &f.block.statements {
-                    collect_returns_from_stmt(content, s, out);
-                }
-            }
-        }
-        Statement::Block(b) => {
-            for s in &b.statements {
-                collect_returns_from_stmt(content, s, out);
-            }
-        }
-        _ => {}
+        }),
     }
 }
 

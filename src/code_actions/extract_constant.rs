@@ -17,10 +17,9 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
+use crate::code_actions::CodeActionData;
 use crate::code_actions::cursor_context::{CursorContext, MemberContext, find_cursor_context};
-use crate::code_actions::find_identical_occurrences;
 use crate::code_actions::naming::string_to_screaming_snake;
-use crate::code_actions::{CodeActionData, make_code_action_data};
 use crate::php_type::PhpType;
 use crate::text_position::{offset_to_position, position_to_byte_offset};
 use crate::type_engine::variable::rhs_resolution::infer_type_from_constant_value;
@@ -603,55 +602,15 @@ impl Backend {
             return;
         }
 
-        // Cheap text search: does the literal appear more than once
-        // in the file?
-        let has_other_occurrences = {
-            let first = content.find(trimmed);
-            match first {
-                Some(pos) => content[pos + trimmed.len()..].contains(trimmed),
-                None => false,
-            }
-        };
-
-        let title = if has_other_occurrences {
-            "Extract constant (this occurrence)"
-        } else {
-            "Extract constant"
-        };
-
-        out.push(CodeActionOrCommand::CodeAction(CodeAction {
-            title: title.to_string(),
-            kind: Some(CodeActionKind::REFACTOR_EXTRACT),
-            diagnostics: None,
-            edit: None,
-            command: None,
-            is_preferred: Some(false),
-            disabled: None,
-            data: Some(make_code_action_data(
-                "refactor.extractConstant",
-                uri,
-                &params.range,
-                serde_json::json!({ "all_occurrences": false }),
-            )),
-        }));
-
-        if has_other_occurrences {
-            out.push(CodeActionOrCommand::CodeAction(CodeAction {
-                title: "Extract constant (all occurrences)".to_string(),
-                kind: Some(CodeActionKind::REFACTOR_EXTRACT),
-                diagnostics: None,
-                edit: None,
-                command: None,
-                is_preferred: Some(false),
-                disabled: None,
-                data: Some(make_code_action_data(
-                    "refactor.extractConstantAll",
-                    uri,
-                    &params.range,
-                    serde_json::json!({ "all_occurrences": true }),
-                )),
-            }));
-        }
+        crate::code_actions::push_extract_actions(
+            out,
+            uri,
+            &params.range,
+            content,
+            trimmed,
+            "constant",
+            "refactor.extractConstant",
+        );
     }
 
     /// Resolve a deferred "Extract Constant" code action by computing
@@ -664,11 +623,8 @@ impl Backend {
         data: &CodeActionData,
         content: &str,
     ) -> Option<WorkspaceEdit> {
-        let all_occurrences = data
-            .extra
-            .get("all_occurrences")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(data.action_kind == "refactor.extractConstantAll");
+        let all_occurrences =
+            crate::code_actions::extract_wants_all_occurrences(data, "refactor.extractConstantAll");
 
         let start_offset = position_to_byte_offset(content, data.range.start);
         let end_offset = position_to_byte_offset(content, data.range.end);
@@ -748,23 +704,13 @@ impl Backend {
 
         if all_occurrences {
             // ── All occurrences mode ────────────────────────────────
-            let trim_start_delta = selected_text.len() - selected_text.trim_start().len();
-            let trim_end_delta = selected_text.len() - selected_text.trim_end().len();
-            let trimmed_start = start_offset + trim_start_delta;
-            let trimmed_end = end_offset - trim_end_delta;
-
-            let other_occurrences = find_identical_occurrences(
+            let all_offsets = crate::code_actions::selection_and_identical_occurrences(
                 content,
-                trimmed,
-                trimmed_start,
-                trimmed_end,
+                start_offset,
+                end_offset,
                 class_info.body_start,
                 class_info.body_end,
             );
-
-            let mut all_offsets: Vec<(usize, usize)> = vec![(start_offset, end_offset)];
-            all_offsets.extend(&other_occurrences);
-            all_offsets.sort_by_key(|&(s, _)| s);
 
             let mut edits = vec![TextEdit {
                 range: Range {
@@ -773,18 +719,11 @@ impl Backend {
                 },
                 new_text: const_declaration,
             }];
-
-            for &(occ_start, occ_end) in &all_offsets {
-                let start_pos = offset_to_position(content, occ_start);
-                let end_pos = offset_to_position(content, occ_end);
-                edits.push(TextEdit {
-                    range: Range {
-                        start: start_pos,
-                        end: end_pos,
-                    },
-                    new_text: replacement.clone(),
-                });
-            }
+            edits.extend(crate::code_actions::replace_spans_edits(
+                content,
+                &all_offsets,
+                &replacement,
+            ));
 
             Some(crate::code_actions::single_file_edit(doc_uri, edits))
         } else {

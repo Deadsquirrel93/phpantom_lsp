@@ -662,75 +662,18 @@ pub(super) fn extract_from_method<'a>(method: &'a Method<'a>, ctx: &mut Extracti
     // them.  The VarDefSite with `DocblockParam` kind lets
     // `find_variable_scope` map the pre-body offset to the correct
     // function body scope.
-    {
-        for (name, file_offset) in docblock_params {
-            let end = file_offset + 1 + name.len() as u32;
-            ctx.spans.push(SymbolSpan {
-                start: file_offset,
-                end,
-                kind: SymbolKind::Variable {
-                    name: crate::atom::atom(&name),
-                },
-            });
-            ctx.var_defs.push(VarDefSite {
-                offset: file_offset,
-                name,
-                kind: VarDefKind::DocblockParam,
-                scope_start: method_scope_start,
-                effective_from: file_offset,
-                nesting_depth: ctx.cond_nesting_depth,
-                block_end: ctx.cond_block_end_stack.last().copied().unwrap_or(u32::MAX),
-            });
-        }
+    for (name, file_offset) in docblock_params {
+        let end = file_offset + 1 + name.len() as u32;
+        ctx.push_variable_definition(
+            (file_offset, end),
+            name,
+            VarDefKind::DocblockParam,
+            method_scope_start,
+        );
     }
 
-    // Parameter type hints, variable spans, and variable definition sites.
     for param in method.parameter_list.parameters.iter() {
-        extract_from_attribute_lists(&param.attribute_lists, ctx, 0);
-        if let Some(ref hint) = param.hint {
-            extract_from_hint_ctx(hint, &mut ctx.spans, ClassRefContext::TypeHint);
-        }
-        // Docblock attached to the parameter itself (e.g. promoted
-        // constructor properties with `/** @var list<Subscription> */`).
-        if let Some((doc_text, doc_offset)) =
-            get_docblock_text_with_offset(ctx.trivias, ctx.content, param)
-        {
-            let _found = extract_docblock_symbols(doc_text, doc_offset, &mut ctx.spans);
-        }
-        let name = {
-            let s = bytes_to_str(param.variable.name);
-            s.strip_prefix('$').unwrap_or(s).to_string()
-        };
-        let param_offset = param.variable.span.start.offset;
-        // Emit a Variable span so the symbol map covers the parameter
-        // token itself (needed for GTD-from-parameter-to-type-hint).
-        ctx.spans.push(SymbolSpan {
-            start: param_offset,
-            end: param.variable.span.end.offset,
-            kind: SymbolKind::Variable {
-                name: crate::atom::atom(&name),
-            },
-        });
-        ctx.var_defs.push(VarDefSite {
-            offset: param_offset,
-            name,
-            kind: VarDefKind::Parameter,
-            scope_start: method_scope_start,
-            effective_from: param_offset,
-            nesting_depth: ctx.cond_nesting_depth,
-            block_end: ctx.cond_block_end_stack.last().copied().unwrap_or(u32::MAX),
-        });
-        if let Some(ref default) = param.default_value {
-            extract_from_expression(default.value, ctx, method_scope_start);
-        }
-        // A constructor-promoted property may declare hooks of its own,
-        // which read like any other hook body but live out here in the
-        // parameter list rather than in a `Property::Hooked` member.
-        if let Some(hooks) = &param.hooks {
-            for hook in hooks.hooks.iter() {
-                extract_from_hook(hook, ctx);
-            }
-        }
+        extract_from_parameter(param, ctx, method_scope_start);
     }
 
     if let Some(ref return_type) = method.return_type_hint {
@@ -762,23 +705,13 @@ pub(super) fn extract_inline_docblock(
 
         // Emit VarDefSite entries for `@var Type $varName` in inline docblocks.
         for (name, file_offset) in found.var_vars {
-            let name_len = name.len() as u32 + 1; // +1 for the `$` prefix
-            ctx.spans.push(SymbolSpan {
-                start: file_offset,
-                end: file_offset + name_len,
-                kind: SymbolKind::Variable {
-                    name: crate::atom::atom(&name),
-                },
-            });
-            ctx.var_defs.push(VarDefSite {
-                offset: file_offset,
+            let end = file_offset + 1 + name.len() as u32;
+            ctx.push_variable_definition(
+                (file_offset, end),
                 name,
-                kind: VarDefKind::DocblockVar,
+                VarDefKind::DocblockVar,
                 scope_start,
-                effective_from: file_offset,
-                nesting_depth: ctx.cond_nesting_depth,
-                block_end: ctx.cond_block_end_stack.last().copied().unwrap_or(u32::MAX),
-            });
+            );
         }
     }
 }
@@ -806,27 +739,12 @@ pub(super) fn extract_from_property<'a>(property: &'a Property<'a>, ctx: &mut Ex
         Property::Plain(plain) => {
             for item in plain.items.iter() {
                 let var = item.variable();
-                let name = {
-                    let s = bytes_to_str(var.name);
-                    s.strip_prefix('$').unwrap_or(s).to_string()
-                };
-                let var_offset = var.span.start.offset;
-                ctx.spans.push(SymbolSpan {
-                    start: var_offset,
-                    end: var.span.end.offset,
-                    kind: SymbolKind::Variable {
-                        name: crate::atom::atom(&name),
-                    },
-                });
-                ctx.var_defs.push(VarDefSite {
-                    offset: var_offset,
-                    name,
-                    kind: VarDefKind::Property,
-                    scope_start: 0,
-                    effective_from: var_offset,
-                    nesting_depth: ctx.cond_nesting_depth,
-                    block_end: ctx.cond_block_end_stack.last().copied().unwrap_or(u32::MAX),
-                });
+                ctx.push_variable_definition(
+                    (var.span.start.offset, var.span.end.offset),
+                    bare_variable_name(var.name),
+                    VarDefKind::Property,
+                    0,
+                );
                 // Walk the default value expression so that class
                 // references like `Foo::class` in property defaults
                 // produce navigable spans.
@@ -837,27 +755,12 @@ pub(super) fn extract_from_property<'a>(property: &'a Property<'a>, ctx: &mut Ex
         }
         Property::Hooked(hooked) => {
             let var = hooked.item.variable();
-            let name = {
-                let s = bytes_to_str(var.name);
-                s.strip_prefix('$').unwrap_or(s).to_string()
-            };
-            let var_offset = var.span.start.offset;
-            ctx.spans.push(SymbolSpan {
-                start: var_offset,
-                end: var.span.end.offset,
-                kind: SymbolKind::Variable {
-                    name: crate::atom::atom(&name),
-                },
-            });
-            ctx.var_defs.push(VarDefSite {
-                offset: var_offset,
-                name,
-                kind: VarDefKind::Property,
-                scope_start: 0,
-                effective_from: var_offset,
-                nesting_depth: ctx.cond_nesting_depth,
-                block_end: ctx.cond_block_end_stack.last().copied().unwrap_or(u32::MAX),
-            });
+            ctx.push_variable_definition(
+                (var.span.start.offset, var.span.end.offset),
+                bare_variable_name(var.name),
+                VarDefKind::Property,
+                0,
+            );
             if let PropertyItem::Concrete(concrete) = &hooked.item {
                 extract_from_expression(concrete.value, ctx, 0);
             }
@@ -898,7 +801,7 @@ fn extract_from_hook<'a>(hook: &'a PropertyHook<'a>, ctx: &mut ExtractionCtx<'a>
 
     if let Some(params) = &hook.parameter_list {
         for param in params.parameters.iter() {
-            extract_from_hook_parameter(param, ctx, scope_start);
+            extract_from_parameter(param, ctx, scope_start);
         }
     }
 
@@ -914,10 +817,12 @@ fn extract_from_hook<'a>(hook: &'a PropertyHook<'a>, ctx: &mut ExtractionCtx<'a>
     }
 }
 
-/// Extract the `$value` parameter a `set` hook declares, so it is
-/// navigable, renameable, and offered by variable completion inside the
-/// hook body.
-fn extract_from_hook_parameter<'a>(
+/// Extract a function-like's parameter: its attributes, type hint and own
+/// docblock (`/** @var list<Foo> */` on a promoted property), a definition
+/// in the body scope starting at `scope_start` so it is navigable,
+/// renameable, and offered by variable completion, its default value, and
+/// the hooks a promoted property declares.
+pub(super) fn extract_from_parameter<'a>(
     param: &'a FunctionLikeParameter<'a>,
     ctx: &mut ExtractionCtx<'a>,
     scope_start: u32,
@@ -926,31 +831,30 @@ fn extract_from_hook_parameter<'a>(
     if let Some(ref hint) = param.hint {
         extract_from_hint_ctx(hint, &mut ctx.spans, ClassRefContext::TypeHint);
     }
-
-    let name = {
-        let s = bytes_to_str(param.variable.name);
-        s.strip_prefix('$').unwrap_or(s).to_string()
-    };
-    let offset = param.variable.span.start.offset;
-    ctx.spans.push(SymbolSpan {
-        start: offset,
-        end: param.variable.span.end.offset,
-        kind: SymbolKind::Variable {
-            name: crate::atom::atom(&name),
-        },
-    });
-    ctx.var_defs.push(VarDefSite {
-        offset,
-        name,
-        kind: VarDefKind::Parameter,
+    if let Some((doc_text, doc_offset)) =
+        get_docblock_text_with_offset(ctx.trivias, ctx.content, param)
+    {
+        let _found = extract_docblock_symbols(doc_text, doc_offset, &mut ctx.spans);
+    }
+    ctx.push_variable_definition(
+        (
+            param.variable.span.start.offset,
+            param.variable.span.end.offset,
+        ),
+        bare_variable_name(param.variable.name),
+        VarDefKind::Parameter,
         scope_start,
-        effective_from: offset,
-        nesting_depth: ctx.cond_nesting_depth,
-        block_end: ctx.cond_block_end_stack.last().copied().unwrap_or(u32::MAX),
-    });
-
+    );
     if let Some(ref default) = param.default_value {
         extract_from_expression(default.value, ctx, scope_start);
+    }
+    // A constructor-promoted property may declare hooks of its own, which
+    // read like any other hook body but live out here in the parameter
+    // list rather than in a `Property::Hooked` member.
+    if let Some(hooks) = &param.hooks {
+        for hook in hooks.hooks.iter() {
+            extract_from_hook(hook, ctx);
+        }
     }
 }
 
@@ -1037,66 +941,18 @@ pub(super) fn extract_from_function<'a>(func: &'a Function<'a>, ctx: &mut Extrac
     // them.  The VarDefSite with `DocblockParam` kind lets
     // `find_variable_scope` map the pre-body offset to the correct
     // function body scope.
-    {
-        for (name, file_offset) in docblock_params {
-            let end = file_offset + 1 + name.len() as u32;
-            ctx.spans.push(SymbolSpan {
-                start: file_offset,
-                end,
-                kind: SymbolKind::Variable {
-                    name: crate::atom::atom(&name),
-                },
-            });
-            ctx.var_defs.push(VarDefSite {
-                offset: file_offset,
-                name,
-                kind: VarDefKind::DocblockParam,
-                scope_start: func_scope_start,
-                effective_from: file_offset,
-                nesting_depth: ctx.cond_nesting_depth,
-                block_end: ctx.cond_block_end_stack.last().copied().unwrap_or(u32::MAX),
-            });
-        }
+    for (name, file_offset) in docblock_params {
+        let end = file_offset + 1 + name.len() as u32;
+        ctx.push_variable_definition(
+            (file_offset, end),
+            name,
+            VarDefKind::DocblockParam,
+            func_scope_start,
+        );
     }
 
-    // Parameter type hints, variable spans, and variable definition sites.
     for param in func.parameter_list.parameters.iter() {
-        extract_from_attribute_lists(&param.attribute_lists, ctx, 0);
-        if let Some(ref hint) = param.hint {
-            extract_from_hint_ctx(hint, &mut ctx.spans, ClassRefContext::TypeHint);
-        }
-        // Docblock attached to the parameter itself (e.g. `/** @var list<Foo> */`).
-        if let Some((doc_text, doc_offset)) =
-            get_docblock_text_with_offset(ctx.trivias, ctx.content, param)
-        {
-            let _found = extract_docblock_symbols(doc_text, doc_offset, &mut ctx.spans);
-        }
-        let pname = {
-            let s = bytes_to_str(param.variable.name);
-            s.strip_prefix('$').unwrap_or(s).to_string()
-        };
-        let param_offset = param.variable.span.start.offset;
-        // Emit a Variable span so the symbol map covers the parameter
-        // token itself (needed for GTD-from-parameter-to-type-hint).
-        ctx.spans.push(SymbolSpan {
-            start: param_offset,
-            end: param.variable.span.end.offset,
-            kind: SymbolKind::Variable {
-                name: crate::atom::atom(&pname),
-            },
-        });
-        ctx.var_defs.push(VarDefSite {
-            offset: param_offset,
-            name: pname,
-            kind: VarDefKind::Parameter,
-            scope_start: func_scope_start,
-            effective_from: param_offset,
-            nesting_depth: ctx.cond_nesting_depth,
-            block_end: ctx.cond_block_end_stack.last().copied().unwrap_or(u32::MAX),
-        });
-        if let Some(ref default) = param.default_value {
-            extract_from_expression(default.value, ctx, func_scope_start);
-        }
+        extract_from_parameter(param, ctx, func_scope_start);
     }
 
     if let Some(ref return_type) = func.return_type_hint {

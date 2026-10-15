@@ -12,8 +12,8 @@ use crate::docblock;
 use crate::types::*;
 
 use super::{
-    DocblockCtx, extract_hint_type, extract_parameters, is_available_for_version,
-    is_removed_for_version, merge_deprecation_info,
+    DocblockCtx, extract_hint_type, extract_parameters, for_each_nested_statement_list,
+    is_available_for_version, is_removed_for_version, merge_deprecation_info,
 };
 
 /// Whether a function or method body calls `func_get_args()`,
@@ -472,12 +472,14 @@ impl Backend {
                 Statement::If(if_stmt) => {
                     let guard_name = try_extract_function_exists_guard(if_stmt.condition);
                     let before = functions.len();
-                    Self::extract_functions_from_if_body(
-                        &if_stmt.body,
-                        functions,
-                        current_namespace,
-                        doc_ctx,
-                    );
+                    for_each_nested_statement_list(statement, |nested| {
+                        Self::extract_functions_from_statements(
+                            nested.iter(),
+                            functions,
+                            current_namespace,
+                            doc_ctx,
+                        );
+                    });
                     // Mark newly extracted functions as polyfills when
                     // inside a function_exists guard.
                     if guard_name.is_some() {
@@ -487,67 +489,6 @@ impl Backend {
                     }
                 }
                 _ => {}
-            }
-        }
-    }
-
-    /// Helper: recurse into an `if` statement body to extract function
-    /// declarations.  Handles both brace-delimited and colon-delimited
-    /// `if` bodies, including `elseif` and `else` branches.
-    fn extract_functions_from_if_body<'a>(
-        body: &'a IfBody<'a>,
-        functions: &mut Vec<FunctionInfo>,
-        current_namespace: &Option<String>,
-        doc_ctx: Option<&DocblockCtx<'a>>,
-    ) {
-        match body {
-            IfBody::Statement(body) => {
-                Self::extract_functions_from_statements(
-                    std::iter::once(body.statement),
-                    functions,
-                    current_namespace,
-                    doc_ctx,
-                );
-                for else_if in body.else_if_clauses.iter() {
-                    Self::extract_functions_from_statements(
-                        std::iter::once(else_if.statement),
-                        functions,
-                        current_namespace,
-                        doc_ctx,
-                    );
-                }
-                if let Some(else_clause) = &body.else_clause {
-                    Self::extract_functions_from_statements(
-                        std::iter::once(else_clause.statement),
-                        functions,
-                        current_namespace,
-                        doc_ctx,
-                    );
-                }
-            }
-            IfBody::ColonDelimited(body) => {
-                Self::extract_functions_from_statements(
-                    body.statements.iter(),
-                    functions,
-                    current_namespace,
-                    doc_ctx,
-                );
-                for else_if in body.else_if_clauses.iter() {
-                    Self::extract_functions_from_statements(
-                        else_if.statements.iter(),
-                        functions,
-                        current_namespace,
-                        doc_ctx,
-                    );
-                }
-                if let Some(else_clause) = &body.else_clause {
-                    Self::extract_functions_from_statements(
-                        else_clause.statements.iter(),
-                        functions,
-                        current_namespace,
-                        doc_ctx,
-                    );
-                }
             }
         }
     }
@@ -626,8 +567,15 @@ impl Backend {
                         namespace,
                     );
                 }
-                Statement::If(if_stmt) => {
-                    Self::extract_defines_from_if_body(&if_stmt.body, defines, content, namespace);
+                Statement::If(_) => {
+                    for_each_nested_statement_list(statement, |nested| {
+                        Self::extract_defines_from_statements(
+                            nested.iter(),
+                            defines,
+                            content,
+                            namespace,
+                        );
+                    });
                 }
                 Statement::Class(class) => {
                     for member in class.members.iter() {
@@ -680,66 +628,6 @@ impl Backend {
                     );
                 }
                 _ => {}
-            }
-        }
-    }
-
-    /// Helper: recurse into an `if` statement body to extract `define()`
-    /// calls.  Mirrors `extract_functions_from_if_body`.
-    fn extract_defines_from_if_body<'a>(
-        body: &'a IfBody<'a>,
-        defines: &mut Vec<(String, u32, Option<String>)>,
-        content: &str,
-        namespace: Option<&str>,
-    ) {
-        match body {
-            IfBody::Statement(body) => {
-                Self::extract_defines_from_statements(
-                    std::iter::once(body.statement),
-                    defines,
-                    content,
-                    namespace,
-                );
-                for else_if in body.else_if_clauses.iter() {
-                    Self::extract_defines_from_statements(
-                        std::iter::once(else_if.statement),
-                        defines,
-                        content,
-                        namespace,
-                    );
-                }
-                if let Some(else_clause) = &body.else_clause {
-                    Self::extract_defines_from_statements(
-                        std::iter::once(else_clause.statement),
-                        defines,
-                        content,
-                        namespace,
-                    );
-                }
-            }
-            IfBody::ColonDelimited(body) => {
-                Self::extract_defines_from_statements(
-                    body.statements.iter(),
-                    defines,
-                    content,
-                    namespace,
-                );
-                for else_if in body.else_if_clauses.iter() {
-                    Self::extract_defines_from_statements(
-                        else_if.statements.iter(),
-                        defines,
-                        content,
-                        namespace,
-                    );
-                }
-                if let Some(else_clause) = &body.else_clause {
-                    Self::extract_defines_from_statements(
-                        else_clause.statements.iter(),
-                        defines,
-                        content,
-                        namespace,
-                    );
-                }
             }
         }
     }

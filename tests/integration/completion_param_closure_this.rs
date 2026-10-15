@@ -617,6 +617,56 @@ async fn test_param_closure_this_method_chain() {
     );
 }
 
+// ─── @param-closure-this in else / switch branches ──────────────────────────
+
+/// The call site can sit in any branch of an `if` or a `switch` case, not
+/// only the first `if` body.
+#[tokio::test]
+async fn test_param_closure_this_in_else_and_switch_branches() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test/closure_this_branches.php").unwrap();
+
+    let src = concat!(
+        "<?php\n",
+        "class Route {\n",
+        "    public function middleware(string $m): self { return $this; }\n",
+        "}\n",
+        "class Router {\n",
+        "    /**\n",
+        "     * @param-closure-this Route $callback\n",
+        "     */\n",
+        "    public function group(\\Closure $callback): void {}\n",
+        "}\n",
+        "class AppRoutes {\n",
+        "    public function register(Router $router, bool $flag, int $mode): void {\n",
+        "        if ($flag) {\n",
+        "        } elseif ($mode > 1) {\n",
+        "        } else {\n",
+        "            $router->group(function () {\n",
+        "                $this->\n",
+        "            });\n",
+        "        }\n",
+        "        switch ($mode) {\n",
+        "            case 1:\n",
+        "                $router->group(function () {\n",
+        "                    $this->\n",
+        "                });\n",
+        "        }\n",
+        "    }\n",
+        "}\n",
+    );
+
+    for (line, character) in [(16, 23), (22, 27)] {
+        let items = complete_at(&backend, &uri, src, line, character).await;
+        let names = method_names(&items);
+        assert!(
+            names.contains(&"middleware"),
+            "Expected 'middleware' from @param-closure-this Route on line {line}, got: {:?}",
+            names,
+        );
+    }
+}
+
 // ─── @param-closure-this in nested closures ─────────────────────────────────
 
 /// A closure inside a closure, where both call sites declare

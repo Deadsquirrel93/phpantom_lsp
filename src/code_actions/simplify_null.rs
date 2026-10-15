@@ -18,7 +18,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::code_actions::cursor_context::innermost_at;
-use crate::text_position::{offset_to_position, position_to_byte_offset};
+use crate::text_position::position_to_byte_offset;
 use crate::types::PhpVersion;
 
 // ─── Detection types ────────────────────────────────────────────────────────
@@ -66,9 +66,6 @@ impl Backend {
             return;
         };
 
-        let start_pos = offset_to_position(content, span.start.offset as usize);
-        let end_pos = offset_to_position(content, span.end.offset as usize);
-
         let (title, replacement) = match &simplification {
             Simplification::NullCoalescing { lhs, rhs } => {
                 ("Simplify to ??".to_string(), format!("{lhs} ?? {rhs}"))
@@ -78,23 +75,14 @@ impl Backend {
             }
         };
 
-        out.push(CodeActionOrCommand::CodeAction(CodeAction {
+        out.push(crate::code_actions::rewrite_action(
             title,
-            kind: Some(CodeActionKind::new("refactor.rewrite")),
-            diagnostics: None,
-            edit: Some(crate::code_actions::single_edit(
-                doc_uri,
-                Range {
-                    start: start_pos,
-                    end: end_pos,
-                },
-                replacement,
-            )),
-            command: None,
-            is_preferred: Some(true),
-            disabled: None,
-            data: None,
-        }));
+            doc_uri,
+            content,
+            (span.start.offset as usize, span.end.offset as usize),
+            replacement,
+            true,
+        ));
     }
 }
 

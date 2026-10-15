@@ -166,89 +166,6 @@ fn walk_stmt_for_closure_this(
             .value
             .as_ref()
             .and_then(|v| walk_expr_for_closure_this(v, ctx)),
-        Statement::Block(block) => {
-            for inner in block.statements.iter() {
-                if let Some(r) = walk_stmt_for_closure_this(inner, ctx) {
-                    return Some(r);
-                }
-            }
-            None
-        }
-        Statement::If(if_stmt) => match &if_stmt.body {
-            IfBody::Statement(body) => walk_stmt_for_closure_this(body.statement, ctx),
-            IfBody::ColonDelimited(body) => {
-                for inner in body.statements.iter() {
-                    if let Some(r) = walk_stmt_for_closure_this(inner, ctx) {
-                        return Some(r);
-                    }
-                }
-                None
-            }
-        },
-        Statement::Foreach(foreach) => match &foreach.body {
-            ForeachBody::Statement(inner) => walk_stmt_for_closure_this(inner, ctx),
-            ForeachBody::ColonDelimited(body) => {
-                for inner in body.statements.iter() {
-                    if let Some(r) = walk_stmt_for_closure_this(inner, ctx) {
-                        return Some(r);
-                    }
-                }
-                None
-            }
-        },
-        Statement::While(while_stmt) => match &while_stmt.body {
-            WhileBody::Statement(inner) => walk_stmt_for_closure_this(inner, ctx),
-            WhileBody::ColonDelimited(body) => {
-                for inner in body.statements.iter() {
-                    if let Some(r) = walk_stmt_for_closure_this(inner, ctx) {
-                        return Some(r);
-                    }
-                }
-                None
-            }
-        },
-        Statement::For(for_stmt) => match &for_stmt.body {
-            ForBody::Statement(inner) => walk_stmt_for_closure_this(inner, ctx),
-            ForBody::ColonDelimited(body) => {
-                for inner in body.statements.iter() {
-                    if let Some(r) = walk_stmt_for_closure_this(inner, ctx) {
-                        return Some(r);
-                    }
-                }
-                None
-            }
-        },
-        Statement::DoWhile(dw) => walk_stmt_for_closure_this(dw.statement, ctx),
-        Statement::Namespace(ns) => {
-            for inner in ns.statements().iter() {
-                if let Some(r) = walk_stmt_for_closure_this(inner, ctx) {
-                    return Some(r);
-                }
-            }
-            None
-        }
-        Statement::Try(try_stmt) => {
-            for inner in try_stmt.block.statements.iter() {
-                if let Some(r) = walk_stmt_for_closure_this(inner, ctx) {
-                    return Some(r);
-                }
-            }
-            for catch in try_stmt.catch_clauses.iter() {
-                for inner in catch.block.statements.iter() {
-                    if let Some(r) = walk_stmt_for_closure_this(inner, ctx) {
-                        return Some(r);
-                    }
-                }
-            }
-            if let Some(finally) = &try_stmt.finally_clause {
-                for inner in finally.block.statements.iter() {
-                    if let Some(r) = walk_stmt_for_closure_this(inner, ctx) {
-                        return Some(r);
-                    }
-                }
-            }
-            None
-        }
         Statement::Function(func) => {
             let bsp = func.body.span();
             if ctx.cursor_offset >= bsp.start.offset && ctx.cursor_offset <= bsp.end.offset {
@@ -260,7 +177,9 @@ fn walk_stmt_for_closure_this(
             }
             None
         }
-        _ => None,
+        _ => crate::parser::find_map_nested_statement(stmt, |inner| {
+            walk_stmt_for_closure_this(inner, ctx)
+        }),
     }
 }
 

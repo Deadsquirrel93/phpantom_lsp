@@ -1334,7 +1334,7 @@ pub(crate) fn walk_top_level_statements<'a, 'b: 'a>(
             // Functions nested inside if blocks (common pattern:
             // `if (!function_exists('name')) { function name() {} }`)
             // must be analyzed the same way as top-level functions.
-            Statement::If(if_stmt) => {
+            Statement::If(_) => {
                 if stmt.span().start.offset <= last_target {
                     diag_ctx.mark_walked(stmt.span());
                     record_scope_snapshot(stmt.span().start.offset, &top_level_scope);
@@ -1344,7 +1344,7 @@ pub(crate) fn walk_top_level_statements<'a, 'b: 'a>(
                     record_scope_snapshot(stmt.span().end.offset, &top_level_scope);
                 }
                 if diag_ctx.wants(stmt.span()) {
-                    walk_functions_in_if_body(&if_stmt.body, default_class, diag_ctx);
+                    walk_functions_in_if(stmt, default_class, diag_ctx);
                 }
             }
             // Top-level code: walk it with the shared scope so that
@@ -1370,60 +1370,30 @@ pub(crate) fn walk_top_level_statements<'a, 'b: 'a>(
     }
 }
 
-/// Recurse into an if-statement body looking for function declarations
-/// and analyze each one.  Handles the common PHP pattern:
+/// Analyze each function declared inside an `if` statement, in any branch
+/// and at any depth of nested blocks, the same way as a top-level
+/// function.  Handles the common PHP pattern:
 /// `if (!function_exists('name')) { function name(...) { ... } }`
-pub(crate) fn walk_functions_in_if_body<'b>(
-    body: &'b mago_syntax::cst::control_flow::r#if::IfBody<'b>,
+pub(crate) fn walk_functions_in_if<'b>(
+    if_stmt: &'b Statement<'b>,
     default_class: &ClassInfo,
     diag_ctx: &DiagnosticWalkCtx<'_>,
 ) {
-    use mago_syntax::cst::control_flow::r#if::IfBody;
-
-    let statements: &[Statement<'b>] = match body {
-        IfBody::Statement(stmt_body) => {
-            // Single statement body — check if it's a block.
-            if let Statement::Block(block) = stmt_body.statement {
-                block.statements.as_slice()
-            } else if let Statement::Function(func) = stmt_body.statement {
-                if !diag_ctx.wants(func.span()) {
-                    return;
-                }
-                diag_ctx.mark_walked(func.span());
-                analyze_function_body(
-                    func.parameter_list.parameters.iter(),
-                    func.body.statements.iter(),
-                    func.span().start.offset,
-                    default_class,
-                    None,
-                    true,
-                    diag_ctx,
-                );
-                return;
-            } else {
-                return;
-            }
+    crate::parser::for_each_nested_function(if_stmt, &mut |func| {
+        if !diag_ctx.wants(func.span()) {
+            return;
         }
-        IfBody::ColonDelimited(colon_body) => colon_body.statements.as_slice(),
-    };
-
-    for inner_stmt in statements.iter() {
-        if let Statement::Function(func) = inner_stmt {
-            if !diag_ctx.wants(func.span()) {
-                continue;
-            }
-            diag_ctx.mark_walked(func.span());
-            analyze_function_body(
-                func.parameter_list.parameters.iter(),
-                func.body.statements.iter(),
-                func.span().start.offset,
-                default_class,
-                None,
-                true,
-                diag_ctx,
-            );
-        }
-    }
+        diag_ctx.mark_walked(func.span());
+        analyze_function_body(
+            func.parameter_list.parameters.iter(),
+            func.body.statements.iter(),
+            func.span().start.offset,
+            default_class,
+            None,
+            true,
+            diag_ctx,
+        );
+    });
 }
 
 /// Walk a class member to find method bodies and run the forward walker.

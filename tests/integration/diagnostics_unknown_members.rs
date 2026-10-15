@@ -128,6 +128,46 @@ class Consumer {
     );
 }
 
+/// A function declared in any branch of a top-level `if`, or in an `if`
+/// nested inside one, is checked like a top-level function.
+#[test]
+fn flags_unknown_method_in_function_declared_in_else_or_nested_if() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Foo {
+    public function bar(): void {}
+}
+
+if (function_exists('first')) {
+} elseif (function_exists('second')) {
+    function second(Foo $f): void {
+        $f->inElseIf();
+    }
+} else {
+    function first(Foo $f): void {
+        $f->inElse();
+    }
+}
+
+if (PHP_VERSION_ID > 80000) {
+    if (!function_exists('third')) {
+        function third(Foo $f): void {
+            $f->inNestedIf();
+        }
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    for name in ["inElseIf", "inElse", "inNestedIf"] {
+        assert!(
+            diags.iter().any(|d| d.message.contains(name)),
+            "Expected unknown method diagnostic for {name}, got: {:?}",
+            diags
+        );
+    }
+}
+
 #[test]
 fn no_diagnostic_for_existing_instance_method() {
     let backend = create_test_backend();

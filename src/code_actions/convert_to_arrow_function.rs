@@ -15,7 +15,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::code_actions::cursor_context::innermost_at;
-use crate::text_position::{offset_to_position, position_to_byte_offset};
+use crate::text_position::position_to_byte_offset;
 
 impl Backend {
     /// Collect "Convert to arrow function" code actions for closures at the
@@ -48,26 +48,14 @@ impl Backend {
             return;
         };
 
-        let start_pos = offset_to_position(content, span.start.offset as usize);
-        let end_pos = offset_to_position(content, span.end.offset as usize);
-
-        out.push(CodeActionOrCommand::CodeAction(CodeAction {
-            title: "Convert to arrow function".to_string(),
-            kind: Some(CodeActionKind::new("refactor.rewrite")),
-            diagnostics: None,
-            edit: Some(crate::code_actions::single_edit(
-                doc_uri,
-                Range {
-                    start: start_pos,
-                    end: end_pos,
-                },
-                replacement,
-            )),
-            command: None,
-            is_preferred: Some(false),
-            disabled: None,
-            data: None,
-        }));
+        out.push(crate::code_actions::rewrite_action(
+            "Convert to arrow function".to_string(),
+            doc_uri,
+            content,
+            (span.start.offset as usize, span.end.offset as usize),
+            replacement,
+            false,
+        ));
     }
 }
 

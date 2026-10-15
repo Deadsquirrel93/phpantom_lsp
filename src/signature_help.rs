@@ -330,8 +330,6 @@ fn collect_fcc_targets(
                 out.push(found);
             }
         }
-        Statement::Block(block) => walk!(block.statements.iter()),
-        Statement::Namespace(ns) => walk!(ns.statements().iter()),
         Statement::Class(cls) => {
             use mago_syntax::cst::class_like::member::ClassLikeMember;
             use mago_syntax::cst::class_like::method::MethodBody;
@@ -357,51 +355,7 @@ fn collect_fcc_targets(
         Statement::Function(func) => {
             walk!(func.body.statements.iter(), span_of(func.body.span()));
         }
-        Statement::If(if_stmt) => match &if_stmt.body {
-            IfBody::Statement(body) => {
-                collect_fcc_targets(body.statement, scope, content, out);
-                for ei in body.else_if_clauses.iter() {
-                    collect_fcc_targets(ei.statement, scope, content, out);
-                }
-                if let Some(ref else_clause) = body.else_clause {
-                    collect_fcc_targets(else_clause.statement, scope, content, out);
-                }
-            }
-            IfBody::ColonDelimited(body) => {
-                walk!(body.statements.iter());
-                for ei in body.else_if_clauses.iter() {
-                    walk!(ei.statements.iter());
-                }
-                if let Some(ref else_clause) = body.else_clause {
-                    walk!(else_clause.statements.iter());
-                }
-            }
-        },
-        Statement::Foreach(foreach) => match &foreach.body {
-            ForeachBody::Statement(inner) => collect_fcc_targets(inner, scope, content, out),
-            ForeachBody::ColonDelimited(body) => walk!(body.statements.iter()),
-        },
-        Statement::For(for_stmt) => match &for_stmt.body {
-            ForBody::Statement(inner) => collect_fcc_targets(inner, scope, content, out),
-            ForBody::ColonDelimited(body) => walk!(body.statements.iter()),
-        },
-        Statement::While(while_stmt) => match &while_stmt.body {
-            WhileBody::Statement(inner) => collect_fcc_targets(inner, scope, content, out),
-            WhileBody::ColonDelimited(body) => walk!(body.statements.iter()),
-        },
-        Statement::DoWhile(do_while) => {
-            collect_fcc_targets(do_while.statement, scope, content, out);
-        }
-        Statement::Try(try_stmt) => {
-            walk!(try_stmt.block.statements.iter());
-            for catch in try_stmt.catch_clauses.iter() {
-                walk!(catch.block.statements.iter());
-            }
-            if let Some(ref finally) = try_stmt.finally_clause {
-                walk!(finally.block.statements.iter());
-            }
-        }
-        _ => {}
+        _ => crate::parser::for_each_nested_statement_list(stmt, |nested| walk!(nested.iter())),
     }
 }
 

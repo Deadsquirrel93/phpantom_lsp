@@ -23,7 +23,7 @@ use tower_lsp::lsp_types::*;
 use crate::Backend;
 use crate::atom::bytes_to_str;
 use crate::class_lookup::find_class_at_offset;
-use crate::parser::with_parsed_program;
+use crate::parser::{for_each_nested_statement_list, with_parsed_program};
 use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::resolver::VarResolutionCtx;
 use crate::type_engine::variable::foreach_resolution::resolve_expression_type;
@@ -68,11 +68,6 @@ struct PropertyCheckCtx<'a> {
 /// Walk a top-level statement collecting property assignments.
 fn collect_from_statement(stmt: &Statement<'_>, ctx: &mut PropertyCheckCtx<'_>) {
     match stmt {
-        Statement::Namespace(ns) => {
-            for inner in ns.statements().iter() {
-                collect_from_statement(inner, ctx);
-            }
-        }
         Statement::Class(class) => {
             for member in class.members.iter() {
                 collect_from_class_member(member, ctx);
@@ -106,64 +101,11 @@ fn collect_from_statement(stmt: &Statement<'_>, ctx: &mut PropertyCheckCtx<'_>) 
                 check_expression_for_property_assignment(val, ctx);
             }
         }
-        Statement::If(if_stmt) => {
-            collect_from_if_body(&if_stmt.body, ctx);
-        }
-        Statement::While(w) => {
-            for s in w.body.statements() {
-                collect_from_statement(s, ctx);
+        _ => for_each_nested_statement_list(stmt, |nested| {
+            for inner in nested {
+                collect_from_statement(inner, ctx);
             }
-        }
-        Statement::DoWhile(dw) => {
-            collect_from_statement(dw.statement, ctx);
-        }
-        Statement::For(f) => {
-            for s in f.body.statements() {
-                collect_from_statement(s, ctx);
-            }
-        }
-        Statement::Foreach(fe) => {
-            for s in fe.body.statements() {
-                collect_from_statement(s, ctx);
-            }
-        }
-        Statement::Switch(sw) => {
-            collect_from_switch_body(&sw.body, ctx);
-        }
-        Statement::Try(t) => {
-            for s in t.block.statements.iter() {
-                collect_from_statement(s, ctx);
-            }
-            for catch in t.catch_clauses.iter() {
-                for s in catch.block.statements.iter() {
-                    collect_from_statement(s, ctx);
-                }
-            }
-            if let Some(ref finally) = t.finally_clause {
-                for s in finally.block.statements.iter() {
-                    collect_from_statement(s, ctx);
-                }
-            }
-        }
-        Statement::Block(block) => {
-            for s in block.statements.iter() {
-                collect_from_statement(s, ctx);
-            }
-        }
-        Statement::Declare(declare) => {
-            use mago_syntax::cst::declare::DeclareBody;
-            match &declare.body {
-                DeclareBody::Statement(inner) => {
-                    collect_from_statement(inner, ctx);
-                }
-                DeclareBody::ColonDelimited(body) => {
-                    for s in body.statements.iter() {
-                        collect_from_statement(s, ctx);
-                    }
-                }
-            }
-        }
-        _ => {}
+        }),
     }
 }
 
@@ -179,62 +121,6 @@ fn collect_from_class_member(
     {
         for s in block.statements.iter() {
             collect_from_statement(s, ctx);
-        }
-    }
-}
-
-fn collect_from_if_body(
-    body: &mago_syntax::cst::control_flow::r#if::IfBody<'_>,
-    ctx: &mut PropertyCheckCtx<'_>,
-) {
-    use mago_syntax::cst::control_flow::r#if::IfBody;
-    match body {
-        IfBody::Statement(inner) => {
-            collect_from_statement(inner.statement, ctx);
-            for c in inner.else_if_clauses.iter() {
-                collect_from_statement(c.statement, ctx);
-            }
-            if let Some(ref c) = inner.else_clause {
-                collect_from_statement(c.statement, ctx);
-            }
-        }
-        IfBody::ColonDelimited(body) => {
-            for s in body.statements.iter() {
-                collect_from_statement(s, ctx);
-            }
-            for c in body.else_if_clauses.iter() {
-                for s in c.statements.iter() {
-                    collect_from_statement(s, ctx);
-                }
-            }
-            if let Some(ref c) = body.else_clause {
-                for s in c.statements.iter() {
-                    collect_from_statement(s, ctx);
-                }
-            }
-        }
-    }
-}
-
-fn collect_from_switch_body(
-    body: &mago_syntax::cst::control_flow::switch::SwitchBody<'_>,
-    ctx: &mut PropertyCheckCtx<'_>,
-) {
-    use mago_syntax::cst::control_flow::switch::SwitchBody;
-    match body {
-        SwitchBody::BraceDelimited(b) => {
-            for case in b.cases.iter() {
-                for s in case.statements().iter() {
-                    collect_from_statement(s, ctx);
-                }
-            }
-        }
-        SwitchBody::ColonDelimited(b) => {
-            for case in b.cases.iter() {
-                for s in case.statements().iter() {
-                    collect_from_statement(s, ctx);
-                }
-            }
         }
     }
 }

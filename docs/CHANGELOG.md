@@ -36,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Functions declared in `else` branches are checked.** A function declared in the `elseif` or `else` branch of an `if`, or in an `if` nested inside another, now gets the same diagnostics as any other function. Before, only the first branch was checked.
 - **`?->` method calls on a `null` value.** `$x?->save()` where `$x` is known to be `null` is no longer reported as a call on `null`, the same as `$x?->name` already was. Laravel strings passed through `?->`, such as the ability in `auth()->user()?->can('edit-post')`, are now checked and navigable like those passed through `->`.
 - **Files with Windows line endings.** In a file saved with `\r\n` line endings, PHPStan quick fixes now edit the line they were offered for, and an inline `@var` annotation applies where it is written instead of in an earlier function.
 - **Template variables passed from constants and config values.** A namespaced constant, a `config()` value or a translation that a controller passes to a Blade view now types the template's variable the same way it is typed in the controller.

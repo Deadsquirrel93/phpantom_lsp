@@ -439,10 +439,7 @@ pub(super) fn collect_destructuring_var_defs(
         };
         match value_expr {
             Expression::Variable(Variable::Direct(dv)) => {
-                let name = {
-                    let s = bytes_to_str(dv.name);
-                    s.strip_prefix('$').unwrap_or(s).to_string()
-                };
+                let name = bare_variable_name(dv.name);
                 var_defs.push(VarDefSite {
                     offset: dv.span.start.offset,
                     name,
