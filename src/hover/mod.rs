@@ -32,7 +32,6 @@ use crate::class_lookup::find_class_at_offset;
 use crate::definition::member::MemberKind;
 use crate::php_type::{PhpType, TypeKind};
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind, SymbolSpan, VarDefKind};
-use crate::type_engine::resolver::CtxLoaders;
 use crate::types::*;
 
 use formatting::*;
@@ -199,10 +198,10 @@ impl Backend {
         let kind = &symbol.kind;
         let ctx = self.file_context_at(uri, cursor_offset);
         let current_class = find_class_at_offset(&ctx.classes, cursor_offset);
-        let class_loader = self.class_loader(&ctx);
-        let resolved_class_loader = self.resolved_class_loader(&ctx);
-        let function_loader = self.function_loader(&ctx);
-        let laravel_macro_this_resolver = self.laravel_macro_this_resolver(&class_loader);
+        let loaders = self.file_loaders(&ctx);
+        let class_loader = loaders.class_loader_at(cursor_offset);
+        let resolved_class_loader = loaders.resolved_class_loader();
+        let function_loader = loaders.function_loader_at(cursor_offset);
 
         match kind {
             SymbolKind::Variable { name } | SymbolKind::CompactVariable { name } => {
@@ -241,19 +240,7 @@ impl Backend {
                 is_method_call,
                 ..
             } => {
-                let rctx = self.resolution_ctx_at(
-                    current_class,
-                    &ctx.classes,
-                    content,
-                    cursor_offset,
-                    CtxLoaders::new(
-                        &resolved_class_loader,
-                        &class_loader,
-                        &function_loader,
-                        &laravel_macro_this_resolver,
-                    )
-                    .with_imports(&ctx.use_map),
-                );
+                let rctx = loaders.resolution_ctx_at(content, cursor_offset);
 
                 let access_kind = if *is_static {
                     AccessKind::DoubleColon

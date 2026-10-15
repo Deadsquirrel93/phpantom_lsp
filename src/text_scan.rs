@@ -112,6 +112,17 @@ pub(crate) fn is_ident_byte(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_'
 }
 
+/// Whether the word `keyword` ends at `pos` (exclusive) in `bytes`, with
+/// no identifier byte on either side of it.
+pub(crate) fn keyword_ends_at(bytes: &[u8], pos: usize, keyword: &[u8]) -> bool {
+    let Some(start) = pos.checked_sub(keyword.len()) else {
+        return false;
+    };
+    &bytes[start..pos] == keyword
+        && (start == 0 || !is_ident_byte(bytes[start - 1]))
+        && bytes.get(pos).is_none_or(|&b| !is_ident_byte(b))
+}
+
 /// Walk `bytes` backward from `pos`, stopping at the first byte that is
 /// not an identifier character, and return that stopping offset.
 ///
@@ -592,6 +603,47 @@ pub(crate) fn scan_top_level(
         }
     }
     None
+}
+
+/// The byte offsets of the commas at the top level of `text`: the ones not
+/// inside a quote, a comment, or a bracket (see [`scan_top_level`]).
+pub(crate) fn top_level_commas(text: &str) -> impl Iterator<Item = usize> + '_ {
+    let bytes = text.as_bytes();
+    let mut start = 0;
+    std::iter::from_fn(move || {
+        // Each pass restarts at depth zero just past a top-level comma,
+        // which is outside every string, comment and bracket by
+        // construction.
+        let comma = start
+            + scan_top_level(bytes.get(start..)?, |bytes, i| {
+                if bytes[i] == b',' {
+                    ScanStep::Stop
+                } else {
+                    ScanStep::Skip(1)
+                }
+            })?;
+        start = comma + 1;
+        Some(comma)
+    })
+}
+
+/// Split `text` at its [top-level commas](top_level_commas), the way an
+/// argument list or an array literal separates its entries.
+///
+/// A trailing comma, which PHP allows after the last argument or element,
+/// leaves no empty entry behind, and blank text has no entries at all.
+pub(crate) fn split_top_level_commas(text: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut start = 0;
+    for comma in top_level_commas(text) {
+        parts.push(&text[start..comma]);
+        start = comma + 1;
+    }
+    let last = &text[start..];
+    if !last.trim().is_empty() {
+        parts.push(last);
+    }
+    parts
 }
 
 /// Split an array literal element on its key separator: the first `=>`

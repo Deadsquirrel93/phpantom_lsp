@@ -720,7 +720,7 @@ pub(crate) fn resolve_array_literal_generic(
         return Some(PhpType::never());
     }
 
-    let elements = crate::type_engine::conditional_resolution::split_text_args(inner);
+    let elements = crate::text_scan::split_top_level_commas(inner);
 
     let first = elements.first()?.trim();
     if let Some((key_text, val_text)) = crate::text_scan::split_top_level_arrow(first) {

@@ -792,7 +792,7 @@ pub(in crate::type_engine) fn resolve_string_func_literal_type(
 ///
 /// Returns one `String` per argument by walking the AST nodes and
 /// extracting their spans. This avoids serialising the argument list
-/// to a flat string and then re-splitting with `split_text_args`.
+/// to a flat string and then re-splitting with `split_top_level_commas`.
 pub(in crate::type_engine) fn extract_arg_texts_from_ast(
     argument_list: &mago_syntax::cst::ArgumentList<'_>,
     content: &str,

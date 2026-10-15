@@ -363,21 +363,12 @@ impl Backend {
             return;
         };
         let file_ctx = self.file_context_at(def_uri, reg.name_offset);
-        let class_loader = self.class_loader(&file_ctx);
-        let resolved_class_loader = self.resolved_class_loader(&file_ctx);
-        let function_loader = self.function_loader(&file_ctx);
-        let laravel_macro_this_resolver = self.laravel_macro_this_resolver(&class_loader);
+        let loaders = self.file_loaders(&file_ctx);
         self.infer_macro_return_type(
             reg,
             &content,
             &file_ctx,
-            CtxLoaders::new(
-                &resolved_class_loader,
-                &class_loader,
-                &function_loader,
-                &laravel_macro_this_resolver,
-            )
-            .with_imports(&file_ctx.use_map),
+            loaders.ctx_loaders_at(reg.name_offset),
         );
     }
 

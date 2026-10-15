@@ -106,7 +106,7 @@ fn literal_array_shape(inner: &str, elements: ArrayElements<'_>) -> Option<PhpTy
     if inner.trim().is_empty() {
         return Some(PhpType::list_shape(Vec::new()));
     }
-    let items = crate::type_engine::types::conditional::split_text_args(inner);
+    let items = crate::text_scan::split_top_level_commas(inner);
     let mut entries: Vec<ShapeEntry> = Vec::new();
     let mut keyed = false;
     for item in items {

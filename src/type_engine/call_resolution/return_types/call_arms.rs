@@ -36,7 +36,7 @@ impl Backend {
         if is_reflected_property_call(method_name)
             && let Some(ty) = resolve_reflected_property_at_call(
                 method_name,
-                &split_text_args(text_args).to_vec(),
+                &split_top_level_commas(text_args).to_vec(),
                 &lhs_resolved,
                 ctx,
             )
@@ -148,7 +148,7 @@ impl Backend {
                 _ => HashMap::new(),
             };
 
-            let split_args = split_text_args(text_args);
+            let split_args = split_top_level_commas(text_args);
             let arg_refs = split_args.to_vec();
             let method_subs = Self::build_method_template_subs(&owner, method_name, &arg_refs, ctx);
 
@@ -316,7 +316,7 @@ impl Backend {
             if all_owners.len() > 1 {
                 let mut union_results: Vec<Arc<ClassInfo>> = Vec::new();
                 for owner in &all_owners {
-                    let split_args = split_text_args(text_args);
+                    let split_args = split_top_level_commas(text_args);
                     let arg_refs = split_args.to_vec();
                     let template_subs =
                         Self::build_method_template_subs(owner, method_name, &arg_refs, ctx);
@@ -374,7 +374,7 @@ impl Backend {
                 ctx.resolved_class_cache,
             );
 
-            let split_args = split_text_args(text_args);
+            let split_args = split_top_level_commas(text_args);
             let arg_refs = split_args.to_vec();
             let template_subs =
                 Self::build_method_template_subs(&merged, method_name, &arg_refs, ctx);
@@ -624,7 +624,7 @@ impl Backend {
                         crate::type_engine::variable::rhs_resolution::substitute_function_templates(
                             &func_info,
                             parsed_ty,
-                            &split_text_args(text_args)
+                            &split_top_level_commas(text_args)
                                 .into_iter()
                                 .map(str::to_string)
                                 .collect::<Vec<String>>(),
@@ -670,7 +670,7 @@ impl Backend {
                 let split_args: Vec<String> = if text_args.is_empty() {
                     vec![]
                 } else {
-                    split_text_args(text_args)
+                    split_top_level_commas(text_args)
                         .into_iter()
                         .map(|s| s.to_string())
                         .collect()
@@ -844,7 +844,7 @@ impl Backend {
         // the other way, so it carries the same class and name.
         if is_reflected_property_class(cls_arc.fqn().as_str())
             && let Some(ty) =
-                resolve_reflected_property_at_new(&cls_arc, &split_text_args(text_args), ctx)
+                resolve_reflected_property_at_new(&cls_arc, &split_top_level_commas(text_args), ctx)
         {
             if let Some(ref mut hint_out) = return_type_hint_out {
                 **hint_out = Some(ty);
@@ -858,7 +858,7 @@ impl Backend {
 
         // An omitted argument still binds through its parameter's default,
         // so `new E` and `new E()` go through here too.
-        let arg_texts = split_text_args(text_args);
+        let arg_texts = split_top_level_commas(text_args);
         let (generic_type, substituted) =
             crate::type_engine::call_resolution::instantiate_class(&cls_arc, &arg_texts, ctx);
         if let Some(ref mut hint_out) = return_type_hint_out {

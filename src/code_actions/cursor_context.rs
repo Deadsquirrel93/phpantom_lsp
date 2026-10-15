@@ -6,7 +6,9 @@
 //! individual code actions don't each need their own copy of the
 //! namespace → class-like → member traversal.  [`find_enclosing_function`]
 //! answers the narrower "which function is this offset in?" for the
-//! actions that edit a function wherever it is declared.
+//! actions that edit a function wherever it is declared, and
+//! [`innermost_at`] finds the construct under the cursor for the actions
+//! that rewrite one.
 
 use mago_span::HasSpan;
 use mago_syntax::cst::class_like::constant::ClassLikeConstant;
@@ -119,6 +121,74 @@ pub(crate) fn find_enclosing_function<'a>(
         walker.walk_statement(statement, &mut found);
     }
     found
+}
+
+/// What `pick` makes of the innermost node holding `offset` that it
+/// accepts, for an action that rewrites the construct under the cursor.
+///
+/// The walk is generic over [`Node`], so it reaches every construct the
+/// parser produces (`elseif` and `else` branches, `match` arms, closure
+/// bodies, anonymous classes), and it only descends into the subtree
+/// holding `offset`, so it costs the depth of the cursor rather than the
+/// size of the file.  Spans are inclusive at both ends: a cursor just past
+/// a construct is still on it.
+pub(crate) fn innermost_at<'ast, 'arena, T>(
+    program: &'ast Program<'arena>,
+    offset: u32,
+    mut pick: impl FnMut(Node<'ast, 'arena>) -> Option<T>,
+) -> Option<T> {
+    fn descend<'ast, 'arena, T>(
+        node: Node<'ast, 'arena>,
+        offset: u32,
+        pick: &mut impl FnMut(Node<'ast, 'arena>) -> Option<T>,
+        found: &mut Option<T>,
+    ) {
+        let span = node.span();
+        if offset < span.start.offset || offset > span.end.offset {
+            return;
+        }
+        if let Some(picked) = pick(node) {
+            *found = Some(picked);
+        }
+        node.visit_children(|child| descend(child, offset, pick, found));
+    }
+
+    let mut found = None;
+    descend(Node::Program(program), offset, &mut pick, &mut found);
+    found
+}
+
+/// A `$var = value;` statement: a plain `=` to a variable other than
+/// `$this`.
+pub(crate) struct PlainAssignment<'ast, 'arena> {
+    /// The whole statement, `;` included.
+    pub(crate) statement: &'ast ExpressionStatement<'arena>,
+    pub(crate) variable: &'ast DirectVariable<'arena>,
+    pub(crate) value: &'ast Expression<'arena>,
+}
+
+/// The innermost `$var = value;` statement under `offset`; see
+/// [`PlainAssignment`].
+pub(crate) fn plain_assignment_at<'ast, 'arena>(
+    program: &'ast Program<'arena>,
+    offset: u32,
+) -> Option<PlainAssignment<'ast, 'arena>> {
+    innermost_at(program, offset, |node| {
+        let Node::ExpressionStatement(statement) = node else {
+            return None;
+        };
+        let Expression::Assignment(assignment) = statement.expression else {
+            return None;
+        };
+        let Expression::Variable(Variable::Direct(variable)) = assignment.lhs else {
+            return None;
+        };
+        (assignment.operator.is_assign() && variable.name != b"$this").then_some(PlainAssignment {
+            statement,
+            variable,
+            value: assignment.rhs,
+        })
+    })
 }
 
 // ── AST walk (private) ─────────────────────────────────────────────────────

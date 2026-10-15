@@ -1,6 +1,6 @@
 //! Unit tests for [`super::namespace_at_offset`] and [`super::NamespaceDecls`].
 
-use super::{NamespaceDecls, namespace_at_offset};
+use super::{NamespaceDecls, namespace_at_offset, split_top_level_commas, top_level_commas};
 
 /// Return the namespace in force where `|` sits in `src` (the marker is
 /// stripped before scanning).
@@ -106,4 +106,63 @@ fn the_namespace_operator_is_not_a_declaration() {
 fn an_identifier_starting_with_the_keyword_is_not_a_declaration() {
     let src = "<?php\nnamespace App;\n$namespaced = 1;\nfunction t() { | }\n";
     assert_eq!(ns_at_marker(src).as_deref(), Some("App"));
+}
+
+#[test]
+fn top_level_commas_split_entries() {
+    assert_eq!(split_top_level_commas("a, b, c"), vec!["a", " b", " c"]);
+    assert_eq!(
+        split_top_level_commas("foo(bar, baz), qux"),
+        vec!["foo(bar, baz)", " qux"]
+    );
+    assert_eq!(
+        split_top_level_commas("fn() => match ($x) { 1 => 'a', 2 => 'b' }, $y"),
+        vec!["fn() => match ($x) { 1 => 'a', 2 => 'b' }", " $y"]
+    );
+}
+
+#[test]
+fn commas_in_strings_do_not_split() {
+    assert_eq!(
+        split_top_level_commas("'1,234,567.89', true"),
+        vec!["'1,234,567.89'", " true"]
+    );
+    assert_eq!(
+        split_top_level_commas("\"hello, world\", 42"),
+        vec!["\"hello, world\"", " 42"]
+    );
+    assert_eq!(
+        split_top_level_commas(r#""a,\"b,c\",d", 'x,\'y,z\'', foo)"#),
+        vec![r#""a,\"b,c\",d""#, " 'x,\\'y,z\\''", " foo)"]
+    );
+    assert_eq!(
+        split_top_level_commas(r#"array('a,b', ["x,y"]), "foo,bar""#),
+        vec![r#"array('a,b', ["x,y"])"#, r#" "foo,bar""#]
+    );
+    assert_eq!(
+        split_top_level_commas(r#"'foo\,bar', "baz\"qux", plain"#),
+        vec![r#"'foo\,bar'"#, r#" "baz\"qux""#, " plain"]
+    );
+}
+
+/// A comma inside a comment ends nothing, so the argument after it is
+/// still the one the caller asked for by index.
+#[test]
+fn commas_in_comments_do_not_split() {
+    assert_eq!(
+        split_top_level_commas("'view', // one, two\n['a' => 1]"),
+        vec!["'view'", " // one, two\n['a' => 1]"]
+    );
+    assert_eq!(
+        split_top_level_commas("'view' /* one, two */, ['a' => 1]"),
+        vec!["'view' /* one, two */", " ['a' => 1]"]
+    );
+}
+
+#[test]
+fn a_trailing_comma_and_blank_text_leave_no_empty_entry() {
+    assert_eq!(split_top_level_commas("$a, $b, "), vec!["$a", " $b"]);
+    assert_eq!(split_top_level_commas("   "), Vec::<&str>::new());
+    assert_eq!(split_top_level_commas(""), Vec::<&str>::new());
+    assert_eq!(top_level_commas("$a, $b, ").count(), 2);
 }

@@ -164,6 +164,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Global classes named inside a namespace with a class of the same name.** In a namespace that declares its own `Node`, a type hint, `instanceof`, `catch` or docblock naming `\Node` now means the global class rather than the namespace's. Completion also stops offering the private members of a same-named class from another namespace.
 - **Generic classes named without their type arguments.** A variable assigned from a method of a bare `\Iterator` (or any generic class named without arguments) is now `mixed` instead of the template parameter's name, as the same call already was when used directly.
 - **Inner iterators keep their element type.** `getInnerIterator()` on an `IteratorIterator` or `FilterIterator` subclass now returns `Iterator<TKey, TValue>`, so `$this->getInnerIterator()->current()` has the element type the class's `@extends` tag gives.
+- **Refactoring actions wherever the code is written.** "Convert to arrow function", "Convert to closure", "Convert to match expression", "Inline variable" and the `??` and `?->` simplifications now also work in `elseif` and `else` branches, `match` arms, and closure bodies. "Convert to closure" captures what a nested closure's `use` clause or a spread such as `...$items` reads, and leaves `$_GET` and the other auto-globals out of `use`, which PHP rejects.
+- **Named arguments after an array, closure or `match` argument.** Named-argument completion now works after an earlier argument such as `[1, 2]`, a closure, or a `match` expression, and commas inside such an argument or a comment no longer move signature help to the next parameter.
 
 ## [0.11.1] - 2026-10-07
 

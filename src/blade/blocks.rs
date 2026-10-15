@@ -24,7 +24,8 @@ use std::ops::Range;
 
 use super::balance::{Directive, directives, inside};
 use super::directives::BladeDirectives;
-use super::signature::{inert_regions, mask_regions, split_top_level_args};
+use super::signature::{inert_regions, mask_regions};
+use crate::text_scan::split_top_level_commas;
 
 /// A byte range of the original Blade source.
 pub(crate) type Span = Range<usize>;
@@ -331,7 +332,7 @@ pub(crate) fn analyse(content: &str, known: &BladeDirectives) -> TemplateBlocks 
             .unwrap_or_default();
 
         if let Some(entry) = named_block_directive(directive) {
-            let split = split_top_level_args(arguments);
+            let split = split_top_level_commas(arguments);
             // A `@section` with a second argument supplies its content
             // there and closes on the spot; only the one-argument form
             // opens a block a `@show` can close.
@@ -381,7 +382,7 @@ pub(crate) fn analyse(content: &str, known: &BladeDirectives) -> TemplateBlocks 
             .iter()
             .find(|(render, _)| *render == directive)
         {
-            let Some(argument) = split_top_level_args(arguments).into_iter().nth(*index) else {
+            let Some(argument) = split_top_level_commas(arguments).into_iter().nth(*index) else {
                 continue;
             };
             match string_literal_span(content, argument) {
@@ -398,7 +399,7 @@ pub(crate) fn analyse(content: &str, known: &BladeDirectives) -> TemplateBlocks 
 
 /// The view names an `@extends` / `@extendsFirst` argument list holds.
 fn view_names(content: &str, directive: &str, arguments: &str) -> Vec<String> {
-    let Some(first) = split_top_level_args(arguments).into_iter().next() else {
+    let Some(first) = split_top_level_commas(arguments).into_iter().next() else {
         return Vec::new();
     };
     if directive == "extendsFirst" {

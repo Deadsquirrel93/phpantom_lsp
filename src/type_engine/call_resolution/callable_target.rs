@@ -69,7 +69,7 @@ impl Backend {
             return (bound, self_bound_params);
         };
 
-        let split_args = crate::type_engine::types::conditional::split_text_args(at);
+        let split_args = crate::text_scan::split_top_level_commas(at);
         let method_subs = Self::build_method_template_subs(owner, method_name, &split_args, rctx);
         if !method_subs.is_empty() {
             crate::inheritance::apply_substitution_to_method(&mut bound, &method_subs);
@@ -380,11 +380,10 @@ impl Backend {
         if let Some(at) = args_text
             && !func.template_params.is_empty()
         {
-            let split_args: Vec<String> =
-                crate::type_engine::types::conditional::split_text_args(at)
-                    .into_iter()
-                    .map(|s| s.to_string())
-                    .collect();
+            let split_args: Vec<String> = crate::text_scan::split_top_level_commas(at)
+                .into_iter()
+                .map(|s| s.to_string())
+                .collect();
             let subs = crate::type_engine::variable::rhs_resolution::build_function_template_subs(
                 func,
                 &split_args,
@@ -467,7 +466,7 @@ impl Backend {
         if let Some(at) = args_text
             && !ctor.template_bindings().is_empty()
         {
-            let split_args = crate::type_engine::types::conditional::split_text_args(at);
+            let split_args = crate::text_scan::split_top_level_commas(at);
             let subs = Self::build_method_template_subs(&merged, "__construct", &split_args, rctx);
             if !subs.is_empty() {
                 let self_bound_params = super::template_subs::self_bound_template_params(

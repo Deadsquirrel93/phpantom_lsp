@@ -23,7 +23,9 @@ use crate::code_actions::implement_methods::{
 };
 use crate::php_type::PhpType;
 use crate::text_position::{offset_to_position, position_to_offset};
-use crate::text_scan::{is_ident_byte, scan_ident_backward, skip_block_comment, skip_line_comment};
+use crate::text_scan::{
+    is_ident_byte, keyword_ends_at, scan_ident_backward, skip_block_comment, skip_line_comment,
+};
 use crate::types::{
     ClassInfo, ClassLikeKind, ConstantInfo, MethodInfo, PhpVersion, PropertyInfo, PropertySource,
     Visibility,
@@ -822,7 +824,7 @@ pub(crate) fn is_after_const_keyword(content: &str, position: Position) -> bool 
     while i > 0 && bytes[i - 1].is_ascii_whitespace() {
         i -= 1;
     }
-    if check_keyword_ending_at_bytes(bytes, i, b"const") {
+    if keyword_ends_at(bytes, i, b"const") {
         return !preceded_by_use_keyword_bytes(bytes, i - "const".len());
     }
     has_const_keyword_before_name(bytes, i)
@@ -835,24 +837,7 @@ fn after_keyword(content: &str, position: Position, keyword: &str) -> bool {
     while i > 0 && bytes[i - 1].is_ascii_whitespace() {
         i -= 1;
     }
-    check_keyword_ending_at_bytes(bytes, i, keyword.as_bytes())
-}
-
-fn check_keyword_ending_at_bytes(bytes: &[u8], pos: usize, keyword: &[u8]) -> bool {
-    if pos < keyword.len() {
-        return false;
-    }
-    let start = pos - keyword.len();
-    if &bytes[start..pos] != keyword {
-        return false;
-    }
-    if start > 0 && is_ident_byte(bytes[start - 1]) {
-        return false;
-    }
-    if pos < bytes.len() && is_ident_byte(bytes[pos]) {
-        return false;
-    }
-    true
+    keyword_ends_at(bytes, i, keyword.as_bytes())
 }
 
 fn preceded_by_use_keyword_bytes(bytes: &[u8], keyword_start: usize) -> bool {
@@ -860,7 +845,7 @@ fn preceded_by_use_keyword_bytes(bytes: &[u8], keyword_start: usize) -> bool {
     while before > 0 && bytes[before - 1].is_ascii_whitespace() {
         before -= 1;
     }
-    check_keyword_ending_at_bytes(bytes, before, b"use")
+    keyword_ends_at(bytes, before, b"use")
 }
 
 pub(super) fn has_const_keyword_before_name(bytes: &[u8], pos: usize) -> bool {
@@ -1116,7 +1101,10 @@ pub(crate) fn is_member_declaration_name_position_at_offset(content: &str, curso
         || is_property_declaration_name_position_at_offset(bytes, cursor)
 }
 
-fn is_function_or_const_name_position_at_offset(bytes: &[u8], cursor: usize) -> bool {
+/// Whether the cursor at byte `cursor` is typing a declared function,
+/// constant or enum case *name*; see
+/// [`is_function_or_const_name_position`](super::type_hint_completion::is_function_or_const_name_position).
+pub(super) fn is_function_or_const_name_position_at_offset(bytes: &[u8], cursor: usize) -> bool {
     let mut i = scan_ident_backward(bytes, cursor);
 
     let after_ident = i;
@@ -1130,18 +1118,18 @@ fn is_function_or_const_name_position_at_offset(bytes: &[u8], cursor: usize) -> 
         return false;
     }
 
-    if check_keyword_ending_at_bytes(bytes, i, b"fn") {
+    if keyword_ends_at(bytes, i, b"fn") {
         return true;
     }
     // `case` names an enum case (a member) but also labels a `switch`
     // branch, where a class/const/enum name completion is wanted.
-    if check_keyword_ending_at_bytes(bytes, i, b"case") {
+    if keyword_ends_at(bytes, i, b"case") {
         return case_is_enum_declaration(bytes, i);
     }
-    if check_keyword_ending_at_bytes(bytes, i, b"function") {
+    if keyword_ends_at(bytes, i, b"function") {
         return !preceded_by_use_keyword_bytes(bytes, i - "function".len());
     }
-    if check_keyword_ending_at_bytes(bytes, i, b"const") {
+    if keyword_ends_at(bytes, i, b"const") {
         return !preceded_by_use_keyword_bytes(bytes, i - "const".len());
     }
     has_const_keyword_before_name(bytes, i)

@@ -487,6 +487,12 @@ pub(in crate::completion) fn class_edit_texts(
 /// and `build_item` don't need seven-plus arguments each.
 pub(in crate::completion) struct ClassItemCtx<'a> {
     pub(in crate::completion) is_fqn_prefix: bool,
+    /// Whether the typed prefix starts with `\`, which the inserted
+    /// fully-qualified name keeps.
+    pub(in crate::completion) has_leading_backslash: bool,
+    /// Whether a fully-qualified name may be shortened through one of the
+    /// file's imports; never in a `use` statement, which spells it out.
+    pub(in crate::completion) shorten_via_imports: bool,
     pub(in crate::completion) is_new: bool,
     /// Whether this completion is inside an attribute list (`#[…]`).
     ///
@@ -550,6 +556,36 @@ pub(in crate::completion) struct ClassItemTexts {
 }
 
 impl ClassItemCtx<'_> {
+    /// What accepting `fqn` inserts, and the `use` import it adds, for a
+    /// class in source `tier` (see [`build_item`](Self::build_item)).
+    pub(in crate::completion) fn item_texts(&self, fqn: &str, tier: char) -> ClassItemTexts {
+        let (mut base_name, filter, mut use_import) = class_edit_texts(
+            crate::util::short_name(fqn),
+            fqn,
+            self.is_fqn_prefix,
+            self.has_leading_backslash,
+            self.file_namespace,
+        );
+        let mut was_shortened = false;
+        if self.shorten_via_imports
+            && let Some(shortened) = shorten_fqn_via_use_map(fqn, self.file_use_map)
+        {
+            base_name = shortened;
+            use_import = None;
+            was_shortened = true;
+        }
+        // Tier 0/1 never need a use-import.
+        if tier <= '1' {
+            use_import = None;
+        }
+        self.apply_import_fixups(&mut base_name, &mut use_import, was_shortened);
+        ClassItemTexts {
+            base_name,
+            filter,
+            use_import,
+        }
+    }
+
     /// Fix up `base_name` and `use_import` after `class_edit_texts`
     /// to handle import conflicts and FQN alias collisions.
     ///
@@ -888,6 +924,8 @@ impl Backend {
         let needs_ctor = is_new || is_attribute;
         let ctx = ClassItemCtx {
             is_fqn_prefix,
+            has_leading_backslash,
+            shorten_via_imports: should_shorten_via_imports,
             is_new,
             is_attribute,
             fqn_replace_range,
@@ -908,7 +946,7 @@ impl Backend {
         };
 
         // Build a reverse lookup: FQN → use-import short name.
-        let use_imported_fqns: HashSet<&String> = file_use_map.values().collect();
+        let use_imported_fqns: HashSet<&str> = file_use_map.values().map(String::as_str).collect();
 
         // Namespace prefix for same/sub-namespace proximity check.
         let ns_prefix = file_namespace.as_ref().map(|ns| format!("{}\\{}", ns, ""));
@@ -938,7 +976,7 @@ impl Backend {
             }
 
             // Determine tier by proximity.
-            let tier = if use_imported_fqns.contains(&fqn.to_string()) {
+            let tier = if use_imported_fqns.contains(fqn) {
                 '0'
             } else {
                 let in_same_or_sub_ns = match &ns_prefix {
@@ -999,38 +1037,13 @@ impl Backend {
             if self.is_likely_namespace_not_class(fqn) {
                 continue;
             }
-            let (mut base_name, filter, mut use_import) = class_edit_texts(
-                sn,
-                fqn,
-                is_fqn_prefix,
-                has_leading_backslash,
-                effective_namespace,
-            );
-            let mut was_shortened = false;
-            if should_shorten_via_imports
-                && let Some(shortened) = shorten_fqn_via_use_map(fqn, file_use_map)
-            {
-                base_name = shortened;
-                use_import = None;
-                was_shortened = true;
-            }
-            // Tier 0/1 never need a use-import.
-            if tier <= '1' {
-                use_import = None;
-            }
-            let mut texts = ClassItemTexts {
-                base_name,
-                filter,
-                use_import,
-            };
-            ctx.apply_import_fixups(&mut texts.base_name, &mut texts.use_import, was_shortened);
             let ctor = if needs_ctor {
                 self.ctor_params_for(fqn)
             } else {
                 None
             };
             items.push(ctx.build_item(
-                texts,
+                ctx.item_texts(fqn, tier),
                 fqn,
                 tier,
                 origin_tier,
@@ -1054,37 +1067,13 @@ impl Backend {
             let Some((tier, _origin_tier, demoted, deprecated)) = classify(fqn, sn) else {
                 continue;
             };
-            let (mut base_name, filter, mut use_import) = class_edit_texts(
-                sn,
-                fqn,
-                is_fqn_prefix,
-                has_leading_backslash,
-                effective_namespace,
-            );
-            let mut was_shortened = false;
-            if should_shorten_via_imports
-                && let Some(shortened) = shorten_fqn_via_use_map(fqn, file_use_map)
-            {
-                base_name = shortened;
-                use_import = None;
-                was_shortened = true;
-            }
-            if tier <= '1' {
-                use_import = None;
-            }
-            let mut texts = ClassItemTexts {
-                base_name,
-                filter,
-                use_import,
-            };
-            ctx.apply_import_fixups(&mut texts.base_name, &mut texts.use_import, was_shortened);
             let ctor = if needs_ctor {
                 self.ctor_params_for(fqn)
             } else {
                 None
             };
             items.push(ctx.build_item(
-                texts,
+                ctx.item_texts(fqn, tier),
                 fqn,
                 tier,
                 crate::ClassCompletionOrigin::CoreStub.sort_tier(),

@@ -77,7 +77,7 @@ pub fn try_generate_docblock(
     function_loader: FunctionLoader<'_>,
     uri: &str,
 ) -> Option<CompletionResponse> {
-    let (trigger_range, indent) = trigger::detect_docblock_trigger(content, position)?;
+    let (trigger_range, _) = trigger::detect_docblock_trigger(content, position)?;
 
     // Find the declaration below and classify it.
     let remaining = trigger::get_text_after_trigger(content, position);
@@ -98,10 +98,10 @@ pub fn try_generate_docblock(
         parse_decl::enrich_property_type_from_class(&mut sym, content, position, local_classes);
     }
 
-    let snippet = build::build_docblock_snippet(
+    let snippet = build::build_docblock(
         &context,
         &sym,
-        &indent,
+        &mut build::DocForm::snippet(),
         content,
         position,
         use_map,
@@ -204,10 +204,10 @@ pub fn try_generate_docblock_on_enter(
     }
 
     // Build the docblock as plain text (no snippet tab stops).
-    let plain = build::build_docblock_plain(
+    let plain = build::build_docblock(
         &context,
         &sym,
-        &indent,
+        &mut build::DocForm::Plain { indent: &indent },
         content,
         position,
         use_map,

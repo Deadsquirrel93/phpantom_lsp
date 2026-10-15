@@ -11,7 +11,7 @@ use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::subject_expr::SubjectExpr;
 use crate::types::*;
 
-use crate::type_engine::conditional_resolution::split_text_args;
+use crate::text_scan::split_top_level_commas;
 use crate::type_engine::resolver::{Loaders, ResolutionCtx};
 use crate::type_engine::subject_expr::split_call_subject_raw;
 use crate::type_engine::variable::array_func_rules::ArrayFuncArgs;
@@ -65,7 +65,7 @@ pub(super) struct TextArrayFuncArgs<'a, 'ctx> {
 impl<'a, 'ctx> TextArrayFuncArgs<'a, 'ctx> {
     pub(super) fn new(text_args: &'a str, ctx: &'a ResolutionCtx<'ctx>) -> Self {
         Self {
-            args: split_text_args(text_args),
+            args: split_top_level_commas(text_args),
             ctx,
         }
     }
@@ -180,12 +180,12 @@ impl ArrayFuncArgs for TextArrayFuncArgs<'_, '_> {
 impl Backend {
     /// Extract the first argument from a comma-separated argument text.
     ///
-    /// [`split_text_args`] does the splitting: it respects nested
+    /// [`split_top_level_commas`](crate::text_scan::split_top_level_commas) does the splitting: it respects nested
     /// brackets and, unlike the hand-rolled scan this replaced, string
     /// literals too, so a comma inside `'a, b'` no longer ends the first
     /// argument.
     pub(super) fn extract_first_arg_text(args_text: &str) -> Option<String> {
-        let first = split_text_args(args_text).into_iter().next()?.trim();
+        let first = split_top_level_commas(args_text).into_iter().next()?.trim();
         (!first.is_empty()).then(|| crate::call_args::text_arg_value(first).to_string())
     }
 

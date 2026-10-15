@@ -266,8 +266,8 @@ impl Backend {
         }
     }
 
-    /// Everything a pass over the whole file behind `ctx` resolves names
-    /// and expressions through; see [`FileLoaders`].
+    /// Everything code in the file behind `ctx` resolves names and
+    /// expressions through; see [`FileLoaders`].
     pub(crate) fn file_loaders<'a>(&'a self, ctx: &'a FileContext) -> FileLoaders<'a> {
         FileLoaders {
             backend: self,
@@ -336,8 +336,6 @@ impl Backend {
         content: &str,
         cursor_offset: u32,
     ) -> Option<ClassInfo> {
-        use crate::class_lookup::find_class_at_offset;
-
         let ctx = self.file_context_at(uri, cursor_offset);
         if let Some(target) =
             crate::virtual_members::laravel::macro_closure_this_target(content, cursor_offset)
@@ -354,25 +352,10 @@ impl Backend {
                 ));
             }
         }
-        let current_class = find_class_at_offset(&ctx.classes, cursor_offset);
-        let class_loader = self.class_loader(&ctx);
-        let resolved_class_loader = self.resolved_class_loader(&ctx);
-        let function_loader = self.function_loader(&ctx);
-        let laravel_macro_this_resolver = self.laravel_macro_this_resolver(&class_loader);
-        let rctx = self.resolution_ctx_at(
-            current_class,
-            &ctx.classes,
-            content,
-            cursor_offset,
-            CtxLoaders::new(
-                &resolved_class_loader,
-                &class_loader,
-                &function_loader,
-                &laravel_macro_this_resolver,
-            )
-            .with_imports(&ctx.use_map),
-        );
-        crate::type_engine::variable::closure_resolution::find_closure_this_override(&rctx)
+        let loaders = self.file_loaders(&ctx);
+        crate::type_engine::variable::closure_resolution::find_closure_this_override(
+            &loaders.resolution_ctx_at(content, cursor_offset),
+        )
     }
 
     /// Return a constant-value-loader closure bound to a [`FileContext`].
@@ -562,14 +545,16 @@ type BoxedFunctionLoader<'a> = Box<dyn Fn(&str, u32) -> Option<FunctionInfo> + '
 type BoxedConstantLoader<'a> = Box<dyn Fn(&str, u32) -> Option<Option<String>> + 'a>;
 type BoxedKeyResolver<'a> = Box<dyn Fn(&str) -> Option<PhpType> + 'a>;
 
-/// Everything a pass over a whole file resolves names and expressions
-/// through, built once per file by [`Backend::file_loaders`]: a class,
-/// function and constant loader for each `namespace` block (see
-/// [`Backend::class_loaders`]), the loader for already-resolved names, the
-/// Laravel config, translation and macro `$this` resolvers, and for each
-/// block the placeholder class that code outside a class reads as its own.
+/// Everything code in a file resolves names and expressions through,
+/// built by [`Backend::file_loaders`]: a class, function and constant
+/// loader for each `namespace` block (see [`Backend::class_loaders`]), the
+/// loader for already-resolved names, the Laravel config, translation and
+/// macro `$this` resolvers, and for each block the placeholder class that
+/// code outside a class reads as its own.
 ///
-/// It hands out the [`VarResolutionCtx`] or [`ResolutionCtx`] for an
+/// A pass over the whole file builds it once; a request at one position
+/// builds it from the [`FileContext`] it already holds.  It hands out the
+/// loaders, and the [`VarResolutionCtx`] or [`ResolutionCtx`], for an
 /// offset, built from the loaders of the block the offset is in.
 pub(crate) struct FileLoaders<'a> {
     backend: &'a Backend,

@@ -29,7 +29,8 @@ use crate::atom::atom;
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::ParameterInfo;
 
-use super::conditional::{ArgTypeResolver, split_text_args};
+use super::conditional::ArgTypeResolver;
+use crate::text_scan::split_top_level_commas;
 
 /// `JSON_THROW_ON_ERROR`, as defined by PHP's `ext/json/php_json.h`.
 ///
@@ -167,7 +168,7 @@ pub(crate) fn call_site_return_type(
 ) -> Option<PhpType> {
     let args = CallArgs {
         params,
-        args: split_text_args(text_args),
+        args: split_top_level_commas(text_args),
         resolver: arg_type_resolver,
     };
     match classify(func_name)? {

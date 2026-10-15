@@ -1,3 +1,4 @@
+use crate::atom::atom;
 /// PHPStan conditional return type resolution.
 ///
 /// This module contains the free functions that resolve PHPStan conditional
@@ -19,7 +20,7 @@
 ///
 /// Both decide an omitted argument by that declared default, since that is
 /// the value the parameter takes at runtime.
-use crate::atom::atom;
+use crate::text_scan::split_top_level_commas;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -283,7 +284,7 @@ pub fn resolve_conditional_with_text_args_and_defaults(
             // Split the textual arguments by comma (at depth 0), then bind
             // them to parameters by PHP's rules so a named argument resolves
             // to the parameter it targets rather than its ordinal slot.
-            let args = split_text_args(text_args);
+            let args = split_top_level_commas(text_args);
             let bound_text = crate::call_args::bind_text_args_to_params(params, &args);
             let arg_text_owned = bound_text.get(param_idx).cloned().flatten();
             // An omitted argument takes the parameter's declared default at
@@ -1116,7 +1117,7 @@ fn decide_template_offset_condition(
     if !binds_directly {
         return None;
     }
-    let args = split_text_args(text_args);
+    let args = split_top_level_commas(text_args);
     let bound = crate::call_args::bind_text_args_to_params(params, &args);
     let arg_text = bound.get(param_idx)?.as_deref()?;
     let arg_ty =
@@ -1443,60 +1444,6 @@ pub fn evaluate_nested_conditionals_text(
         }
         _ => ty.map_children(&recurse),
     }
-}
-
-/// Split a textual argument list by commas, respecting nested brackets
-/// so that `"foo(a, b), c"` splits into `["foo(a, b)", "c"]`.
-///
-/// Braces count as brackets too, so a closure argument written out in full
-/// (`function ($a) { return [$a, 1]; }, $rest`) stays one argument.
-pub fn split_text_args(text: &str) -> Vec<&str> {
-    let mut result = Vec::new();
-    let mut depth = 0u32;
-    let mut start = 0;
-    let mut in_single_quote = false;
-    let mut in_double_quote = false;
-    let mut prev_was_backslash = false;
-
-    for (i, ch) in text.char_indices() {
-        if prev_was_backslash {
-            prev_was_backslash = false;
-            continue;
-        }
-        match ch {
-            '\\'
-                // Only treat as escape if inside a quote
-                if in_single_quote || in_double_quote =>
-            {
-                prev_was_backslash = true;
-            }
-            '\'' if !in_double_quote => {
-                in_single_quote = !in_single_quote;
-            }
-            '"' if !in_single_quote => {
-                in_double_quote = !in_double_quote;
-            }
-            '(' | '[' | '{' if !in_single_quote && !in_double_quote => {
-                depth += 1;
-            }
-            ')' | ']' | '}' if !in_single_quote && !in_double_quote => {
-                depth = depth.saturating_sub(1);
-            }
-            ',' if depth == 0 && !in_single_quote && !in_double_quote => {
-                result.push(&text[start..i]);
-                start = i + 1; // skip the comma
-            }
-            _ => {}
-        }
-    }
-    // Push the last segment (or the only one if there were no commas).
-    if start <= text.len() {
-        let last = &text[start..];
-        if !last.trim().is_empty() {
-            result.push(last);
-        }
-    }
-    result
 }
 
 /// A single resolved class name, or a union of them when more than one

@@ -34,9 +34,7 @@ use tower_lsp::lsp_types::*;
 
 use super::point_location;
 use crate::Backend;
-use crate::class_lookup::find_class_at_offset;
 use crate::text_position::position_to_offset;
-use crate::type_engine::resolver::CtxLoaders;
 use crate::types::ResolvedType;
 use crate::types::*;
 use crate::virtual_members::ResolvedClassCache;
@@ -141,34 +139,18 @@ impl Backend {
         // 2. Gather context needed for class resolution.
         let cursor_offset = position_to_offset(content, position);
         let ctx = self.file_context_at(uri, cursor_offset);
-
-        let current_class = find_class_at_offset(&ctx.classes, cursor_offset).cloned();
-
-        let class_loader = self.class_loader(&ctx);
-
-        let resolved_class_loader = self.resolved_class_loader(&ctx);
-        let function_loader = self.function_loader(&ctx);
-        let laravel_macro_this_resolver = self.laravel_macro_this_resolver(&class_loader);
+        let loaders = self.file_loaders(&ctx);
+        let resolved_class_loader = loaders.resolved_class_loader();
 
         // 3. Resolve the subject to all candidate classes.
         //    When a variable is assigned different types in conditional
         //    branches (e.g. if/else), multiple candidates are returned.
-        let rctx = self.resolution_ctx_at(
-            current_class.as_ref(),
-            &ctx.classes,
-            content,
-            cursor_offset,
-            CtxLoaders::new(
-                &resolved_class_loader,
-                &class_loader,
-                &function_loader,
-                &laravel_macro_this_resolver,
-            )
-            .with_imports(&ctx.use_map),
-        );
-        let candidates = ResolvedType::into_arced_classes(
-            crate::type_engine::resolver::resolve_target_classes(subject, access_kind, &rctx),
-        );
+        let candidates =
+            ResolvedType::into_arced_classes(crate::type_engine::resolver::resolve_target_classes(
+                subject,
+                access_kind,
+                &loaders.resolution_ctx_at(content, cursor_offset),
+            ));
 
         if candidates.is_empty() {
             return None;

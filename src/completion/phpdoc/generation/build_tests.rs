@@ -198,9 +198,9 @@ fn generates_function_snippet_no_indent_in_continuation() {
     };
     let use_map = HashMap::new();
     let file_ns = None;
-    let snippet = build_function_snippet(
+    let snippet = build_function(
         &sym,
-        "    ",
+        &mut DocForm::snippet(),
         "<?php\n",
         Position {
             line: 0,
@@ -236,9 +236,9 @@ fn snippet_escapes_dollar_in_param_names() {
     };
     let use_map = HashMap::new();
     let file_ns = None;
-    let snippet = build_function_snippet(
+    let snippet = build_function(
         &sym,
-        "",
+        &mut DocForm::snippet(),
         "<?php\n",
         Position {
             line: 0,
@@ -290,9 +290,9 @@ fn generates_function_snippet_skips_fully_typed_params() {
             None
         }
     };
-    let snippet = build_function_snippet(
+    let snippet = build_function(
         &sym,
-        "",
+        &mut DocForm::snippet(),
         "<?php\n",
         Position {
             line: 0,
@@ -333,9 +333,9 @@ fn generates_function_snippet_for_untyped_params() {
     };
     let use_map = HashMap::new();
     let file_ns = None;
-    let snippet = build_function_snippet(
+    let snippet = build_function(
         &sym,
-        "    ",
+        &mut DocForm::snippet(),
         "<?php\n",
         Position {
             line: 0,
@@ -381,9 +381,9 @@ fn generates_function_snippet_for_array_param_and_return() {
     };
     let use_map = HashMap::new();
     let file_ns = None;
-    let snippet = build_function_snippet(
+    let snippet = build_function(
         &sym,
-        "    ",
+        &mut DocForm::snippet(),
         "<?php\n",
         Position {
             line: 0,
@@ -413,9 +413,9 @@ fn generates_void_function_snippet_without_return() {
     };
     let use_map = HashMap::new();
     let file_ns = None;
-    let snippet = build_function_snippet(
+    let snippet = build_function(
         &sym,
-        "    ",
+        &mut DocForm::snippet(),
         "<?php\n",
         Position {
             line: 0,
@@ -444,9 +444,9 @@ fn paramless_void_generates_summary_skeleton() {
     };
     let use_map = HashMap::new();
     let file_ns = None;
-    let snippet = build_function_snippet(
+    let snippet = build_function(
         &sym,
-        "    ",
+        &mut DocForm::snippet(),
         "<?php\n",
         Position {
             line: 0,
@@ -482,7 +482,7 @@ fn paramless_void_generates_summary_skeleton() {
 #[test]
 fn generates_class_snippet_without_templates() {
     let sym = SymbolInfo::default();
-    let snippet = build_class_snippet(&sym, "    ", &no_classes);
+    let snippet = build_class(&sym, &mut DocForm::snippet(), &no_classes);
     assert!(snippet.starts_with("/**"));
     assert!(
         snippet.contains("${1}"),
@@ -517,7 +517,7 @@ fn generates_class_snippet_with_templated_parent() {
             None
         }
     };
-    let snippet = build_class_snippet(&sym, " ", &loader);
+    let snippet = build_class(&sym, &mut DocForm::snippet(), &loader);
     assert!(
         snippet.contains("@extends Factory<${1:TModel}>"),
         "Should contain @extends with template tab stop, got:\n{}",
@@ -554,7 +554,7 @@ fn generates_class_snippet_with_templated_interface() {
             None
         }
     };
-    let snippet = build_class_snippet(&sym, " ", &loader);
+    let snippet = build_class(&sym, &mut DocForm::snippet(), &loader);
     assert!(
         snippet.contains("@implements Comparable<${1:T}>"),
         "Should contain @implements with template tab stop, got:\n{}",
@@ -568,7 +568,7 @@ fn generates_property_snippet_always_has_var() {
         type_hint: Some(PhpType::parse("string")),
         ..Default::default()
     };
-    let snippet = build_property_snippet(&sym, "    ", &no_classes);
+    let snippet = build_var(&sym, &mut DocForm::snippet(), &no_classes);
     assert!(
         snippet.contains("@var string"),
         "Typed property should have @var string, got:\n{}",
@@ -585,7 +585,7 @@ fn generates_property_snippet_always_has_var() {
 #[test]
 fn generates_property_snippet_untyped_has_mixed() {
     let sym = SymbolInfo::default();
-    let snippet = build_property_snippet(&sym, "    ", &no_classes);
+    let snippet = build_var(&sym, &mut DocForm::snippet(), &no_classes);
     assert!(
         snippet.contains("@var ${1:mixed}"),
         "Untyped property should have @var with mixed placeholder, got:\n{}",
@@ -599,14 +599,14 @@ fn generates_constant_snippet_with_type() {
         type_hint: Some(PhpType::parse("int")),
         ..Default::default()
     };
-    let snippet = build_constant_snippet(&sym, "    ", &no_classes);
+    let snippet = build_var(&sym, &mut DocForm::snippet(), &no_classes);
     assert!(snippet.contains("@var int"));
 }
 
 #[test]
 fn generates_constant_snippet_without_type() {
     let sym = SymbolInfo::default();
-    let snippet = build_constant_snippet(&sym, "    ", &no_classes);
+    let snippet = build_var(&sym, &mut DocForm::snippet(), &no_classes);
     assert!(snippet.contains("@var ${1:mixed}"));
 }
 
@@ -622,9 +622,9 @@ fn param_names_are_space_aligned() {
     };
     let use_map = HashMap::new();
     let file_ns = None;
-    let snippet = build_function_snippet(
+    let snippet = build_function(
         &sym,
-        " ",
+        &mut DocForm::snippet(),
         "<?php\n",
         Position {
             line: 0,
@@ -677,9 +677,9 @@ fn param_names_aligned_with_mixed_enrichment_widths() {
     };
     let use_map = HashMap::new();
     let file_ns = None;
-    let snippet = build_function_snippet(
+    let snippet = build_function(
         &sym,
-        " ",
+        &mut DocForm::snippet(),
         "<?php\n",
         Position {
             line: 0,
@@ -754,9 +754,9 @@ fn blank_separator_between_tag_groups() {
     let file_ns = None;
     // Use content with a throw so we get @throws.
     let content = "<?php\nfunction test($x) { throw new \\RuntimeException(); }";
-    let snippet = build_function_snippet(
+    let snippet = build_function(
         &sym,
-        "",
+        &mut DocForm::snippet(),
         content,
         Position {
             line: 1,

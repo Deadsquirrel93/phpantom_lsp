@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use crate::atom::atom;
 use crate::php_type::{PhpType, TypeKind};
-use crate::type_engine::conditional_resolution::split_text_args;
+use crate::text_scan::split_top_level_commas;
 use crate::type_engine::resolver::ResolutionCtx;
 use crate::type_engine::subject_expr::SubjectExpr;
 use crate::types::{AccessKind, ClassInfo, ResolvedType};
@@ -108,7 +108,7 @@ pub(super) fn resolve_request_accessor_at_call(
         &mut Vec::new(),
         0,
     )?;
-    let args = split_text_args(text_args);
+    let args = split_top_level_commas(text_args);
     let bound = crate::call_args::bind_text_args_to_params(&method.parameters, &args);
     let default_type = || {
         let text = bound.get(1)?.as_deref()?;
@@ -146,7 +146,7 @@ pub(super) fn resolve_validated_shape_at_call(
 
     let call = validated_shape::shape_bearing_method(method_name)?;
     let receiver = owners.iter().find_map(|rt| rt.class_info.as_ref())?;
-    let mut args = split_text_args(text_args);
+    let mut args = split_top_level_commas(text_args);
     for arg in &mut args {
         *arg = crate::call_args::text_arg_value(arg);
     }
@@ -205,7 +205,7 @@ fn auth_guard_name(base: &SubjectExpr, user_args: &str) -> Option<String> {
 /// Returns `None` when there are no arguments or the first argument is
 /// not a single-quoted or double-quoted string literal.
 fn first_string_literal_arg(args_text: &str) -> Option<String> {
-    let first = split_text_args(args_text).into_iter().next()?;
+    let first = split_top_level_commas(args_text).into_iter().next()?;
     crate::text_scan::unquote_php_string(crate::call_args::text_arg_value(first))
         .map(str::to_string)
 }

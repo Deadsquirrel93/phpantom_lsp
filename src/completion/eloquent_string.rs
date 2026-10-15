@@ -25,7 +25,7 @@ use crate::completion::source::code_context::{CodeContext, Operator};
 use crate::php_type::{PhpType, TypeKind};
 use crate::text_position::position_to_offset;
 use crate::text_scan::collapse_continuation_lines;
-use crate::type_engine::resolver::{CtxLoaders, resolve_target_classes};
+use crate::type_engine::resolver::resolve_target_classes;
 use crate::type_engine::subject_extraction::detect_access_operator;
 use crate::types::{AccessKind, ClassInfo, FileContext};
 use crate::virtual_members::laravel::{
@@ -323,24 +323,9 @@ impl Backend {
         cursor_offset: u32,
         ctx: &FileContext,
     ) -> Option<Arc<ClassInfo>> {
-        let current_class = crate::class_lookup::find_class_at_offset(&ctx.classes, cursor_offset);
-        let source_class_loader = self.class_loader(ctx);
-        let class_loader = &self.resolved_class_loader(ctx);
-        let function_loader = self.function_loader(ctx);
-        let laravel_macro_this_resolver = self.laravel_macro_this_resolver(&source_class_loader);
-        let rctx = self.resolution_ctx_at(
-            current_class,
-            &ctx.classes,
-            content,
-            cursor_offset,
-            CtxLoaders::new(
-                class_loader,
-                &source_class_loader,
-                &function_loader,
-                &laravel_macro_this_resolver,
-            )
-            .with_imports(&ctx.use_map),
-        );
+        let loaders = self.file_loaders(ctx);
+        let class_loader = loaders.resolved_class_loader();
+        let rctx = loaders.resolution_ctx_at(content, cursor_offset);
         let access_kind = if es_ctx.is_static {
             AccessKind::DoubleColon
         } else {

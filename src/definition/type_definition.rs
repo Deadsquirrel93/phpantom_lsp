@@ -20,7 +20,7 @@ use crate::Backend;
 use crate::class_lookup::find_class_at_offset;
 use crate::php_type::PhpType;
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind};
-use crate::type_engine::resolver::{CtxLoaders, Loaders};
+use crate::type_engine::resolver::Loaders;
 use crate::types::*;
 
 impl Backend {
@@ -44,10 +44,10 @@ impl Backend {
 
         let ctx = self.file_context_at(uri, offset);
         let current_class = find_class_at_offset(&ctx.classes, offset);
-        let class_loader = self.class_loader(&ctx);
-        let resolved_class_loader = self.resolved_class_loader(&ctx);
-        let function_loader = self.function_loader(&ctx);
-        let laravel_macro_this_resolver = self.laravel_macro_this_resolver(&class_loader);
+        let loaders = self.file_loaders(&ctx);
+        let class_loader = loaders.class_loader_at(offset);
+        let resolved_class_loader = loaders.resolved_class_loader();
+        let function_loader = loaders.function_loader_at(offset);
 
         let resolved_types: Vec<PhpType> = match &symbol.kind {
             SymbolKind::Variable { name } | SymbolKind::CompactVariable { name } => {
@@ -88,19 +88,7 @@ impl Backend {
                     AccessKind::Arrow
                 };
 
-                let rctx = self.resolution_ctx_at(
-                    current_class,
-                    &ctx.classes,
-                    content,
-                    offset,
-                    CtxLoaders::new(
-                        &resolved_class_loader,
-                        &class_loader,
-                        &function_loader,
-                        &laravel_macro_this_resolver,
-                    )
-                    .with_imports(&ctx.use_map),
-                );
+                let rctx = loaders.resolution_ctx_at(content, offset);
 
                 let source = self.symbol_map_source(uri, content)?;
                 let candidates = ResolvedType::into_arced_classes(

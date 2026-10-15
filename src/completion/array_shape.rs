@@ -743,7 +743,7 @@ pub fn extract_spread_expressions(rhs: &str) -> Option<Vec<String>> {
         return Some(vec![]);
     }
 
-    let parts = split_array_literal_elements(inner);
+    let parts = crate::text_scan::split_top_level_commas(inner);
     let mut spreads = Vec::new();
 
     for part in &parts {
@@ -760,63 +760,6 @@ pub fn extract_spread_expressions(rhs: &str) -> Option<Vec<String>> {
     }
 
     Some(spreads)
-}
-
-/// Split array literal elements on commas at depth 0, respecting
-/// `(…)`, `[…]`, `{…}`, `<…>` nesting and quoted strings.
-fn split_array_literal_elements(s: &str) -> Vec<&str> {
-    let mut parts = Vec::new();
-    let mut depth_paren = 0i32;
-    let mut depth_bracket = 0i32;
-    let mut depth_brace = 0i32;
-    let mut in_single_quote = false;
-    let mut in_double_quote = false;
-    let mut prev_char = '\0';
-    let mut start = 0;
-
-    for (i, ch) in s.char_indices() {
-        if in_single_quote {
-            if ch == '\'' && prev_char != '\\' {
-                in_single_quote = false;
-            }
-            prev_char = ch;
-            continue;
-        }
-        if in_double_quote {
-            if ch == '"' && prev_char != '\\' {
-                in_double_quote = false;
-            }
-            prev_char = ch;
-            continue;
-        }
-
-        match ch {
-            '\'' => in_single_quote = true,
-            '"' => in_double_quote = true,
-            '(' | '[' => {
-                if ch == '(' {
-                    depth_paren += 1;
-                } else {
-                    depth_bracket += 1;
-                }
-            }
-            ')' => depth_paren -= 1,
-            ']' => depth_bracket -= 1,
-            '{' => depth_brace += 1,
-            '}' => depth_brace -= 1,
-            ',' if depth_paren == 0 && depth_bracket == 0 && depth_brace == 0 => {
-                parts.push(&s[start..i]);
-                start = i + 1;
-            }
-            _ => {}
-        }
-        prev_char = ch;
-    }
-    let last = &s[start..];
-    if !last.trim().is_empty() {
-        parts.push(last);
-    }
-    parts
 }
 
 #[cfg(test)]

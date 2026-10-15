@@ -1392,17 +1392,7 @@ pub(crate) fn seed_superglobals(scope: &mut ScopeState) {
     let array_type = vec![ResolvedType::from_type_string(PhpType::named(atom(
         "array",
     )))];
-    for name in [
-        "$_SERVER",
-        "$_GET",
-        "$_POST",
-        "$_COOKIE",
-        "$_REQUEST",
-        "$_FILES",
-        "$_ENV",
-        "$_SESSION",
-        "$GLOBALS",
-    ] {
+    for name in crate::scope_collector::AUTO_GLOBALS {
         scope.set(name, array_type.clone());
     }
 }

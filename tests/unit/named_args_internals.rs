@@ -80,6 +80,30 @@ fn skips_double_quoted_string() {
     assert_eq!(find_enclosing_open_paren(&chars, 9), Some(3));
 }
 
+#[test]
+fn skips_array_closure_and_match_arguments() {
+    for text in [
+        "foo([1, 2], ",
+        "foo(function () { return 1; }, ",
+        "foo(match ($x) { 1 => 'a', 2 => 'b' }, ",
+    ] {
+        let chars: Vec<char> = text.chars().collect();
+        assert_eq!(
+            find_enclosing_open_paren(&chars, chars.len()),
+            Some(3),
+            "{text}"
+        );
+    }
+}
+
+#[test]
+fn none_inside_an_array_or_block() {
+    let chars: Vec<char> = "foo([1, ".chars().collect();
+    assert_eq!(find_enclosing_open_paren(&chars, 8), None);
+    let chars: Vec<char> = "if ($x) { $y = 1; ".chars().collect();
+    assert_eq!(find_enclosing_open_paren(&chars, 18), None);
+}
+
 // ── extract_call_expression ─────────────────────────────────────
 
 #[test]

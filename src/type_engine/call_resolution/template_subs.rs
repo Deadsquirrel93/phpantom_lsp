@@ -33,7 +33,7 @@ impl Backend {
     ///
     /// Callers with an AST `ArgumentList` should extract per-argument text
     /// via [`extract_arg_texts_from_ast`] and convert to `&[&str]`.
-    /// Callers with only raw text should use [`split_text_args`] first.
+    /// Callers with only raw text should use [`split_top_level_commas`](crate::text_scan::split_top_level_commas) first.
     ///
     /// Returns an empty map if the method has no template params, no
     /// bindings, or if argument types cannot be resolved.
@@ -987,7 +987,7 @@ pub(crate) fn array_literal_element_type(
         return Some(PhpType::never());
     }
     let mut members: Vec<PhpType> = Vec::new();
-    for elem in crate::type_engine::types::conditional::split_text_args(inner) {
+    for elem in crate::text_scan::split_top_level_commas(inner) {
         let elem = elem.trim();
         if elem.is_empty() {
             continue;
@@ -1064,7 +1064,7 @@ pub(crate) fn array_literal_shape_type_with(
     // largest integer key so far.  Unknown once a key we cannot read (or a
     // spread) could have been an integer.
     let mut next_index: Option<i64> = Some(0);
-    for elem in crate::type_engine::types::conditional::split_text_args(inner) {
+    for elem in crate::text_scan::split_top_level_commas(inner) {
         let elem = elem.trim();
         if elem.is_empty() {
             continue;

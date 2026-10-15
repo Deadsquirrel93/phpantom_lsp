@@ -21,10 +21,11 @@ use crate::type_engine::variable::array_func_rules::{
 use crate::types::ClassLikeKind;
 use crate::types::*;
 
+use crate::text_scan::split_top_level_commas;
 use crate::type_engine::conditional_resolution::{
     TemplateContext, ThisContext, VarClassStringResolver, receiver_type_for_condition,
     resolve_conditional_with_text_args_and_defaults, resolve_conditional_without_args,
-    resolve_conditional_without_args_and_defaults, split_text_args,
+    resolve_conditional_without_args_and_defaults,
 };
 use crate::type_engine::resolver::ResolutionCtx;
 

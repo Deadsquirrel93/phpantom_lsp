@@ -543,7 +543,7 @@ fn wrapper_constructor_template(
     let paren_start = rest.find('(')?;
     let paren_end = rest.rfind(')')?;
     let inner_args = rest.get(paren_start + 1..paren_end)?.trim();
-    let wrapper_arg_texts = crate::type_engine::conditional_resolution::split_text_args(inner_args);
+    let wrapper_arg_texts = crate::text_scan::split_top_level_commas(inner_args);
     let wrapper_subs =
         bind_constructor_template_args(&wrapper_cls, wrapper_ctor, &wrapper_arg_texts, ctx);
     let wrapper_tpl = wrapper_cls.template_params.get(tpl_position)?;

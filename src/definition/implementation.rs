@@ -43,7 +43,6 @@ use crate::class_lookup::find_class_at_offset;
 use crate::config::IndexingStrategy;
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind};
 use crate::text_position::{LineIndex, line_start_byte_offset, position_to_offset};
-use crate::type_engine::resolver::CtxLoaders;
 use crate::types::{ClassInfo, ClassLikeKind, FileContext, MAX_INHERITANCE_DEPTH, ResolvedType};
 use crate::util::{collect_php_files, short_name};
 
@@ -406,32 +405,16 @@ impl Backend {
         let (subject, access_kind) = self.lookup_member_access_context(uri, content, position)?;
 
         let cursor_offset = position_to_offset(content, position);
-        let current_class = find_class_at_offset(&ctx.classes, cursor_offset);
-
-        let class_loader = self.class_loader(ctx);
-
-        let resolved_class_loader = self.resolved_class_loader(ctx);
-        let function_loader = self.function_loader(ctx);
-        let laravel_macro_this_resolver = self.laravel_macro_this_resolver(&class_loader);
+        let loaders = self.file_loaders(ctx);
+        let resolved_class_loader = loaders.resolved_class_loader();
 
         // Resolve the subject to candidate classes.
-        let rctx = self.resolution_ctx_at(
-            current_class,
-            &ctx.classes,
-            content,
-            cursor_offset,
-            CtxLoaders::new(
-                &resolved_class_loader,
-                &class_loader,
-                &function_loader,
-                &laravel_macro_this_resolver,
-            )
-            .with_imports(&ctx.use_map),
-        );
-
-        let candidates = ResolvedType::into_arced_classes(
-            crate::type_engine::resolver::resolve_target_classes(&subject, access_kind, &rctx),
-        );
+        let candidates =
+            ResolvedType::into_arced_classes(crate::type_engine::resolver::resolve_target_classes(
+                &subject,
+                access_kind,
+                &loaders.resolution_ctx_at(content, cursor_offset),
+            ));
 
         if candidates.is_empty() {
             return None;

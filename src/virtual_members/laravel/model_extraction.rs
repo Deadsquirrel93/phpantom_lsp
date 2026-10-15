@@ -12,6 +12,7 @@
 //! [`ClassInfo`]/[`LaravelMetadata`] into virtual members at completion
 //! time.
 
+use crate::text_scan::split_top_level_commas;
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
@@ -545,51 +546,8 @@ fn array_literal_entries(text: &str) -> impl Iterator<Item = &str> {
     inner
         .into_iter()
         .flat_map(split_top_level_commas)
+        .map(str::trim)
         .filter(|segment| !segment.is_empty())
-}
-
-/// Split `text` on commas that are not nested in `()`, `[]`, `{}`, or a
-/// quoted string. Empty segments (a trailing comma) are kept out.
-fn split_top_level_commas(text: &str) -> Vec<&str> {
-    let mut out = Vec::new();
-    let mut start = 0;
-    let mut depth = 0i32;
-    let mut quote: Option<char> = None;
-    let mut i = 0;
-    while i < text.len() {
-        let c = text[i..].chars().next().unwrap_or('\0');
-        let len = c.len_utf8();
-        if let Some(q) = quote {
-            if c == '\\' {
-                i += len + text[i + len..].chars().next().map_or(0, char::len_utf8);
-                continue;
-            }
-            if c == q {
-                quote = None;
-            }
-            i += len;
-            continue;
-        }
-        match c {
-            '\'' | '"' => quote = Some(c),
-            '(' | '[' | '{' => depth += 1,
-            ')' | ']' | '}' => depth -= 1,
-            ',' if depth == 0 => {
-                let segment = text[start..i].trim();
-                if !segment.is_empty() {
-                    out.push(segment);
-                }
-                start = i + len;
-            }
-            _ => {}
-        }
-        i += len;
-    }
-    let tail = text[start..].trim();
-    if !tail.is_empty() {
-        out.push(tail);
-    }
-    out
 }
 
 /// Parse key-value pairs from a PHP array literal text.
@@ -714,6 +672,8 @@ fn parse_cast_call_args(inner: &str) -> Vec<String> {
     }
     split_top_level_commas(inner)
         .into_iter()
+        .map(str::trim)
+        .filter(|arg| !arg.is_empty())
         .map(|arg| extract_cast_call_arg(arg).unwrap_or_default())
         .collect()
 }

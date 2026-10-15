@@ -122,30 +122,29 @@ fn detect_with_nested_parens_containing_comma() {
     assert_eq!(site.active_parameter, 1);
 }
 
-// ── count_top_level_commas ──────────────────────────────────────
+// ── active parameter ────────────────────────────────────────────
 
 #[test]
-fn count_commas_empty() {
-    let chars: Vec<char> = "()".chars().collect();
-    assert_eq!(count_top_level_commas(&chars, 1, 1), 0);
+fn a_comma_inside_a_match_argument_does_not_advance_the_parameter() {
+    let content = "<?php\nfoo(match ($x) { 1 => 'a', 2 => 'b' }, ";
+    let pos = Position {
+        line: 1,
+        character: 39,
+    };
+    let site = detect_call_site_text_fallback(content, pos).unwrap();
+    assert_eq!(site.call_expression, "foo");
+    assert_eq!(site.active_parameter, 1);
 }
 
 #[test]
-fn count_commas_two() {
-    let chars: Vec<char> = "($a, $b, $c)".chars().collect();
-    assert_eq!(count_top_level_commas(&chars, 1, 11), 2);
-}
-
-#[test]
-fn count_commas_nested() {
-    let chars: Vec<char> = "(foo(1, 2), $b)".chars().collect();
-    assert_eq!(count_top_level_commas(&chars, 1, 14), 1);
-}
-
-#[test]
-fn count_commas_in_string() {
-    let chars: Vec<char> = "('a,b', $c)".chars().collect();
-    assert_eq!(count_top_level_commas(&chars, 1, 10), 1);
+fn commas_in_strings_and_nested_calls_do_not_advance_the_parameter() {
+    let content = "<?php\nfoo('a,b', bar(1, 2), ";
+    let pos = Position {
+        line: 1,
+        character: 22,
+    };
+    let site = detect_call_site_text_fallback(content, pos).unwrap();
+    assert_eq!(site.active_parameter, 2);
 }
 
 // ── format_param_label ──────────────────────────────────────────
