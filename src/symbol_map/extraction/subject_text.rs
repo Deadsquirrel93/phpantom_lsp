@@ -1,3 +1,4 @@
+use mago_span::HasSpan;
 use mago_syntax::cst::sequence::TokenSeparatedSequence;
 
 use super::*;
@@ -19,6 +20,17 @@ pub(super) fn expr_to_subject_text(expr: &Expression<'_>) -> String {
     expr_to_subject_expr(expr)
         .map(|se| se.to_subject_text())
         .unwrap_or_default()
+}
+
+/// The [`SubjectText`] of a member access whose subject is `expr`.
+pub(super) fn subject_text_of(expr: &Expression<'_>, content: &str) -> SubjectText {
+    let span = expr.span();
+    SubjectText::new(
+        expr_to_subject_text(expr),
+        span.start.offset,
+        span.end.offset,
+        content,
+    )
 }
 
 /// Render the callee of a function-call expression (`callee(…)`) as the

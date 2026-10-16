@@ -9,6 +9,10 @@
 use tower_lsp::lsp_types::Position;
 
 use crate::symbol_map::LaravelStringKind;
+use crate::symbol_map::extraction::laravel::{
+    is_config_repository_method, is_gate_check_method, is_request_route_pattern_method,
+    is_route_facade_pattern_method, is_route_name_method,
+};
 use crate::text_position::position_to_offset;
 use crate::text_scan::{is_escaped, skip_php_trivia};
 
@@ -665,17 +669,6 @@ pub(super) fn middleware_completion_context(
     Some((LaravelStringKind::ConfigResource(resource), current, start))
 }
 
-pub(super) fn is_gate_check_method(method: &str) -> bool {
-    match method.len() {
-        3 => method.eq_ignore_ascii_case("any") || method.eq_ignore_ascii_case("has"),
-        4 => method.eq_ignore_ascii_case("none"),
-        5 => method.eq_ignore_ascii_case("check"),
-        6 => method.eq_ignore_ascii_case("allows") || method.eq_ignore_ascii_case("denies"),
-        7 => method.eq_ignore_ascii_case("inspect"),
-        _ => false,
-    }
-}
-
 pub(super) fn chain_starts_at_laravel_facade(
     content: &str,
     chain: &str,
@@ -1008,22 +1001,21 @@ pub(super) fn detect_laravel_string_key_context_inner<'a>(
             None
         } else {
             match (short_lower.as_str(), fn_lower.as_str()) {
-                (
-                    "config",
-                    "get" | "getmany" | "set" | "has" | "boolean" | "array" | "collection"
-                    | "prepend" | "push",
-                ) => Some(LaravelStringKind::Config),
+                ("config", method) if is_config_repository_method(method) => {
+                    Some(LaravelStringKind::Config)
+                }
                 ("view", "make" | "exists") => Some(LaravelStringKind::View),
                 ("lang", "get" | "has" | "hasforlocale" | "choice") => {
                     Some(LaravelStringKind::Trans)
                 }
                 // Route names reached through the URL-building facades, and the
                 // "is the current route named …?" predicates.
-                (
-                    "url" | "redirect" | "response",
-                    "route" | "signedroute" | "temporarysignedroute" | "redirecttoroute",
-                ) => Some(LaravelStringKind::Route),
-                ("route", "is" | "currentroutenamed") => Some(LaravelStringKind::Route),
+                ("url" | "redirect" | "response", method) if is_route_name_method(method) => {
+                    Some(LaravelStringKind::Route)
+                }
+                ("route", method) if is_route_facade_pattern_method(method) => {
+                    Some(LaravelStringKind::Route)
+                }
                 ("env", "get" | "getorfail") => Some(LaravelStringKind::Env),
                 // Artisan command names.
                 ("artisan", "call" | "queue") => Some(LaravelStringKind::Command),
@@ -1032,11 +1024,9 @@ pub(super) fn detect_laravel_string_key_context_inner<'a>(
                 ("relation", "getmorphedmodel") => Some(LaravelStringKind::MorphAlias),
                 ("model", "getactualclassnameformorph") => Some(LaravelStringKind::MorphAlias),
                 // Authorization abilities checked through the Gate facade.
-                (
-                    "gate",
-                    "allows" | "denies" | "check" | "any" | "none" | "authorize" | "inspect"
-                    | "has" | "define",
-                ) => Some(LaravelStringKind::GateAbility),
+                ("gate", method) if method == "define" || is_gate_check_method(method) => {
+                    Some(LaravelStringKind::GateAbility)
+                }
                 _ => None,
             }
         }
@@ -1117,10 +1107,7 @@ pub(super) fn detect_laravel_string_key_context_inner<'a>(
             if argument.named_argument.is_some() || argument.shape != StringArgumentShape::Scalar {
                 return None;
             }
-            if matches!(
-                func_name.to_ascii_lowercase().as_str(),
-                "route" | "signedroute" | "temporarysignedroute" | "redirecttoroute" | "routeis"
-            ) {
+            if is_route_name_method(func_name) || is_request_route_pattern_method(func_name) {
                 Some(LaravelStringKind::Route)
                 // `$this->call('cmd')` / `$this->callSilently('cmd')` inside a
                 // console command run another Artisan command.  Restricted to a

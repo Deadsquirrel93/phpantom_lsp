@@ -10,41 +10,7 @@ pub(super) fn extract_instantiation_expr<'a>(
     scope_start: u32,
 ) {
     emit_keyword(&inst.new, ctx);
-    match inst.class {
-        Expression::Identifier(ident) => {
-            let raw = bytes_to_str(ident.value()).to_string();
-            ctx.spans.push(class_ref_span_ctx(
-                ident.span().start.offset,
-                ident.span().end.offset,
-                &raw,
-                ClassRefContext::New,
-            ));
-        }
-        Expression::Self_(kw) => {
-            ctx.spans.push(SymbolSpan {
-                start: kw.span.start.offset,
-                end: kw.span.end.offset,
-                kind: SymbolKind::SelfStaticParent(SelfStaticParentKind::Self_),
-            });
-        }
-        Expression::Static(kw) => {
-            ctx.spans.push(SymbolSpan {
-                start: kw.span.start.offset,
-                end: kw.span.end.offset,
-                kind: SymbolKind::SelfStaticParent(SelfStaticParentKind::Static),
-            });
-        }
-        Expression::Parent(kw) => {
-            ctx.spans.push(SymbolSpan {
-                start: kw.span.start.offset,
-                end: kw.span.end.offset,
-                kind: SymbolKind::SelfStaticParent(SelfStaticParentKind::Parent),
-            });
-        }
-        _ => {
-            extract_from_expression(inst.class, ctx, scope_start);
-        }
-    }
+    emit_class_expr_span(inst.class, ClassRefContext::New, ctx, scope_start);
     if let Some(ref args) = inst.argument_list {
         let class_text = expr_to_subject_text(inst.class);
         // A mailable's `content()` returns
@@ -113,14 +79,13 @@ fn extract_property_hook_call<'a>(
         return false;
     };
 
-    let class_span = property_access.class.span();
-    let subject_text = SubjectText::new(
-        expr_to_subject_text(property_access.class),
-        class_span.start.offset,
-        class_span.end.offset,
-        ctx.content,
+    let subject_text = subject_text_of(property_access.class, ctx.content);
+    emit_class_expr_span(
+        property_access.class,
+        ClassRefContext::Other,
+        ctx,
+        scope_start,
     );
-    emit_class_expr_span(property_access.class, ctx, scope_start);
 
     let property_name = {
         let s = bytes_to_str(variable.name);
@@ -666,7 +631,7 @@ fn extract_static_method_call<'a>(
     }
 
     let subject_text = expr_to_subject_text(static_call.class);
-    emit_class_expr_span(static_call.class, ctx, scope_start);
+    emit_class_expr_span(static_call.class, ClassRefContext::Other, ctx, scope_start);
 
     if let ClassLikeMemberSelector::Identifier(ident) = &static_call.method {
         let member_name = crate::atom::atom_bytes(ident.value);
@@ -1085,13 +1050,7 @@ pub(super) fn extract_partial_application_expr<'a>(
             }
         },
         PartialApplication::Method(method_pa) => {
-            let object_span = method_pa.object.span();
-            let subject_text = SubjectText::new(
-                expr_to_subject_text(method_pa.object),
-                object_span.start.offset,
-                object_span.end.offset,
-                ctx.content,
-            );
+            let subject_text = subject_text_of(method_pa.object, ctx.content);
             extract_from_expression(method_pa.object, ctx, scope_start);
             if let ClassLikeMemberSelector::Identifier(ident) = &method_pa.method {
                 let member_name = crate::atom::atom_bytes(ident.value);
@@ -1111,14 +1070,8 @@ pub(super) fn extract_partial_application_expr<'a>(
             }
         }
         PartialApplication::StaticMethod(static_pa) => {
-            let class_span = static_pa.class.span();
-            let subject_text = SubjectText::new(
-                expr_to_subject_text(static_pa.class),
-                class_span.start.offset,
-                class_span.end.offset,
-                ctx.content,
-            );
-            emit_class_expr_span(static_pa.class, ctx, scope_start);
+            let subject_text = subject_text_of(static_pa.class, ctx.content);
+            emit_class_expr_span(static_pa.class, ClassRefContext::Other, ctx, scope_start);
             if let ClassLikeMemberSelector::Identifier(ident) = &static_pa.method {
                 let member_name = crate::atom::atom_bytes(ident.value);
                 ctx.spans.push(SymbolSpan {

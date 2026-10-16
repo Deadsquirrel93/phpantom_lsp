@@ -13,6 +13,7 @@ use mago_syntax::cst::*;
 
 use crate::atom::{bytes_to_str, literal_bytes_to_str};
 use crate::php_type::{PhpType, TypeKind};
+use crate::symbol_map::extraction::laravel::is_render_each_method;
 use crate::type_engine::resolver::VarResolutionCtx;
 use crate::types::ClassInfo;
 use crate::virtual_members::laravel::is_view_facade;
@@ -583,11 +584,6 @@ fn is_view_render_static_call(class: &Expression<'_>, method: &str) -> bool {
             && method.eq_ignore_ascii_case("view"))
         || (is_facade("Response", "Illuminate\\Support\\Facades\\Response")
             && method.eq_ignore_ascii_case("view"))
-}
-
-/// Whether a method is the view factory's `renderEach()`.
-fn is_render_each_method(method: &str) -> bool {
-    method.eq_ignore_ascii_case("renderEach")
 }
 
 /// Record the sites a `renderEach($view, $data, $iterator, $empty)` call is.

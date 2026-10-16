@@ -2185,6 +2185,71 @@ class Svc {
 }
 
 #[test]
+fn namespaced_function_byref_param_shadows_the_global_function() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+namespace {
+    function fill(?string $out): void {}
+}
+namespace App {
+    function fill(?string &$out): void {
+        $out = 'hello';
+    }
+    function demo(): void {
+        fill($result);
+        echo $result;
+    }
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "`fill()` in namespace App calls `App\\fill`, whose by-ref param defines $result. Got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn byref_param_of_a_global_class_needs_an_import_in_a_namespace() {
+    let php = |import: &str| {
+        format!(
+            r#"<?php
+namespace {{
+    class Helper {{
+        public static function fill(?string &$out): void {{
+            $out = 'hello';
+        }}
+    }}
+}}
+namespace App {{
+    {import}
+    function demo(): void {{
+        Helper::fill($result);
+        echo $result;
+    }}
+}}
+"#
+        )
+    };
+
+    let imported = undefined_var_diagnostics(&php("use Helper;"));
+    assert!(
+        imported.is_empty(),
+        "the imported global class's by-ref param defines $result. Got: {:?}",
+        imported,
+    );
+
+    // Without the import `Helper` is `App\Helper`, which does not exist, so
+    // nothing says `$result` is written.
+    let unimported = undefined_var_diagnostics(&php(""));
+    assert!(
+        unimported.iter().any(|d| d.message.contains("$result")),
+        "an unimported global class does not answer for `Helper`. Got: {:?}",
+        unimported,
+    );
+}
+
+#[test]
 fn no_diagnostic_for_namespaced_static_method_byref_param() {
     let diags = undefined_var_diagnostics(
         r#"<?php

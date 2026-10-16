@@ -406,14 +406,14 @@ pub(crate) fn walk_closures_in_expr<'b>(
         }
         Expression::Instantiation(inst) => {
             if let Some(ref args) = inst.argument_list {
-                walk_closures_in_call_args(&args.arguments, None, outer_scope, ctx, |_| vec![]);
+                walk_closures_in_call_args(&args.arguments, None, outer_scope, ctx);
             }
         }
         Expression::AnonymousClass(anon) => {
             // Constructor arguments evaluate in the outer scope (with the
             // outer `$this`), so scan them for closures there.
             if let Some(ref args) = anon.argument_list {
-                walk_closure_in_partial_call_args(&args.arguments, outer_scope, ctx, |_| vec![]);
+                walk_closure_in_partial_call_args(&args.arguments, outer_scope, ctx);
             }
             // The anonymous class's own method bodies have their own
             // `$this` (the anonymous class), so walk them separately.
@@ -538,145 +538,42 @@ pub(crate) fn walk_closures_in_call<'b>(
     outer_scope: &ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
-    match call {
+    let arguments = match call {
         Call::Function(fc) => {
             // Recurse into the function expression (for closures in
             // chained calls like `$fn()($anotherClosure)`).
             walk_closures_in_expr(fc.function, outer_scope, ctx, None);
-
-            let func_name = match fc.function {
-                Expression::Identifier(ident) => Some(bytes_to_str(ident.value()).to_string()),
-                _ => None,
-            };
-            walk_closures_in_call_args(
-                &fc.argument_list.arguments,
-                Some(call),
-                outer_scope,
-                ctx,
-                |arg_idx| {
-                    if let Some(ref name) = func_name {
-                        infer_callable_params_from_function_fw(
-                            name,
-                            arg_idx,
-                            &fc.argument_list,
-                            outer_scope,
-                            ctx,
-                        )
-                    } else {
-                        vec![]
-                    }
-                },
-            );
+            &fc.argument_list.arguments
         }
         Call::Method(mc) => {
             match closure_call_scope(mc, outer_scope, ctx) {
                 Some(call_scope) => walk_closures_in_expr(mc.object, &call_scope, ctx, None),
                 None => walk_closures_in_expr(mc.object, outer_scope, ctx, None),
             }
-
-            walk_closures_in_method_args(
-                call,
-                mc.object,
-                &mc.method,
-                &mc.argument_list,
-                outer_scope,
-                ctx,
-            );
+            &mc.argument_list.arguments
         }
         Call::NullSafeMethod(mc) => {
             walk_closures_in_expr(mc.object, outer_scope, ctx, None);
-
-            walk_closures_in_method_args(
-                call,
-                mc.object,
-                &mc.method,
-                &mc.argument_list,
-                outer_scope,
-                ctx,
-            );
+            &mc.argument_list.arguments
         }
         Call::StaticMethod(sc) => {
             walk_closures_in_expr(sc.class, outer_scope, ctx, None);
-
-            let method_name = if let ClassLikeMemberSelector::Identifier(ident) = &sc.method {
-                Some(bytes_to_str(ident.value).to_string())
-            } else {
-                None
-            };
-            walk_closures_in_call_args(
-                &sc.argument_list.arguments,
-                Some(call),
-                outer_scope,
-                ctx,
-                |arg_idx| {
-                    if let Some(ref name) = method_name {
-                        infer_callable_params_from_static_receiver_fw(
-                            sc.class,
-                            name,
-                            arg_idx,
-                            &sc.argument_list,
-                            outer_scope,
-                            ctx,
-                        )
-                    } else {
-                        vec![]
-                    }
-                },
-            );
+            &sc.argument_list.arguments
         }
-    }
-}
-
-/// Walk the closures among the arguments of an instance method call,
-/// written with `->` or `?->`, typing their parameters from the method
-/// the receiver resolves to.
-fn walk_closures_in_method_args<'b>(
-    call: &'b Call<'b>,
-    object: &'b Expression<'b>,
-    method: &'b ClassLikeMemberSelector<'b>,
-    argument_list: &'b ArgumentList<'b>,
-    outer_scope: &ScopeState,
-    ctx: &ForwardWalkCtx<'_>,
-) {
-    let method_name = match method {
-        ClassLikeMemberSelector::Identifier(ident) => Some(bytes_to_str(ident.value)),
-        _ => None,
     };
-    let obj_span = object.span();
-    walk_closures_in_call_args(
-        &argument_list.arguments,
-        Some(call),
-        outer_scope,
-        ctx,
-        |arg_idx| match method_name {
-            Some(name) => infer_callable_params_from_receiver_fw(
-                (obj_span.start.offset, obj_span.end.offset),
-                name,
-                arg_idx,
-                argument_list,
-                outer_scope,
-                ctx,
-            ),
-            None => vec![],
-        },
-    );
+    walk_closures_in_call_args(arguments, Some(call), outer_scope, ctx);
 }
 
-/// Walk the arguments of a call expression, invoking `infer_fn` for
-/// each argument index to get inferred callable parameter types.
-/// When an argument is a closure/arrow function, the inferred types
-/// are passed through so untyped parameters get the correct types,
-/// and a `@param-closure-this` on the parameter of `call` receiving it
-/// rebinds its `$this`.
-pub(crate) fn walk_closures_in_call_args<'b, F>(
+/// Walk the arguments of a call expression.  A closure or arrow function
+/// passed to `call` gets the parameter types the callee's signature gives
+/// it, so untyped parameters get the correct types, and a
+/// `@param-closure-this` on the parameter receiving it rebinds its `$this`.
+pub(crate) fn walk_closures_in_call_args<'b>(
     arguments: &'b TokenSeparatedSequence<'b, Argument<'b>>,
     call: Option<&Call<'b>>,
     outer_scope: &ScopeState,
     ctx: &ForwardWalkCtx<'_>,
-    infer_fn: F,
-) where
-    F: Fn(usize) -> Vec<PhpType>,
-{
+) {
     for (arg_idx, arg) in arguments.iter().enumerate() {
         let arg_expr = match arg {
             Argument::Positional(a) => a.value,
@@ -692,7 +589,9 @@ pub(crate) fn walk_closures_in_call_args<'b, F>(
         }
         match arg_expr {
             Expression::Closure(_) | Expression::ArrowFunction(_) => {
-                let inferred = infer_fn(arg_idx);
+                let inferred = call.map_or_else(Vec::new, |call| {
+                    infer_callable_params_for_call(call, arg_idx, outer_scope, ctx)
+                });
                 let rebound = call
                     .and_then(|call| closure_this_argument_scope(call, arg_idx, outer_scope, ctx));
                 walk_closures_in_expr(
@@ -713,42 +612,15 @@ pub(crate) fn walk_closures_in_call_args<'b, F>(
     }
 }
 
-/// Walk the partial arguments of a call expression, invoking `infer_fn` for
-/// each argument index to get inferred callable parameter types.
-/// When an argument is a closure/arrow function, the inferred types
-/// are passed through so untyped parameters get the correct types.
-pub(crate) fn walk_closure_in_partial_call_args<'b, F>(
+/// Walk the closures among the partial arguments of an anonymous class's
+/// constructor call.
+pub(crate) fn walk_closure_in_partial_call_args<'b>(
     arguments: &'b TokenSeparatedSequence<'b, PartialArgument<'b>>,
     outer_scope: &ScopeState,
     ctx: &ForwardWalkCtx<'_>,
-    infer_fn: F,
-) where
-    F: Fn(usize) -> Vec<PhpType>,
-{
-    for (arg_idx, arg) in arguments.iter().enumerate() {
-        let arg_expr = match arg {
-            PartialArgument::Positional(a) => a.value,
-            PartialArgument::Named(a) => a.value,
-            _ => continue,
-        };
-        match arg_expr {
-            Expression::Closure(_) | Expression::ArrowFunction(_) => {
-                let inferred = infer_fn(arg_idx);
-                walk_closures_in_expr(
-                    arg_expr,
-                    outer_scope,
-                    ctx,
-                    if inferred.is_empty() {
-                        None
-                    } else {
-                        Some(&inferred)
-                    },
-                );
-            }
-            _ => {
-                walk_closures_in_expr(arg_expr, outer_scope, ctx, None);
-            }
-        }
+) {
+    for arg_expr in arguments.iter().filter_map(PartialArgument::value) {
+        walk_closures_in_expr(arg_expr, outer_scope, ctx, None);
     }
 }
 

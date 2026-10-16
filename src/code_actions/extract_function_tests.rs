@@ -1518,21 +1518,21 @@ fn definition_void_guard_with_value_rewrites_returns() {
 #[test]
 fn rewrite_void_returns_to_null_basic() {
     let body = "if (!$x) return;\nif (!$y) return;";
-    let result = rewrite_void_returns_to_null(body);
+    let result = rewrite_guard_returns(body, |value| value.is_none(), "null");
     assert_eq!(result, "if (!$x) return null;\nif (!$y) return null;");
 }
 
 #[test]
 fn rewrite_void_returns_to_null_preserves_valued_returns() {
     let body = "if (!$x) return;\nreturn $result;";
-    let result = rewrite_void_returns_to_null(body);
+    let result = rewrite_guard_returns(body, |value| value.is_none(), "null");
     assert_eq!(result, "if (!$x) return null;\nreturn $result;");
 }
 
 #[test]
 fn rewrite_void_returns_to_null_ignores_identifiers() {
     let body = "$returnValue = 1;\nif (!$x) return;";
-    let result = rewrite_void_returns_to_null(body);
+    let result = rewrite_guard_returns(body, |value| value.is_none(), "null");
     assert_eq!(result, "$returnValue = 1;\nif (!$x) return null;");
 }
 
@@ -1541,14 +1541,14 @@ fn rewrite_void_returns_to_null_ignores_identifiers() {
 #[test]
 fn rewrite_void_guards_to_false() {
     let body = "if (!$x) return;\nif (!$y) return;";
-    let result = rewrite_guard_returns(body, None);
+    let result = rewrite_guard_returns(body, |value| value.is_none(), "false");
     assert_eq!(result, "if (!$x) return false;\nif (!$y) return false;");
 }
 
 #[test]
 fn rewrite_void_guards_preserves_non_bare_returns() {
     let body = "if (!$x) return;\nreturn $result;";
-    let result = rewrite_guard_returns(body, None);
+    let result = rewrite_guard_returns(body, |value| value.is_none(), "false");
     assert_eq!(
         result, "if (!$x) return false;\nreturn $result;",
         "should only rewrite bare returns"
@@ -1558,14 +1558,14 @@ fn rewrite_void_guards_preserves_non_bare_returns() {
 #[test]
 fn rewrite_void_guards_ignores_return_in_identifiers() {
     let body = "$returnValue = 1;\nif (!$x) return;";
-    let result = rewrite_guard_returns(body, None);
+    let result = rewrite_guard_returns(body, |value| value.is_none(), "false");
     assert_eq!(result, "$returnValue = 1;\nif (!$x) return false;");
 }
 
 #[test]
 fn rewrite_uniform_null_to_false() {
     let body = "if ($id <= 0) return null;\nif (!$org) return null;";
-    let result = rewrite_guard_returns(body, Some("null"));
+    let result = rewrite_guard_returns(body, |value| value == Some("null"), "false");
     assert_eq!(
         result,
         "if ($id <= 0) return false;\nif (!$org) return false;"
@@ -1575,7 +1575,7 @@ fn rewrite_uniform_null_to_false() {
 #[test]
 fn rewrite_uniform_value_preserves_other_returns() {
     let body = "if ($id <= 0) return null;\nreturn $result;";
-    let result = rewrite_guard_returns(body, Some("null"));
+    let result = rewrite_guard_returns(body, |value| value == Some("null"), "false");
     assert_eq!(
         result, "if ($id <= 0) return false;\nreturn $result;",
         "should only rewrite matching return values"
@@ -1583,9 +1583,26 @@ fn rewrite_uniform_value_preserves_other_returns() {
 }
 
 #[test]
+fn rewrite_void_guards_leaves_nested_functions_strings_and_comments() {
+    let body = "if (!$x) return;\n$f = fn () => array_map(function () { return; }, []);\n/* return; */ echo 'return;';";
+    let result = rewrite_guard_returns(body, |value| value.is_none(), "false");
+    assert_eq!(
+        result,
+        "if (!$x) return false;\n$f = fn () => array_map(function () { return; }, []);\n/* return; */ echo 'return;';"
+    );
+}
+
+#[test]
+fn rewrite_void_guards_keeps_the_terminator() {
+    let body = "if (!$x) {\n    return ;\n}";
+    let result = rewrite_guard_returns(body, |value| value.is_none(), "false");
+    assert_eq!(result, "if (!$x) {\n    return false;\n}");
+}
+
+#[test]
 fn rewrite_uniform_numeric_to_false() {
     let body = "if ($x < 0) return 0;\nif ($x > 100) return 0;";
-    let result = rewrite_guard_returns(body, Some("0"));
+    let result = rewrite_guard_returns(body, |value| value == Some("0"), "false");
     assert_eq!(
         result,
         "if ($x < 0) return false;\nif ($x > 100) return false;"

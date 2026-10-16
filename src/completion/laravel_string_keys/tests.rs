@@ -413,6 +413,23 @@ fn detects_config_static_get() {
 }
 
 #[test]
+fn detects_static_config_typed_getters() {
+    for method in [
+        "string",
+        "integer",
+        "float",
+        "boolean",
+        "array",
+        "collection",
+    ] {
+        let content = format!("<?php\nConfig::{method}('app.name');\n");
+        let ctx = detect_at_end(&content, "app.name")
+            .unwrap_or_else(|| panic!("should detect Config::{method}() context"));
+        assert_eq!(ctx.kind, LaravelStringKind::Config);
+    }
+}
+
+#[test]
 fn detects_static_config_mutators_and_translation_queries() {
     for method in ["prepend", "push"] {
         let content = format!("<?php\nConfig::{method}('app.providers');\n");

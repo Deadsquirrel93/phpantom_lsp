@@ -309,16 +309,6 @@ fn string_argument<'a>(arg: &PartialArgument<'_>, content: &'a str) -> Option<(&
     Some((&content[start as usize..end as usize], inner))
 }
 
-/// Whether `name` is a plain PHP identifier, so that prose such as
-/// `#[CoversMethod(Foo::class, 'not a name')]` is not turned into a symbol.
-fn is_identifier(name: &str) -> bool {
-    let mut chars = name.chars();
-    chars
-        .next()
-        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
-        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
-}
-
 /// [`is_identifier`] for a name that may carry a namespace.
 fn is_qualified_identifier(name: &str) -> bool {
     let name = name.trim_start_matches('\\');

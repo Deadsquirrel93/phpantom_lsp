@@ -162,103 +162,53 @@ impl Backend {
         function_imports: &std::collections::HashMap<String, String>,
         file_namespace: &Option<String>,
     ) -> Option<Vec<usize>> {
-        match call_kind {
+        let (class_name, method_name) = match call_kind {
             ByRefCallKind::Function(name) => {
-                // Build FQN candidates: the raw name, plus the imported or
-                // namespace-qualified name.  A bare name is a `use function`
-                // alias or local to the namespace; only a qualified name's
-                // first segment goes through the class/namespace imports.
-                let imports = if name.contains('\\') {
+                // PHP's rule for a function name: a qualified name's first
+                // segment goes through the class/namespace imports and the
+                // name never falls back, while a bare name is a `use
+                // function` alias or local to the namespace, falling back to
+                // the global function only when that one does not exist.
+                let qualified = name.contains('\\');
+                let imports = if qualified {
                     file_use_map
                 } else {
                     function_imports
                 };
                 let fqn = crate::names::resolve_to_fqn(name, imports, file_namespace);
-                let mut candidates: Vec<&str> = vec![*name];
-                if fqn != *name {
-                    candidates.push(&fqn);
+                let mut candidates: Vec<&str> = vec![&fqn];
+                if !qualified && fqn != *name {
+                    candidates.push(name);
                 }
                 let func_info = self.find_or_load_function(&candidates)?;
-                let positions: Vec<usize> = func_info
-                    .parameters
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, p)| p.is_reference)
-                    .map(|(i, _)| i)
-                    .collect();
-                Some(positions)
+                return Some(by_ref_positions(&func_info.parameters));
             }
-            ByRefCallKind::StaticMethod(class_name, method_name) => {
-                let cls = self.resolve_call_class(
-                    class_name,
-                    enclosing_class_name,
-                    file_use_map,
-                    file_namespace,
-                )?;
-                let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
-                    &cls,
-                    &|name| self.find_or_load_class(name),
-                    Some(&self.resolved_class_cache),
-                );
-                let method = merged.get_method(method_name)?;
-                let positions: Vec<usize> = method
-                    .parameters
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, p)| p.is_reference)
-                    .map(|(i, _)| i)
-                    .collect();
-                Some(positions)
-            }
-            ByRefCallKind::Constructor(class_name) => {
-                let cls = self.resolve_call_class(
-                    class_name,
-                    enclosing_class_name,
-                    file_use_map,
-                    file_namespace,
-                )?;
-                let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
-                    &cls,
-                    &|name| self.find_or_load_class(name),
-                    Some(&self.resolved_class_cache),
-                );
-                let ctor = merged.get_method("__construct")?;
-                let positions: Vec<usize> = ctor
-                    .parameters
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, p)| p.is_reference)
-                    .map(|(i, _)| i)
-                    .collect();
-                Some(positions)
-            }
-            ByRefCallKind::InstanceMethod(class_name, method_name) => {
-                let fqn = crate::names::resolve_to_fqn(class_name, file_use_map, file_namespace);
-                let cls = self
-                    .find_or_load_class(&fqn)
-                    .or_else(|| self.find_or_load_class(class_name))?;
-                let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
-                    &cls,
-                    &|name| self.find_or_load_class(name),
-                    Some(&self.resolved_class_cache),
-                );
-                let method = merged.get_method(method_name)?;
-                let positions: Vec<usize> = method
-                    .parameters
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, p)| p.is_reference)
-                    .map(|(i, _)| i)
-                    .collect();
-                Some(positions)
-            }
-        }
+            ByRefCallKind::StaticMethod(class_name, method_name)
+            | ByRefCallKind::InstanceMethod(class_name, method_name) => (*class_name, *method_name),
+            ByRefCallKind::Constructor(class_name) => (*class_name, "__construct"),
+        };
+        let cls = self.resolve_call_class(
+            class_name,
+            enclosing_class_name,
+            file_use_map,
+            file_namespace,
+        )?;
+        let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
+            &cls,
+            &|name| self.find_or_load_class(name),
+            Some(&self.resolved_class_cache),
+        );
+        Some(by_ref_positions(
+            &merged.get_method(method_name)?.parameters,
+        ))
     }
 
-    /// Resolve a `Cls::method()`/`new Cls()` class name to its
-    /// [`ClassInfo`], handling the relative names `self`, `static`, and
-    /// `parent` by resolving them against the class enclosing the call
-    /// site rather than treating them as a literal class name.
+    /// Resolve the class a call names (`Cls::method()`, `new Cls()`,
+    /// `(new Cls)->method()`) to its [`ClassInfo`].
+    ///
+    /// A written name follows PHP's rule (the imports, else the current
+    /// namespace, never a global class), and the relative names `self`,
+    /// `static` and `parent` resolve against the class enclosing the call.
     fn resolve_call_class(
         &self,
         class_name: &str,
@@ -267,21 +217,31 @@ impl Backend {
         file_namespace: &Option<String>,
     ) -> Option<std::sync::Arc<crate::types::ClassInfo>> {
         if crate::class_lookup::is_class_keyword(class_name) {
-            let enclosing_name = enclosing_class_name?;
             let enclosing_fqn =
-                crate::names::resolve_to_fqn(enclosing_name, file_use_map, file_namespace);
-            let enclosing_class = self
-                .find_or_load_class(&enclosing_fqn)
-                .or_else(|| self.find_or_load_class(enclosing_name))?;
+                crate::names::resolve_to_fqn(enclosing_class_name?, file_use_map, file_namespace);
+            let enclosing_class = self.find_or_load_class(&enclosing_fqn)?;
             let fqn =
                 crate::class_lookup::resolve_class_keyword(class_name, Some(&enclosing_class))?;
             return self.find_or_load_class(&fqn);
         }
 
-        let fqn = crate::names::resolve_to_fqn(class_name, file_use_map, file_namespace);
-        self.find_or_load_class(&fqn)
-            .or_else(|| self.find_or_load_class(class_name))
+        self.find_or_load_class(&crate::names::resolve_to_fqn(
+            class_name,
+            file_use_map,
+            file_namespace,
+        ))
     }
+}
+
+/// The 0-based positions of `parameters` that take their argument by
+/// reference.
+fn by_ref_positions(parameters: &[crate::types::ParameterInfo]) -> Vec<usize> {
+    parameters
+        .iter()
+        .enumerate()
+        .filter(|(_, p)| p.is_reference)
+        .map(|(i, _)| i)
+        .collect()
 }
 
 // ─── Internal context ───────────────────────────────────────────────────────

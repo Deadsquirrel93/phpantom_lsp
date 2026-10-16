@@ -134,6 +134,16 @@ pub(crate) enum ReturnStrategy {
     Unsafe,
 }
 
+/// A `return` statement the selected code owns, as opposed to one inside a
+/// nested function or closure, which returns from that instead.
+pub(crate) struct OwnReturn<'a> {
+    /// The returned expression's source text, `None` for a bare `return;`.
+    pub(crate) value: Option<&'a str>,
+    /// The bytes from just past the `return` keyword to the terminator: what
+    /// a rewrite to another value replaces.
+    pub(crate) after_keyword: std::ops::Range<usize>,
+}
+
 /// Collect the source text of every `return` expression in the selected
 /// statements.
 ///
@@ -143,6 +153,17 @@ pub(crate) fn collect_return_expressions<'a>(
     content: &'a str,
     stmts: &[&Statement<'_>],
 ) -> Vec<Option<&'a str>> {
+    collect_own_returns(content, stmts.iter().copied())
+        .into_iter()
+        .map(|own| own.value)
+        .collect()
+}
+
+/// Every `return` statement `stmts` own, in source order.
+pub(crate) fn collect_own_returns<'a, 's, 'ast: 's>(
+    content: &'a str,
+    stmts: impl IntoIterator<Item = &'s Statement<'ast>>,
+) -> Vec<OwnReturn<'a>> {
     let mut out = Vec::new();
     for stmt in stmts {
         collect_returns_from_stmt(content, stmt, &mut out);
@@ -150,21 +171,21 @@ pub(crate) fn collect_return_expressions<'a>(
     out
 }
 
-/// Recursively collect return expressions from a single statement.
-pub(crate) fn collect_returns_from_stmt<'a>(
+/// Recursively collect the returns a single statement owns.
+fn collect_returns_from_stmt<'a>(
     content: &'a str,
     stmt: &Statement<'_>,
-    out: &mut Vec<Option<&'a str>>,
+    out: &mut Vec<OwnReturn<'a>>,
 ) {
     match stmt {
-        Statement::Return(ret) => {
-            let expr_text = ret.value.as_ref().map(|expr| {
-                let s = expr.span().start.offset as usize;
-                let e = expr.span().end.offset as usize;
-                content[s..e].trim()
-            });
-            out.push(expr_text);
-        }
+        Statement::Return(ret) => out.push(OwnReturn {
+            value: ret.value.as_ref().map(|expr| {
+                let span = expr.span();
+                content[span.start.offset as usize..span.end.offset as usize].trim()
+            }),
+            after_keyword: ret.r#return.span().end.offset as usize
+                ..ret.terminator.span().start.offset as usize,
+        }),
         _ => crate::parser::for_each_nested_statement_list(stmt, |nested| {
             for inner in nested {
                 collect_returns_from_stmt(content, inner, out);

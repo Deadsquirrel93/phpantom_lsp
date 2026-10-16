@@ -617,76 +617,45 @@ pub(crate) fn infer_callable_params_for_call(
     scope: &ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) -> Vec<PhpType> {
-    match call {
+    let (receiver, method, argument_list) = match call {
         Call::Function(fc) => {
-            let func_name = match fc.function {
-                Expression::Identifier(ident) => Some(bytes_to_str(ident.value()).to_string()),
-                _ => None,
+            let Expression::Identifier(ident) = fc.function else {
+                return vec![];
             };
-            if let Some(ref name) = func_name {
-                infer_callable_params_from_function_fw(name, arg_idx, &fc.argument_list, scope, ctx)
-            } else {
-                vec![]
-            }
-        }
-        Call::Method(mc) => {
-            let method_name = if let ClassLikeMemberSelector::Identifier(ident) = &mc.method {
-                Some(bytes_to_str(ident.value).to_string())
-            } else {
-                None
-            };
-            if let Some(ref name) = method_name {
-                let obj_span = mc.object.span();
-                infer_callable_params_from_receiver_fw(
-                    (obj_span.start.offset, obj_span.end.offset),
-                    name,
-                    arg_idx,
-                    &mc.argument_list,
-                    scope,
-                    ctx,
-                )
-            } else {
-                vec![]
-            }
-        }
-        Call::NullSafeMethod(mc) => {
-            let method_name = if let ClassLikeMemberSelector::Identifier(ident) = &mc.method {
-                Some(bytes_to_str(ident.value).to_string())
-            } else {
-                None
-            };
-            if let Some(ref name) = method_name {
-                let obj_span = mc.object.span();
-                infer_callable_params_from_receiver_fw(
-                    (obj_span.start.offset, obj_span.end.offset),
-                    name,
-                    arg_idx,
-                    &mc.argument_list,
-                    scope,
-                    ctx,
-                )
-            } else {
-                vec![]
-            }
+            return infer_callable_params_from_function_fw(
+                bytes_to_str(ident.value()),
+                arg_idx,
+                &fc.argument_list,
+                scope,
+                ctx,
+            );
         }
         Call::StaticMethod(sc) => {
-            let method_name = if let ClassLikeMemberSelector::Identifier(ident) = &sc.method {
-                Some(bytes_to_str(ident.value).to_string())
-            } else {
-                None
+            let ClassLikeMemberSelector::Identifier(ident) = &sc.method else {
+                return vec![];
             };
-            if let Some(ref name) = method_name {
-                infer_callable_params_from_static_receiver_fw(
-                    sc.class,
-                    name,
-                    arg_idx,
-                    &sc.argument_list,
-                    scope,
-                    ctx,
-                )
-            } else {
-                vec![]
-            }
+            return infer_callable_params_from_static_receiver_fw(
+                sc.class,
+                bytes_to_str(ident.value),
+                arg_idx,
+                &sc.argument_list,
+                scope,
+                ctx,
+            );
         }
-    }
+        Call::Method(mc) => (mc.object, &mc.method, &mc.argument_list),
+        Call::NullSafeMethod(mc) => (mc.object, &mc.method, &mc.argument_list),
+    };
+    let ClassLikeMemberSelector::Identifier(ident) = method else {
+        return vec![];
+    };
+    let receiver_span = receiver.span();
+    infer_callable_params_from_receiver_fw(
+        (receiver_span.start.offset, receiver_span.end.offset),
+        bytes_to_str(ident.value),
+        arg_idx,
+        argument_list,
+        scope,
+        ctx,
+    )
 }

@@ -26,6 +26,7 @@ use mago_syntax::cst::*;
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
+use crate::symbol_map::extraction::laravel::ROUTE_HTTP_METHODS;
 use crate::text_position::position_to_offset;
 use crate::types::{AccessKind, FileContext};
 
@@ -41,10 +42,6 @@ pub(crate) struct LaravelRouteControllerContext {
     /// The partial method name the user has typed so far.
     pub prefix: String,
 }
-
-// ─── Route HTTP methods ─────────────────────────────────────────────────────
-
-const ROUTE_HTTP_METHODS: &[&str] = &["get", "post", "put", "patch", "delete", "options", "any"];
 
 // ─── Detection (text scanning + AST) ────────────────────────────────────────
 

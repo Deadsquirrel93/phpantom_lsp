@@ -176,6 +176,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Refactoring actions wherever the code is written.** "Convert to arrow function", "Convert to closure", "Convert to match expression", "Inline variable" and the `??` and `?->` simplifications now also work in `elseif` and `else` branches, `match` arms, and closure bodies. "Convert to closure" captures what a nested closure's `use` clause or a spread such as `...$items` reads, and leaves `$_GET` and the other auto-globals out of `use`, which PHP rejects.
 - **Named arguments after an array, closure or `match` argument.** Named-argument completion now works after an earlier argument such as `[1, 2]`, a closure, or a `match` expression, and commas inside such an argument or a comment no longer move signature help to the next parameter.
 - **Path helpers in service providers.** A config file, or a view, translation or route directory, that a service provider names with any of Laravel's path helpers, such as `config_path()`, is now found. One named with `lang_path()` is looked for in `resources/lang` when the project still keeps its translations there, as Laravel does.
+- **Extracting code with early returns leaves other `return`s alone.** "Extract method" and "Extract function" rewrite only the selection's own guard returns. A `return` inside a closure in the selection, or a string or comment that reads like one, is no longer changed to `return false;`.
+- **By-reference parameters of namespaced functions.** A variable passed to a by-reference parameter of `App\fill()` from inside `namespace App` is no longer reported as undefined when a global `fill()` also exists.
+- **Config key completion in `Config::string()`, `integer()` and `float()`.** The typed getters on the `Config` facade now offer config keys, as `Config::get()` and `Config::boolean()` already did.
+- **Escaped quotes in `#[Config]` and `#[RedirectToRoute]` keys.** A key such as `#[Config('app.it\'s')]` now names `app.it's`, the way PHP reads it, as a `config()` call already did.
 
 ## [0.11.1] - 2026-10-07
 

@@ -1,0 +1,42 @@
+//! Laravel's string-keyed names: config keys, route and view names,
+//! container bindings, gate abilities, morph aliases, Artisan commands and
+//! macros, each written as a string literal the symbol map makes navigable.
+//!
+//! Each file covers one family.  `spans` holds the primitive they all emit
+//! through, and `receivers` the receiver spellings that gate them.
+
+use super::*;
+
+mod attributes;
+mod commands;
+mod config;
+mod container;
+mod gates;
+mod macros;
+mod morph;
+mod receivers;
+mod routes;
+mod spans;
+mod views;
+
+pub(in crate::symbol_map::extraction) use attributes::*;
+pub(in crate::symbol_map::extraction) use commands::*;
+pub(in crate::symbol_map::extraction) use config::*;
+pub(in crate::symbol_map::extraction) use container::*;
+pub(in crate::symbol_map::extraction) use gates::*;
+pub(in crate::symbol_map::extraction) use macros::*;
+pub(in crate::symbol_map::extraction) use morph::*;
+pub(in crate::symbol_map::extraction) use receivers::*;
+pub(in crate::symbol_map::extraction) use routes::*;
+pub(in crate::symbol_map::extraction) use spans::*;
+pub(in crate::symbol_map::extraction) use views::*;
+
+pub(crate) use config::{config_keys_written_by, is_config_repository_method};
+pub(crate) use container::is_laravel_container_expr;
+pub(crate) use gates::is_gate_check_method;
+pub(crate) use receivers::chain_roots_at_facade;
+pub(crate) use routes::{
+    ROUTE_HTTP_METHODS, is_request_route_pattern_method, is_route_facade_pattern_method,
+    is_route_name_method,
+};
+pub(crate) use views::is_render_each_method;

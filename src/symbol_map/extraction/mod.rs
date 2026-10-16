@@ -5,6 +5,7 @@
 //! every navigable symbol occurrence.  The entry point is
 //! [`extract_symbol_map`].
 
+use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
 use super::docblock::{
@@ -126,6 +127,29 @@ struct ExtractionCtx<'a> {
 fn bare_variable_name(raw: &[u8]) -> String {
     let name = bytes_to_str(raw);
     name.strip_prefix('$').unwrap_or(name).to_string()
+}
+
+/// Whether a string literal's `name` is a plain PHP identifier, so that
+/// prose such as `[$a, 'some text']` or `#[CoversMethod(Foo::class, 'not a
+/// name')]` is not turned into a symbol.
+fn is_identifier(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars
+        .next()
+        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+/// The [`SymbolKind::ClassReference`] span for a class name written as an
+/// identifier in code.
+fn identifier_class_ref(ident: &Identifier<'_>, context: ClassRefContext) -> SymbolSpan {
+    let span = ident.span();
+    class_ref_span_ctx(
+        span.start.offset,
+        span.end.offset,
+        bytes_to_str(ident.value()),
+        context,
+    )
 }
 
 impl<'a> ExtractionCtx<'a> {

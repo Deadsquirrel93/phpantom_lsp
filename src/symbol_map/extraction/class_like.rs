@@ -17,25 +17,15 @@ pub(super) fn extract_from_class<'a>(class: &'a Class<'a>, ctx: &mut ExtractionC
 
     if let Some(ref extends) = class.extends {
         for ident in extends.types.iter() {
-            let raw = bytes_to_str(ident.value()).to_string();
-            ctx.spans.push(class_ref_span_ctx(
-                ident.span().start.offset,
-                ident.span().end.offset,
-                &raw,
-                ClassRefContext::ExtendsClass,
-            ));
+            ctx.spans
+                .push(identifier_class_ref(ident, ClassRefContext::ExtendsClass));
         }
     }
 
     if let Some(ref implements) = class.implements {
         for ident in implements.types.iter() {
-            let raw = bytes_to_str(ident.value()).to_string();
-            ctx.spans.push(class_ref_span_ctx(
-                ident.span().start.offset,
-                ident.span().end.offset,
-                &raw,
-                ClassRefContext::Implements,
-            ));
+            ctx.spans
+                .push(identifier_class_ref(ident, ClassRefContext::Implements));
         }
     }
 
@@ -149,11 +139,8 @@ pub(super) fn extract_from_interface<'a>(iface: &'a Interface<'a>, ctx: &mut Ext
 
     if let Some(ref extends) = iface.extends {
         for ident in extends.types.iter() {
-            let raw = bytes_to_str(ident.value()).to_string();
-            ctx.spans.push(class_ref_span_ctx(
-                ident.span().start.offset,
-                ident.span().end.offset,
-                &raw,
+            ctx.spans.push(identifier_class_ref(
+                ident,
                 ClassRefContext::ExtendsInterface,
             ));
         }
@@ -229,13 +216,8 @@ pub(super) fn extract_from_enum<'a>(enum_def: &'a Enum<'a>, ctx: &mut Extraction
 
     if let Some(ref implements) = enum_def.implements {
         for ident in implements.types.iter() {
-            let raw = bytes_to_str(ident.value()).to_string();
-            ctx.spans.push(class_ref_span_ctx(
-                ident.span().start.offset,
-                ident.span().end.offset,
-                &raw,
-                ClassRefContext::Implements,
-            ));
+            ctx.spans
+                .push(identifier_class_ref(ident, ClassRefContext::Implements));
         }
     }
 
@@ -279,13 +261,9 @@ pub(super) fn extract_from_attribute_lists<'a>(
     for attr_list in attribute_lists.iter() {
         for attr in attr_list.attributes.iter() {
             // The attribute name (e.g. `\Illuminate\...\CollectedBy`).
-            let raw = bytes_to_str(attr.name.value()).to_string();
-            ctx.spans.push(class_ref_span_ctx(
-                attr.name.span().start.offset,
-                attr.name.span().end.offset,
-                &raw,
-                ClassRefContext::Attribute,
-            ));
+            let raw = bytes_to_str(attr.name.value());
+            ctx.spans
+                .push(identifier_class_ref(&attr.name, ClassRefContext::Attribute));
 
             // Attribute arguments — also emit a CallSite so that
             // signature help and named parameter completion work
@@ -397,13 +375,8 @@ pub(super) fn extract_from_class_member<'a>(
             }
 
             for ident in trait_use.trait_names.iter() {
-                let raw = bytes_to_str(ident.value()).to_string();
-                ctx.spans.push(class_ref_span_ctx(
-                    ident.span().start.offset,
-                    ident.span().end.offset,
-                    &raw,
-                    ClassRefContext::TraitUse,
-                ));
+                ctx.spans
+                    .push(identifier_class_ref(ident, ClassRefContext::TraitUse));
             }
 
             // Extract symbols from trait use adaptations (`{ ... }` block)
@@ -477,34 +450,7 @@ pub(super) fn extract_from_trait_alias_adaptation<'a>(
     ctx: &mut ExtractionCtx<'a>,
 ) {
     match &alias_adapt.method_reference {
-        TraitUseMethodReference::Absolute(abs) => {
-            let trait_raw = bytes_to_str(abs.trait_name.value()).to_string();
-            ctx.spans.push(class_ref_span(
-                abs.trait_name.span().start.offset,
-                abs.trait_name.span().end.offset,
-                &trait_raw,
-            ));
-            let method_name = crate::atom::atom_bytes(abs.method_name.value);
-            let trait_span = abs.trait_name.span();
-            ctx.spans.push(SymbolSpan {
-                start: abs.method_name.span.start.offset,
-                end: abs.method_name.span.end.offset,
-                kind: SymbolKind::MemberAccess {
-                    subject_text: SubjectText::new(
-                        trait_raw,
-                        trait_span.start.offset,
-                        trait_span.end.offset,
-                        ctx.content,
-                    ),
-                    member_name: method_name,
-                    is_static: true,
-                    is_method_call: true,
-                    docblock_ref: DocblockMemberRef::No,
-                    is_array_callable: false,
-                    is_nullsafe: false,
-                },
-            });
-        }
+        TraitUseMethodReference::Absolute(abs) => extract_absolute_method_reference(abs, ctx),
         TraitUseMethodReference::Identifier(ident) => {
             let subject = first_trait_name.unwrap_or("self").to_string();
             let method_name = crate::atom::atom_bytes(ident.value);
@@ -554,26 +500,37 @@ pub(super) fn extract_from_trait_precedence_adaptation<'a>(
     prec: &'a TraitUsePrecedenceAdaptation<'a>,
     ctx: &mut ExtractionCtx<'a>,
 ) {
-    let trait_raw = bytes_to_str(prec.method_reference.trait_name.value()).to_string();
-    ctx.spans.push(class_ref_span(
-        prec.method_reference.trait_name.span().start.offset,
-        prec.method_reference.trait_name.span().end.offset,
-        &trait_raw,
-    ));
+    extract_absolute_method_reference(&prec.method_reference, ctx);
 
-    let method_name = crate::atom::atom_bytes(prec.method_reference.method_name.value);
-    let trait_span = prec.method_reference.trait_name.span();
+    for ident in prec.trait_names.iter() {
+        ctx.spans
+            .push(identifier_class_ref(ident, ClassRefContext::Other));
+    }
+}
+
+/// Extract the `TraitA::method` a trait adaptation names: `TraitA` gets a
+/// `ClassReference` span and `method` a `MemberAccess` span, a static call
+/// on `TraitA`.
+fn extract_absolute_method_reference(
+    reference: &TraitUseAbsoluteMethodReference<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    ctx.spans.push(identifier_class_ref(
+        &reference.trait_name,
+        ClassRefContext::Other,
+    ));
+    let trait_span = reference.trait_name.span();
     ctx.spans.push(SymbolSpan {
-        start: prec.method_reference.method_name.span.start.offset,
-        end: prec.method_reference.method_name.span.end.offset,
+        start: reference.method_name.span.start.offset,
+        end: reference.method_name.span.end.offset,
         kind: SymbolKind::MemberAccess {
             subject_text: SubjectText::new(
-                trait_raw,
+                bytes_to_str(reference.trait_name.value()).to_string(),
                 trait_span.start.offset,
                 trait_span.end.offset,
                 ctx.content,
             ),
-            member_name: method_name,
+            member_name: crate::atom::atom_bytes(reference.method_name.value),
             is_static: true,
             is_method_call: true,
             docblock_ref: DocblockMemberRef::No,
@@ -581,15 +538,6 @@ pub(super) fn extract_from_trait_precedence_adaptation<'a>(
             is_nullsafe: false,
         },
     });
-
-    for ident in prec.trait_names.iter() {
-        let raw = bytes_to_str(ident.value()).to_string();
-        ctx.spans.push(class_ref_span(
-            ident.span().start.offset,
-            ident.span().end.offset,
-            &raw,
-        ));
-    }
 }
 
 pub(super) fn extract_from_method<'a>(method: &'a Method<'a>, ctx: &mut ExtractionCtx<'a>) {
@@ -1082,8 +1030,6 @@ pub(super) fn extract_from_hint_ctx(
 ) {
     match hint {
         Hint::Identifier(ident) => {
-            let raw = bytes_to_str(ident.value()).to_string();
-            let name_clean = strip_fqn_prefix(&raw).to_string();
             // The parser gives every type PHP supports natively its own
             // `Hint` variant, so an identifier here is a class name as far
             // as PHP is concerned — including `resource`, `integer`, and
@@ -1092,13 +1038,9 @@ pub(super) fn extract_from_hint_ctx(
             // will be interpreted as a class name"). Reading them as the
             // class references they are is what gets them reported instead
             // of waved through by the docblock type vocabulary.
-            if !crate::php_type::is_native_type_name(&name_clean) {
-                spans.push(class_ref_span_ctx(
-                    ident.span().start.offset,
-                    ident.span().end.offset,
-                    &raw,
-                    ref_ctx,
-                ));
+            if !crate::php_type::is_native_type_name(strip_fqn_prefix(bytes_to_str(ident.value())))
+            {
+                spans.push(identifier_class_ref(ident, ref_ctx));
             }
         }
         Hint::Nullable(nullable) => {
