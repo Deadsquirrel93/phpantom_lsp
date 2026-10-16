@@ -999,10 +999,6 @@ fn emit_type_symbols(ty: &type_ast::Type<'_>, sink: &mut DocblockSink<'_>) {
     }
 }
 
-/// Emit a span for a type identifier (class name, or self/static/parent).
-///
-/// Checks [`is_navigable_type`] and emits either a `ClassReference` or
-/// `SelfStaticParent` span as appropriate.
 /// Emit the operand of a type operator (`key-of<X>`, `value-of<X>`, `X[K]`).
 ///
 /// A bare name in that position is usually array-typed rather than a class:
@@ -1047,6 +1043,10 @@ fn emit_int_mask_member_symbols(ty: &type_ast::Type<'_>, sink: &mut DocblockSink
     }
 }
 
+/// Emit a span for a type identifier (class name, or self/static/parent).
+///
+/// Checks [`is_navigable_type`] and emits either a `ClassReference` or
+/// `SelfStaticParent` span as appropriate.
 fn emit_identifier_span(name: &str, start: u32, end: u32, spans: &mut Vec<SymbolSpan>) {
     emit_identifier_span_in(name, start, end, ClassRefContext::Other, spans);
 }

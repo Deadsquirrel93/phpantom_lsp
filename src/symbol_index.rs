@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use parking_lot::RwLock;
 
 use crate::ci_map::{CiMap, CiSet};
-use crate::types::{ClassInfo, DefineInfo, FunctionInfo, MethodStore};
+use crate::types::{ClassInfo, DefineInfo, FunctionInfo};
 use crate::{ClassCompletionOrigin, UriGlobals};
 
 /// Every declaration of the names that more than one file declares, keyed
@@ -77,8 +77,6 @@ pub(crate) struct SymbolIndex {
     /// the name and cleared wholesale whenever the indexes grow, the
     /// same lifecycle `class_not_found_cache` follows.
     pub(crate) function_not_found_cache: Arc<RwLock<CiSet>>,
-    /// Global method store: `(class_fqn, method_name)` → `Arc<MethodInfo>`.
-    pub(crate) method_store: MethodStore,
     /// Reverse inheritance index: parent FQN → list of child FQNs.
     pub(crate) gti_index: Arc<RwLock<HashMap<String, Vec<String>>>>,
     /// The same inheritance edges the other way round: child FQN → the
@@ -132,7 +130,6 @@ impl SymbolIndex {
             duplicate_classes: Arc::new(RwLock::new(CiMap::new())),
             class_not_found_cache: Arc::new(RwLock::new(CiSet::new())),
             function_not_found_cache: Arc::new(RwLock::new(CiSet::new())),
-            method_store: Arc::new(RwLock::new(HashMap::new())),
             gti_index: Arc::new(RwLock::new(HashMap::new())),
             gti_parents_index: Arc::new(RwLock::new(HashMap::new())),
         }
@@ -202,59 +199,13 @@ impl SymbolIndex {
 }
 
 impl SymbolIndex {
-    /// Record `classes` in the method store and the go-to-implementation
-    /// index.
-    pub(crate) fn index_class_members(&self, classes: &[Arc<ClassInfo>]) {
-        self.populate_method_store(classes);
-        self.populate_gti_index(classes);
-    }
-
-    /// Withdraw what [`index_class_members`](Self::index_class_members)
-    /// recorded for the classes named `fqns`, before they are re-indexed or
-    /// dropped.
-    pub(crate) fn withdraw_class_members(&self, fqns: &[String]) {
-        self.evict_methods_for_fqns(fqns);
-        self.evict_gti_for_fqns(fqns);
-    }
-
-    /// Populate the method store from a slice of classes.
-    ///
-    /// For each class, inserts every method under the key
-    /// `(class_fqn, method.name)`.  Called from `update_ast_inner`
-    /// and `parse_and_cache_content_versioned` after classes are parsed.
-    fn populate_method_store(&self, classes: &[Arc<ClassInfo>]) {
-        let mut store = self.method_store.write();
-        for cls in classes {
-            let fqn = cls.fqn().to_string();
-            for method in &cls.methods {
-                let key = (fqn.clone(), method.name.to_string());
-                store.insert(key, Arc::clone(method));
-            }
-        }
-    }
-
-    /// Remove all method store entries whose class FQN matches any of
-    /// the given FQNs.
-    ///
-    /// Called before re-populating after a file re-parse so that renamed
-    /// or deleted methods do not linger.
-    fn evict_methods_for_fqns(&self, fqns: &[String]) {
-        if fqns.is_empty() {
-            return;
-        }
-        let mut store = self.method_store.write();
-        for fqn in fqns {
-            store.retain(|k, _| k.0 != *fqn);
-        }
-    }
-
-    /// Populate the GTI (go-to-implementation) reverse inheritance index
-    /// for the given classes.  For each class, inserts the class's FQN
-    /// into the child list of every parent (parent_class, interfaces,
-    /// used_traits), and records the same edges under the class itself in
-    /// `gti_parents_index` so they can be withdrawn again without
-    /// searching for them.
-    fn populate_gti_index(&self, classes: &[Arc<ClassInfo>]) {
+    /// Record the inheritance edges of `classes` in the GTI
+    /// (go-to-implementation) reverse inheritance index.  For each class,
+    /// inserts the class's FQN into the child list of every parent
+    /// (parent_class, interfaces, used_traits), and records the same edges
+    /// under the class itself in `gti_parents_index` so they can be
+    /// withdrawn again without searching for them.
+    pub(crate) fn index_inheritance(&self, classes: &[Arc<ClassInfo>]) {
         let mut gti = self.gti_index.write();
         let mut parents_index = self.gti_parents_index.write();
         for cls in classes {
@@ -294,13 +245,14 @@ impl SymbolIndex {
         }
     }
 
-    /// Remove all GTI entries where one of `fqns` appears as a child.
-    /// Called before re-populating when a file is re-parsed.
+    /// Withdraw what [`index_inheritance`](Self::index_inheritance)
+    /// recorded for the classes named `fqns`, before they are re-indexed or
+    /// dropped: every GTI entry where one of them appears as a child.
     ///
     /// Only the parents each class was registered under are touched, so the
     /// cost is the size of the re-parsed file's inheritance clauses rather
     /// than the size of the workspace.
-    fn evict_gti_for_fqns(&self, fqns: &[String]) {
+    pub(crate) fn withdraw_inheritance(&self, fqns: &[String]) {
         if fqns.is_empty() {
             return;
         }
@@ -428,7 +380,7 @@ impl ClassDeclarations<'_> {
     ///
     /// Returns the names that no file declares any more and the names that
     /// changed hands, so the caller can refresh the indexes derived from
-    /// them (`method_store`, `gti_index`).
+    /// them (`gti_index`).
     pub(crate) fn withdraw_uris(&mut self, uris: &HashSet<String>) -> WithdrawnClasses {
         let affected: Vec<String> = self
             .dupes
@@ -495,7 +447,7 @@ impl ClassDeclarations<'_> {
 }
 
 /// What [`ClassDeclarations::declare`] did, for refreshing the indexes
-/// derived from the class index (`method_store`, `gti_index`).
+/// derived from the class index (`gti_index`).
 pub(crate) struct Declared {
     /// Whether the new declaration is the one now serving lookups, or a
     /// lower-sorting file's declaration of the same name still is.

@@ -1,3 +1,18 @@
+//! Class, interface, trait, and enum extraction.
+//!
+//! Each class-like declaration is tagged with a [`ClassLikeKind`] so that
+//! downstream consumers (e.g. `throw new` completion) can distinguish
+//! concrete classes from interfaces, traits, and enums.
+//!
+//! This module handles extracting `ClassInfo` from the PHP AST for all
+//! class-like declarations: `class`, `interface`, `trait`, and `enum`.
+//! It also extracts class-like members (methods, properties, constants,
+//! trait uses) and merges in PHPDoc `@property`, `@method`, `@mixin`,
+//! and `@deprecated` annotations from docblocks.
+//!
+//! Anonymous classes (`new class { ... }`) are extracted separately, by
+//! the sibling [`super::anonymous`] module.
+
 use std::sync::Arc;
 
 use crate::php_type::PhpType;
@@ -13,20 +28,6 @@ use mago_syntax::cst::class_like::trait_use::{
 };
 use mago_syntax::cst::sequence::Sequence;
 
-/// Class, interface, trait, and enum extraction.
-///
-/// Each class-like declaration is tagged with a [`ClassLikeKind`] so that
-/// downstream consumers (e.g. `throw new` completion) can distinguish
-/// concrete classes from interfaces, traits, and enums.
-///
-/// This module handles extracting `ClassInfo` from the PHP AST for all
-/// class-like declarations: `class`, `interface`, `trait`, and `enum`.
-/// It also extracts class-like members (methods, properties, constants,
-/// trait uses) and merges in PHPDoc `@property`, `@method`, `@mixin`,
-/// and `@deprecated` annotations from docblocks.
-///
-/// Anonymous classes (`new class { ... }`) are extracted separately, by
-/// the sibling [`super::anonymous`] module.
 use mago_syntax::cst::*;
 
 use crate::Backend;

@@ -1,8 +1,9 @@
-/// Goto-definition for standalone constants and functions.
-///
-/// Both resolve a list of candidate names against the global symbol maps,
-/// lazily parsing the defining file when the byte-level startup scan only
-/// recorded its path, and jump to the declaration's stored name offset.
+//! Goto-definition for standalone constants and functions.
+//!
+//! Both resolve a list of candidate names against the global symbol maps,
+//! lazily parsing the defining file when the byte-level startup scan only
+//! recorded its path, and jump to the declaration's stored name offset.
+
 use tower_lsp::lsp_types::{Location, Url};
 
 use super::point_location;

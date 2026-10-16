@@ -181,7 +181,6 @@ impl Backend {
         // rescanned; keeping them would promote a copy of a class that the
         // update may have moved or removed.
         self.symbols.duplicate_classes.write().clear();
-        self.symbols.method_store.write().clear();
         self.symbols.gti_index.write().clear();
         self.symbols.gti_parents_index.write().clear();
         self.clear_not_found_caches();

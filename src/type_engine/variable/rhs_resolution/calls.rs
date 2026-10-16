@@ -462,7 +462,6 @@ pub(super) fn resolve_return_type(ty: PhpType, ctx: &VarResolutionCtx<'_>) -> Ve
     }
     vec![resolved_type_with_lookup(
         ty,
-        &current_class_name,
         ctx.all_classes,
         ctx.class_loader,
     )]

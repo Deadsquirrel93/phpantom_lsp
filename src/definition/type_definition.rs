@@ -1,17 +1,18 @@
-/// Go-to-type-definition resolution (`textDocument/typeDefinition`).
-///
-/// "Go to Type Definition" jumps from a variable or expression to the
-/// class/interface/trait/enum declaration of its resolved type, rather
-/// than to the definition site (assignment, parameter, etc.).
-///
-/// For example, if `$user` is typed as `User`, go-to-definition jumps
-/// to the `$user = ...` assignment, while go-to-type-definition jumps
-/// to the `class User { … }` declaration.
-///
-/// The implementation reuses the existing variable type resolution and
-/// subject resolution pipelines, then looks up each resolved class name
-/// via [`resolve_class_reference`](super::resolve) to find its
-/// definition location.
+//! Go-to-type-definition resolution (`textDocument/typeDefinition`).
+//!
+//! "Go to Type Definition" jumps from a variable or expression to the
+//! class/interface/trait/enum declaration of its resolved type, rather
+//! than to the definition site (assignment, parameter, etc.).
+//!
+//! For example, if `$user` is typed as `User`, go-to-definition jumps
+//! to the `$user = ...` assignment, while go-to-type-definition jumps
+//! to the `class User { … }` declaration.
+//!
+//! The implementation reuses the existing variable type resolution and
+//! subject resolution pipelines, then looks up each resolved class name
+//! via [`resolve_class_reference`](super::resolve) to find its
+//! definition location.
+
 use crate::atom::atom;
 use std::sync::Arc;
 use tower_lsp::lsp_types::*;

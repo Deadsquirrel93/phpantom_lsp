@@ -1,18 +1,19 @@
-/// Goto-definition resolution — core entry points.
-///
-/// Given a cursor position in a PHP file this module:
-///   1. Extracts the symbol (class / interface / trait / enum name) under the cursor.
-///   2. Resolves it to a fully-qualified name using the file's `use` map and namespace.
-///   3. Locates the file on disk via PSR-4 mappings.
-///   4. Finds the exact line of the symbol's declaration inside that file.
-///   5. Returns an LSP `Location` the editor can jump to.
-///
-/// Member-access resolution (methods, properties, constants via `->`, `?->`,
-/// `::`) is handled by the sibling [`super::member`] module.
-///
-/// Variable definition resolution (`$var` → most recent assignment /
-/// declaration) is also handled here, against the precomputed symbol map's
-/// variable-definition index.
+//! Goto-definition resolution — core entry points.
+//!
+//! Given a cursor position in a PHP file this module:
+//!   1. Extracts the symbol (class / interface / trait / enum name) under the cursor.
+//!   2. Resolves it to a fully-qualified name using the file's `use` map and namespace.
+//!   3. Locates the file on disk via PSR-4 mappings.
+//!   4. Finds the exact line of the symbol's declaration inside that file.
+//!   5. Returns an LSP `Location` the editor can jump to.
+//!
+//! Member-access resolution (methods, properties, constants via `->`, `?->`,
+//! `::`) is handled by the sibling [`super::member`] module.
+//!
+//! Variable definition resolution (`$var` → most recent assignment /
+//! declaration) is also handled here, against the precomputed symbol map's
+//! variable-definition index.
+
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -703,20 +704,6 @@ impl Backend {
         Some(point_location(parsed_uri, position))
     }
 
-    /// Find the position (line, character) of a class / interface / trait / enum
-    /// declaration inside the given file content.
-    ///
-    /// Searches for patterns like:
-    ///   `class ClassName`
-    ///   `interface ClassName`
-    ///   `trait ClassName`
-    ///   `enum ClassName`
-    ///   `abstract class ClassName`
-    ///   `final class ClassName`
-    ///   `readonly class ClassName`
-    ///
-    /// Returns the position of the keyword (`class`, `interface`, etc.) on
-    /// the matching line.
     /// Resolve `self`, `static`, or `parent` keywords to a class definition.
     ///
     /// - `self` / `static` → jump to the enclosing class declaration.

@@ -15,6 +15,7 @@
 //! - [`signature`]: Signature extraction shared by functions and methods
 //! - [`use_statements`]: `use` statement and namespace extraction
 //! - [`ast_update`]: The `update_ast` orchestrator
+//! - [`ast_publish`]: Publishing a batch of parsed files to the indexes
 //! - [`name_resolution`]: Qualifying the names a parsed declaration spells
 //! - [`initializers`]: Qualifying the classes a constant initializer names
 //! - [`parse_cache`]: The thread-local cache that shares one parse per pass
@@ -25,6 +26,7 @@ use std::collections::HashMap;
 
 mod anonymous;
 mod ast_helpers;
+mod ast_publish;
 mod ast_update;
 mod attributes;
 mod classes;

@@ -1,28 +1,29 @@
-/// Type-hint resolution to concrete `ClassInfo` values.
-///
-/// This module contains the logic for mapping parsed [`PhpType`] values
-/// (as they appear in return types, property annotations, and PHPDoc
-/// tags) to resolved `ClassInfo` values that the completion, hover, and
-/// definition engines can work with.
-///
-/// Split from [`crate::type_engine::resolver`] for navigability.  The entry points are:
-///
-/// - [`type_hint_to_classes_typed`]: maps a parsed [`PhpType`] to all
-///   matching `ClassInfo` values (handles unions, intersections, generics,
-///   `self`/`static`/`$this`, nullable types, object shapes, and type
-///   alias expansion).
-/// - [`resolve_type_alias_typed`]: fully expands a type alias defined
-///   via `@phpstan-type` / `@psalm-type` / `@phpstan-import-type`.
-/// - [`resolve_property_types`]: resolves a property's type hint
-///   on a class to all candidate `ClassInfo` values.
-/// - [`resolve_imported_type_alias`]: resolves a single imported
-///   type alias reference.
+//! Type-hint resolution to concrete `ClassInfo` values.
+//!
+//! This module contains the logic for mapping parsed [`PhpType`] values
+//! (as they appear in return types, property annotations, and PHPDoc
+//! tags) to resolved `ClassInfo` values that the completion, hover, and
+//! definition engines can work with.
+//!
+//! Split from [`crate::type_engine::resolver`] for navigability.  The entry points are:
+//!
+//! - [`type_hint_to_classes_typed`]: maps a parsed [`PhpType`] to all
+//!   matching `ClassInfo` values (handles unions, intersections, generics,
+//!   `self`/`static`/`$this`, nullable types, object shapes, and type
+//!   alias expansion).
+//! - [`resolve_type_alias_typed`]: fully expands a type alias defined
+//!   via `@phpstan-type` / `@psalm-type` / `@phpstan-import-type`.
+//! - [`resolve_property_types`]: resolves a property's type hint
+//!   on a class to all candidate `ClassInfo` values.
+//! - [`resolve_imported_type_alias`]: resolves a single imported
+//!   type alias reference.
+
 use std::sync::Arc;
 
 use crate::atom::atom;
 use crate::class_lookup::{find_class_by_fqn, find_or_load_resolved};
 use crate::inheritance::build_generic_subs;
-use crate::php_type::{PhpType, TypeKind};
+use crate::php_type::{PhpType, TypeKind, is_builtin_non_class_type};
 use crate::types::*;
 use crate::util::short_name;
 use crate::virtual_members::{self, laravel};
@@ -641,8 +642,6 @@ fn resolve_named_type(
 ///
 /// Pass an empty `owning_class_name` to search all classes without
 /// priority (used by the array-key completion path).
-use crate::php_type::is_builtin_non_class_type;
-
 pub(crate) fn resolve_type_alias_typed(
     ty: &PhpType,
     owning_class_name: &str,

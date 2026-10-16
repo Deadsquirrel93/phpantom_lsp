@@ -1,8 +1,9 @@
-/// Standalone function and `define()` constant extraction.
-///
-/// This module handles extracting standalone (non-method) function
-/// definitions and `define('NAME', value)` constant declarations from
-/// the PHP AST.
+//! Standalone function and `define()` constant extraction.
+//!
+//! This module handles extracting standalone (non-method) function
+//! definitions and `define('NAME', value)` constant declarations from
+//! the PHP AST.
+
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
 

@@ -1,5 +1,6 @@
-/// Context types and the thread-local chain resolution cache shared by
-/// [`super::resolve_target_classes`] and the functions it delegates to.
+//! Context types and the thread-local chain resolution cache shared by
+//! [`super::resolve_target_classes`] and the functions it delegates to.
+
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;

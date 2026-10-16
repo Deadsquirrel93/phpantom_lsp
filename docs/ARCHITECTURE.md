@@ -552,9 +552,9 @@ name, and keeps a runner-up recorded by one path from going stale when the
 other withdraws a declaration. Readers that take more than one of these
 locks must take them in the same order.
 
-The indexes derived from the class index (`method_store`, `gti_index`) are
-keyed by FQN, so they are repopulated from whichever declaration won
-rather than from the classes the current parse produced.
+The index derived from the class index (`gti_index`) is keyed by FQN,
+so it is repopulated from whichever declaration won rather than from the
+classes the current parse produced.
 
 ### Lifecycle Invariants
 

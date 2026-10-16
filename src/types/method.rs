@@ -1,23 +1,6 @@
-//! A method as parsed, and the store that shares methods between the
-//! classes that inherit them.
+//! A method as parsed.
 
 use super::*;
-
-/// Key for the global method store: `(class_fqn, method_name)`.
-///
-/// The class FQN is fully qualified (e.g. `"App\\Models\\User"`).
-/// The method name is the original-case name (e.g. `"updateText"`).
-pub type MethodStoreKey = (String, String);
-
-/// Global method store mapping `(class_fqn, method_name)` to the
-/// method's metadata.
-///
-/// This is the first step toward eliminating method cloning during
-/// inheritance: once all consumers look up methods through the store
-/// instead of iterating `ClassInfo.methods`, the inheritance merge
-/// can copy `(fqn, name)` tuples instead of cloning full `MethodInfo`
-/// structs.
-pub type MethodStore = Arc<parking_lot::RwLock<HashMap<MethodStoreKey, Arc<MethodInfo>>>>;
 
 /// Stores extracted method information from a parsed PHP class.
 #[derive(Debug, Clone, Default)]

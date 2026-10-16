@@ -21,7 +21,7 @@ impl Backend {
     /// first, or stale symbols linger: completion keeps suggesting a class
     /// whose file was removed, go-to-definition jumps into a deleted file,
     /// and so on.  Purging only some indexes (e.g. `fqn_uri_index` but not
-    /// `method_store`) leaves the symptom alive in whichever feature reads
+    /// `gti_index`) leaves the symptom alive in whichever feature reads
     /// the index that was missed.
     ///
     /// The purge of each discovery index is done once for the whole batch
@@ -84,7 +84,7 @@ impl Backend {
         self.symbols.note_class_lookup_change();
         let mut classes_changed = !dropped_fqns.is_empty() || !promoted_fqns.is_empty();
         let mut functions_retired = false;
-        self.symbols.withdraw_class_members(&dropped_fqns);
+        self.symbols.withdraw_inheritance(&dropped_fqns);
         if !promoted_fqns.is_empty() {
             // The indexes derived from the class index still describe the
             // purged declaration, so rebuild them from the survivor.
@@ -95,8 +95,8 @@ impl Backend {
                     .filter_map(|fqn| fci.get(fqn).map(Arc::clone))
                     .collect()
             };
-            self.symbols.withdraw_class_members(&promoted_fqns);
-            self.symbols.index_class_members(&winners);
+            self.symbols.withdraw_inheritance(&promoted_fqns);
+            self.symbols.index_inheritance(&winners);
         }
 
         self.symbols

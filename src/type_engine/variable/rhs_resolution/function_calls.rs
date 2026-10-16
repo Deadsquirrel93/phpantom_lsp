@@ -130,7 +130,6 @@ fn builtin_function_call(
     {
         return Some(vec![resolved_type_with_lookup(
             folded,
-            &ctx.current_class.fqn(),
             ctx.all_classes,
             ctx.class_loader,
         )]);

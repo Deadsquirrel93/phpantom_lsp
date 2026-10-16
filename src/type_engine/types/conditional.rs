@@ -1,34 +1,42 @@
-use crate::atom::atom;
-/// PHPStan conditional return type resolution.
-///
-/// This module contains the free functions that resolve PHPStan conditional
-/// return type annotations to concrete type strings.  These annotations
-/// allow a function's return type to depend on the type or value of a
-/// parameter at the call site.
-///
-/// Two resolution paths are supported:
-///
-/// - **Text-based** ([`resolve_conditional_with_text_args_and_defaults`]): the main path,
-///   taking the raw argument text between the call's parentheses. Callers
-///   that hold a parsed `ArgumentList` extract each argument's source text
-///   from it, so an assignment (`$var = func(…)`) and an inline call
-///   (`func(A::class)->method()`) decide their conditions identically.
-/// - **No-args** ([`resolve_conditional_without_args`]): used when no
-///   arguments were provided (or none were preserved); walks the
-///   conditional tree deciding each condition against the parameter's
-///   declared default.
-///
-/// Both decide an omitted argument by that declared default, since that is
-/// the value the parameter takes at runtime.
-use crate::text_scan::split_top_level_commas;
+//! PHPStan conditional return type resolution.
+//!
+//! This module contains the free functions that resolve PHPStan conditional
+//! return type annotations to concrete type strings.  These annotations
+//! allow a function's return type to depend on the type or value of a
+//! parameter at the call site.
+//!
+//! Two resolution paths are supported:
+//!
+//! - **Text-based** ([`resolve_conditional_with_text_args_and_defaults`]): the main path,
+//!   taking the raw argument text between the call's parentheses. Callers
+//!   that hold a parsed `ArgumentList` extract each argument's source text
+//!   from it, so an assignment (`$var = func(…)`) and an inline call
+//!   (`func(A::class)->method()`) decide their conditions identically.
+//! - **No-args** ([`resolve_conditional_without_args`]): used when no
+//!   arguments were provided (or none were preserved); walks the
+//!   conditional tree deciding each condition against the parameter's
+//!   declared default.
+//!
+//! Both decide an omitted argument by that declared default, since that is
+//! the value the parameter takes at runtime.
+
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use mago_syntax::cst::*;
 
-use crate::php_type::{LiteralValue, PhpType, TypeKind};
+use crate::atom::atom;
+use crate::php_type::{ConditionalType, PhpType, TypeKind};
+use crate::text_scan::split_top_level_commas;
 use crate::types::{ClassInfo, ParameterInfo};
+
+mod arg_form;
+
+use arg_form::{
+    combine_union_results, condition_category, condition_result_from_text,
+    literal_condition_result, type_category,
+};
 
 /// Groups template-related context for conditional return type resolution.
 ///
@@ -144,14 +152,6 @@ fn resolved_class_fqn(name: &str, class_loader: &dyn Fn(&str) -> Option<Arc<Clas
         .unwrap_or_else(|| name.to_string())
 }
 
-/// Resolve a conditional return type using **textual** arguments extracted
-/// from the source code (e.g. `"SessionManager::class"`).
-///
-/// `tpl` carries the template parameter defaults from the owning class.
-///
-/// When the conditional's subject (e.g. `TAsync`) is not a method parameter
-/// but a class-level template parameter with a default value, the default
-/// is used to evaluate the condition.
 /// Whether a `($this is C ? …)` conditional takes its then branch for the
 /// receiver type `this_ty`, `self` in the condition naming `declaring`.
 /// `None` when the receiver type cannot decide it.
@@ -174,6 +174,14 @@ fn this_condition_holds(
     Some(satisfied ^ negated)
 }
 
+/// Resolve a conditional return type using **textual** arguments extracted
+/// from the source code (e.g. `"SessionManager::class"`).
+///
+/// `tpl` carries the template parameter defaults from the owning class.
+///
+/// When the conditional's subject (e.g. `TAsync`) is not a method parameter
+/// but a class-level template parameter with a default value, the default
+/// is used to evaluate the condition.
 pub fn resolve_conditional_with_text_args_and_defaults(
     conditional: &PhpType,
     params: &[ParameterInfo],
@@ -183,526 +191,42 @@ pub fn resolve_conditional_with_text_args_and_defaults(
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     tpl: &TemplateContext<'_>,
 ) -> Option<PhpType> {
-    match conditional.kind() {
-        TypeKind::Conditional(cond) => {
-            let (param, negated, condition, then_type, else_type) = (
-                &cond.param,
-                &cond.negated,
-                &cond.condition,
-                &cond.then_type,
-                &cond.else_type,
-            );
-            // A conditional that asks for proof answers an undecided
-            // condition with its else branch instead of the union of
-            // both — see [`ConditionalType::else_when_undecided`].
-            let undecided: Option<&PhpType> = cond.else_when_undecided.then_some(else_type);
-            let resolve_branch = |branch: &PhpType| {
-                resolve_conditional_with_text_args_and_defaults(
-                    branch,
-                    params,
-                    text_args,
-                    var_resolver,
-                    class_ctx,
-                    class_loader,
-                    tpl,
-                )
-            };
-            // What the conditional answers when a resolver was consulted
-            // and could not pin the argument down: the call really may take
-            // either branch, so the answer is their union unless the
-            // conditional asked for proof and named its else branch as the
-            // undecided reading.
-            let undecided_answer = || match undecided {
-                Some(branch) => resolve_branch(branch),
-                None => union_branch_types(resolve_branch(then_type), resolve_branch(else_type)),
-            };
-            let target = param.as_str();
+    TextArgs {
+        params,
+        text_args,
+        var_resolver,
+        class_ctx,
+        class_loader,
+        tpl,
+    }
+    .resolve(conditional)
+}
 
-            // `$this` names the receiver, not a parameter: decide the
-            // condition against the resolved receiver type the caller
-            // supplied (its class-level `@template` values already
-            // substituted, e.g. by a preceding `@phpstan-self-out`) rather
-            // than looking it up among `params`/`text_args`.
-            if target.eq_ignore_ascii_case("$this") {
-                let Some(this_ty) = tpl.this_type else {
-                    return undecided_answer();
-                };
-                return match this_condition_holds(
-                    this_ty,
-                    condition,
-                    *negated,
-                    class_ctx.declaring,
-                    class_loader,
-                ) {
-                    Some(true) => resolve_branch(then_type),
-                    Some(false) => resolve_branch(else_type),
-                    None => undecided_answer(),
-                };
-            }
+/// A call whose conditional return type is decided against the source text
+/// of its arguments, with everything needed to read that text.
+#[derive(Clone, Copy)]
+struct TextArgs<'a> {
+    params: &'a [ParameterInfo],
+    /// The raw text between the call's parentheses.
+    text_args: &'a str,
+    var_resolver: VarClassStringResolver<'a>,
+    class_ctx: ConditionalClassContext<'a>,
+    class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    tpl: &'a TemplateContext<'a>,
+}
 
-            // Check if the conditional subject is a template parameter
-            // with a default value (not a method $parameter).
-            if !target.starts_with('$')
-                && let Some(resolved) = try_resolve_with_template_default(
-                    target,
-                    *negated,
-                    condition,
-                    then_type,
-                    else_type,
-                    tpl.defaults,
-                )
-            {
-                return Some(resolved);
-            }
-
-            // `T[0] is string` asks about an offset of what the argument
-            // binding `T` holds, which is read off that argument's type.
-            if !target.starts_with('$')
-                && target.contains('[')
-                && let Some(decided) = decide_template_offset_condition(
-                    target,
-                    condition,
-                    params,
-                    text_args,
-                    tpl,
-                    class_loader,
-                )
-            {
-                return if decided ^ *negated {
-                    resolve_branch(then_type)
-                } else {
-                    resolve_branch(else_type)
-                };
-            }
-
-            // A condition keyed on a `@template` parameter (`B is 0|1`) is
-            // decided by the argument that binds it (`@param B $behavior`).
-            let target = if target.starts_with('$') {
-                target
-            } else {
-                tpl.bindings
-                    .iter()
-                    .find(|(template, _)| template.as_str() == target)
-                    .map_or(target, |(_, param)| param.as_str())
-            };
-
-            // A `$name` the signature does not declare has no argument to
-            // decide it, so nothing is known and both branches remain.
-            let Some(param_idx) = params
-                .iter()
-                .position(|p| p.name == target)
-                .or_else(|| (!target.starts_with('$')).then_some(0))
-            else {
-                return undecided_answer();
-            };
-            let is_variadic = params
-                .get(param_idx)
-                .map(|p| p.is_variadic)
-                .unwrap_or(false);
-
-            // Split the textual arguments by comma (at depth 0), then bind
-            // them to parameters by PHP's rules so a named argument resolves
-            // to the parameter it targets rather than its ordinal slot.
-            let args = split_top_level_commas(text_args);
-            let bound_text = crate::call_args::bind_text_args_to_params(params, &args);
-            let arg_text_owned = bound_text.get(param_idx).cloned().flatten();
-            // An omitted argument takes the parameter's declared default at
-            // runtime, so the condition is decided against that default
-            // rather than being left undecidable. The default's own
-            // `self`/`static`/`parent` (e.g. `= self::SOME_CONST`) is
-            // written in the method's declaring class, not the call site,
-            // so it is resolved against `class_ctx.declaring` here, before
-            // the text reaches any of the branches below.
-            let default_text_resolved: Option<Cow<'_, str>> = arg_text_owned
-                .is_none()
-                .then(|| param_default_text(params.get(param_idx)))
-                .flatten()
-                .map(|text| resolve_default_self_keyword(text, class_ctx.declaring));
-            let arg_text = arg_text_owned
-                .as_deref()
-                .or(default_text_resolved.as_deref());
-
-            let constant_values = condition_constants_as_values(condition, class_loader, tpl);
-            let condition = constant_values.as_ref().unwrap_or(condition);
-
-            if matches!(condition.kind(), TypeKind::ClassString(_)) {
-                // Extract the bound type from `class-string<Bound>`, if any.
-                // When a bound is present AND resolves to a real class (not
-                // a template parameter like `T`), the conditional checks
-                // whether the argument class is a subtype of the bound
-                // (e.g. `$type is class-string<FormFlowTypeInterface>`).
-                //
-                // When the bound is a template parameter (e.g. `T` from
-                // `@template T of object`), any `::class` literal satisfies
-                // the condition and the template param is substituted with
-                // the concrete class name — this is the existing behavior.
-                //
-                // We distinguish the two by checking whether the bound name
-                // is one of the method/function's own `@template` parameter
-                // names (`tpl.params`), not by resolving it as a class:
-                // `class_loader` resolution below determines whether a
-                // *concrete* bound exists in the project, but a bare
-                // template name like `T` would never appear there anyway,
-                // so membership in `tpl.params` is the only reliable signal
-                // for which case we're in.
-                let class_string_bound_name: Option<&str> = match condition.kind() {
-                    TypeKind::ClassString(Some(inner)) => match inner.kind() {
-                        TypeKind::Named(name) => Some(name.as_str()),
-                        _ => None,
-                    },
-                    _ => None,
-                };
-
-                let bound_is_template = class_string_bound_name
-                    .is_some_and(|name| tpl.params.iter().any(|tp| tp.as_str() == name));
-
-                // For concrete bounds, try to resolve the bound class.
-                // `None` = no bound or template param (permissive)
-                // `Some(resolved)` = concrete class (strict subtype check)
-                // `Some(sentinel)` = unresolvable concrete name (always
-                //   fails the subtype check, forcing the else branch)
-                let concrete_class_string_bound: Option<String> = if bound_is_template {
-                    None
-                } else {
-                    class_string_bound_name.map(|name| {
-                        if let Some(cls) =
-                            crate::class_lookup::load_resolved_name(name, class_loader)
-                        {
-                            cls.fqn().to_string()
-                        } else {
-                            // Concrete class that can't be resolved
-                            // (cross-file name resolution failure).
-                            // Use a sentinel that will never match,
-                            // forcing the else branch.  This is the
-                            // safe default: we can't verify the
-                            // subtype relationship, so we fall back
-                            // to the broader return type.
-                            "!!unresolvable_bound!!".to_string()
-                        }
-                    })
-                };
-
-                // Helper: check whether a resolved class name satisfies the
-                // concrete class-string bound.  Returns `true` when there is
-                // no concrete bound (bare `class-string` or template param
-                // bound — any class satisfies it) or the class is a subtype
-                // of the bound.
-                let satisfies_bound = |resolved_name: &str| -> bool {
-                    match concrete_class_string_bound {
-                        None => true,
-                        Some(ref bound) => crate::class_lookup::is_subtype_of_names(
-                            resolved_name,
-                            bound,
-                            class_loader,
-                        ),
-                    }
-                };
-
-                // Helper: choose the correct branch based on whether the
-                // bound is satisfied and the `negated` flag.
-                let choose_branch = |bound_satisfied: bool| -> Option<PhpType> {
-                    let take_then = bound_satisfied ^ *negated;
-                    resolve_conditional_with_text_args_and_defaults(
-                        if take_then { then_type } else { else_type },
-                        params,
-                        text_args,
-                        var_resolver,
-                        class_ctx,
-                        class_loader,
-                        tpl,
-                    )
-                };
-
-                // Helper: when the class-string bound is itself a template
-                // parameter (not a concrete class to subtype-check), the
-                // condition is definitionally satisfied and `then_type`
-                // must have the template substituted with the resolved
-                // class(es) rather than being discarded wholesale — this
-                // preserves surrounding structure like `T&MockInterface`
-                // instead of collapsing it to bare `T`. The substituted
-                // branch can itself be a conditional (`(B is 0|1 ? C :
-                // C|null)`), so it is resolved in turn.
-                let substitute_bound = |resolved_ty: PhpType| -> Option<PhpType> {
-                    match class_string_bound_name {
-                        Some(bound_name) if bound_is_template => {
-                            let subs = std::collections::HashMap::from([(
-                                bound_name.to_string(),
-                                resolved_ty,
-                            )]);
-                            resolve_branch(&then_type.substitute(&subs))
-                        }
-                        _ => Some(resolved_ty),
-                    }
-                };
-
-                // For variadic class-string parameters, collect class
-                // names from ALL arguments at and after param_idx and
-                // form a union type (e.g. `A|B` from `A::class, B::class`).
-                if is_variadic {
-                    let mut class_names: Vec<String> = Vec::new();
-                    for arg in args.iter().skip(param_idx) {
-                        let trimmed = arg.trim();
-                        if let Some(class_name) = extract_class_name_from_text(trimmed) {
-                            let class_name = class_ctx.resolve_written(&class_name, class_loader);
-                            if !class_names.contains(&class_name) {
-                                class_names.push(class_name);
-                            }
-                        } else if trimmed.starts_with('$')
-                            && let Some(resolver) = var_resolver
-                        {
-                            for name in resolver(trimmed) {
-                                let name = resolved_class_fqn(&name, class_loader);
-                                if !class_names.contains(&name) {
-                                    class_names.push(name);
-                                }
-                            }
-                        }
-                    }
-                    if !class_names.is_empty() {
-                        // When a bound exists, check all collected classes.
-                        // If any fails the bound check, fall through to the
-                        // else branch rather than returning a wrong type.
-                        let all_satisfy = class_names.iter().all(|n| satisfies_bound(n));
-                        if !all_satisfy {
-                            return choose_branch(false);
-                        }
-
-                        return substitute_bound(named_or_union(class_names));
-                    }
-                    return resolve_conditional_with_text_args_and_defaults(
-                        else_type,
-                        params,
-                        text_args,
-                        var_resolver,
-                        class_ctx,
-                        class_loader,
-                        tpl,
-                    );
-                }
-
-                // Check if the argument text matches `X::class`.  An omitted
-                // argument already reads back as its `Foo::class` default, so
-                // `app()` resolves the same as `app(Foo::class)`.
-                let resolved = arg_text
-                    .and_then(extract_class_name_from_text)
-                    .map(|class_name| class_ctx.resolve_written(&class_name, class_loader))
-                    .or_else(|| {
-                        arg_text.and_then(|text| class_named_by_quoted_string(text, class_loader))
-                    });
-                if let Some(resolved) = resolved {
-                    // When a bound exists, verify the class is a subtype
-                    // before taking the then-branch.  E.g. for
-                    // `($type is class-string<FormFlowTypeInterface> ? FormFlowInterface : FormInterface)`
-                    // with `ImageUploadFormType::class`: if `ImageUploadFormType`
-                    // does NOT implement `FormFlowTypeInterface`, return
-                    // `FormInterface` (else branch), not the class name.
-                    if concrete_class_string_bound.is_some() {
-                        return choose_branch(satisfies_bound(&resolved));
-                    }
-
-                    return substitute_bound(PhpType::named(atom(&resolved)));
-                }
-                // Check if the argument is a variable holding class-string
-                // value(s) (e.g. from a match expression).
-                if let Some(arg) = arg_text
-                    && let trimmed = arg.trim()
-                    && trimmed.starts_with('$')
-                    && let Some(resolver) = var_resolver
-                {
-                    let names = resolver(trimmed);
-                    if !names.is_empty() {
-                        let names: Vec<String> = names
-                            .into_iter()
-                            .map(|n| resolved_class_fqn(&n, class_loader))
-                            .collect();
-
-                        // When a bound exists, check all resolved names.
-                        if concrete_class_string_bound.is_some() {
-                            let all_satisfy = names.iter().all(|n| satisfies_bound(n));
-                            return choose_branch(all_satisfy);
-                        }
-
-                        return substitute_bound(named_or_union(names));
-                    }
-                }
-                // Any other argument (a property, a method's return, a class
-                // constant) is judged by its resolved type: a
-                // `class-string<Foo>` names `Foo` just as `Foo::class` does.
-                if let Some(arg) = arg_text
-                    && let Some(resolve) = tpl.arg_type_resolver
-                    && let Some(arg_ty) = resolve(arg)
-                    && let Some(inner) = class_string_inner_classes(&arg_ty)
-                {
-                    if concrete_class_string_bound.is_some() {
-                        let all_satisfy = inner.iter().all(|ty| match ty.kind() {
-                            TypeKind::Named(name) => satisfies_bound(name.as_str()),
-                            _ => false,
-                        });
-                        return choose_branch(all_satisfy);
-                    }
-                    let bound = if inner.len() == 1 {
-                        inner.into_iter().next().unwrap()
-                    } else {
-                        PhpType::union(inner)
-                    };
-                    return substitute_bound(bound);
-                }
-                // Argument isn't a ::class literal or resolvable variable → try else branch
-                resolve_conditional_with_text_args_and_defaults(
-                    else_type,
-                    params,
-                    text_args,
-                    var_resolver,
-                    class_ctx,
-                    class_loader,
-                    tpl,
-                )
-            } else if condition.is_null() {
-                // The null (`then`) branch is taken when the parameter really
-                // holds null: no argument at all (so it falls back to a null
-                // default), an explicit `null`, or an argument whose resolved
-                // type is null. Any other type takes the else branch, and a
-                // type that may or may not be null (`?string`) leaves both
-                // branches open rather than committing to one the call may
-                // not take.
-                let decided = match arg_text {
-                    // A variadic parameter has no single value to judge: it
-                    // holds every trailing argument, so the only question the
-                    // condition can be asking is whether any were passed. Its
-                    // first argument's own type says nothing about that, and
-                    // for the by-reference out-parameters this shape is used
-                    // for (`sscanf($s, $fmt, $a, $b)`) that type is usually
-                    // unresolvable anyway.
-                    _ if is_variadic => Some(arg_text_owned.is_none()),
-                    None => Some(true),
-                    Some(text) if text.trim().is_empty() => Some(true),
-                    Some(text) => condition_result_from_text(condition, text).or_else(|| {
-                        tpl.arg_type_resolver
-                            .and_then(|resolve| resolve(text))
-                            .and_then(|arg_ty| {
-                                type_condition_result(&arg_ty, condition, class_loader)
-                            })
-                            .or_else(|| {
-                                // With no resolver to consult, an argument that
-                                // is not the literal `null` reads as non-null,
-                                // which is what it usually is.
-                                tpl.arg_type_resolver.is_none().then_some(false)
-                            })
-                    }),
-                };
-                let branch = match decided {
-                    Some(is_null) => {
-                        if is_null ^ *negated {
-                            then_type
-                        } else {
-                            else_type
-                        }
-                    }
-                    None => return undecided_answer(),
-                };
-                resolve_branch(branch)
-            } else if matches!(condition.kind(), TypeKind::Literal(_)) {
-                // Value condition (`$format is 0`, `$flags is 15`). A literal
-                // argument settles it outright; anything else is settled by
-                // the argument's resolved type when that turns out to be a
-                // literal of its own, which is how a named constant
-                // (`pathinfo($p, PATHINFO_FILENAME)`) or a local holding one
-                // decides the branch it really takes.
-                let decided = arg_text.and_then(|arg| {
-                    condition_result_from_text(condition, arg).or_else(|| {
-                        tpl.arg_type_resolver
-                            .and_then(|resolve| resolve(arg))
-                            .and_then(|arg_ty| literal_condition_result(condition, &arg_ty))
-                    })
-                });
-                let branch = match decided {
-                    Some(matched) => {
-                        if matched ^ *negated {
-                            then_type
-                        } else {
-                            else_type
-                        }
-                    }
-                    // Neither the text nor the resolved type pins the value
-                    // down, so the call really may take either branch. Union
-                    // them rather than committing to the else, which would
-                    // report a type the call can't promise.
-                    None if arg_text.is_some() && tpl.arg_type_resolver.is_some() => {
-                        return undecided_answer();
-                    }
-                    None => else_type,
-                };
-                resolve_branch(branch)
-            } else if let Some((cond_class, cond_const)) = class_const_condition_parts(condition) {
-                // Class-constant condition (e.g. `$mode is PDO::FETCH_ASSOC`).
-                // Take the then-branch when the bound argument is the same
-                // class constant.
-                let matched = arg_text
-                    .and_then(|arg| arg.trim().rsplit_once("::"))
-                    .is_some_and(|(arg_class, arg_const)| {
-                        class_const_matches(
-                            cond_class,
-                            cond_const,
-                            arg_class.trim(),
-                            arg_const.trim(),
-                            class_ctx.calling,
-                        )
-                    });
-                let take_then = matched ^ *negated;
-                resolve_conditional_with_text_args_and_defaults(
-                    if take_then { then_type } else { else_type },
-                    params,
-                    text_args,
-                    var_resolver,
-                    class_ctx,
-                    class_loader,
-                    tpl,
-                )
-            } else {
-                // IsType equivalent (`$x is string`, `$x is array|string`,
-                // …). Decide the branch in three ways, in order of
-                // confidence: (1) from the argument's syntactic form (a
-                // literal), (2) from the argument's resolved type when a
-                // resolver is available (e.g. a method-call chain that
-                // returns `string`). When neither is conclusive, fall
-                // through to the else branch as before.
-                let decided = arg_text.and_then(|arg| {
-                    condition_result_from_text(condition, arg).or_else(|| {
-                        tpl.arg_type_resolver
-                            .and_then(|resolve| resolve(arg))
-                            .and_then(|arg_ty| {
-                                type_condition_result(&arg_ty, condition, class_loader)
-                            })
-                    })
-                });
-                let branch = match decided {
-                    Some(satisfied) => {
-                        if satisfied ^ *negated {
-                            then_type
-                        } else {
-                            else_type
-                        }
-                    }
-                    None => {
-                        // The condition is genuinely undecidable: the argument
-                        // is an expression whose type we could not pin down.
-                        // When a resolver was available (i.e. a real
-                        // resolution context, not a bare completion lookup),
-                        // the true result is one of the two branches, so
-                        // return their union rather than committing to the
-                        // else branch — otherwise `Str::replace(…, $x->y())`
-                        // would resolve to `string[]` and falsely flag a
-                        // `string` argument.
-                        if arg_text.is_some() && tpl.arg_type_resolver.is_some() {
-                            return undecided_answer();
-                        }
-                        else_type
-                    }
-                };
-                resolve_branch(branch)
-            }
-        }
-        _ => {
+impl TextArgs<'_> {
+    /// Resolve `conditional` against this call.
+    fn resolve(&self, conditional: &PhpType) -> Option<PhpType> {
+        let Self {
+            params,
+            text_args,
+            class_ctx,
+            class_loader,
+            tpl,
+            ..
+        } = *self;
+        let TypeKind::Conditional(cond) = conditional.kind() else {
             // `void` carries no information beyond the method's declared
             // return type, so the caller falls back to that. `never` is
             // different: it means the call provably does not return, which
@@ -710,9 +234,507 @@ pub fn resolve_conditional_with_text_args_and_defaults(
             if conditional.is_void() {
                 return None;
             }
-            Some(conditional.clone())
+            return Some(conditional.clone());
+        };
+        let (param, negated, condition, then_type, else_type) = (
+            &cond.param,
+            &cond.negated,
+            &cond.condition,
+            &cond.then_type,
+            &cond.else_type,
+        );
+        // A conditional that asks for proof answers an undecided
+        // condition with its else branch instead of the union of
+        // both — see [`ConditionalType::else_when_undecided`].
+        let undecided: Option<&PhpType> = cond.else_when_undecided.then_some(else_type);
+        let resolve_branch = |branch: &PhpType| self.resolve(branch);
+        // What the conditional answers when a resolver was consulted
+        // and could not pin the argument down: the call really may take
+        // either branch, so the answer is their union unless the
+        // conditional asked for proof and named its else branch as the
+        // undecided reading.
+        let undecided_answer = || match undecided {
+            Some(branch) => resolve_branch(branch),
+            None => union_branch_types(resolve_branch(then_type), resolve_branch(else_type)),
+        };
+        let target = param.as_str();
+
+        // `$this` names the receiver, not a parameter: decide the
+        // condition against the resolved receiver type the caller
+        // supplied (its class-level `@template` values already
+        // substituted, e.g. by a preceding `@phpstan-self-out`) rather
+        // than looking it up among `params`/`text_args`.
+        if target.eq_ignore_ascii_case("$this") {
+            let Some(this_ty) = tpl.this_type else {
+                return undecided_answer();
+            };
+            return match this_condition_holds(
+                this_ty,
+                condition,
+                *negated,
+                class_ctx.declaring,
+                class_loader,
+            ) {
+                Some(true) => resolve_branch(then_type),
+                Some(false) => resolve_branch(else_type),
+                None => undecided_answer(),
+            };
+        }
+
+        // Check if the conditional subject is a template parameter
+        // with a default value (not a method $parameter).
+        if !target.starts_with('$')
+            && let Some(resolved) = try_resolve_with_template_default(
+                target,
+                *negated,
+                condition,
+                then_type,
+                else_type,
+                tpl.defaults,
+            )
+        {
+            return Some(resolved);
+        }
+
+        // `T[0] is string` asks about an offset of what the argument
+        // binding `T` holds, which is read off that argument's type.
+        if !target.starts_with('$')
+            && target.contains('[')
+            && let Some(decided) = decide_template_offset_condition(
+                target,
+                condition,
+                params,
+                text_args,
+                tpl,
+                class_loader,
+            )
+        {
+            return if decided ^ *negated {
+                resolve_branch(then_type)
+            } else {
+                resolve_branch(else_type)
+            };
+        }
+
+        // A condition keyed on a `@template` parameter (`B is 0|1`) is
+        // decided by the argument that binds it (`@param B $behavior`).
+        let target = if target.starts_with('$') {
+            target
+        } else {
+            tpl.bindings
+                .iter()
+                .find(|(template, _)| template.as_str() == target)
+                .map_or(target, |(_, param)| param.as_str())
+        };
+
+        // A `$name` the signature does not declare has no argument to
+        // decide it, so nothing is known and both branches remain.
+        let Some(param_idx) = params
+            .iter()
+            .position(|p| p.name == target)
+            .or_else(|| (!target.starts_with('$')).then_some(0))
+        else {
+            return undecided_answer();
+        };
+        let is_variadic = params
+            .get(param_idx)
+            .map(|p| p.is_variadic)
+            .unwrap_or(false);
+
+        // Split the textual arguments by comma (at depth 0), then bind
+        // them to parameters by PHP's rules so a named argument resolves
+        // to the parameter it targets rather than its ordinal slot.
+        let args = split_top_level_commas(text_args);
+        let bound_text = crate::call_args::bind_text_args_to_params(params, &args);
+        let arg_text_owned = bound_text.get(param_idx).cloned().flatten();
+        // An omitted argument takes the parameter's declared default at
+        // runtime, so the condition is decided against that default
+        // rather than being left undecidable. The default's own
+        // `self`/`static`/`parent` (e.g. `= self::SOME_CONST`) is
+        // written in the method's declaring class, not the call site,
+        // so it is resolved against `class_ctx.declaring` here, before
+        // the text reaches any of the branches below.
+        let default_text_resolved: Option<Cow<'_, str>> = arg_text_owned
+            .is_none()
+            .then(|| param_default_text(params.get(param_idx)))
+            .flatten()
+            .map(|text| resolve_default_self_keyword(text, class_ctx.declaring));
+        let arg_text = arg_text_owned
+            .as_deref()
+            .or(default_text_resolved.as_deref());
+
+        let constant_values = condition_constants_as_values(condition, class_loader, tpl);
+        let condition = constant_values.as_ref().unwrap_or(condition);
+
+        if matches!(condition.kind(), TypeKind::ClassString(_)) {
+            let variadic_args = is_variadic.then(|| args.get(param_idx..).unwrap_or_default());
+            self.class_string_condition(cond, condition, variadic_args, arg_text)
+        } else if condition.is_null() {
+            // The null (`then`) branch is taken when the parameter really
+            // holds null: no argument at all (so it falls back to a null
+            // default), an explicit `null`, or an argument whose resolved
+            // type is null. Any other type takes the else branch, and a
+            // type that may or may not be null (`?string`) leaves both
+            // branches open rather than committing to one the call may
+            // not take.
+            let decided = match arg_text {
+                // A variadic parameter has no single value to judge: it
+                // holds every trailing argument, so the only question the
+                // condition can be asking is whether any were passed. Its
+                // first argument's own type says nothing about that, and
+                // for the by-reference out-parameters this shape is used
+                // for (`sscanf($s, $fmt, $a, $b)`) that type is usually
+                // unresolvable anyway.
+                _ if is_variadic => Some(arg_text_owned.is_none()),
+                None => Some(true),
+                Some(text) if text.trim().is_empty() => Some(true),
+                Some(text) => condition_result_from_text(condition, text).or_else(|| {
+                    tpl.arg_type_resolver
+                        .and_then(|resolve| resolve(text))
+                        .and_then(|arg_ty| type_condition_result(&arg_ty, condition, class_loader))
+                        .or_else(|| {
+                            // With no resolver to consult, an argument that
+                            // is not the literal `null` reads as non-null,
+                            // which is what it usually is.
+                            tpl.arg_type_resolver.is_none().then_some(false)
+                        })
+                }),
+            };
+            let branch = match decided {
+                Some(is_null) => {
+                    if is_null ^ *negated {
+                        then_type
+                    } else {
+                        else_type
+                    }
+                }
+                None => return undecided_answer(),
+            };
+            resolve_branch(branch)
+        } else if matches!(condition.kind(), TypeKind::Literal(_)) {
+            // Value condition (`$format is 0`, `$flags is 15`). A literal
+            // argument settles it outright; anything else is settled by
+            // the argument's resolved type when that turns out to be a
+            // literal of its own, which is how a named constant
+            // (`pathinfo($p, PATHINFO_FILENAME)`) or a local holding one
+            // decides the branch it really takes.
+            let decided = arg_text.and_then(|arg| {
+                condition_result_from_text(condition, arg).or_else(|| {
+                    tpl.arg_type_resolver
+                        .and_then(|resolve| resolve(arg))
+                        .and_then(|arg_ty| literal_condition_result(condition, &arg_ty))
+                })
+            });
+            let branch = match decided {
+                Some(matched) => {
+                    if matched ^ *negated {
+                        then_type
+                    } else {
+                        else_type
+                    }
+                }
+                // Neither the text nor the resolved type pins the value
+                // down, so the call really may take either branch. Union
+                // them rather than committing to the else, which would
+                // report a type the call can't promise.
+                None if arg_text.is_some() && tpl.arg_type_resolver.is_some() => {
+                    return undecided_answer();
+                }
+                None => else_type,
+            };
+            resolve_branch(branch)
+        } else if let Some((cond_class, cond_const)) = class_const_condition_parts(condition) {
+            // Class-constant condition (e.g. `$mode is PDO::FETCH_ASSOC`).
+            // Take the then-branch when the bound argument is the same
+            // class constant.
+            let matched = arg_text
+                .and_then(|arg| arg.trim().rsplit_once("::"))
+                .is_some_and(|(arg_class, arg_const)| {
+                    class_const_matches(
+                        cond_class,
+                        cond_const,
+                        arg_class.trim(),
+                        arg_const.trim(),
+                        class_ctx.calling,
+                    )
+                });
+            let take_then = matched ^ *negated;
+            self.resolve(if take_then { then_type } else { else_type })
+        } else {
+            // IsType equivalent (`$x is string`, `$x is array|string`,
+            // …). Decide the branch in three ways, in order of
+            // confidence: (1) from the argument's syntactic form (a
+            // literal), (2) from the argument's resolved type when a
+            // resolver is available (e.g. a method-call chain that
+            // returns `string`). When neither is conclusive, fall
+            // through to the else branch as before.
+            let decided = arg_text.and_then(|arg| {
+                condition_result_from_text(condition, arg).or_else(|| {
+                    tpl.arg_type_resolver
+                        .and_then(|resolve| resolve(arg))
+                        .and_then(|arg_ty| type_condition_result(&arg_ty, condition, class_loader))
+                })
+            });
+            let branch = match decided {
+                Some(satisfied) => {
+                    if satisfied ^ *negated {
+                        then_type
+                    } else {
+                        else_type
+                    }
+                }
+                None => {
+                    // The condition is genuinely undecidable: the argument
+                    // is an expression whose type we could not pin down.
+                    // When a resolver was available (i.e. a real
+                    // resolution context, not a bare completion lookup),
+                    // the true result is one of the two branches, so
+                    // return their union rather than committing to the
+                    // else branch — otherwise `Str::replace(…, $x->y())`
+                    // would resolve to `string[]` and falsely flag a
+                    // `string` argument.
+                    if arg_text.is_some() && tpl.arg_type_resolver.is_some() {
+                        return undecided_answer();
+                    }
+                    else_type
+                }
+            };
+            resolve_branch(branch)
         }
     }
+
+    /// Decide a `class-string` condition (`$type is class-string<Bound>`)
+    /// against the class or classes the argument names.
+    ///
+    /// `variadic_args` holds every argument a variadic parameter collects,
+    /// and is `None` for any other parameter, which `arg_text` describes.
+    fn class_string_condition(
+        &self,
+        cond: &ConditionalType,
+        condition: &PhpType,
+        variadic_args: Option<&[&str]>,
+        arg_text: Option<&str>,
+    ) -> Option<PhpType> {
+        let Self {
+            var_resolver,
+            class_ctx,
+            class_loader,
+            tpl,
+            ..
+        } = *self;
+        // Extract the bound type from `class-string<Bound>`, if any.
+        // When a bound is present AND resolves to a real class (not
+        // a template parameter like `T`), the conditional checks
+        // whether the argument class is a subtype of the bound
+        // (e.g. `$type is class-string<FormFlowTypeInterface>`).
+        //
+        // When the bound is a template parameter (e.g. `T` from
+        // `@template T of object`), any `::class` literal satisfies
+        // the condition and the template param is substituted with
+        // the concrete class name — this is the existing behavior.
+        //
+        // We distinguish the two by checking whether the bound name
+        // is one of the method/function's own `@template` parameter
+        // names (`tpl.params`), not by resolving it as a class:
+        // `class_loader` resolution below determines whether a
+        // *concrete* bound exists in the project, but a bare
+        // template name like `T` would never appear there anyway,
+        // so membership in `tpl.params` is the only reliable signal
+        // for which case we're in.
+        let class_string_bound_name: Option<&str> = match condition.kind() {
+            TypeKind::ClassString(Some(inner)) => match inner.kind() {
+                TypeKind::Named(name) => Some(name.as_str()),
+                _ => None,
+            },
+            _ => None,
+        };
+
+        let bound_is_template = class_string_bound_name
+            .is_some_and(|name| tpl.params.iter().any(|tp| tp.as_str() == name));
+
+        // For concrete bounds, try to resolve the bound class.
+        // `None` = no bound or template param (permissive)
+        // `Some(resolved)` = concrete class (strict subtype check)
+        // `Some(sentinel)` = unresolvable concrete name (always
+        //   fails the subtype check, forcing the else branch)
+        let concrete_class_string_bound: Option<String> = if bound_is_template {
+            None
+        } else {
+            class_string_bound_name.map(|name| {
+                if let Some(cls) = crate::class_lookup::load_resolved_name(name, class_loader) {
+                    cls.fqn().to_string()
+                } else {
+                    // Concrete class that can't be resolved
+                    // (cross-file name resolution failure).
+                    // Use a sentinel that will never match,
+                    // forcing the else branch.  This is the
+                    // safe default: we can't verify the
+                    // subtype relationship, so we fall back
+                    // to the broader return type.
+                    "!!unresolvable_bound!!".to_string()
+                }
+            })
+        };
+
+        // Helper: check whether a resolved class name satisfies the
+        // concrete class-string bound.  Returns `true` when there is
+        // no concrete bound (bare `class-string` or template param
+        // bound — any class satisfies it) or the class is a subtype
+        // of the bound.
+        let satisfies_bound = |resolved_name: &str| -> bool {
+            match concrete_class_string_bound {
+                None => true,
+                Some(ref bound) => {
+                    crate::class_lookup::is_subtype_of_names(resolved_name, bound, class_loader)
+                }
+            }
+        };
+
+        // Helper: choose the correct branch based on whether the
+        // bound is satisfied and the `negated` flag.
+        let choose_branch = |bound_satisfied: bool| -> Option<PhpType> {
+            let take_then = bound_satisfied ^ cond.negated;
+            self.resolve(if take_then {
+                &cond.then_type
+            } else {
+                &cond.else_type
+            })
+        };
+
+        // Helper: when the class-string bound is itself a template
+        // parameter (not a concrete class to subtype-check), the
+        // condition is definitionally satisfied and `then_type`
+        // must have the template substituted with the resolved
+        // class(es) rather than being discarded wholesale — this
+        // preserves surrounding structure like `T&MockInterface`
+        // instead of collapsing it to bare `T`. The substituted
+        // branch can itself be a conditional (`(B is 0|1 ? C :
+        // C|null)`), so it is resolved in turn.
+        let substitute_bound = |resolved_ty: PhpType| -> Option<PhpType> {
+            match class_string_bound_name {
+                Some(bound_name) if bound_is_template => {
+                    let subs =
+                        std::collections::HashMap::from([(bound_name.to_string(), resolved_ty)]);
+                    self.resolve(&cond.then_type.substitute(&subs))
+                }
+                _ => Some(resolved_ty),
+            }
+        };
+
+        // For variadic class-string parameters, collect class
+        // names from ALL arguments at and after param_idx and
+        // form a union type (e.g. `A|B` from `A::class, B::class`).
+        if let Some(variadic_args) = variadic_args {
+            let mut class_names: Vec<String> = Vec::new();
+            for arg in variadic_args {
+                let trimmed = arg.trim();
+                if let Some(class_name) = extract_class_name_from_text(trimmed) {
+                    let class_name = class_ctx.resolve_written(&class_name, class_loader);
+                    if !class_names.contains(&class_name) {
+                        class_names.push(class_name);
+                    }
+                } else if trimmed.starts_with('$')
+                    && let Some(resolver) = var_resolver
+                {
+                    for name in resolver(trimmed) {
+                        let name = resolved_class_fqn(&name, class_loader);
+                        if !class_names.contains(&name) {
+                            class_names.push(name);
+                        }
+                    }
+                }
+            }
+            if !class_names.is_empty() {
+                // When a bound exists, check all collected classes.
+                // If any fails the bound check, fall through to the
+                // else branch rather than returning a wrong type.
+                let all_satisfy = class_names.iter().all(|n| satisfies_bound(n));
+                if !all_satisfy {
+                    return choose_branch(false);
+                }
+
+                return substitute_bound(named_or_union(class_names));
+            }
+            return self.resolve(&cond.else_type);
+        }
+
+        // Check if the argument text matches `X::class`.  An omitted
+        // argument already reads back as its `Foo::class` default, so
+        // `app()` resolves the same as `app(Foo::class)`.
+        let resolved = arg_text
+            .and_then(extract_class_name_from_text)
+            .map(|class_name| class_ctx.resolve_written(&class_name, class_loader))
+            .or_else(|| arg_text.and_then(|text| class_named_by_quoted_string(text, class_loader)));
+        if let Some(resolved) = resolved {
+            // When a bound exists, verify the class is a subtype
+            // before taking the then-branch.  E.g. for
+            // `($type is class-string<FormFlowTypeInterface> ? FormFlowInterface : FormInterface)`
+            // with `ImageUploadFormType::class`: if `ImageUploadFormType`
+            // does NOT implement `FormFlowTypeInterface`, return
+            // `FormInterface` (else branch), not the class name.
+            if concrete_class_string_bound.is_some() {
+                return choose_branch(satisfies_bound(&resolved));
+            }
+
+            return substitute_bound(PhpType::named(atom(&resolved)));
+        }
+        // Check if the argument is a variable holding class-string
+        // value(s) (e.g. from a match expression).
+        if let Some(arg) = arg_text
+            && let trimmed = arg.trim()
+            && trimmed.starts_with('$')
+            && let Some(resolver) = var_resolver
+        {
+            let names = resolver(trimmed);
+            if !names.is_empty() {
+                let names: Vec<String> = names
+                    .into_iter()
+                    .map(|n| resolved_class_fqn(&n, class_loader))
+                    .collect();
+
+                // When a bound exists, check all resolved names.
+                if concrete_class_string_bound.is_some() {
+                    let all_satisfy = names.iter().all(|n| satisfies_bound(n));
+                    return choose_branch(all_satisfy);
+                }
+
+                return substitute_bound(named_or_union(names));
+            }
+        }
+        // Any other argument (a property, a method's return, a class
+        // constant) is judged by its resolved type: a
+        // `class-string<Foo>` names `Foo` just as `Foo::class` does.
+        if let Some(arg) = arg_text
+            && let Some(resolve) = tpl.arg_type_resolver
+            && let Some(arg_ty) = resolve(arg)
+            && let Some(inner) = class_string_inner_classes(&arg_ty)
+        {
+            if concrete_class_string_bound.is_some() {
+                let all_satisfy = inner.iter().all(|ty| match ty.kind() {
+                    TypeKind::Named(name) => satisfies_bound(name.as_str()),
+                    _ => false,
+                });
+                return choose_branch(all_satisfy);
+            }
+            let bound = if inner.len() == 1 {
+                inner.into_iter().next().unwrap()
+            } else {
+                PhpType::union(inner)
+            };
+            return substitute_bound(bound);
+        }
+        // Argument isn't a ::class literal or resolvable variable → try else branch
+        self.resolve(&cond.else_type)
+    }
+}
+
+/// The source text of a parameter's declared default value.
+///
+/// An omitted argument takes this value at runtime, so a conditional keyed on
+/// that parameter is decided against the default rather than being treated as
+/// undecidable.
+fn param_default_text(param: Option<&ParameterInfo>) -> Option<&str> {
+    param?.default_value.as_deref()
 }
 
 /// `condition` with each global constant it names (`$flag is
@@ -757,339 +779,6 @@ fn condition_constants_as_values(
     })
 }
 
-/// Checks whether the argument text is a quoted string literal.
-fn arg_is_string_literal(arg: &str) -> bool {
-    let t = arg.trim();
-    (t.starts_with('\'') && t.ends_with('\'')) || (t.starts_with('"') && t.ends_with('"'))
-}
-
-/// Checks whether the argument text is an integer literal, in any of the
-/// notations PHP accepts (`10`, `-10`, `0x0a`, `0b1010`, `012`, `1_0`).
-fn arg_is_int_literal(arg: &str) -> bool {
-    crate::php_type::parse_php_int_literal(arg.trim()).is_some()
-}
-
-/// Checks whether the argument text is a float literal.
-fn arg_is_float_literal(arg: &str) -> bool {
-    let t = arg.trim();
-    let t = t.strip_prefix('-').unwrap_or(t);
-    t.contains('.') && t.chars().all(|c| c.is_ascii_digit() || c == '.')
-}
-
-/// The syntactic form of an argument's source text, as far as it can be
-/// classified without resolving its type. Used to decide `is <Type>`
-/// conditions against literal arguments.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum ArgForm {
-    StringLit,
-    IntLit,
-    FloatLit,
-    /// The two boolean literals are kept apart so a condition naming one of
-    /// them (`$as_number is true`) is decided rather than treated as a plain
-    /// `is bool`.
-    True,
-    False,
-    Null,
-    ArrayLit,
-    /// A closure or arrow function literal, which is always a `Closure`.
-    Closure,
-    /// Any expression whose type cannot be read from its syntax alone
-    /// (variables, property/method chains, function calls, …).
-    Unknown,
-}
-
-/// Classify the syntactic form of an argument's source text.
-fn classify_arg_form(arg: &str) -> ArgForm {
-    let t = arg.trim();
-    if t.is_empty() {
-        return ArgForm::Unknown;
-    }
-    if arg_is_string_literal(t) {
-        return ArgForm::StringLit;
-    }
-    if arg_is_int_literal(t) {
-        return ArgForm::IntLit;
-    }
-    if arg_is_float_literal(t) {
-        return ArgForm::FloatLit;
-    }
-    if t.eq_ignore_ascii_case("true") {
-        return ArgForm::True;
-    }
-    if t.eq_ignore_ascii_case("false") {
-        return ArgForm::False;
-    }
-    if t.eq_ignore_ascii_case("null") {
-        return ArgForm::Null;
-    }
-    if t.starts_with('[') || t.to_ascii_lowercase().starts_with("array(") {
-        return ArgForm::ArrayLit;
-    }
-    if is_closure_literal(t) {
-        return ArgForm::Closure;
-    }
-    ArgForm::Unknown
-}
-
-/// Whether `t` is written as `function (…) …` or `fn (…) => …`, optionally
-/// `static` and by-reference.
-fn is_closure_literal(t: &str) -> bool {
-    let starts_with_keyword = |text: &str, keyword: &str| {
-        text.get(..keyword.len())
-            .is_some_and(|head| head.eq_ignore_ascii_case(keyword))
-            && text[keyword.len()..].trim_start().starts_with(['(', '&'])
-    };
-    let t = match t.get(..6) {
-        Some(head) if head.eq_ignore_ascii_case("static") => t[6..].trim_start(),
-        _ => t,
-    };
-    starts_with_keyword(t, "fn") || starts_with_keyword(t, "function")
-}
-
-/// The literal value an argument's source text denotes, when the text is a
-/// literal at all (`0`, `-1`, `1.5`, `'json'`).
-fn literal_value_from_text(arg_text: &str) -> Option<LiteralValue> {
-    let t = arg_text.trim();
-    match classify_arg_form(t) {
-        ArgForm::StringLit => Some(LiteralValue::string_raw(t)),
-        ArgForm::IntLit => Some(LiteralValue::int(t)),
-        ArgForm::FloatLit => Some(LiteralValue::float(t)),
-        _ => None,
-    }
-}
-
-/// The source text of a parameter's declared default value.
-///
-/// An omitted argument takes this value at runtime, so a conditional keyed on
-/// that parameter is decided against the default rather than being treated as
-/// undecidable.
-fn param_default_text(param: Option<&ParameterInfo>) -> Option<&str> {
-    param?.default_value.as_deref()
-}
-
-/// Decide a conditional's condition against an argument's source text.
-///
-/// A value condition (`$format is 0`) is settled by comparing literal values,
-/// so `0x1` satisfies `is 1` and `"foo"` satisfies `is 'foo'`. A type condition
-/// (`$x is string`, `$x is array|string`) is settled by the argument's
-/// syntactic form. Returns `None` when the text settles neither, which happens
-/// whenever the argument is an expression rather than a literal.
-fn condition_result_from_text(condition: &PhpType, arg_text: &str) -> Option<bool> {
-    match condition.kind() {
-        TypeKind::Union(members) => combine_union_results(
-            members
-                .iter()
-                .map(|member| condition_result_from_text(member, arg_text)),
-        ),
-        TypeKind::Literal(expected) => match literal_value_from_text(arg_text) {
-            Some(actual) => Some(crate::php_type::literals_equal(expected, &actual)),
-            // A value of another kind entirely cannot be the literal, whatever
-            // it holds: `null` is never `'array'`.
-            None => match (literal_category(expected), form_category(arg_text)) {
-                (lit, Some(form)) if lit != form => Some(false),
-                _ => None,
-            },
-        },
-        _ => condition_result_from_form(condition, classify_arg_form(arg_text)),
-    }
-}
-
-/// Decide a value condition (`$flags is 15`) against an argument's *resolved*
-/// type, for the arguments whose source text is not a literal.
-///
-/// A resolved literal settles the comparison both ways: `PATHINFO_FILENAME`
-/// resolves to `8`, which refutes `is 15` as conclusively as the text `8`
-/// would have. Anything broader than a literal (`int`, a union, an unresolved
-/// expression) leaves the condition undecided.
-fn literal_condition_result(condition: &PhpType, arg_ty: &PhpType) -> Option<bool> {
-    match condition.kind() {
-        TypeKind::Union(members) => combine_union_results(
-            members
-                .iter()
-                .map(|member| literal_condition_result(member, arg_ty)),
-        ),
-        TypeKind::Literal(expected) => match arg_ty.as_literal() {
-            Some(actual) => Some(crate::php_type::literals_equal(expected, actual)),
-            // Even without a literal value, a type from another category
-            // cannot hold one: an `int` argument is never `'array'`.
-            None => match type_category(arg_ty) {
-                Some(category) if category != literal_category(expected) => Some(false),
-                _ => None,
-            },
-        },
-        _ => None,
-    }
-}
-
-/// The runtime category a literal value belongs to, in the same vocabulary
-/// [`type_category`] reports.
-fn literal_category(value: &LiteralValue) -> &'static str {
-    match value {
-        LiteralValue::Int(_) => "int",
-        LiteralValue::Float(_) => "float",
-        LiteralValue::String(_) => "string",
-    }
-}
-
-/// The runtime category an argument's source text belongs to, or `None` when
-/// its syntax does not say.
-fn form_category(arg_text: &str) -> Option<&'static str> {
-    match classify_arg_form(arg_text) {
-        ArgForm::StringLit => Some("string"),
-        ArgForm::IntLit => Some("int"),
-        ArgForm::FloatLit => Some("float"),
-        ArgForm::True | ArgForm::False => Some("bool"),
-        ArgForm::Null => Some("null"),
-        ArgForm::ArrayLit => Some("array"),
-        ArgForm::Closure => Some("object"),
-        ArgForm::Unknown => None,
-    }
-}
-
-/// Decide a type condition (`$x is string`, `$x is array|string`) from the
-/// argument's syntactic form.
-///
-/// A literal argument has a fully known type, so the answer is conclusive;
-/// [`ArgForm::Unknown`] yields `None` for the caller to handle. Union
-/// conditions are satisfied when any member is.
-fn condition_result_from_form(condition: &PhpType, form: ArgForm) -> Option<bool> {
-    if form == ArgForm::Unknown {
-        return None;
-    }
-    match condition.kind() {
-        TypeKind::Union(members) => combine_union_results(
-            members
-                .iter()
-                .map(|member| condition_result_from_form(member, form)),
-        ),
-        _ if form == ArgForm::Closure => closure_matches_condition(condition),
-        _ => Some(scalar_condition_matches_form(condition, form)),
-    }
-}
-
-/// Combine the per-member results of a union condition: it is satisfied when
-/// any member is, and refuted only when every member is refuted.
-fn combine_union_results(results: impl Iterator<Item = Option<bool>>) -> Option<bool> {
-    let mut any_true = false;
-    let mut all_false = true;
-    for result in results {
-        match result {
-            Some(true) => {
-                any_true = true;
-                all_false = false;
-            }
-            Some(false) => {}
-            None => all_false = false,
-        }
-    }
-    if any_true {
-        Some(true)
-    } else if all_false {
-        Some(false)
-    } else {
-        None
-    }
-}
-
-/// Whether a single (non-union) type condition is satisfied by a literal
-/// argument form. A literal always has a fully known type, so this is
-/// conclusive (unlike [`ArgForm::Unknown`], which the caller handles).
-fn scalar_condition_matches_form(condition: &PhpType, form: ArgForm) -> bool {
-    match form {
-        ArgForm::StringLit => condition.is_string_type(),
-        ArgForm::IntLit => condition.is_int(),
-        ArgForm::FloatLit => condition.is_float(),
-        // A boolean literal satisfies `is bool` either way, and the matching
-        // half of `is true` / `is false`.
-        ArgForm::True => condition.is_bool() || condition.is_true(),
-        ArgForm::False => condition.is_bool() || condition.is_false(),
-        ArgForm::Null => condition.is_null(),
-        ArgForm::ArrayLit => condition.is_array_like(),
-        ArgForm::Closure | ArgForm::Unknown => false,
-    }
-}
-
-/// Whether a closure literal satisfies a single (non-union) type condition.
-///
-/// A class condition other than `Closure` itself stays undecided, and so
-/// does a callable signature, which the literal's own signature would have
-/// to be checked against.
-fn closure_matches_condition(condition: &PhpType) -> Option<bool> {
-    if condition.is_mixed()
-        || condition.is_object()
-        || (condition.is_callable() && !matches!(condition.kind(), TypeKind::Callable(_)))
-    {
-        Some(true)
-    } else if condition.is_true() || condition.is_false() || condition_category(condition).is_some()
-    {
-        Some(false)
-    } else {
-        None
-    }
-}
-
-/// The broad runtime category a resolved type belongs to, used to decide
-/// mutually-exclusive `is <scalar>` conditions. Returns `None` when the type
-/// cannot be placed in a single category (so the condition stays undecided).
-fn type_category(t: &PhpType) -> Option<&'static str> {
-    if t.is_string_subtype() {
-        Some("string")
-    } else if t.is_int_subtype() {
-        Some("int")
-    } else if t.is_float_subtype() {
-        Some("float")
-    } else if t.is_bool() || t.is_true() || t.is_false() {
-        // `true` and `false` are boolean values, not class names — without
-        // this they fall through to the class-instance case below.
-        Some("bool")
-    } else if t.is_null() {
-        Some("null")
-    } else if t.is_array_like() {
-        Some("array")
-    } else if matches!(t.kind(), TypeKind::Callable(_)) || t.base_name().is_some() {
-        // A closure/callable or any class instance — not a scalar or array.
-        Some("object")
-    } else {
-        None
-    }
-}
-
-/// The category named by a (non-union) `is <Type>` condition, or `None` when
-/// the condition is not a plain scalar/array type we can categorise.
-fn condition_category(condition: &PhpType) -> Option<&'static str> {
-    if condition.is_string_type() {
-        Some("string")
-    } else if condition.is_int() {
-        Some("int")
-    } else if condition.is_float() {
-        Some("float")
-    } else if condition.is_bool() {
-        Some("bool")
-    } else if condition.is_null() {
-        Some("null")
-    } else if condition.is_array_like() {
-        Some("array")
-    } else if condition.is_object() {
-        // The one category [`type_category`] reports that has no keyword of
-        // its own below: `is object` asks the same question it answers for
-        // every class instance, so a scalar argument refutes it outright
-        // rather than being handed to the class-hierarchy check, where the
-        // bare keyword resolves to no class at all and settles nothing.
-        Some("object")
-    } else {
-        None
-    }
-}
-
-/// Decide whether an argument of resolved type `arg_ty` satisfies a type
-/// `condition`.
-///
-/// Returns `Some(true)` when the resolved type clearly satisfies the
-/// condition, `Some(false)` when it clearly cannot (a mutually-exclusive
-/// category, e.g. a `Closure` argument against `array|string`), and `None`
-/// when it cannot be proven either way (`mixed`, an unresolved type, or a
-/// mixed union). The caller uses `None` to fall back to a union of both
-/// branches rather than committing to the wrong one.
 /// Whether a value of `arg_ty` satisfies `condition`, for callers outside
 /// this module that need to walk a conditional's branches themselves.
 pub(in crate::type_engine) fn condition_holds_for_type(
@@ -1149,6 +838,15 @@ fn decide_template_offset_condition(
     type_condition_result(&subject_ty, condition, class_loader)
 }
 
+/// Decide whether an argument of resolved type `arg_ty` satisfies a type
+/// `condition`.
+///
+/// Returns `Some(true)` when the resolved type clearly satisfies the
+/// condition, `Some(false)` when it clearly cannot (a mutually-exclusive
+/// category, e.g. a `Closure` argument against `array|string`), and `None`
+/// when it cannot be proven either way (`mixed`, an unresolved type, or a
+/// mixed union). The caller uses `None` to fall back to a union of both
+/// branches rather than committing to the wrong one.
 fn type_condition_result(
     arg_ty: &PhpType,
     condition: &PhpType,
@@ -1689,9 +1387,8 @@ pub fn resolve_conditional_without_args_and_defaults(
             );
             let target = param.as_str();
 
-            // `$this` names the receiver, not a parameter — see the
-            // matching branch in
-            // [`resolve_conditional_with_text_args_and_defaults`].
+            // `$this` names the receiver, not a parameter; see the matching
+            // branch in [`TextArgs::resolve`].
             if target.eq_ignore_ascii_case("$this") {
                 let decided = this_ctx.and_then(|this_ctx| {
                     this_condition_holds(
@@ -1758,8 +1455,7 @@ pub fn resolve_conditional_without_args_and_defaults(
             }
         }
         _ => {
-            // See the matching arm in
-            // `resolve_conditional_with_text_args_and_defaults`: `never`
+            // See the matching early return in `TextArgs::resolve`: `never`
             // must propagate as informative, only `void` falls back.
             if conditional.is_void() {
                 return None;

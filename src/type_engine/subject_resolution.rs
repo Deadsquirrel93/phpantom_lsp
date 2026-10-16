@@ -1,12 +1,13 @@
-/// Shared subject type resolution utility.
-///
-/// Resolves a subject string (`$this`, `self`, `static`, `parent`,
-/// bare class names, or `$variable`) to a [`PhpType`].  This is the
-/// single point of truth for all features that need to answer "what
-/// type does this subject refer to?" without the full completion
-/// resolver pipeline.
-///
-/// Consumers: deprecated diagnostics, find-references, code actions.
+//! Shared subject type resolution utility.
+//!
+//! Resolves a subject string (`$this`, `self`, `static`, `parent`,
+//! bare class names, or `$variable`) to a [`PhpType`].  This is the
+//! single point of truth for all features that need to answer "what
+//! type does this subject refer to?" without the full completion
+//! resolver pipeline.
+//!
+//! Consumers: deprecated diagnostics, find-references, code actions.
+
 use crate::atom::atom;
 use std::collections::HashMap;
 use std::sync::Arc;

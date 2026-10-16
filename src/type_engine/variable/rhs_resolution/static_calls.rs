@@ -90,13 +90,9 @@ pub(super) fn resolve_rhs_static_call(
     let Some(cls_name) = class_name else {
         return vec![];
     };
-    let Some(owner) = (ctx.class_loader)(&cls_name)
-        .map(Arc::unwrap_or_clone)
-        .or_else(|| {
-            crate::class_lookup::find_class_by_fqn(ctx.all_classes, &cls_name)
-                .map(|c| ClassInfo::clone(c))
-        })
-    else {
+    let Some(owner) = (ctx.class_loader)(&cls_name).or_else(|| {
+        crate::class_lookup::find_class_by_fqn(ctx.all_classes, &cls_name).map(Arc::clone)
+    }) else {
         return vec![];
     };
     static_call_on_class(&owner, method_name, static_call, ctx)

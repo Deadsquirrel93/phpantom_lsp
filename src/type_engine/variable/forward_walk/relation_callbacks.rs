@@ -257,7 +257,7 @@ pub(crate) fn eager_callback_arguments<'a>(
             ctx.all_classes,
             ctx.class_loader,
         )?;
-        vec![ResolvedType::from_class(owner)]
+        vec![ResolvedType::from_arc(owner)]
     } else {
         let span = receiver.span();
         super::super::closure_resolution::resolve_receiver_types(

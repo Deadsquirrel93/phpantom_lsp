@@ -1,9 +1,10 @@
-/// Variable name completion.
-///
-/// This module handles building completion items for variable names (`$`
-/// prefix) by collecting variable definitions from the precomputed
-/// [`SymbolMap`] visible at the cursor position, respecting PHP scoping
-/// rules (function, method, closure, and top-level scope).
+//! Variable name completion.
+//!
+//! This module handles building completion items for variable names (`$`
+//! prefix) by collecting variable definitions from the precomputed
+//! [`SymbolMap`] visible at the cursor position, respecting PHP scoping
+//! rules (function, method, closure, and top-level scope).
+
 use std::collections::HashSet;
 
 use tower_lsp::lsp_types::*;

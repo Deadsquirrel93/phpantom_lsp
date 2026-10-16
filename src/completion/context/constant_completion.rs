@@ -1,7 +1,8 @@
-/// Global constant name completions.
-///
-/// This module builds completion items for standalone constants
-/// (`define()` constants and built-in PHP constants from stubs).
+//! Global constant name completions.
+//!
+//! This module builds completion items for standalone constants
+//! (`define()` constants and built-in PHP constants from stubs).
+
 use std::collections::HashSet;
 
 use tower_lsp::lsp_types::*;

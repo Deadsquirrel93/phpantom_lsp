@@ -245,6 +245,7 @@ mod blade_imbalance;
 mod blade_sections;
 mod blade_signature;
 pub(crate) mod class_case_mismatch;
+mod class_init_facts;
 pub(crate) mod class_name_mismatch;
 mod collect;
 pub(crate) mod cross_file;

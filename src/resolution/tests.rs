@@ -148,8 +148,8 @@ fn method_lookup_ignores_case() {
 /// (the vendor / stub / re-open-after-close path) must evict index
 /// entries for classes the file no longer defines.  Previously this
 /// path only inserted new FQNs, so a renamed or deleted class kept
-/// ghost entries in the FQN indexes, the GTI reverse-inheritance edges
-/// (find_implementors / type hierarchy), and the method store.
+/// ghost entries in the FQN indexes and the GTI reverse-inheritance edges
+/// (find_implementors / type hierarchy).
 #[test]
 fn versioned_reparse_evicts_removed_classes() {
     let backend = Backend::new_test();
@@ -189,14 +189,6 @@ fn versioned_reparse_evicts_removed_classes() {
             .any(|kids| kids.iter().any(|k| k == "Lib\\Child")),
         "some parent should list Child as an implementor after first parse"
     );
-    assert!(
-        backend
-            .symbols
-            .method_store
-            .read()
-            .contains_key(&("Lib\\Child".to_string(), "ghost".to_string())),
-        "Child::ghost should be in the method store after first parse"
-    );
 
     // Re-parse the same URI with Child (and its method) removed.
     backend.parse_and_cache_content("<?php namespace Lib; class Base {}", uri);
@@ -227,14 +219,6 @@ fn versioned_reparse_evicts_removed_classes() {
             .values()
             .any(|kids| kids.iter().any(|k| k == "Lib\\Child")),
         "no parent should still list the removed Child as an implementor"
-    );
-    assert!(
-        !backend
-            .symbols
-            .method_store
-            .read()
-            .contains_key(&("Lib\\Child".to_string(), "ghost".to_string())),
-        "Child::ghost must be evicted from the method store on re-parse"
     );
 
     // Base, which the file still defines, must survive the re-parse.
@@ -374,21 +358,5 @@ fn lazy_parse_promotes_the_runner_up_when_the_winner_drops_the_name() {
             .get("Vendor\\Variant")
             .is_some_and(|cls| cls.methods.iter().any(|m| m.name == "bare")),
         "the promoted declaration's members must be the ones indexed"
-    );
-    assert!(
-        backend
-            .symbols
-            .method_store
-            .read()
-            .contains_key(&("Vendor\\Variant".to_string(), "bare".to_string())),
-        "the method store must follow the promoted declaration"
-    );
-    assert!(
-        !backend
-            .symbols
-            .method_store
-            .read()
-            .contains_key(&("Vendor\\Variant".to_string(), "rich".to_string())),
-        "the withdrawn declaration's members must be gone"
     );
 }

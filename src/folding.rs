@@ -1,9 +1,10 @@
-/// Folding range handler for `textDocument/foldingRange`.
-///
-/// Parses the PHP source, walks the AST to collect foldable regions
-/// (class bodies, function/method bodies, closures, arrays, control-flow
-/// blocks, argument/parameter lists), and scans trivia for doc-block and
-/// consecutive single-line comment ranges.
+//! Folding range handler for `textDocument/foldingRange`.
+//!
+//! Parses the PHP source, walks the AST to collect foldable regions
+//! (class bodies, function/method bodies, closures, arrays, control-flow
+//! blocks, argument/parameter lists), and scans trivia for doc-block and
+//! consecutive single-line comment ranges.
+
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
 use tower_lsp::lsp_types::{FoldingRange, FoldingRangeKind};

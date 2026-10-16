@@ -75,21 +75,6 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B624. The `new static` quick fixes can edit the wrong class
-
-**Impact: Low · Complexity: Medium**
-
-`find_class_keyword_before` (`src/code_actions/phpstan/new_static.rs`)
-finds the enclosing class by taking the last whitespace-delimited `class`
-word before the diagnostic line, rejecting only `::class` and `new class`.
-The word "class" in a comment or string inside the method (`// the class
-is final`) is taken as the declaration, and a `new static` inside a trait
-reaches back to an earlier class in the same file. The `final`, tag and
-docblock edits then land on that line. Locate the class through the
-parsed file instead (its start offset, `is_final`/`is_abstract` and
-constructor are all on `ClassInfo`); refactor.md item 14 covers the
-rewrite.
-
 ### B616. PHPStan quick fixes write `\n` line endings into `\r\n` files
 
 **Impact: Low · Complexity: Low**

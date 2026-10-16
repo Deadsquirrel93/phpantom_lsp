@@ -1,11 +1,12 @@
-/// Iterable element/key type extraction from a class's generic
-/// annotations (`@extends Collection<int, User>`,
-/// `@implements IteratorAggregate<int, User>`), plus
-/// [`resolve_expression_type`], a thin wrapper over the unified RHS
-/// pipeline.
-///
-/// Consumed by the forward walker's foreach/destructuring handling,
-/// array-access resolution, and raw type inference.
+//! Iterable element/key type extraction from a class's generic
+//! annotations (`@extends Collection<int, User>`,
+//! `@implements IteratorAggregate<int, User>`), plus
+//! [`resolve_expression_type`], a thin wrapper over the unified RHS
+//! pipeline.
+//!
+//! Consumed by the forward walker's foreach/destructuring handling,
+//! array-access resolution, and raw type inference.
+
 use std::collections::HashMap;
 use std::sync::Arc;
 

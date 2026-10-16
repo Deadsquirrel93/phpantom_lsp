@@ -1,6 +1,7 @@
-/// Instantiation (`new ClassName(…)`) resolution: the instantiated
-/// class, constructor template-binding classification, and generic
-/// substitution map construction for class-level `@template` parameters.
+//! Instantiation (`new ClassName(…)`) resolution: the instantiated
+//! class, constructor template-binding classification, and generic
+//! substitution map construction for class-level `@template` parameters.
+
 use std::collections::HashMap;
 use std::sync::Arc;
 

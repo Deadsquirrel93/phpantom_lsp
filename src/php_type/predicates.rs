@@ -202,7 +202,7 @@ impl PhpType {
     /// has read yet — the docblock parser cannot tell the two apart. Callers
     /// that *can* read constants use this to learn which names a type needs
     /// resolved before they bind them (see
-    /// `type_engine::call_resolution::constant_operand_shape`).
+    /// `type_engine::call_resolution::constant_operands`).
     ///
     /// Names are appended in traversal order, without deduplication; a class
     /// constant arrives in its written `Foo::BAR` spelling.

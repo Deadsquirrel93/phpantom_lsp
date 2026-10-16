@@ -462,7 +462,6 @@ pub(super) fn resolve_owner_method_call(
     {
         return vec![resolved_type_with_lookup(
             inferred,
-            current_class_name,
             ctx.all_classes,
             ctx.class_loader,
         )];
@@ -490,7 +489,6 @@ pub(super) fn resolve_owner_method_call(
         let parsed_effective = expanded.unwrap_or(hint);
         return vec![resolved_type_with_lookup(
             parsed_effective,
-            current_class_name,
             ctx.all_classes,
             ctx.class_loader,
         )];

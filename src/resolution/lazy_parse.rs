@@ -302,11 +302,11 @@ impl Backend {
         // set (still available in uri_classes_index before the overwrite
         // below) so stale entries for renamed or removed classes can be
         // evicted.  Mirrors `update_ast_inner`, which computes `old_fqns`
-        // and evicts fqn_class_index, fqn_uri_index, gti_index, and
-        // method_store.  Without this, a class deleted or renamed on
-        // re-parse (vendor change, phar refresh, re-open after did_close)
-        // leaves ghost entries that keep resolving from stale state and
-        // pollute find_implementors / type hierarchy.
+        // and evicts fqn_class_index, fqn_uri_index, and gti_index.
+        // Without this, a class deleted or renamed on re-parse (vendor
+        // change, phar refresh, re-open after did_close) leaves ghost
+        // entries that keep resolving from stale state and pollute
+        // find_implementors / type hierarchy.
         let old_fqns: Vec<String> = if was_already_parsed {
             self.symbols
                 .uri_classes_index
@@ -401,19 +401,18 @@ impl Backend {
                 (winners, reowned)
             })
         };
-        // On re-parse, evict the method_store and gti_index entries for
-        // the classes this file previously defined before re-populating.
-        // Evicting the *old* FQN set (rather than the new one) removes
-        // methods of classes that were deleted or renamed, and clears
-        // stale reverse-inheritance edges so find_implementors / type
-        // hierarchy stop serving children that no longer extend a parent.
-        // For a first-time load `old_fqns` is empty and both calls
-        // early-return.
-        self.symbols.withdraw_class_members(&old_fqns);
+        // On re-parse, evict the gti_index entries for the classes this
+        // file previously defined before re-populating.  Evicting the *old*
+        // FQN set (rather than the new one) clears stale
+        // reverse-inheritance edges of classes that were deleted or
+        // renamed, so find_implementors / type hierarchy stop serving
+        // children that no longer extend a parent.  For a first-time load
+        // `old_fqns` is empty and the call early-returns.
+        self.symbols.withdraw_inheritance(&old_fqns);
         // Same for a name this parse took over from another file: those
         // entries describe the declaration that just lost.
-        self.symbols.withdraw_class_members(&reowned_fqns);
-        self.symbols.index_class_members(&winning_classes);
+        self.symbols.withdraw_inheritance(&reowned_fqns);
+        self.symbols.index_inheritance(&winning_classes);
 
         // Remove newly-discovered FQNs from the negative-result cache.
         {

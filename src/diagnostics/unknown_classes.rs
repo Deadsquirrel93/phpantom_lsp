@@ -167,7 +167,7 @@ impl Backend {
             // `key-of<ID_TABLE>` / `ID_TABLE[K]` name the array the constant
             // holds, not a class. The type engine reads the constant's own
             // initializer there (see
-            // `type_engine::call_resolution::constant_operand_shape`), so
+            // `type_engine::call_resolution::constant_operands`), so
             // insisting the name is a class would report every use of the
             // syntax PHPantom supports.
             if ref_context == ClassRefContext::TypeOperatorOperand

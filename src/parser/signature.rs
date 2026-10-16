@@ -1,9 +1,10 @@
-/// The signature extraction shared by standalone functions and methods.
-///
-/// Both declarations carry the same pieces: version-gating stub
-/// attributes, a parameter list, a return type hint that
-/// `#[LanguageLevelTypeAware]` and `#[ArrayShape]` can refine, and a
-/// docblock with `@return`, conditional return and `@template` tags.
+//! The signature extraction shared by standalone functions and methods.
+//!
+//! Both declarations carry the same pieces: version-gating stub
+//! attributes, a parameter list, a return type hint that
+//! `#[LanguageLevelTypeAware]` and `#[ArrayShape]` can refine, and a
+//! docblock with `@return`, conditional return and `@template` tags.
+
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
 

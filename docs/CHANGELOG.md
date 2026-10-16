@@ -175,6 +175,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Inner iterators keep their element type.** `getInnerIterator()` on an `IteratorIterator` or `FilterIterator` subclass now returns `Iterator<TKey, TValue>`, so `$this->getInnerIterator()->current()` has the element type the class's `@extends` tag gives.
 - **Refactoring actions wherever the code is written.** "Convert to arrow function", "Convert to closure", "Convert to match expression", "Inline variable" and the `??` and `?->` simplifications now also work in `elseif` and `else` branches, `match` arms, and closure bodies. "Convert to closure" captures what a nested closure's `use` clause or a spread such as `...$items` reads, and leaves `$_GET` and the other auto-globals out of `use`, which PHP rejects.
 - **Named arguments after an array, closure or `match` argument.** Named-argument completion now works after an earlier argument such as `[1, 2]`, a closure, or a `match` expression, and commas inside such an argument or a comment no longer move signature help to the next parameter.
+- **Path helpers in service providers.** A config file, or a view, translation or route directory, that a service provider names with any of Laravel's path helpers, such as `config_path()`, is now found. One named with `lang_path()` is looked for in `resources/lang` when the project still keeps its translations there, as Laravel does.
 
 ## [0.11.1] - 2026-10-07
 

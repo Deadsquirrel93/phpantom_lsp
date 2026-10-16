@@ -44,7 +44,7 @@ use crate::text_position::offset_to_position;
 use super::helpers::{
     chain_name_prefix, chain_uri_modifier, extract_string_literal, join_uri_segments,
 };
-use super::provider_resources::resolve_path_arg;
+use super::provider_resources::{PathContext, resolve_path_arg};
 use super::route_names::{RouteEntry, for_each_nested_statement, route_name_matches};
 
 /// The FQN of Folio's page-naming helper, as `mago-names` resolves it.
@@ -93,13 +93,12 @@ pub(crate) fn discover_folio_mounts(backend: &Backend) -> Vec<FolioMount> {
         let arena = LocalArena::new();
         let file_id = FileId::new(b"input.php");
         let program = mago_syntax::parser::parse_file_content(&arena, file_id, content.as_bytes());
-        let file_dir = bootstrap_path.parent().unwrap_or(&workspace_root);
-        mounts.extend(scan_folio_mounts_in_program(
+        let paths = PathContext {
+            file_dir: bootstrap_path.parent().unwrap_or(&workspace_root),
+            workspace_root: &workspace_root,
             program,
-            &content,
-            file_dir,
-            &workspace_root,
-        ));
+        };
+        mounts.extend(scan_folio_mounts_in_program(&content, &paths));
     }
 
     if mounts.is_empty() && folio_in_use(&workspace_root) {
@@ -138,26 +137,15 @@ fn folio_in_use(workspace_root: &Path) -> bool {
 /// `bootstrap/app.php`, which is scanned directly since it registers no
 /// provider of its own.
 pub(crate) fn scan_folio_mounts_in_program(
-    program: &Program<'_>,
     content: &str,
-    file_dir: &Path,
-    workspace_root: &Path,
+    paths: &PathContext<'_, '_>,
 ) -> Vec<FolioMount> {
     let mut mounts = Vec::new();
-    for stmt in program.statements.iter() {
-        collect_folio_path_mounts(
-            stmt,
-            content,
-            file_dir,
-            workspace_root,
-            program,
-            &mut mounts,
-        );
+    for stmt in paths.program.statements.iter() {
+        collect_folio_path_mounts(stmt, content, paths, &mut mounts);
     }
-    super::helpers::walk_program_expressions(program, &mut |expr| {
-        if let Some(mount) =
-            with_routing_pages_mount(expr, content, file_dir, workspace_root, program)
-        {
+    super::helpers::walk_program_expressions(paths.program, &mut |expr| {
+        if let Some(mount) = with_routing_pages_mount(expr, content, paths) {
             mounts.push(mount);
         }
         ControlFlow::Continue(())
@@ -178,19 +166,16 @@ pub(crate) fn scan_folio_mounts_in_program(
 fn collect_folio_path_mounts(
     stmt: &Statement<'_>,
     content: &str,
-    file_dir: &Path,
-    workspace_root: &Path,
-    program: &Program<'_>,
+    paths: &PathContext<'_, '_>,
     out: &mut Vec<FolioMount>,
 ) {
     if let Statement::Expression(e) = stmt
-        && let Some(mount) =
-            folio_path_mount(e.expression, content, file_dir, workspace_root, program)
+        && let Some(mount) = folio_path_mount(e.expression, content, paths)
     {
         out.push(mount);
     }
     for_each_nested_statement(stmt, &mut |nested| {
-        collect_folio_path_mounts(nested, content, file_dir, workspace_root, program, out);
+        collect_folio_path_mounts(nested, content, paths, out);
     });
 }
 
@@ -199,13 +184,11 @@ fn collect_folio_path_mounts(
 fn folio_path_mount(
     expr: &Expression<'_>,
     content: &str,
-    file_dir: &Path,
-    workspace_root: &Path,
-    program: &Program<'_>,
+    paths: &PathContext<'_, '_>,
 ) -> Option<FolioMount> {
     let args = folio_mount_root_args(expr, content)?;
     let path_arg = args.arguments.iter().next()?;
-    let directory = resolve_path_arg(path_arg.value(), content, file_dir, workspace_root, program)?;
+    let directory = resolve_path_arg(path_arg.value(), content, paths)?;
     Some(FolioMount {
         directory,
         uri_prefix: chain_uri_modifier(expr, content),
@@ -255,9 +238,7 @@ fn is_folio_facade(class: &Expression<'_>, content: &str) -> bool {
 fn with_routing_pages_mount(
     expr: &Expression<'_>,
     content: &str,
-    file_dir: &Path,
-    workspace_root: &Path,
-    program: &Program<'_>,
+    paths: &PathContext<'_, '_>,
 ) -> Option<FolioMount> {
     let Expression::Call(Call::Method(mc)) = expr else {
         return None;
@@ -280,7 +261,7 @@ fn with_routing_pages_mount(
             }
             _ => None,
         })?;
-    let directory = resolve_path_arg(pages_arg, content, file_dir, workspace_root, program)?;
+    let directory = resolve_path_arg(pages_arg, content, paths)?;
     Some(FolioMount {
         directory,
         uri_prefix: String::new(),

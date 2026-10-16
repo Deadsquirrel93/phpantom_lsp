@@ -1,7 +1,9 @@
+use std::collections::HashMap;
+
 use super::*;
 use crate::atom::{AtomMap, atom};
 use crate::php_type::PhpType;
-use crate::types::{ClassLikeKind, MethodInfo};
+use crate::types::{ClassLikeKind, MethodInfo, Visibility};
 
 /// Helper to build a `HashMap<String, PhpType>` from `(&str, &str)` pairs.
 fn make_subs(pairs: &[(&str, &str)]) -> HashMap<String, PhpType> {

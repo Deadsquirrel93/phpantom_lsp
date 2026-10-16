@@ -1,46 +1,47 @@
-/// Forward-walking scope model for variable type resolution.
-///
-/// This module implements a single top-to-bottom pass through a function
-/// or method body, maintaining a mutable type map (`ScopeState`) that
-/// records each variable's type as assignments are encountered.  When the
-/// walk reaches the cursor position it stops and the caller reads the
-/// target variable's type from the map — an O(1) `HashMap` lookup with
-/// zero recursion.
-///
-/// # Architecture
-///
-/// A backward scanner that resolves one variable at a time from the
-/// cursor, recursively resolving each RHS variable reference, costs
-/// O(depth × file_size) per lookup.  The forward walker replaces that
-/// recursion with a single forward pass:
-///
-/// 1. Seed `ScopeState` with parameter types.
-/// 2. Walk statements top-to-bottom.  At each assignment `$a = expr`,
-///    evaluate `expr` by reading other variables from the scope (O(1)
-///    map lookups) and store the result under `$a`.
-/// 3. At the cursor, read the target variable from the scope.
-///
-/// There is no recursion on variable resolution, no depth limit, and
-/// every variable resolved during the walk is available to subsequent
-/// statements for free.
-///
-/// # Consumers
-///
-/// - **Per-request lookups** (completion, hover, go-to-definition,
-///   signature help): the walker is called with `cursor_offset` set to
-///   the request position and only the target variable's type is read.
-/// - **Diagnostics**: [`build_diagnostic_scopes`] walks every
-///   function/method body in the file once (`cursor_offset = u32::MAX`)
-///   and records scope snapshots at each statement boundary in a
-///   thread-local [`DIAGNOSTIC_SCOPE`] cache.  When
-///   `resolve_variable_types` is called for a diagnostic span, it
-///   checks the cache first via [`lookup_diagnostic_scope`] and returns
-///   the pre-computed types in O(log N) time instead of re-walking the
-///   body for every span.
-/// - **Member-reference searches**, which ask about an access or two in
-///   a candidate file rather than all of them, populate the same cache
-///   through [`build_diagnostic_scopes_for_offsets`], which walks only
-///   the bodies holding the offsets it is given.
+//! Forward-walking scope model for variable type resolution.
+//!
+//! This module implements a single top-to-bottom pass through a function
+//! or method body, maintaining a mutable type map (`ScopeState`) that
+//! records each variable's type as assignments are encountered.  When the
+//! walk reaches the cursor position it stops and the caller reads the
+//! target variable's type from the map — an O(1) `HashMap` lookup with
+//! zero recursion.
+//!
+//! # Architecture
+//!
+//! A backward scanner that resolves one variable at a time from the
+//! cursor, recursively resolving each RHS variable reference, costs
+//! O(depth × file_size) per lookup.  The forward walker replaces that
+//! recursion with a single forward pass:
+//!
+//! 1. Seed `ScopeState` with parameter types.
+//! 2. Walk statements top-to-bottom.  At each assignment `$a = expr`,
+//!    evaluate `expr` by reading other variables from the scope (O(1)
+//!    map lookups) and store the result under `$a`.
+//! 3. At the cursor, read the target variable from the scope.
+//!
+//! There is no recursion on variable resolution, no depth limit, and
+//! every variable resolved during the walk is available to subsequent
+//! statements for free.
+//!
+//! # Consumers
+//!
+//! - **Per-request lookups** (completion, hover, go-to-definition,
+//!   signature help): the walker is called with `cursor_offset` set to
+//!   the request position and only the target variable's type is read.
+//! - **Diagnostics**: [`build_diagnostic_scopes`] walks every
+//!   function/method body in the file once (`cursor_offset = u32::MAX`)
+//!   and records scope snapshots at each statement boundary in a
+//!   thread-local [`DIAGNOSTIC_SCOPE`] cache.  When
+//!   `resolve_variable_types` is called for a diagnostic span, it
+//!   checks the cache first via [`lookup_diagnostic_scope`] and returns
+//!   the pre-computed types in O(log N) time instead of re-walking the
+//!   body for every span.
+//! - **Member-reference searches**, which ask about an access or two in
+//!   a candidate file rather than all of them, populate the same cache
+//!   through [`build_diagnostic_scopes_for_offsets`], which walks only
+//!   the bodies holding the offsets it is given.
+
 use std::cell::{Cell, RefCell};
 
 use mago_span::HasSpan;
@@ -49,6 +50,7 @@ use mago_syntax::cst::*;
 use crate::types::ResolvedType;
 
 mod array_assignment;
+mod assert_narrowing;
 mod assignment;
 mod assignment_deps;
 mod by_ref;
@@ -78,6 +80,7 @@ mod walk_ctx;
 mod while_for;
 
 pub(crate) use array_assignment::*;
+pub(crate) use assert_narrowing::*;
 pub(crate) use assignment::*;
 pub(crate) use assignment_deps::*;
 pub(crate) use by_ref::*;

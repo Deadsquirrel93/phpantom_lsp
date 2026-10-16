@@ -1,12 +1,13 @@
-/// Class-string variable resolution.
-///
-/// Resolves variables that hold a class-string value (e.g. `$cls = User::class`)
-/// to the referenced `ClassInfo` instances.  This is used when the access kind
-/// is `::` (`$cls::`) so that static members are offered instead of string
-/// methods.
-///
-/// Handles simple assignments, match expressions, ternary / null-coalescing
-/// branches, and `self` / `static` / `parent` keywords.
+//! Class-string variable resolution.
+//!
+//! Resolves variables that hold a class-string value (e.g. `$cls = User::class`)
+//! to the referenced `ClassInfo` instances.  This is used when the access kind
+//! is `::` (`$cls::`) so that static members are offered instead of string
+//! methods.
+//!
+//! Handles simple assignments, match expressions, ternary / null-coalescing
+//! branches, and `self` / `static` / `parent` keywords.
+
 use std::sync::Arc;
 
 use mago_span::HasSpan;

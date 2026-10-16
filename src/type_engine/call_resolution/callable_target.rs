@@ -1,6 +1,7 @@
-/// Callable target resolution: resolving a call expression string to a
-/// `ResolvedCallableTarget` with label, parameters, and return type, used
-/// by signature help and named-argument completion.
+//! Callable target resolution: resolving a call expression string to a
+//! `ResolvedCallableTarget` with label, parameters, and return type, used
+//! by signature help and named-argument completion.
+
 use std::sync::Arc;
 
 use crate::Backend;
@@ -16,8 +17,8 @@ use crate::type_engine::resolver::{CtxLoaders, ResolutionCtx};
 
 use tower_lsp::lsp_types::Position;
 
+use super::constant_operands::evaluate_constant_operands;
 use super::target_cache::CALLABLE_TARGET_CACHE;
-use super::template_subs::evaluate_constant_operands;
 
 impl Backend {
     /// Bind a method's declaration to one call site: substitute the

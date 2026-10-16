@@ -247,9 +247,6 @@ fn positional_parameters_would_change(
         .any(|(ep, ap)| parameter_enrichment_would_change(ep, ap))
 }
 
-/// Whether [`enrich_single_parameter`] would change `existing_param`.
-///
-/// Mirrors the apply function's conditions (keep the two in sync).
 /// Whether the child's own native parameter hint supersedes the
 /// ancestor's docblock type.
 ///
@@ -274,6 +271,9 @@ fn child_native_hint_overrides(
         })
 }
 
+/// Whether [`enrich_single_parameter`] would change `existing_param`.
+///
+/// Mirrors the apply function's conditions (keep the two in sync).
 fn parameter_enrichment_would_change(
     existing_param: &ParameterInfo,
     ancestor_param: &ParameterInfo,

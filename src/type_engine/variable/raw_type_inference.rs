@@ -1,8 +1,9 @@
-/// Array literal inference and array function helpers.
-///
-/// These are utility helpers that support the forward-walking variable
-/// resolver in [`super::forward_walk`] and the foreach/destructuring
-/// resolution module.
+//! Array literal inference and array function helpers.
+//!
+//! These are utility helpers that support the forward-walking variable
+//! resolver in [`super::forward_walk`] and the foreach/destructuring
+//! resolution module.
+
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
 

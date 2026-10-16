@@ -115,14 +115,15 @@ mod naming;
 pub(crate) mod phpstan;
 mod promote_constructor_param;
 mod remove_unused_import;
-pub(crate) use remove_unused_import::{
-    build_line_deletion_edit, build_use_directive_deletion_edit, range_touches_use_import,
-};
 mod replace_deprecated;
 mod replace_fqcn;
 mod simplify_null;
 mod sort_use_statements;
 mod update_docblock;
+mod use_line_deletion;
+pub(crate) use use_line_deletion::{
+    build_line_deletion_edit, build_use_directive_deletion_edit, range_touches_use_import,
+};
 
 mod docblock_edit;
 mod helpers;

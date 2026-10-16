@@ -1,15 +1,16 @@
-/// Request-scoped memos for call resolution, plus body-return-type
-/// inference.
-///
-/// Bundles the callable-target cache and the body-return-inference memo
-/// behind [`activate_type_engine_caches`], which every request entry
-/// point activates so the two memos live exactly as long as one request
-/// (or one file's diagnostic pass).
-///
-/// The facilities that need project-wide state — inferring a return type
-/// from a method body, the model behind an auth guard, the validation
-/// rules describing a request — read the `Backend` off the resolution
-/// context instead, so a caller cannot forget to install them.
+//! Request-scoped memos for call resolution, plus body-return-type
+//! inference.
+//!
+//! Bundles the callable-target cache and the body-return-inference memo
+//! behind [`activate_type_engine_caches`], which every request entry
+//! point activates so the two memos live exactly as long as one request
+//! (or one file's diagnostic pass).
+//!
+//! The facilities that need project-wide state — inferring a return type
+//! from a method body, the model behind an auth guard, the validation
+//! rules describing a request — read the `Backend` off the resolution
+//! context instead, so a caller cannot forget to install them.
+
 #[cfg(test)]
 use std::cell::Cell;
 use std::cell::RefCell;

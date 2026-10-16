@@ -258,6 +258,7 @@ mod self_out;
 mod semantic_export;
 mod semantic_tokens;
 mod server_lifecycle;
+mod signature_change_detection;
 mod signature_from_call_site;
 mod signature_help;
 mod smoke;

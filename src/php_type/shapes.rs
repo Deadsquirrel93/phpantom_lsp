@@ -367,7 +367,7 @@ impl PhpType {
     /// same reason: one branch writing a literal and another writing the
     /// base type must not leave both spellings behind.
     fn join_values(a: &PhpType, b: &PhpType) -> PhpType {
-        use crate::php_type::normalize::is_runtime_value_subtype;
+        use crate::php_type::runtime_join::is_runtime_value_subtype;
 
         if a.equivalent(b) {
             return a.clone();

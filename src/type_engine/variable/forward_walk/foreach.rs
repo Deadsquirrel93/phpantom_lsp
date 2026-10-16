@@ -129,7 +129,7 @@ pub(crate) fn narrow_iterated_collection<'b>(
     }
 
     let narrowed = guard_scope.get(&var_name);
-    if narrowed.is_empty() || !narrowing_changed_types(entry_value_types, narrowed) {
+    if narrowed.is_empty() || same_types(entry_value_types, narrowed) {
         return None;
     }
     let element = ResolvedType::types_joined(narrowed);

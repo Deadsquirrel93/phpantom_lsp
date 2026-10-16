@@ -1,33 +1,34 @@
-/// Go-to-implementation support (`textDocument/implementation`).
-///
-/// When the cursor is on an interface name, abstract class name, or any
-/// non-final class name, this module finds all concrete implementations
-/// (and, for concrete class targets, all subclasses including abstract
-/// ones) and returns their locations.  The same applies to method calls
-/// where the owning type is an interface or abstract class.
-///
-/// When the cursor is on a method *definition* inside a concrete class, the
-/// reverse direction is also supported: the handler finds the interface or
-/// abstract class that declares the method and jumps to it.
-///
-/// Final classes cannot be extended, so go-to-implementation is a no-op
-/// for them.
-///
-/// # Resolution strategy
-///
-/// 1. **Determine the target symbol** — consult the precomputed `SymbolMap`
-///    for the word under the cursor.
-/// 2. **Identify the target type** — resolve the symbol to a `ClassInfo` and
-///    check whether it is a non-final class or interface.
-/// 3. **Scan for implementors** — walk all classes known to the server
-///    (`uri_classes_index`, `fqn_uri_index`, PSR-4 directories) and collect
-///    those whose `interfaces` list or `parent_class` matches the target type.
-/// 4. **Return locations** — for class-level requests, return the class
-///    declaration position; for method-level requests, return the method
-///    position in each implementing class.
-/// 5. **Reverse jump** — for `MemberDeclaration` symbols on a concrete class,
-///    walk the class's interfaces and parent abstract classes to find the
-///    prototype method declaration and return its location.
+//! Go-to-implementation support (`textDocument/implementation`).
+//!
+//! When the cursor is on an interface name, abstract class name, or any
+//! non-final class name, this module finds all concrete implementations
+//! (and, for concrete class targets, all subclasses including abstract
+//! ones) and returns their locations.  The same applies to method calls
+//! where the owning type is an interface or abstract class.
+//!
+//! When the cursor is on a method *definition* inside a concrete class, the
+//! reverse direction is also supported: the handler finds the interface or
+//! abstract class that declares the method and jumps to it.
+//!
+//! Final classes cannot be extended, so go-to-implementation is a no-op
+//! for them.
+//!
+//! # Resolution strategy
+//!
+//! 1. **Determine the target symbol** — consult the precomputed `SymbolMap`
+//!    for the word under the cursor.
+//! 2. **Identify the target type** — resolve the symbol to a `ClassInfo` and
+//!    check whether it is a non-final class or interface.
+//! 3. **Scan for implementors** — walk all classes known to the server
+//!    (`uri_classes_index`, `fqn_uri_index`, PSR-4 directories) and collect
+//!    those whose `interfaces` list or `parent_class` matches the target type.
+//! 4. **Return locations** — for class-level requests, return the class
+//!    declaration position; for method-level requests, return the method
+//!    position in each implementing class.
+//! 5. **Reverse jump** — for `MemberDeclaration` symbols on a concrete class,
+//!    walk the class's interfaces and parent abstract classes to find the
+//!    prototype method declaration and return its location.
+
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -1029,8 +1030,6 @@ impl Backend {
         })
     }
 
-    /// Get the FQN for a class given its short name, by looking it up in
-    /// the `fqn_uri_index`.
     /// Find the location of a class declaration for an implementor.
     fn locate_class_declaration(
         &self,

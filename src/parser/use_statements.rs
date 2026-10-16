@@ -1,8 +1,9 @@
-/// `use` statement and namespace extraction.
-///
-/// This module handles parsing PHP `use` statements and namespace
-/// declarations from the AST, building a mapping of short (imported)
-/// names to their fully-qualified equivalents.
+//! `use` statement and namespace extraction.
+//!
+//! This module handles parsing PHP `use` statements and namespace
+//! declarations from the AST, building a mapping of short (imported)
+//! names to their fully-qualified equivalents.
+
 use std::collections::HashMap;
 
 use mago_syntax::cst::*;

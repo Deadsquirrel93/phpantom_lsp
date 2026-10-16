@@ -62,6 +62,7 @@
 //!   whose result depends on the property name passed at the call site.
 mod arg_type_resolution;
 mod callable_target;
+mod constant_operands;
 mod facade_owner;
 mod out_param;
 mod reflection;
@@ -73,6 +74,7 @@ mod template_subs;
 pub(crate) use out_param::{OutParamCallee, effective_out_type, resolve_out_type_for_call};
 
 pub(crate) use callable_target::invoked_value_types;
+pub(crate) use constant_operands::evaluate_constant_operands;
 pub(crate) use facade_owner::facade_concrete_owner;
 pub(crate) use reflection::{
     is_reflected_property_call, is_reflected_property_class, resolve_reflected_property_at_call,
@@ -90,6 +92,6 @@ pub(crate) use target_cache::{
 };
 pub(crate) use template_binding::{TemplateCallee, bind_template_args, instantiate_class};
 pub(crate) use template_subs::{
-    array_literal_shape_type_with, build_call_template_subs, evaluate_constant_operands,
-    finish_template_subs, generalize_object_template_arg,
+    array_literal_shape_type_with, build_call_template_subs, finish_template_subs,
+    generalize_object_template_arg,
 };

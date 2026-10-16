@@ -1,11 +1,12 @@
-/// Namespace declaration completions.
-///
-/// This module builds completion items for `namespace` declarations,
-/// suggesting namespace names that fall under known PSR-4 prefixes.
-///
-/// When the file's path falls under a PSR-4 source directory, the
-/// namespace inferred from the path is boosted to the top of the list.
-/// If multiple PSR-4 roots match, the longest match is ranked first.
+//! Namespace declaration completions.
+//!
+//! This module builds completion items for `namespace` declarations,
+//! suggesting namespace names that fall under known PSR-4 prefixes.
+//!
+//! When the file's path falls under a PSR-4 source directory, the
+//! namespace inferred from the path is boosted to the top of the list.
+//! If multiple PSR-4 roots match, the longest match is ranked first.
+
 use std::collections::HashSet;
 use std::path::Path;
 

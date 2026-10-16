@@ -395,7 +395,7 @@ pub(crate) fn infer_callable_params_from_static_receiver_fw(
         // For relation-query methods, override with Builder<RelatedModel>.
         if crate::virtual_members::laravel::relation_query_method(method_name).is_some()
             && let Some(override_params) = infer_relation_callback_params(
-                &[ResolvedType::from_class(cls.clone())],
+                &[ResolvedType::from_arc(Arc::clone(cls))],
                 method_name,
                 arg_idx,
                 argument_list,

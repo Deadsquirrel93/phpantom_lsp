@@ -37,6 +37,7 @@ mod literal;
 mod normalize;
 mod parse;
 mod predicates;
+mod runtime_join;
 mod shape_keys;
 mod shapes;
 mod subtype;

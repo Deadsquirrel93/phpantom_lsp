@@ -904,22 +904,6 @@ mod tests {
                 .is_some_and(|cls| cls.methods.iter().any(|m| m.name == "bare")),
             "the class index must describe the surviving declaration"
         );
-        assert!(
-            backend
-                .symbols
-                .method_store
-                .read()
-                .contains_key(&("Vendor\\Variant".to_string(), "bare".to_string())),
-            "the method store must follow the surviving declaration"
-        );
-        assert!(
-            !backend
-                .symbols
-                .method_store
-                .read()
-                .contains_key(&("Vendor\\Variant".to_string(), "rich".to_string())),
-            "the deleted file's members must be gone"
-        );
     }
 
     /// ...and the name still goes away once the last declaring file is

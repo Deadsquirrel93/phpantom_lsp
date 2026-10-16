@@ -633,7 +633,7 @@ pub(crate) fn condition_arm_narrowing<'b>(
             !types.is_empty()
                 && seeded
                     .get(name)
-                    .is_none_or(|before| narrowing_changed_types(before, types))
+                    .is_none_or(|before| !same_types(before, types))
         })
         .map(|(name, types)| (name.to_string(), types))
         .collect();

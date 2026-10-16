@@ -1,10 +1,11 @@
-/// Qualifying the class names in a class constant's initializer.
-///
-/// An initializer is kept as source text (`ConstantInfo::value`) and read
-/// by whichever file reads the constant, where the imports and namespace of
-/// the block that wrote it are not in scope.  The classes it names are
-/// therefore spelled out fully qualified while the declaring file is parsed,
-/// the way every other name a class carries is.
+//! Qualifying the class names in a class constant's initializer.
+//!
+//! An initializer is kept as source text (`ConstantInfo::value`) and read
+//! by whichever file reads the constant, where the imports and namespace of
+//! the block that wrote it are not in scope.  The classes it names are
+//! therefore spelled out fully qualified while the declaring file is parsed,
+//! the way every other name a class carries is.
+
 use crate::text_scan;
 
 /// `expression` with the class of every `Class::member` access in it

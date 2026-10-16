@@ -1,9 +1,10 @@
-/// Property access (`$this->prop`, `$obj->prop`, `$obj?->prop`)
-/// resolution: resolves the property's type hint, plus the
-/// `find_*_this_property_assignment*` scanners that narrow a property's
-/// type from its last assignment in the enclosing method when the
-/// assigned type is narrower than the declared one (or the property is
-/// untyped).
+//! Property access (`$this->prop`, `$obj->prop`, `$obj?->prop`)
+//! resolution: resolves the property's type hint, plus the
+//! `find_*_this_property_assignment*` scanners that narrow a property's
+//! type from its last assignment in the enclosing method when the
+//! assigned type is narrower than the declared one (or the property is
+//! untyped).
+
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -59,7 +60,6 @@ pub(super) fn resolve_rhs_property_access(
     fn resolve_property_with_hint(
         prop_name: &str,
         owner: &ClassInfo,
-        current_class_name: &str,
         all_classes: &[Arc<ClassInfo>],
         class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     ) -> Vec<ResolvedType> {
@@ -78,12 +78,7 @@ pub(super) fn resolve_rhs_property_access(
             // is not lost.
             return match type_hint {
                 Some(hint) => {
-                    vec![resolved_type_with_lookup(
-                        hint,
-                        current_class_name,
-                        all_classes,
-                        class_loader,
-                    )]
+                    vec![resolved_type_with_lookup(hint, all_classes, class_loader)]
                 }
                 _ => vec![],
             };
@@ -276,13 +271,8 @@ pub(super) fn resolve_rhs_property_access(
                 Expression::Self_(_) | Expression::Static(_) | Expression::Parent(_)
             );
             for cls in &target_classes {
-                let resolved = resolve_property_with_hint(
-                    &prop_name,
-                    cls,
-                    current_class_name,
-                    all_classes,
-                    class_loader,
-                );
+                let resolved =
+                    resolve_property_with_hint(&prop_name, cls, all_classes, class_loader);
                 if !resolved.is_empty() {
                     return if forwards_lsb {
                         resolved
@@ -545,13 +535,8 @@ pub(super) fn resolve_rhs_property_access(
 
             let mut all_resolved: Vec<ResolvedType> = Vec::new();
             for owner in &owner_classes {
-                let resolved = resolve_property_with_hint(
-                    &prop_name,
-                    owner,
-                    current_class_name,
-                    all_classes,
-                    class_loader,
-                );
+                let resolved =
+                    resolve_property_with_hint(&prop_name, owner, all_classes, class_loader);
                 for mut rt in resolved {
                     // A synthetic owner (`__object_shape`) leaves `self` to
                     // the caller's context, as `replace_self_in_property_type`

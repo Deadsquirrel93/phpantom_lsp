@@ -1,6 +1,7 @@
-/// Argument-text-to-type resolution: converts call-site argument texts
-/// (literals, array shapes, variables, chained expressions) to `PhpType`
-/// for template substitution and generic argument binding.
+//! Argument-text-to-type resolution: converts call-site argument texts
+//! (literals, array shapes, variables, chained expressions) to `PhpType`
+//! for template substitution and generic argument binding.
+
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::sync::Arc;

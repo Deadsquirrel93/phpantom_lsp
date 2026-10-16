@@ -1,16 +1,17 @@
-/// Closure and arrow-function helpers for the forward walker.
-///
-/// This module provides:
-///
-/// - **`@param-closure-this` resolution:** detects when the cursor is
-///   inside a closure whose enclosing call site declares a
-///   `@param-closure-this` tag and overrides `$this` accordingly.
-/// - **Callable parameter inference helpers:** shared receiver
-///   resolution and generic-argument recovery used by
-///   `forward_walk/callable_inference.rs` to infer untyped
-///   closure/arrow-function parameter types from the enclosing callable
-///   signature (e.g. `$users->map(fn($u) => …)` infers `$u` from the
-///   `map` method's parameter type).
+//! Closure and arrow-function helpers for the forward walker.
+//!
+//! This module provides:
+//!
+//! - **`@param-closure-this` resolution:** detects when the cursor is
+//!   inside a closure whose enclosing call site declares a
+//!   `@param-closure-this` tag and overrides `$this` accordingly.
+//! - **Callable parameter inference helpers:** shared receiver
+//!   resolution and generic-argument recovery used by
+//!   `forward_walk/callable_inference.rs` to infer untyped
+//!   closure/arrow-function parameter types from the enclosing callable
+//!   signature (e.g. `$users->map(fn($u) => …)` infers `$u` from the
+//!   `map` method's parameter type).
+
 use std::cell::RefCell;
 use std::sync::Arc;
 
@@ -571,12 +572,12 @@ pub(in crate::type_engine) fn find_owner_by_name(
     fqn: &str,
     all_classes: &[Arc<ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> Option<ClassInfo> {
+) -> Option<Arc<ClassInfo>> {
     all_classes
         .iter()
         .find(|c| c.fqn().eq_ignore_ascii_case(fqn))
-        .map(|c| ClassInfo::clone(c))
-        .or_else(|| class_loader(fqn).map(Arc::unwrap_or_clone))
+        .map(Arc::clone)
+        .or_else(|| class_loader(fqn))
 }
 
 /// Look up `closure_this_type` on an instance method's parameter at
@@ -621,13 +622,13 @@ fn closure_this_from_static_receiver(
         && let Some(resolve_macro_this) = ctx.laravel_macro_this_resolver
         && let Some(owner) = resolve_macro_this(&class_name)
     {
-        return Some(vec![ResolvedType::from_class(Arc::unwrap_or_clone(
+        return Some(vec![ResolvedType::from_arc(
             crate::virtual_members::resolve_class_fully_maybe_cached(
                 &owner,
                 ctx.class_loader,
                 ctx.resolved_class_cache,
             ),
-        ))]);
+        )]);
     }
 
     let owner = find_owner_by_name(&class_name, ctx.all_classes, ctx.class_loader)?;
@@ -646,7 +647,7 @@ fn closure_this_from_static_receiver(
 fn closure_this_from_method_params(
     method: &MethodInfo,
     arg_idx: usize,
-    owner: Option<&ClassInfo>,
+    owner: Option<&Arc<ClassInfo>>,
     ctx: &ResolutionCtx<'_>,
 ) -> Option<Vec<ResolvedType>> {
     let param = method.parameters.get(arg_idx)?;
@@ -662,16 +663,16 @@ fn closure_this_from_method_params(
 /// through the class loader.
 fn resolve_closure_this_type(
     php_type: &PhpType,
-    owner: Option<&ClassInfo>,
+    owner: Option<&Arc<ClassInfo>>,
     ctx: &ResolutionCtx<'_>,
 ) -> Option<Vec<ResolvedType>> {
     let resolved: Vec<ResolvedType> = match php_type.kind() {
         TypeKind::Intersection(members) => members
             .iter()
             .filter_map(|member| resolve_closure_this_class(member, owner, ctx))
-            .map(ResolvedType::from_class)
+            .map(ResolvedType::from_arc)
             .collect(),
-        _ => vec![ResolvedType::from_class(resolve_closure_this_class(
+        _ => vec![ResolvedType::from_arc(resolve_closure_this_class(
             php_type, owner, ctx,
         )?)],
     };
@@ -680,11 +681,13 @@ fn resolve_closure_this_type(
 
 fn resolve_closure_this_class(
     php_type: &PhpType,
-    owner: Option<&ClassInfo>,
+    owner: Option<&Arc<ClassInfo>>,
     ctx: &ResolutionCtx<'_>,
-) -> Option<ClassInfo> {
+) -> Option<Arc<ClassInfo>> {
     if php_type.is_self_like() {
-        return owner.cloned().or_else(|| ctx.current_class.cloned());
+        return owner
+            .cloned()
+            .or_else(|| ctx.current_class.cloned().map(Arc::new));
     }
 
     // Extract the base class name without stringifying.
@@ -696,16 +699,14 @@ fn resolve_closure_this_class(
         .iter()
         .find(|c| c.fqn().eq_ignore_ascii_case(type_str))
     {
-        return Some(ClassInfo::clone(cls));
+        return Some(Arc::clone(cls));
     }
 
     let resolved = (ctx.class_loader)(type_str)?;
-    Some(Arc::unwrap_or_clone(
-        crate::virtual_members::resolve_class_fully_maybe_cached(
-            &resolved,
-            ctx.class_loader,
-            ctx.resolved_class_cache,
-        ),
+    Some(crate::virtual_members::resolve_class_fully_maybe_cached(
+        &resolved,
+        ctx.class_loader,
+        ctx.resolved_class_cache,
     ))
 }
 

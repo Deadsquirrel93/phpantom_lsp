@@ -1,6 +1,7 @@
-/// Array access (`$arr[0]`, `$arr['key']`) resolution: extracts the
-/// generic element type or array-shape value type from the base array's
-/// annotation or assignment, including chained bracket access.
+//! Array access (`$arr[0]`, `$arr['key']`) resolution: extracts the
+//! generic element type or array-shape value type from the base array's
+//! annotation or assignment, including chained bracket access.
+
 use std::collections::HashMap;
 
 use mago_span::HasSpan;
