@@ -10,7 +10,7 @@ use tower_lsp::lsp_types::Position;
 
 use crate::symbol_map::LaravelStringKind;
 use crate::symbol_map::extraction::laravel::{
-    is_config_repository_method, is_gate_check_method, is_request_route_pattern_method,
+    facade_static_call_first_arg_kind, is_gate_check_method, is_request_route_pattern_method,
     is_route_facade_pattern_method, is_route_name_method,
 };
 use crate::text_position::position_to_offset;
@@ -956,18 +956,19 @@ pub(super) fn detect_laravel_string_key_context_inner<'a>(
         }
         let written_class = &before_colons[cls_start..];
         let reference = semantic_class_reference(written_class, cls_start, resolved_names);
-        // Preserve the pre-existing legacy facade behavior. New resource
-        // triggers above resolve semantic aliases exactly; feeding an
-        // unrelated `Vendor\Config as Foo` target into the legacy short-name
-        // table would otherwise misclassify `Foo::get()` as Laravel Config.
-        let short = written_class.rsplit('\\').next().unwrap_or(written_class);
-
-        let fn_lower = func_name.to_ascii_lowercase();
-        let short_lower = short.to_ascii_lowercase();
-        let legacy_accepts_array = matches!(
-            (short_lower.as_str(), fn_lower.as_str()),
-            ("config", "getmany") | ("route", "is" | "currentroutenamed")
-        );
+        // Classified by the class as written, the way the symbol map
+        // classifies the finished call. Resource triggers resolve semantic
+        // aliases exactly; an unrelated `Vendor\Config as Foo` must not make
+        // `Foo::get()` read as Laravel Config.
+        let clean_class = written_class.trim_start_matches('\\');
+        let facade_kind = facade_static_call_first_arg_kind(clean_class, func_name);
+        // The calls that take a list of names as well as a single one.
+        let accepts_array = match facade_kind {
+            Some(LaravelStringKind::Config) => func_name.eq_ignore_ascii_case("getMany"),
+            Some(LaravelStringKind::View) => func_name.eq_ignore_ascii_case("first"),
+            Some(LaravelStringKind::Route) => is_route_facade_pattern_method(func_name),
+            _ => false,
+        };
 
         if let Some(trigger) =
             config_resource_static_trigger(content, reference, func_name, indexed_class_exists)
@@ -996,39 +997,11 @@ pub(super) fn detect_laravel_string_key_context_inner<'a>(
             Some(middleware_kind)
         } else if argument.named_argument.is_some()
             || (argument.shape != StringArgumentShape::Scalar
-                && (!legacy_accepts_array || !before_quote.trim_end().ends_with('[')))
+                && (!accepts_array || !before_quote.trim_end().ends_with('[')))
         {
             None
         } else {
-            match (short_lower.as_str(), fn_lower.as_str()) {
-                ("config", method) if is_config_repository_method(method) => {
-                    Some(LaravelStringKind::Config)
-                }
-                ("view", "make" | "exists") => Some(LaravelStringKind::View),
-                ("lang", "get" | "has" | "hasforlocale" | "choice") => {
-                    Some(LaravelStringKind::Trans)
-                }
-                // Route names reached through the URL-building facades, and the
-                // "is the current route named …?" predicates.
-                ("url" | "redirect" | "response", method) if is_route_name_method(method) => {
-                    Some(LaravelStringKind::Route)
-                }
-                ("route", method) if is_route_facade_pattern_method(method) => {
-                    Some(LaravelStringKind::Route)
-                }
-                ("env", "get" | "getorfail") => Some(LaravelStringKind::Env),
-                // Artisan command names.
-                ("artisan", "call" | "queue") => Some(LaravelStringKind::Command),
-                ("schedule", "command") => Some(LaravelStringKind::Command),
-                // Eloquent morph aliases.
-                ("relation", "getmorphedmodel") => Some(LaravelStringKind::MorphAlias),
-                ("model", "getactualclassnameformorph") => Some(LaravelStringKind::MorphAlias),
-                // Authorization abilities checked through the Gate facade.
-                ("gate", method) if method == "define" || is_gate_check_method(method) => {
-                    Some(LaravelStringKind::GateAbility)
-                }
-                _ => None,
-            }
+            facade_kind
         }
     } else if is_instance_method {
         let receiver = trimmed_before

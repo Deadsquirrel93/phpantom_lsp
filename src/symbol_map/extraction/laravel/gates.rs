@@ -46,8 +46,7 @@ pub(crate) fn is_gate_check_method(member_name: &str) -> bool {
 
 /// Whether a static-call subject names Laravel's `Gate` facade.
 pub(in crate::symbol_map::extraction) fn is_gate_facade(clean_subject: &str) -> bool {
-    clean_subject.eq_ignore_ascii_case("Gate")
-        || clean_subject.eq_ignore_ascii_case("Illuminate\\Support\\Facades\\Gate")
+    matches_laravel_facade(clean_subject, "Gate")
 }
 
 /// Whether an instance-method chain roots at the `Gate` facade, as

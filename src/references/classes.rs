@@ -324,19 +324,12 @@ impl Backend {
         uri: &str,
         offset: u32,
     ) -> Option<String> {
-        let classes: Vec<Arc<ClassInfo>> = self
-            .symbols
-            .uri_classes_index
-            .read()
-            .get(uri)
-            .cloned()
-            .unwrap_or_default();
-        let current_class = crate::class_lookup::find_class_at_offset(&classes, offset);
+        let current_class = self.class_at_offset(uri, offset);
         let keyword = match ssp_kind {
             SelfStaticParentKind::Parent => "parent",
             _ => "self",
         };
-        crate::class_lookup::resolve_class_keyword(keyword, current_class)
+        crate::class_lookup::resolve_class_keyword(keyword, current_class.as_deref())
     }
 }
 

@@ -295,8 +295,8 @@ pub struct ClassInfo {
     /// inside class-level attributes (which sit *before* the keyword and
     /// the body braces) with their enclosing class.
     pub decl_start_offset: u32,
-    /// The parent class name from the `extends` clause, if any.
-    /// This is the raw name as written in source (e.g. "BaseClass", "Foo\\Bar").
+    /// The parent class from the `extends` clause, if any, as an FQN
+    /// without a leading `\` (the parser resolves the name as written).
     pub parent_class: Option<Atom>,
     /// Interface names from the `implements` clause (classes and enums only).
     ///

@@ -333,13 +333,13 @@ impl Backend {
     ///
     /// `offset` is the starting byte offset of the function-name
     /// identifier in the source file.  Pass `0` (and/or `None`
-    /// `resolved_names`) when no offset is available; resolution then
-    /// behaves exactly like the plain use-map + namespace candidate list.
+    /// `resolved_names`) when no offset is available; the name is then
+    /// qualified from `function_imports` and `file_namespace` alone, which
+    /// cannot expand a qualified name through a class import.
     ///
-    /// Candidate order mirrors PHP's unqualified-call resolution: the
-    /// namespace-local name wins, with the bare name as the global
-    /// fallback, then the `use function` alias and the single-namespace
-    /// guess.
+    /// Either way the lookup follows PHP's rule (see
+    /// [`function_lookup_names`](crate::names::function_lookup_names)): only
+    /// a bare name that is not imported falls back to the global function.
     pub(crate) fn resolve_function_name_at(
         &self,
         name: &str,
@@ -348,46 +348,22 @@ impl Backend {
         function_imports: &HashMap<String, String>,
         file_namespace: &Option<String>,
     ) -> Option<FunctionInfo> {
-        // A leading backslash (`\response`, `\App\Helpers\foo`) is an
-        // explicit global/absolute reference.  Strip it and look up the
-        // qualified name directly, bypassing the use-map and namespace
-        // qualification (which would otherwise mangle it into
-        // `Current\Ns\\response`).
-        if let Some(absolute) = name.strip_prefix('\\') {
-            return self.find_or_load_function(&[absolute]);
-        }
-
-        // Offset-aware, multi-namespace-correct candidate from mago-names.
+        // Offset-aware, multi-namespace-correct name from mago-names.
         // `offset == 0` is the "no offset available" sentinel (no PHP
         // function-call identifier ever starts at byte 0, before `<?php`).
-        let offset_resolved: Option<String> = if offset != 0 {
-            resolved_names
-                .and_then(|rn| rn.get(offset))
-                .map(str::to_owned)
-        } else {
-            None
-        };
-
-        let use_resolved: Option<String> = function_imports.get(name).cloned();
-        let ns_qualified: Option<String> = file_namespace
-            .as_ref()
-            .map(|ns| format!("{}\\{}", ns, name));
-
-        let mut candidates: Vec<&str> = Vec::with_capacity(4);
-        if let Some(ref r) = offset_resolved {
-            candidates.push(r.as_str());
+        let offset_resolved = (offset != 0)
+            .then(|| resolved_names.and_then(|rn| rn.get(offset)))
+            .flatten();
+        let (fqn, fallback) = crate::names::function_lookup_names(
+            name,
+            &HashMap::new(),
+            function_imports,
+            file_namespace,
+        );
+        let fqn = offset_resolved.unwrap_or(&fqn);
+        match fallback {
+            Some(global) if global != fqn => self.find_or_load_function(&[fqn, global]),
+            _ => self.find_or_load_function(&[fqn]),
         }
-        candidates.push(name);
-        if let Some(ref fqn) = use_resolved {
-            candidates.push(fqn.as_str());
-        }
-        if let Some(ref nq) = ns_qualified {
-            candidates.push(nq.as_str());
-        }
-
-        // Unified lookup: checks global_functions first, then
-        // falls back to embedded PHP stubs (parsed lazily and
-        // cached for future lookups).
-        self.find_or_load_function(&candidates)
     }
 }

@@ -196,6 +196,40 @@ fn detects_the_list_and_environment_call_shapes() {
     }
 }
 
+/// A static call completes the names the symbol map recognises in the
+/// finished call, keyed on the class as written.
+#[test]
+fn static_calls_complete_what_the_symbol_map_recognises() {
+    for (call, expected) in [
+        ("View::first(['emails.", LaravelStringKind::View),
+        ("Response::view('emails.", LaravelStringKind::View),
+        (
+            "\\Illuminate\\Support\\Facades\\View::make('emails.",
+            LaravelStringKind::View,
+        ),
+        (
+            "\\Illuminate\\Support\\Env::get('emails.",
+            LaravelStringKind::Env,
+        ),
+        (
+            "Post::getActualClassNameForMorph('emails.",
+            LaravelStringKind::MorphAlias,
+        ),
+    ] {
+        let content = format!("<?php\n{call}");
+        let ctx =
+            detect_at_end(&content, "emails.").unwrap_or_else(|| panic!("should detect `{call}`"));
+        assert_eq!(ctx.kind, expected, "for `{call}`");
+        assert_eq!(ctx.prefix, "emails.", "for `{call}`");
+    }
+    for call in ["Acme\\View::make('emails.", "Facades\\Lang::get('emails."] {
+        assert!(
+            detect_at_end(&format!("<?php\n{call}"), "emails.").is_none(),
+            "`{call}` is not a Laravel facade"
+        );
+    }
+}
+
 /// `#[RedirectToRoute]` names a route rather than a config key, but only
 /// where the file imports Laravel's attribute.
 #[test]

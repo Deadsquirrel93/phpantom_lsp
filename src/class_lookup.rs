@@ -25,9 +25,17 @@ use crate::types::{ClassInfo, ClassLikeKind};
 /// `self::` reference inside a class-level attribute — which sits before
 /// the body braces — still resolves to the class it decorates.
 pub(crate) fn find_class_at_offset(classes: &[Arc<ClassInfo>], offset: u32) -> Option<&ClassInfo> {
+    find_shared_class_at_offset(classes, offset).map(Arc::as_ref)
+}
+
+/// [`find_class_at_offset`], handing back the shared `Arc` so a caller
+/// can keep the class after letting go of the list it came from.
+pub(crate) fn find_shared_class_at_offset(
+    classes: &[Arc<ClassInfo>],
+    offset: u32,
+) -> Option<&Arc<ClassInfo>> {
     classes
         .iter()
-        .map(|c| c.as_ref())
         .map(|c| {
             let start = if c.decl_start_offset != 0 {
                 c.decl_start_offset

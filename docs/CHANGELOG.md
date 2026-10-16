@@ -36,6 +36,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Laravel name completion in facade calls.** Completion now offers view names, morph aliases, and the other Laravel names in every static call that go-to-definition and diagnostics already recognise, such as `View::first()` and `Response::view()`. A class that only shares a facade's short name, such as `Acme\View`, no longer gets them.
+- **Imported functions that share a name with a global one.** After `use function Lib\greet;`, signature help and the other features that look the function up show `Lib\greet`, not a global `greet()`.
+- **Hover on inherited members shows the class that declares them.** A parent's own method now wins over the same method in a trait it uses, and members from a trait used by a trait or declared only on an interface show where they come from.
+- **`parent` in namespaced classes.** The type hierarchy now opens on `parent`, and semantic highlighting colours `parent` and the members called through it by the parent class.
 - **Short template argument lists on interfaces, traits and mixins.** `@implements Coll<User>` on an interface with `@template TKey` and `@template TValue` now binds `User` to `TValue` for the `@method` and `@property` tags read through it, the same as `@extends` already did, and an omitted parameter takes its declared default. The same applies to `@use` and `@mixin`, and a parent is now matched by its full name, so two parents with the same short name no longer swap arguments.
 - **Classes with the same short name in different namespaces.** Protected members and constructors are offered only for the class itself and its real ancestors, not for a same-named class in another namespace, and semantic highlighting colours each class by its own kind and deprecation.
 - **Imports match `new` in any case.** A property typed from `new user()` in a constructor, or from a promoted parameter's default, now names the imported `App\Models\User` instead of a class in the current namespace.

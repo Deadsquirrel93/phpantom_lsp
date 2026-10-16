@@ -39,11 +39,8 @@ pub(in crate::symbol_map::extraction) fn is_artisan_command_static_call(
     clean_subject: &str,
     member_name: &str,
 ) -> bool {
-    let is_artisan = clean_subject.eq_ignore_ascii_case("Artisan")
-        || clean_subject.eq_ignore_ascii_case("Illuminate\\Support\\Facades\\Artisan");
-    let is_schedule = clean_subject.eq_ignore_ascii_case("Schedule")
-        || clean_subject.eq_ignore_ascii_case("Illuminate\\Support\\Facades\\Schedule");
-    let member = member_name.to_ascii_lowercase();
-    (is_artisan && matches!(member.as_str(), "call" | "queue"))
-        || (is_schedule && member == "command")
+    (matches_laravel_facade(clean_subject, "Artisan")
+        && (member_name.eq_ignore_ascii_case("call") || member_name.eq_ignore_ascii_case("queue")))
+        || (matches_laravel_facade(clean_subject, "Schedule")
+            && member_name.eq_ignore_ascii_case("command"))
 }

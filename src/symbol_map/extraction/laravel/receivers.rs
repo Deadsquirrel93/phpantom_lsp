@@ -7,7 +7,11 @@ use super::*;
 
 /// Whether a semantically resolved class is either Laravel's global runtime
 /// alias or the exact class inside `namespace`.
-fn matches_laravel_class(class_name: &str, namespace: &str, short: &str) -> bool {
+pub(in crate::symbol_map::extraction) fn matches_laravel_class(
+    class_name: &str,
+    namespace: &str,
+    short: &str,
+) -> bool {
     let class_name = class_name.trim_start_matches('\\');
     if class_name.eq_ignore_ascii_case(short) {
         return true;

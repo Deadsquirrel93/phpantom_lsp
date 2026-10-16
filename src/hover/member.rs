@@ -185,18 +185,25 @@ fn raw_class_has_member(
     // is only known through the current file's AST and not yet indexed),
     // fall back to assuming the member is declared — this avoids hiding
     // indicators when the project is only partially indexed.
-    let raw = match class_loader(&fqn) {
-        Some(c) => c,
-        None => return true,
-    };
+    match class_loader(&fqn) {
+        Some(raw) => declares_member(&raw, member_name, member_kind),
+        None => true,
+    }
+}
 
+/// Whether `class` itself declares a member with the given name and kind.
+fn declares_member(
+    class: &ClassInfo,
+    member_name: &str,
+    member_kind: &MemberKindForOrigin,
+) -> bool {
     match member_kind {
-        MemberKindForOrigin::Method => raw
+        MemberKindForOrigin::Method => class
             .methods
             .iter()
             .any(|m| m.name.eq_ignore_ascii_case(member_name)),
-        MemberKindForOrigin::Property => raw.properties.iter().any(|p| p.name == member_name),
-        MemberKindForOrigin::Constant => raw.constants.iter().any(|c| c.name == member_name),
+        MemberKindForOrigin::Property => class.properties.iter().any(|p| p.name == member_name),
+        MemberKindForOrigin::Constant => class.constants.iter().any(|c| c.name == member_name),
     }
 }
 
@@ -235,41 +242,16 @@ fn build_origin_lines(
     if declared_on_owner {
         if let Some(ref parent_name) = owner.parent_class
             && let Some(parent) = class_loader(parent_name)
+            && declares_member(&parent, member_name, &member_kind)
         {
-            let has_member = match member_kind {
-                MemberKindForOrigin::Method => parent
-                    .methods
-                    .iter()
-                    .any(|m| m.name.eq_ignore_ascii_case(member_name)),
-                MemberKindForOrigin::Property => {
-                    parent.properties.iter().any(|p| p.name == member_name)
-                }
-                MemberKindForOrigin::Constant => {
-                    parent.constants.iter().any(|c| c.name == member_name)
-                }
-            };
-            if has_member {
-                origins.push(MemberOrigin::Override(short_name(parent_name).to_string()));
-            }
+            origins.push(MemberOrigin::Override(short_name(parent_name).to_string()));
         }
 
         for iface_name in &owner.interfaces {
-            if let Some(iface) = class_loader(iface_name) {
-                let has_member = match member_kind {
-                    MemberKindForOrigin::Method => iface
-                        .methods
-                        .iter()
-                        .any(|m| m.name.eq_ignore_ascii_case(member_name)),
-                    MemberKindForOrigin::Property => {
-                        iface.properties.iter().any(|p| p.name == member_name)
-                    }
-                    MemberKindForOrigin::Constant => {
-                        iface.constants.iter().any(|c| c.name == member_name)
-                    }
-                };
-                if has_member {
-                    origins.push(MemberOrigin::Implements(short_name(iface_name).to_string()));
-                }
+            if let Some(iface) = class_loader(iface_name)
+                && declares_member(&iface, member_name, &member_kind)
+            {
+                origins.push(MemberOrigin::Implements(short_name(iface_name).to_string()));
             }
         }
     }
@@ -305,8 +287,9 @@ pub(crate) enum MemberKindForOrigin {
 /// Find the class that originally declares a member.
 ///
 /// When a member is inherited (not declared on `owner` itself), this
-/// walks up the parent chain and checks traits and mixins to find the
-/// class that actually declares the member.  Returns a fully-resolved
+/// searches the traits, the parent chain and the interfaces in PHP's
+/// precedence order, then the mixins, to find the class that actually
+/// declares the member.  Returns a fully-resolved
 /// `ClassInfo` for the declaring class, or falls back to `owner` when
 /// the declaring class cannot be determined.
 ///
@@ -323,96 +306,18 @@ pub(crate) fn find_declaring_class(
         return Arc::new(owner.clone());
     }
 
-    for trait_name in &owner.used_traits {
-        if let Some(trait_class) = class_loader(trait_name) {
-            let has = match member_kind {
-                MemberKindForOrigin::Method => trait_class
-                    .methods
-                    .iter()
-                    .any(|m| m.name.eq_ignore_ascii_case(member_name)),
-                MemberKindForOrigin::Property => {
-                    trait_class.properties.iter().any(|p| p.name == member_name)
-                }
-                MemberKindForOrigin::Constant => {
-                    trait_class.constants.iter().any(|c| c.name == member_name)
-                }
-            };
-            if has {
-                return trait_class;
-            }
-        }
+    let declares = |class: &ClassInfo| declares_member(class, member_name, member_kind);
+    if let Some((_, declaring)) =
+        crate::inheritance::find_declaring_ancestor(owner, class_loader, &declares)
+    {
+        return declaring;
     }
-
-    let mut ancestor_name = owner.parent_class;
-    let mut depth = 0u32;
-    while let Some(ref name) = ancestor_name {
-        depth += 1;
-        if depth > 20 {
-            break;
-        }
-        if let Some(ancestor) = class_loader(name) {
-            for trait_name in &ancestor.used_traits {
-                if let Some(trait_class) = class_loader(trait_name) {
-                    let has = match member_kind {
-                        MemberKindForOrigin::Method => trait_class
-                            .methods
-                            .iter()
-                            .any(|m| m.name.eq_ignore_ascii_case(member_name)),
-                        MemberKindForOrigin::Property => {
-                            trait_class.properties.iter().any(|p| p.name == member_name)
-                        }
-                        MemberKindForOrigin::Constant => {
-                            trait_class.constants.iter().any(|c| c.name == member_name)
-                        }
-                    };
-                    if has {
-                        return trait_class;
-                    }
-                }
-            }
-
-            let has = match member_kind {
-                MemberKindForOrigin::Method => ancestor
-                    .methods
-                    .iter()
-                    .any(|m| m.name.eq_ignore_ascii_case(member_name)),
-                MemberKindForOrigin::Property => {
-                    ancestor.properties.iter().any(|p| p.name == member_name)
-                }
-                MemberKindForOrigin::Constant => {
-                    ancestor.constants.iter().any(|c| c.name == member_name)
-                }
-            };
-            if has {
-                return ancestor;
-            }
-            ancestor_name = ancestor.parent_class;
-        } else {
-            break;
-        }
-    }
-
-    for mixin_name in &owner.mixins {
-        if let Some(mixin_class) = class_loader(mixin_name) {
-            let has = match member_kind {
-                MemberKindForOrigin::Method => mixin_class
-                    .methods
-                    .iter()
-                    .any(|m| m.name.eq_ignore_ascii_case(member_name)),
-                MemberKindForOrigin::Property => {
-                    mixin_class.properties.iter().any(|p| p.name == member_name)
-                }
-                MemberKindForOrigin::Constant => {
-                    mixin_class.constants.iter().any(|c| c.name == member_name)
-                }
-            };
-            if has {
-                return mixin_class;
-            }
-        }
-    }
-
-    Arc::new(owner.clone())
+    owner
+        .mixins
+        .iter()
+        .filter_map(|name| class_loader(name))
+        .find(|mixin| declares(mixin))
+        .unwrap_or_else(|| Arc::new(owner.clone()))
 }
 
 /// Result of searching for a member on a [`ClassInfo`] for hover purposes.

@@ -366,27 +366,16 @@ fn build_mixin_macro(
     }
 
     // The macro's signature comes from the closure the method returns.
-    let closure_expr = returned_closure(body)?;
-    let (parameter_list, return_type_hint) = closure_signature(closure_expr)?;
-    let closure_text = expr_source_text(Some(closure_expr), content);
-
-    let parameters =
-        crate::parser::extract_parameters(parameter_list, Some(content), php_version, None);
-    let return_type = return_type_hint.map(|rth| crate::parser::extract_hint_type(&rth.hint));
-
-    let mut synthesized = MethodInfo::virtual_method_typed(name, return_type.as_ref());
-    synthesized.parameters = parameters.into();
-    synthesized.native_return_type = return_type;
-    synthesized.is_macro = true;
-
-    Some(MacroRegistration {
-        target: target_fqn.to_string(),
-        method: synthesized,
-        name_offset: method.name.span.start.offset,
-        closure_text,
-        closure_offset: Some(closure_expr.span().start.offset),
-        definition_uri: Some(mixin_uri.to_string()),
-    })
+    let mut registration = closure_macro(
+        name,
+        target_fqn.to_string(),
+        method.name.span.start.offset,
+        returned_closure(body)?,
+        content,
+        php_version,
+    )?;
+    registration.definition_uri = Some(mixin_uri.to_string());
+    Some(registration)
 }
 
 /// Build a macro from a trait mixin method whose own signature is used directly
@@ -952,31 +941,7 @@ fn build_instance_registration(
     content: &str,
     php_version: Option<PhpVersion>,
 ) -> Option<MacroRegistration> {
-    let mut args = mc.argument_list.arguments.iter();
-    let name_arg = args.next()?.value();
-    let name = macro_name(name_arg)?;
-    let name_offset = name_arg.span().start.offset;
-    let closure_expr = args.next()?.value();
-    let (parameter_list, return_type_hint) = closure_signature(closure_expr)?;
-    let closure_text = expr_source_text(Some(closure_expr), content);
-
-    let parameters =
-        crate::parser::extract_parameters(parameter_list, Some(content), php_version, None);
-    let return_type = return_type_hint.map(|rth| crate::parser::extract_hint_type(&rth.hint));
-
-    let mut method = MethodInfo::virtual_method_typed(&name, return_type.as_ref());
-    method.parameters = parameters.into();
-    method.native_return_type = return_type;
-    method.is_macro = true;
-
-    Some(MacroRegistration {
-        target: target.to_string(),
-        method,
-        name_offset,
-        closure_text,
-        closure_offset: Some(closure_expr.span().start.offset),
-        definition_uri: None,
-    })
+    registration_from_arguments(&mc.argument_list, target.to_string(), content, php_version)
 }
 
 /// Build a [`MacroRegistration`] from a `Target::macro('name', closure)` call,
@@ -988,20 +953,47 @@ fn build_registration(
     php_version: Option<PhpVersion>,
 ) -> Option<MacroRegistration> {
     let target = resolve_target_fqn(smc.class, resolved)?;
+    registration_from_arguments(&smc.argument_list, target, content, php_version)
+}
 
-    let mut args = smc.argument_list.arguments.iter();
+/// The macro a `macro('name', closure)` call's arguments register on
+/// `target`.
+fn registration_from_arguments(
+    argument_list: &ArgumentList<'_>,
+    target: String,
+    content: &str,
+    php_version: Option<PhpVersion>,
+) -> Option<MacroRegistration> {
+    let mut args = argument_list.arguments.iter();
     let name_arg = args.next()?.value();
     let name = macro_name(name_arg)?;
-    let name_offset = name_arg.span().start.offset;
     let closure_expr = args.next()?.value();
-    let (parameter_list, return_type_hint) = closure_signature(closure_expr)?;
-    let closure_text = expr_source_text(Some(closure_expr), content);
+    closure_macro(
+        &name,
+        target,
+        name_arg.span().start.offset,
+        closure_expr,
+        content,
+        php_version,
+    )
+}
 
+/// The macro `name` whose signature is that of `closure_expr`, or `None`
+/// when that is not a closure or arrow function.
+fn closure_macro(
+    name: &str,
+    target: String,
+    name_offset: u32,
+    closure_expr: &Expression<'_>,
+    content: &str,
+    php_version: Option<PhpVersion>,
+) -> Option<MacroRegistration> {
+    let (parameter_list, return_type_hint) = closure_signature(closure_expr)?;
     let parameters =
         crate::parser::extract_parameters(parameter_list, Some(content), php_version, None);
     let return_type = return_type_hint.map(|rth| crate::parser::extract_hint_type(&rth.hint));
 
-    let mut method = MethodInfo::virtual_method_typed(&name, return_type.as_ref());
+    let mut method = MethodInfo::virtual_method_typed(name, return_type.as_ref());
     method.parameters = parameters.into();
     method.native_return_type = return_type;
     method.is_macro = true;
@@ -1010,7 +1002,7 @@ fn build_registration(
         target,
         method,
         name_offset,
-        closure_text,
+        closure_text: expr_source_text(Some(closure_expr), content),
         closure_offset: Some(closure_expr.span().start.offset),
         definition_uri: None,
     })

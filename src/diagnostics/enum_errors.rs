@@ -58,45 +58,30 @@ impl Backend {
             let backed = class_info.backed_type.is_some();
 
             for case in &enum_cases {
-                if backed && case.enum_value.is_none() {
-                    let range = match self.offset_range_to_lsp_range(
-                        uri,
-                        content,
-                        case.name_offset as usize,
-                        case.name_offset as usize + case.name.len(),
-                    ) {
-                        Some(r) => r,
-                        None => continue,
-                    };
-                    out.push(make_diagnostic(
-                        range,
-                        DiagnosticSeverity::ERROR,
-                        "invalid_enum_case",
-                        format!(
-                            "Enum case '{}::{}' must have a value, enum '{}' is a backed enum",
-                            class_info.name, case.name, class_info.name
-                        ),
-                    ));
-                } else if !backed && case.enum_value.is_some() {
-                    let range = match self.offset_range_to_lsp_range(
-                        uri,
-                        content,
-                        case.name_offset as usize,
-                        case.name_offset as usize + case.name.len(),
-                    ) {
-                        Some(r) => r,
-                        None => continue,
-                    };
-                    out.push(make_diagnostic(
-                        range,
-                        DiagnosticSeverity::ERROR,
-                        "invalid_enum_case",
-                        format!(
-                            "Enum case '{}::{}' must not have a value, enum '{}' is not a backed enum",
-                            class_info.name, case.name, class_info.name
-                        ),
-                    ));
-                }
+                let (enum_name, case_name) = (&class_info.name, &case.name);
+                let message = match (backed, case.enum_value.is_some()) {
+                    (true, false) => format!(
+                        "Enum case '{enum_name}::{case_name}' must have a value, enum '{enum_name}' is a backed enum"
+                    ),
+                    (false, true) => format!(
+                        "Enum case '{enum_name}::{case_name}' must not have a value, enum '{enum_name}' is not a backed enum"
+                    ),
+                    _ => continue,
+                };
+                let Some(range) = self.offset_range_to_lsp_range(
+                    uri,
+                    content,
+                    case.name_offset as usize,
+                    case.name_offset as usize + case.name.len(),
+                ) else {
+                    continue;
+                };
+                out.push(make_diagnostic(
+                    range,
+                    DiagnosticSeverity::ERROR,
+                    "invalid_enum_case",
+                    message,
+                ));
             }
 
             if backed {

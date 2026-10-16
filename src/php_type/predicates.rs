@@ -353,23 +353,7 @@ impl PhpType {
         match self.kind() {
             TypeKind::Named(s) => matches!(
                 s.to_ascii_lowercase().as_str(),
-                "string"
-                    | "non-empty-string"
-                    | "numeric-string"
-                    | "literal-string"
-                    | "non-empty-literal-string"
-                    | "truthy-string"
-                    | "callable-string"
-                    | "class-string"
-                    | "interface-string"
-                    | "trait-string"
-                    | "enum-string"
-                    | "view-string"
-                    | "lowercase-string"
-                    | "non-empty-lowercase-string"
-                    | "uppercase-string"
-                    | "non-empty-uppercase-string"
-                    | "non-falsy-string"
+                "string" | string_refinement!() | "view-string"
             ),
             TypeKind::ClassString(_) | TypeKind::InterfaceString(_) => true,
             TypeKind::Literal(l) => matches!(**l, LiteralValue::String(_)),
@@ -419,13 +403,7 @@ impl PhpType {
         match self.kind() {
             TypeKind::Named(s) => matches!(
                 keyword_lowercase(s).as_str(),
-                "int"
-                    | "integer"
-                    | "positive-int"
-                    | "negative-int"
-                    | "non-negative-int"
-                    | "non-positive-int"
-                    | "non-zero-int"
+                "int" | "integer" | int_refinement!()
             ),
             TypeKind::IntRange(_, _) => true,
             TypeKind::Literal(l) => matches!(**l, LiteralValue::Int(_)),
@@ -641,11 +619,7 @@ impl PhpType {
                             | "boolean"
                             | "true"
                             | "false"
-                            | "positive-int"
-                            | "negative-int"
-                            | "non-negative-int"
-                            | "non-positive-int"
-                            | "non-zero-int"
+                            | int_refinement!()
                     )
             }
             TypeKind::Literal(value) => {

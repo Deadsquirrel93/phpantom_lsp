@@ -127,8 +127,7 @@ pub(crate) fn config_keys_written_by(expr: &Expression<'_>, content: &str) -> Ve
 
 /// Whether a static call's class, as written, is the `Config` facade.
 pub(in crate::symbol_map::extraction) fn is_config_facade_name(name: &str) -> bool {
-    name.eq_ignore_ascii_case("Config")
-        || name.eq_ignore_ascii_case("Illuminate\\Support\\Facades\\Config")
+    matches_laravel_facade(name, "Config")
 }
 
 /// Push a config-key span for every key the array argument of a

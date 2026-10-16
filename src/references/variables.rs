@@ -12,7 +12,6 @@ use tower_lsp::lsp_types::{Location, Range};
 
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind, VarDefKind};
 use crate::text_position::LineIndex;
-use crate::types::ClassInfo;
 
 impl Backend {
     /// Find all references to a variable within its enclosing scope.
@@ -306,14 +305,7 @@ impl Backend {
         };
 
         // Determine the class body the cursor is in.
-        let ctx_classes: Vec<Arc<ClassInfo>> = self
-            .symbols
-            .uri_classes_index
-            .read()
-            .get(uri)
-            .cloned()
-            .unwrap_or_default();
-        let current_class = crate::class_lookup::find_class_at_offset(&ctx_classes, cursor_offset);
+        let current_class = self.class_at_offset(uri, cursor_offset);
         let (class_start, class_end) = match current_class {
             Some(cc) => (cc.start_offset, cc.end_offset),
             None => return locations,

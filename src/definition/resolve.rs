@@ -23,11 +23,10 @@ use tower_lsp::lsp_types::*;
 use super::member::{MemberAccessHint, MemberDefinitionCtx, MemberKind};
 use super::point_location;
 use crate::Backend;
-use crate::class_lookup::find_class_at_offset;
 use crate::composer;
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind};
 use crate::text_position::position_to_offset;
-use crate::types::{AccessKind, ClassInfo};
+use crate::types::AccessKind;
 use crate::util::short_name;
 use crate::virtual_members::laravel;
 
@@ -717,15 +716,7 @@ impl Backend {
     ) -> Option<Location> {
         let cursor_offset = position_to_offset(content, position);
 
-        let classes: Vec<std::sync::Arc<ClassInfo>> = self
-            .symbols
-            .uri_classes_index
-            .read()
-            .get(uri)
-            .cloned()
-            .unwrap_or_default();
-
-        let current_class = find_class_at_offset(&classes, cursor_offset)?;
+        let current_class = self.class_at_offset(uri, cursor_offset)?;
 
         if matches!(
             ssp_kind,
@@ -759,76 +750,9 @@ impl Backend {
             return Some(point_location(parsed_uri, target_position));
         }
 
-        // SelfStaticParentKind::Parent
-        let parent_name = current_class.parent_class.as_ref()?;
-
-        // Try to find the parent class in the current file first.
-        // Use keyword_offset when available (the parent class is in the
-        // same file's uri_classes_index entry).
-        let parent_in_file = classes.iter().find(|c| c.name == *parent_name);
-        let parent_pos = parent_in_file.filter(|pc| pc.keyword_offset > 0).map(|pc| {
-            crate::text_position::offset_to_position(content, pc.keyword_offset as usize)
-        });
-        if let Some(pos) = parent_pos {
-            let parsed_uri = Url::parse(uri).ok()?;
-            return Some(point_location(parsed_uri, pos));
-        }
-
-        // Resolve the parent class name to a FQN using use-map / namespace.
-        let ctx = self.file_context(uri);
-
-        let fqn = ctx.resolve_name_at(parent_name, cursor_offset);
-
-        // Try fqn_uri_index / uri_classes_index lookup via find_class_file_content.
-        if let Some((class_uri, class_content)) = self.find_class_file_content(&fqn, uri, content) {
-            // Use keyword_offset from the uri_classes_index entry for the cross-file class.
-            let cross_class = self.find_class_in_uri_classes_index(&fqn);
-            if let Some(ref cc) = cross_class
-                && cc.keyword_offset > 0
-                && let Ok(parsed_uri) = Url::parse(&class_uri)
-            {
-                let pos = crate::text_position::offset_to_position(
-                    &class_content,
-                    cc.keyword_offset as usize,
-                );
-                return Some(point_location(parsed_uri, pos));
-            }
-        }
-
-        // Try class index: direct FQN → URI lookup.
-        {
-            let candidates = [fqn.as_str(), parent_name.as_str()];
-            for candidate in &candidates {
-                if let Some(file_uri) = self.symbols.fqn_uri_index.read().get(candidate).cloned()
-                    && let Some(file_path) = Url::parse(&file_uri)
-                        .ok()
-                        .and_then(|u| u.to_file_path().ok())
-                    && let Some(location) = self.resolve_class_in_file(&file_path, candidate)
-                {
-                    return Some(location);
-                }
-            }
-        }
-
-        // Try PSR-4 resolution as a last resort.
-        // PSR-4 mappings only cover user code (from composer.json).
-        // Vendor classes are resolved by the class index above.
-        let workspace_root = self.workspace.workspace_root.read().clone();
-
-        if let Some(workspace_root) = workspace_root {
-            let mappings = self.workspace.psr4_mappings.read();
-            let candidates = [fqn.as_str(), parent_name.as_str()];
-            for candidate in &candidates {
-                if let Some(file_path) =
-                    composer::resolve_class_path(&mappings, &workspace_root, candidate)
-                    && let Some(location) = self.resolve_class_in_file(&file_path, candidate)
-                {
-                    return Some(location);
-                }
-            }
-        }
-
-        None
+        // The parser has already resolved `parent_class` to an FQN.
+        let parent_name = current_class.parent_class?;
+        self.resolve_class_reference(uri, content, &parent_name, true, cursor_offset)
     }
 }
 

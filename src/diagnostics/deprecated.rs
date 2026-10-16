@@ -30,9 +30,7 @@ use crate::types::AccessKind;
 use crate::types::{ClassInfo, ClassLikeKind};
 use crate::virtual_members::{ResolvedClassCache, resolve_class_fully_cached};
 
-use super::helpers::{
-    FileDiagnosticContext, find_enclosing_method_name, make_tagged_diagnostic, resolve_to_fqn,
-};
+use super::helpers::{FileDiagnosticContext, find_enclosing_method_name, make_tagged_diagnostic};
 use super::subject_cache::SubjectCacheKey;
 
 impl Backend {
@@ -95,6 +93,32 @@ impl Backend {
             return;
         };
 
+        // Flag one deprecated use, unless it sits in code that is itself
+        // deprecated.
+        let report = |out: &mut Vec<Diagnostic>,
+                      start: u32,
+                      end: u32,
+                      symbol: &str,
+                      class: Option<&str>,
+                      msg: &str,
+                      see_refs: &[String]| {
+            if is_within_deprecated_scope(
+                self,
+                local_classes,
+                resolved_class_loader,
+                cache,
+                content,
+                start,
+            ) {
+                return;
+            }
+            if let Some(range) =
+                self.offset_range_to_lsp_range(uri, content, start as usize, end as usize)
+            {
+                out.push(deprecated_diagnostic(range, symbol, class, msg, see_refs));
+            }
+        };
+
         // ── Walk every symbol span ──────────────────────────────────────
         for span in &symbol_map.spans {
             if !super::incremental::reports_site(span.start) {
@@ -118,44 +142,24 @@ impl Backend {
                     if matches!(context, ClassRefContext::UseImport) {
                         continue;
                     }
-                    // Prefer mago-names byte-offset lookup when available —
-                    // it applies PHP's full name resolution rules.  Fall
-                    // back to the legacy resolve_to_fqn helper otherwise.
                     let resolved_name = if *is_fqn {
                         name.to_string()
-                    } else if let Some(rn) = file_resolved_names {
-                        rn.get(span.start)
-                            .map(|s| s.to_string())
-                            .unwrap_or_else(|| resolve_to_fqn(name, file_use_map, file_namespace))
                     } else {
-                        resolve_to_fqn(name, file_use_map, file_namespace)
+                        ctx.file.resolve_name_at(name, span.start)
                     };
 
                     if let Some(cls) = self.find_or_load_class(&resolved_name)
                         && let Some(msg) = &cls.deprecation_message
-                        && !is_within_deprecated_scope(
-                            self,
-                            local_classes,
-                            resolved_class_loader,
-                            cache,
-                            content,
-                            span.start,
-                        )
-                        && let Some(range) = self.offset_range_to_lsp_range(
-                            uri,
-                            content,
-                            span.start as usize,
-                            span.end as usize,
-                        )
                     {
-                        let class_fqn = cls.fqn();
-                        out.push(deprecated_diagnostic(
-                            range,
-                            &class_fqn,
+                        report(
+                            out,
+                            span.start,
+                            span.end,
+                            &cls.fqn(),
                             None,
                             msg,
                             &cls.see_refs,
-                        ));
+                        );
                     }
                 }
 
@@ -271,30 +275,16 @@ impl Backend {
                                 ))
                             })
                     };
-                    if let Some((msg, see_refs)) = deprecated
-                        && !is_within_deprecated_scope(
-                            self,
-                            local_classes,
-                            resolved_class_loader,
-                            cache,
-                            content,
+                    if let Some((msg, see_refs)) = deprecated {
+                        report(
+                            out,
                             span.start,
-                        )
-                        && let Some(range) = self.offset_range_to_lsp_range(
-                            uri,
-                            content,
-                            span.start as usize,
-                            span.end as usize,
-                        )
-                    {
-                        let class_fqn = resolved.fqn();
-                        out.push(deprecated_diagnostic(
-                            range,
+                            span.end,
                             member_name,
-                            Some(&class_fqn),
+                            Some(&resolved.fqn()),
                             msg,
                             see_refs,
-                        ));
+                        );
                     }
                 }
 
@@ -315,28 +305,16 @@ impl Backend {
                         &ctx.file.symbol_imports_at(span.start).functions,
                         file_namespace,
                     ) && let Some(msg) = &func_info.deprecation_message
-                        && !is_within_deprecated_scope(
-                            self,
-                            local_classes,
-                            resolved_class_loader,
-                            cache,
-                            content,
-                            span.start,
-                        )
-                        && let Some(range) = self.offset_range_to_lsp_range(
-                            uri,
-                            content,
-                            span.start as usize,
-                            span.end as usize,
-                        )
                     {
-                        out.push(deprecated_diagnostic(
-                            range,
+                        report(
+                            out,
+                            span.start,
+                            span.end,
                             name,
                             None,
                             msg,
                             &func_info.see_refs,
-                        ));
+                        );
                     }
                 }
 

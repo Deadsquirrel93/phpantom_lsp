@@ -55,6 +55,32 @@ pub(crate) fn resolve_to_fqn(
     name.to_string()
 }
 
+/// The function a call by `name`, as written, reaches: the FQN PHP looks
+/// up first, and the global name it falls back to when that one does not
+/// exist.
+///
+/// A qualified name's first segment goes through the class imports
+/// (`class_imports`) and never falls back.  A bare name is a `use function`
+/// alias, which never falls back either, or else local to the namespace,
+/// falling back to the global function.
+pub(crate) fn function_lookup_names<'n>(
+    name: &'n str,
+    class_imports: &HashMap<String, String>,
+    function_imports: &HashMap<String, String>,
+    namespace: &Option<String>,
+) -> (String, Option<&'n str>) {
+    if name.contains('\\') {
+        return (resolve_to_fqn(name, class_imports, namespace), None);
+    }
+    if let Some(fqn) = lookup_import(function_imports, name) {
+        return (fqn.clone(), None);
+    }
+    match namespace {
+        Some(ns) => (format!("{ns}\\{name}"), Some(name)),
+        None => (name.to_string(), None),
+    }
+}
+
 /// Reverse of [`resolve_to_fqn`]: shorten a resolved name to the form the
 /// file would reference it by: the `use`-map alias when one imports it,
 /// or the bare name when it lives in the file's own namespace.  A

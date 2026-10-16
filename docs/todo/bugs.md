@@ -71,7 +71,28 @@ No outstanding items.
 
 ## Name resolution
 
-No outstanding items.
+### B625. A qualified function call through a class import is not found without a resolved name
+
+**Impact: Low · Complexity: Medium**
+
+```php
+namespace App;
+use Lib\Helpers;
+Helpers\greet(   // no signature help for Lib\Helpers\greet()
+```
+
+PHP expands the first segment of a qualified function name through the
+file's class imports. `Backend::resolve_function_name_at`
+(`resolution/functions.rs`) only gets that right when mago's resolved
+name for the call's offset is available. Without it, the
+`names::function_lookup_names` fallback gets the `use function` table
+and no class imports, so it builds `App\Helpers\greet`. The callers that
+pass no resolved name are `resolve_function_name` (signature help through
+`callable_target.rs`, `replace_deprecated.rs`) and every
+`function_loader_with(None, …)` (Blade echoes, discovery, the
+fix-return-type inference). Give the function loader the class `use` map
+as well (or the `FileContext` it comes from) and pass it to
+`function_lookup_names`.
 
 ## Miscellaneous
 

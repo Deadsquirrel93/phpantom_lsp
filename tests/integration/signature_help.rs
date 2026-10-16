@@ -79,6 +79,28 @@ async fn standalone_function_first_param() {
 }
 
 #[tokio::test]
+async fn imported_function_shadows_a_global_one() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///sig_imported_func.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace {\n",
+        "    function greet(int $times): void {}\n",
+        "}\n",
+        "namespace Lib {\n",
+        "    function greet(string $name): void {}\n",
+        "}\n",
+        "namespace App {\n",
+        "    use function Lib\\greet;\n",
+        "    greet(\n",
+        "}\n",
+    );
+
+    let sh = sig_help_at(&backend, &uri, text, 9, 10).await.unwrap();
+    assert_eq!(sig_label(&sh), "(string $name): void");
+}
+
+#[tokio::test]
 async fn standalone_function_second_param() {
     let backend = create_test_backend();
     let uri = Url::parse("file:///sig_func2.php").unwrap();

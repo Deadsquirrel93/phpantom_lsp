@@ -37,13 +37,10 @@ pub(in crate::symbol_map::extraction) fn is_route_name_facade_call(
     clean_subject: &str,
     member_name: &str,
 ) -> bool {
-    let is_facade = clean_subject.eq_ignore_ascii_case("URL")
-        || clean_subject.eq_ignore_ascii_case("Illuminate\\Support\\Facades\\URL")
-        || clean_subject.eq_ignore_ascii_case("Redirect")
-        || clean_subject.eq_ignore_ascii_case("Illuminate\\Support\\Facades\\Redirect")
-        || clean_subject.eq_ignore_ascii_case("Response")
-        || clean_subject.eq_ignore_ascii_case("Illuminate\\Support\\Facades\\Response");
-    is_facade && is_route_name_method(member_name)
+    ["URL", "Redirect", "Response"]
+        .iter()
+        .any(|facade| matches_laravel_facade(clean_subject, facade))
+        && is_route_name_method(member_name)
 }
 
 /// Whether `member_name` is the request's "is the current route named …?"

@@ -716,9 +716,7 @@ fn emit_laravel_static_call_spans<'a>(
     }
     // The `View` facade proxies the view factory, so every
     // factory method that names a template does so here too.
-    if clean_subject.eq_ignore_ascii_case("View")
-        || clean_subject.eq_ignore_ascii_case("Illuminate\\Support\\Facades\\View")
-    {
+    if matches_laravel_facade(clean_subject, "View") {
         if let Some(index) = view_factory_method_name_index(member_name) {
             try_emit_laravel_view_span_at(index, argument_list, ctx.content, &mut ctx.spans);
         } else if is_render_each_method(member_name) {
@@ -728,10 +726,7 @@ fn emit_laravel_static_call_spans<'a>(
     // `Route::view('/about', 'pages.about', [...])` binds a URI
     // straight to a template, naming the view second;
     // `Response::view('pages.about', [...])` names it first.
-    if (clean_subject.eq_ignore_ascii_case("Route")
-        || clean_subject.eq_ignore_ascii_case("Illuminate\\Support\\Facades\\Route"))
-        && member_name.eq_ignore_ascii_case("view")
-    {
+    if matches_laravel_facade(clean_subject, "Route") && member_name.eq_ignore_ascii_case("view") {
         try_emit_laravel_string_span_at(
             crate::symbol_map::LaravelStringKind::View,
             1,
@@ -740,9 +735,7 @@ fn emit_laravel_static_call_spans<'a>(
             &mut ctx.spans,
         );
     }
-    if (clean_subject.eq_ignore_ascii_case("Response")
-        || clean_subject.eq_ignore_ascii_case("Illuminate\\Support\\Facades\\Response"))
-        && member_name.eq_ignore_ascii_case("view")
+    if matches_laravel_facade(clean_subject, "Response") && member_name.eq_ignore_ascii_case("view")
     {
         try_emit_laravel_string_span(
             crate::symbol_map::LaravelStringKind::View,
@@ -763,9 +756,7 @@ fn emit_laravel_static_call_spans<'a>(
     }
     // `Route::is('admin.*')` / `Route::currentRouteNamed(…)` list
     // the names the current route is checked against.
-    if (clean_subject.eq_ignore_ascii_case("Route")
-        || clean_subject.eq_ignore_ascii_case("Illuminate\\Support\\Facades\\Route"))
-        && is_route_facade_pattern_method(member_name)
+    if matches_laravel_facade(clean_subject, "Route") && is_route_facade_pattern_method(member_name)
     {
         try_emit_laravel_string_spans_all(
             crate::symbol_map::LaravelStringKind::Route,
@@ -776,13 +767,7 @@ fn emit_laravel_static_call_spans<'a>(
     }
     // `Env::get('APP_NAME')` reads the same variable the `env()`
     // helper it backs does.
-    if (clean_subject.eq_ignore_ascii_case("Env")
-        || clean_subject.eq_ignore_ascii_case("Illuminate\\Support\\Env"))
-        && matches!(
-            member_name.to_ascii_lowercase().as_str(),
-            "get" | "getorfail"
-        )
-    {
+    if is_env_key_call(clean_subject, member_name) {
         try_emit_laravel_string_span(
             crate::symbol_map::LaravelStringKind::Env,
             argument_list,
@@ -790,13 +775,7 @@ fn emit_laravel_static_call_spans<'a>(
             &mut ctx.spans,
         );
     }
-    if (clean_subject.eq_ignore_ascii_case("Lang")
-        || clean_subject.eq_ignore_ascii_case("Illuminate\\Support\\Facades\\Lang"))
-        && matches!(
-            member_name.to_ascii_lowercase().as_str(),
-            "get" | "has" | "hasforlocale" | "choice"
-        )
-    {
+    if is_lang_key_call(clean_subject, member_name) {
         try_emit_laravel_string_span(
             crate::symbol_map::LaravelStringKind::Trans,
             argument_list,
@@ -806,9 +785,7 @@ fn emit_laravel_static_call_spans<'a>(
     }
     // `App::make('payments')` and the registrations written
     // against the same facade.
-    if clean_subject.eq_ignore_ascii_case("App")
-        || clean_subject.eq_ignore_ascii_case("Illuminate\\Support\\Facades\\App")
-    {
+    if matches_laravel_facade(clean_subject, "App") {
         try_emit_container_key_span(member_name, argument_list, ctx.content, &mut ctx.spans);
     }
     // Artisan command names: `Artisan::call('app:sync')`,
@@ -835,16 +812,9 @@ fn emit_laravel_static_call_spans<'a>(
     // `Relation::morphMap(['post' => Post::class])` registration,
     // and the argument of `Relation::getMorphedModel('post')` /
     // `Model::getActualClassNameForMorph('post')`.
-    if clean_subject.eq_ignore_ascii_case("Relation")
-        || clean_subject.eq_ignore_ascii_case("Illuminate\\Database\\Eloquent\\Relations\\Relation")
-    {
-        if is_morph_map_registration_method(member_name) {
-            try_emit_morph_map_key_spans(argument_list, ctx.content, &mut ctx.spans);
-        } else if member_name.eq_ignore_ascii_case("getMorphedModel") {
-            try_emit_morph_type_spans(argument_list, 0, ctx.content, &mut ctx.spans);
-        }
-    }
-    if member_name.eq_ignore_ascii_case("getActualClassNameForMorph") {
+    if is_relation_class_name(clean_subject) && is_morph_map_registration_method(member_name) {
+        try_emit_morph_map_key_spans(argument_list, ctx.content, &mut ctx.spans);
+    } else if is_morph_alias_lookup_call(clean_subject, member_name) {
         try_emit_morph_type_spans(argument_list, 0, ctx.content, &mut ctx.spans);
     }
     // A model forwards static calls to its query builder, so

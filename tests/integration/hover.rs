@@ -2862,6 +2862,36 @@ function demo(): void {
     );
 }
 
+/// A parent's own method overrides the one its trait supplies, so the
+/// parent is the class that declares it.
+#[test]
+fn hover_inherited_method_prefers_the_parent_over_its_trait() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+trait Runs {
+    public function run(): void {}
+}
+class Base {
+    use Runs;
+    public function run(): void {}
+}
+class Child extends Base {}
+function demo(Child $child): void {
+    $child->run();
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 10, 14).expect("expected hover");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("class Base"),
+        "should show declaring class Base, got: {}",
+        text
+    );
+    assert!(!text.contains("trait Runs"), "got: {}", text);
+}
+
 // ─── Class with parent and implements ───────────────────────────────────────
 
 #[test]

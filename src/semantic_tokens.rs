@@ -614,13 +614,8 @@ impl Backend {
 
         let base: Arc<ClassInfo> = match subject_text {
             "$this" | "self" | "static" | "parent" => {
-                // Innermost class whose byte range contains the access
-                // (handles nested anonymous classes).
-                let Some(enclosing) = ctx
-                    .classes
-                    .iter()
-                    .filter(|c| offset >= c.start_offset && offset <= c.end_offset)
-                    .max_by_key(|c| c.start_offset)
+                let Some(enclosing) =
+                    crate::class_lookup::find_shared_class_at_offset(&ctx.classes, offset)
                 else {
                     return unverified;
                 };
@@ -631,11 +626,10 @@ impl Backend {
                     return unverified;
                 }
                 if subject_text == "parent" {
-                    let Some(ref parent_name) = enclosing.parent_class else {
+                    let Some(parent_name) = enclosing.parent_class else {
                         return unverified;
                     };
-                    let fqn = ctx.resolve_name_at(parent_name, offset);
-                    match self.find_or_load_class(&fqn) {
+                    match self.find_or_load_class(&parent_name) {
                         Some(c) => c,
                         None => return unverified,
                     }
@@ -816,12 +810,10 @@ impl Backend {
         if *ssp_kind == crate::symbol_map::SelfStaticParentKind::Parent {
             // Try to resolve the parent class kind.
             if let Some(class) = crate::class_lookup::find_class_at_offset(&ctx.classes, offset)
-                && let Some(ref parent_name) = class.parent_class
+                && let Some(parent_name) = class.parent_class
+                && let Some(parent_info) = self.find_or_load_class(&parent_name)
             {
-                let fqn = ctx.resolve_name_at(parent_name, offset);
-                if let Some(parent_info) = self.find_or_load_class(&fqn) {
-                    return kind_to_token_type(parent_info.kind);
-                }
+                return kind_to_token_type(parent_info.kind);
             }
         }
         TT_TYPE

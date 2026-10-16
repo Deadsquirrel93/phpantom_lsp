@@ -367,27 +367,7 @@ pub(super) fn has_return_type_between(
     paren_col: usize,
     brace_line: usize,
 ) -> bool {
-    for (line_idx, line) in lines
-        .iter()
-        .enumerate()
-        .take(brace_line + 1)
-        .skip(paren_line)
-    {
-        let start_col = if line_idx == paren_line {
-            paren_col + 1
-        } else {
-            0
-        };
-        let end_col = if line_idx == brace_line {
-            line.find('{').unwrap_or(line.len())
-        } else {
-            line.len()
-        };
-        if start_col <= end_col && line[start_col..end_col].contains(':') {
-            return true;
-        }
-    }
-    false
+    gather_between_paren_and_brace(lines, paren_line, paren_col, brace_line).contains(':')
 }
 
 /// Check whether the byte position `after_semi` (just past a `;`) is

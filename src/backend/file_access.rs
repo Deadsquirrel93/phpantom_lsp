@@ -157,6 +157,14 @@ impl Backend {
         self.symbols.uri_classes_index.read().get(uri).cloned()
     }
 
+    /// The innermost class `uri` declares around `offset` (see
+    /// [`find_class_at_offset`](crate::class_lookup::find_class_at_offset)),
+    /// unlinked, without copying the file's class list.
+    pub(crate) fn class_at_offset(&self, uri: &str, offset: u32) -> Option<Arc<ClassInfo>> {
+        let index = self.symbols.uri_classes_index.read();
+        crate::class_lookup::find_shared_class_at_offset(index.get(uri)?, offset).cloned()
+    }
+
     /// The classes `uri` declares, linked the way the class loader links a
     /// class it loads (see [`link_loaded_class`](Self::link_loaded_class)).
     ///
@@ -259,20 +267,6 @@ impl Backend {
             return ctx;
         }
         ctx.at(byte_offset)
-    }
-
-    /// Subset of [`file_context_at`](Self::file_context_at) for callers
-    /// that only need the enclosing class list and namespace (e.g.
-    /// resolving `self`/`static`/`parent`). Skips the `use`-map and
-    /// `resolved_names` clones.
-    pub(crate) fn classes_and_namespace_at(
-        &self,
-        uri: &str,
-        byte_offset: u32,
-    ) -> (Vec<Arc<ClassInfo>>, Option<String>) {
-        let classes = self.linked_classes_for_uri(uri);
-        let namespace = self.namespace_at_offset(uri, byte_offset);
-        (classes, namespace)
     }
 
     /// Subset of [`file_context_at`](Self::file_context_at) for callers

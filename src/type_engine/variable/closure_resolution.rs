@@ -294,89 +294,32 @@ fn walk_call_for_closure_this(
     call: &Call<'_>,
     ctx: &ResolutionCtx<'_>,
 ) -> Option<Vec<ResolvedType>> {
-    match call {
-        Call::Function(fc) => {
-            let result = walk_args_for_closure_this(&fc.argument_list.arguments, ctx, &|arg_idx| {
-                closure_this_for_argument(call, arg_idx, ctx)
-            });
-            if result.is_some() {
-                return result;
-            }
-            // Recurse into arguments that are not closures (e.g. nested calls).
-            for arg in fc.argument_list.arguments.iter() {
-                let arg_expr = arg.value();
-                if !is_closure_like(arg_expr)
-                    && let Some(r) = walk_expr_for_closure_this(arg_expr, ctx)
-                {
-                    return Some(r);
-                }
-            }
-            None
-        }
+    let (receiver, argument_list) = match call {
+        Call::Function(fc) => (None, &fc.argument_list),
         Call::Method(mc) => {
             if let Some(r) = closure_call_this(mc, ctx) {
                 return Some(r);
             }
-            if let Some(r) = walk_expr_for_closure_this(mc.object, ctx) {
-                return Some(r);
-            }
-            let result = walk_args_for_closure_this(&mc.argument_list.arguments, ctx, &|arg_idx| {
-                closure_this_for_argument(call, arg_idx, ctx)
-            });
-            if result.is_some() {
-                return result;
-            }
-            for arg in mc.argument_list.arguments.iter() {
-                let arg_expr = arg.value();
-                if !is_closure_like(arg_expr)
-                    && let Some(r) = walk_expr_for_closure_this(arg_expr, ctx)
-                {
-                    return Some(r);
-                }
-            }
-            None
+            (Some(mc.object), &mc.argument_list)
         }
-        Call::NullSafeMethod(mc) => {
-            if let Some(r) = walk_expr_for_closure_this(mc.object, ctx) {
-                return Some(r);
-            }
-            let result = walk_args_for_closure_this(&mc.argument_list.arguments, ctx, &|arg_idx| {
-                closure_this_for_argument(call, arg_idx, ctx)
-            });
-            if result.is_some() {
-                return result;
-            }
-            for arg in mc.argument_list.arguments.iter() {
-                let arg_expr = arg.value();
-                if !is_closure_like(arg_expr)
-                    && let Some(r) = walk_expr_for_closure_this(arg_expr, ctx)
-                {
-                    return Some(r);
-                }
-            }
-            None
-        }
-        Call::StaticMethod(sc) => {
-            if let Some(r) = walk_expr_for_closure_this(sc.class, ctx) {
-                return Some(r);
-            }
-            let result = walk_args_for_closure_this(&sc.argument_list.arguments, ctx, &|arg_idx| {
-                closure_this_for_argument(call, arg_idx, ctx)
-            });
-            if result.is_some() {
-                return result;
-            }
-            for arg in sc.argument_list.arguments.iter() {
-                let arg_expr = arg.value();
-                if !is_closure_like(arg_expr)
-                    && let Some(r) = walk_expr_for_closure_this(arg_expr, ctx)
-                {
-                    return Some(r);
-                }
-            }
-            None
-        }
+        Call::NullSafeMethod(mc) => (Some(mc.object), &mc.argument_list),
+        Call::StaticMethod(sc) => (Some(sc.class), &sc.argument_list),
+    };
+    if let Some(r) = receiver.and_then(|receiver| walk_expr_for_closure_this(receiver, ctx)) {
+        return Some(r);
     }
+    walk_args_for_closure_this(&argument_list.arguments, ctx, &|arg_idx| {
+        closure_this_for_argument(call, arg_idx, ctx)
+    })
+    // Recurse into arguments that are not closures (e.g. nested calls).
+    .or_else(|| {
+        argument_list
+            .arguments
+            .iter()
+            .map(|arg| arg.value())
+            .filter(|arg_expr| !is_closure_like(arg_expr))
+            .find_map(|arg_expr| walk_expr_for_closure_this(arg_expr, ctx))
+    })
 }
 
 /// What `$this` is bound to inside a closure passed as argument `arg_idx`

@@ -164,23 +164,16 @@ impl Backend {
     ) -> Option<Vec<usize>> {
         let (class_name, method_name) = match call_kind {
             ByRefCallKind::Function(name) => {
-                // PHP's rule for a function name: a qualified name's first
-                // segment goes through the class/namespace imports and the
-                // name never falls back, while a bare name is a `use
-                // function` alias or local to the namespace, falling back to
-                // the global function only when that one does not exist.
-                let qualified = name.contains('\\');
-                let imports = if qualified {
-                    file_use_map
-                } else {
-                    function_imports
-                };
-                let fqn = crate::names::resolve_to_fqn(name, imports, file_namespace);
-                let mut candidates: Vec<&str> = vec![&fqn];
-                if !qualified && fqn != *name {
-                    candidates.push(name);
-                }
-                let func_info = self.find_or_load_function(&candidates)?;
+                let (fqn, fallback) = crate::names::function_lookup_names(
+                    name,
+                    file_use_map,
+                    function_imports,
+                    file_namespace,
+                );
+                let func_info = match fallback {
+                    Some(global) => self.find_or_load_function(&[&fqn, global]),
+                    None => self.find_or_load_function(&[&fqn]),
+                }?;
                 return Some(by_ref_positions(&func_info.parameters));
             }
             ByRefCallKind::StaticMethod(class_name, method_name)
