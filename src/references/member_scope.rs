@@ -603,26 +603,30 @@ impl Backend {
         }
     }
 
-    fn collect_macro_declaring_targets(
+    /// The classes among `seed_fqns` and their ancestors that a Laravel macro
+    /// named `member_name` is registered on, or `None` when there are none.
+    pub(super) fn collect_macro_declaring_targets(
         &self,
         seed_fqns: &[String],
         member_name: &str,
     ) -> Option<Vec<String>> {
-        let index = self.laravel_macros.read();
-        let mut targets = Vec::new();
+        let class_loader = |name: &str| -> Option<Arc<ClassInfo>> { self.find_or_load_class(name) };
+        let mut candidates = HashSet::new();
         for seed in seed_fqns {
-            let mut ancestors = HashSet::new();
-            let normalized = normalize_fqn(seed).to_string();
-            ancestors.insert(normalized.clone());
-            let class_loader =
-                |name: &str| -> Option<Arc<ClassInfo>> { self.find_or_load_class(name) };
-            self.collect_ancestors(&normalized, &class_loader, &mut ancestors);
-            for candidate in ancestors {
-                if index.has_macro(&candidate, member_name) && !targets.contains(&candidate) {
-                    targets.push(candidate);
-                }
+            let normalized = normalize_fqn(seed);
+            if candidates.insert(normalized.clone()) {
+                self.collect_ancestors(&normalized, &class_loader, &mut candidates);
             }
         }
+        // Read only once the walk is done: loading a class reads the macro
+        // index too, and a reader queues behind a waiting writer, so a
+        // rebuild arriving mid-walk would wait on a guard held here while
+        // the walk waited on the rebuild.
+        let index = self.laravel_macros.read();
+        let targets: Vec<String> = candidates
+            .into_iter()
+            .filter(|candidate| index.has_macro(candidate, member_name))
+            .collect();
         (!targets.is_empty()).then_some(targets)
     }
 

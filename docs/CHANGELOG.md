@@ -202,6 +202,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Abstract methods a parent gets from a trait.** A class extending an abstract class whose trait declares an abstract method is now reported when it does not implement it, and "Implement missing methods" adds a stub for it. The diagnostic also names the interface a method comes from when that interface extends another with the same short name.
 - **Closure parameters follow the rules of function parameters.** A closure's or arrow function's `@param` no longer replaces a native type it does not fit, so `/** @param Foo $x */ function (int $x)` reads `$x` as an `int`, the way a function's parameter is read.
 - **Service providers in a `config/app.php` written with `array()`.** Only the classes listed under `providers` are now read as service providers, as they already were for the `[…]` spelling.
+- **Find References no longer hangs on constructors or Laravel macros.** Finding the references of a `__construct` method could leave the server unresponsive until it was restarted, and so could finding or renaming a macro while a file that registers macros was being edited.
 
 ## [0.11.1] - 2026-10-07
 

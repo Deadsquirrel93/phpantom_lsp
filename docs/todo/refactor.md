@@ -225,8 +225,8 @@ functions that lock and await and every guard bound across a loader
 call, 143 slices with offset arithmetic, 120 parse sites, 80 deep clones,
 every per-file cache, 387 linear membership checks, 319 text-scanning
 lines in the type engine and request handlers, and the test helpers
-shared across suites. Item 1 is a prerequisite for E1. B626, B627 and
-B628 went to `bugs.md`.
+shared across suites. Item 1 is a prerequisite for E1. B626 and B628
+went to `bugs.md`.
 
 ## 1. Split `definition/member/mod.rs` before E1
 
@@ -244,10 +244,9 @@ into one helper.
 
 ## 2. Release index guards before loading or long work
 
-B627 is the two guards that do deadlock. These hold a read guard across
-work that loads classes, parses or walks the disk. No cycle was found
-for them yet, but the next caller that adds one becomes the next B627,
-and meanwhile each stalls the writers queued behind it:
+These hold a read guard across work that loads classes, parses or walks
+the disk. No cycle was found for them yet, but the next caller that adds
+one deadlocks, and meanwhile each stalls the writers queued behind it:
 `resolution/classes.rs:383` (an `if let` temporary of
 `workspace_root.read()` across `parse_and_cache_file`),
 `resolution/functions.rs:153` (the `stub_function_index` read held to 247

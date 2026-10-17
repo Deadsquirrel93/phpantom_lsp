@@ -21,31 +21,7 @@ surfaced: one entry is one root cause, however many shapes it shows up in.
 
 ## Crashes
 
-### B627. Find References can hang on a constructor or a Laravel macro
-
-**Impact: Medium-High · Complexity: Low**
-
-Two reference searches hold a read guard across a call that takes the same
-lock again:
-
-- `collect_constructor_hierarchy` (`references/classes.rs:281-317`) holds
-  `symbols.gti_index.read()` while `declares_ctor` loads each descendant
-  through `find_or_load_class`. When that load parses a file (an index
-  miss, or a class the descendant's docblock types link to), publishing
-  the parse ends in `index_inheritance` (`symbol_index.rs:209`), which
-  takes `gti_index.write()` on the same thread. Find References on a
-  `__construct` hangs, and every later parse blocks behind it.
-- `collect_macro_declaring_targets` (`references/member_scope.rs:606-627`)
-  holds `laravel_macros.read()` while `collect_ancestors` loads classes,
-  and loading a class reads `laravel_macros` again
-  (`inject_laravel_macros`, `resolution/classes.rs:207`). The lock is
-  task-fair, so a macro index rebuild queued between the two reads (an
-  edit to a file that calls `macro(` or `mixin(`) deadlocks member Find
-  References.
-
-Read each step under its own short-lived guard
-(`let children = self.symbols.gti_index.read().get(&fqn).cloned();`), and
-collect the ancestors before taking the macro index.
+No outstanding items.
 
 ## Type comparison
 

@@ -291,25 +291,28 @@ impl Backend {
 
         // Walk down from each owner, including inheriting descendants and
         // pruning at overrides.
-        let gti = self.symbols.gti_index.read();
         let mut queue: std::collections::VecDeque<String> = owners.iter().cloned().collect();
         let mut seen: HashSet<String> = owners.iter().map(|f| fold_class_fqn(f)).collect();
         while let Some(fqn) = queue.pop_front() {
-            if let Some(descendants) = gti.get(&fqn) {
-                for desc in descendants {
-                    let normalized = normalize_fqn(desc).to_string();
-                    if !seen.insert(fold_class_fqn(&normalized)) {
-                        continue;
-                    }
-                    // A descendant that declares its own constructor uses a
-                    // different constructor — exclude it and stop walking
-                    // past it.
-                    if declares_ctor(&normalized) {
-                        continue;
-                    }
-                    result.insert(fold_class_fqn(&normalized));
-                    queue.push_back(normalized);
+            // Copied out rather than read under a guard held across the
+            // loop: loading a descendant can parse a file, and publishing
+            // that parse writes this index.
+            let Some(descendants) = self.symbols.gti_index.read().get(&fqn).cloned() else {
+                continue;
+            };
+            for desc in descendants {
+                let normalized = normalize_fqn(&desc);
+                if !seen.insert(fold_class_fqn(&normalized)) {
+                    continue;
                 }
+                // A descendant that declares its own constructor uses a
+                // different constructor — exclude it and stop walking
+                // past it.
+                if declares_ctor(&normalized) {
+                    continue;
+                }
+                result.insert(fold_class_fqn(&normalized));
+                queue.push_back(normalized);
             }
         }
 
