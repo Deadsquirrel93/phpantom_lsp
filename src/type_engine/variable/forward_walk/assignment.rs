@@ -324,25 +324,6 @@ pub(crate) enum ArgSelector {
     Name(String),
 }
 
-/// Flatten a statement iterator, descending into `namespace Foo;` and
-/// `namespace Foo { ... }` blocks so that function and class
-/// declarations inside a namespace are visited alongside top-level
-/// declarations. Nearly all real-world PHP declares its symbols inside
-/// a namespace, so a search that only inspects `program.statements`
-/// would never find the callee.
-pub(crate) fn flatten_namespaced_statements<'b>(
-    statements: impl Iterator<Item = &'b Statement<'b>>,
-    out: &mut Vec<&'b Statement<'b>>,
-) {
-    for stmt in statements {
-        if let Statement::Namespace(ns) = stmt {
-            flatten_namespaced_statements(ns.statements().iter(), out);
-        } else {
-            out.push(stmt);
-        }
-    }
-}
-
 /// Process increment/decrement expressions (`$a++`, `++$a`, `$a--`, `--$a`).
 ///
 /// For numeric types (int, float), the base type is preserved.

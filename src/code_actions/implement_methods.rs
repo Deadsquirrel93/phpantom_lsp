@@ -566,6 +566,7 @@ mod tests {
                     is_reference: false,
                     closure_this_type: None,
                     param_out_type: None,
+                    callable_invocation: None,
                 },
                 ParameterInfo {
                     name: crate::atom::atom("$options"),
@@ -578,6 +579,7 @@ mod tests {
                     is_reference: false,
                     closure_this_type: None,
                     param_out_type: None,
+                    callable_invocation: None,
                 },
             ]
             .into(),

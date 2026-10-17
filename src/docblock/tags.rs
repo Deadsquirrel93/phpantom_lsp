@@ -21,7 +21,7 @@ use mago_syntax::cst::*;
 
 use crate::atom::atom;
 use crate::symbol_map::docblock::get_docblock_text_with_offset;
-use crate::types::{AssertionKind, ParameterInfo, PhpVersion, TypeAssertion};
+use crate::types::{AssertionKind, CallableInvocation, ParameterInfo, PhpVersion, TypeAssertion};
 
 use super::parser::{
     DocblockInfo, TagInfo, TagValueInfo, collapse_newlines, parse_docblock_for_tags,
@@ -595,9 +595,10 @@ pub fn extract_param_raw_type_from_info(info: &DocblockInfo, var_name: &str) -> 
 
 /// Merge a function or method's `@param` docblock tags into its parsed
 /// native parameters: richer docblock types, per-parameter descriptions,
-/// `@param-closure-this` binding, `@param-out` post-call types, and extra
-/// `@param` tags naming a parameter `func_get_args()` reads that the
-/// native signature has none for.
+/// `@param-closure-this` binding, `@param-out` post-call types, when a
+/// callable argument is invoked, and extra `@param` tags naming a
+/// parameter `func_get_args()` reads that the native signature has none
+/// for.
 ///
 /// A `@param` tag that omits its variable name (common in
 /// phpstorm-stubs, e.g. `@param callable(TValue, TKey): bool`) is matched
@@ -662,6 +663,29 @@ pub(crate) fn merge_param_docblock_into_parameters(
         }
     }
 
+    // Populate `callable_invocation` so a call site can tell whether a
+    // callable it passes runs before the call returns.  The later-invoked
+    // tags go last: a parameter tagged both ways is later-invoked, as
+    // PHPStan reads it.
+    for (kind, invocation) in [
+        (
+            TagKind::ParamImmediatelyInvokedCallable,
+            CallableInvocation::Immediate,
+        ),
+        (
+            TagKind::ParamLaterInvokedCallable,
+            CallableInvocation::Later,
+        ),
+    ] {
+        for tag in info.tags_by_kind(kind) {
+            if let Some(name) = tag.variable()
+                && let Some(param) = parameters.iter_mut().find(|p| p.name.as_str() == name)
+            {
+                param.callable_invocation = Some(invocation);
+            }
+        }
+    }
+
     // Append extra `@param` tags that don't match any native parameter.
     // These document parameters accessed via `func_get_args()` or
     // similar mechanisms and should appear in hover/signature.
@@ -679,6 +703,7 @@ pub(crate) fn merge_param_docblock_into_parameters(
                 is_reference: false,
                 closure_this_type: None,
                 param_out_type: None,
+                callable_invocation: None,
             });
         }
     }

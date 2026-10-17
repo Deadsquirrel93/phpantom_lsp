@@ -233,6 +233,7 @@ pub(crate) fn extract_parameters(
                 is_reference,
                 closure_this_type: None,
                 param_out_type: None,
+                callable_invocation: None,
             }
         })
         .collect()

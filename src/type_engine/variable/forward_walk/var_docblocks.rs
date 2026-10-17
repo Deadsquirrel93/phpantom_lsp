@@ -11,25 +11,6 @@ use crate::atom::bytes_to_str;
 use crate::php_type::PhpType;
 use crate::types::ResolvedType;
 
-pub(crate) fn preceding_docblock_text(content: &str, node_start: usize) -> Option<&str> {
-    let before = content.get(..node_start)?;
-    let doc_end = before.rfind("*/")? + 2;
-    let between = &before[doc_end..];
-    if between.contains(';') || between.contains('{') || between.contains('}') {
-        return None;
-    }
-    let doc_start = before[..doc_end].rfind("/**")?;
-    // An earlier docblock, closed before the comment that ends here, is
-    // not this node's.
-    if before
-        .get(doc_start + 3..doc_end - 2)
-        .is_some_and(|inner| inner.contains("*/"))
-    {
-        return None;
-    }
-    Some(&before[doc_start..doc_end])
-}
-
 /// Try to process an inline `/** @var Type $x */` docblock override.
 pub(crate) fn try_process_inline_var_override<'b>(
     expr: &'b Expression<'b>,

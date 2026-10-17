@@ -301,6 +301,7 @@ mod tests {
                     is_reference: false,
                     closure_this_type: None,
                     param_out_type: None,
+                    callable_invocation: None,
                 },
                 ParameterInfo {
                     name: crate::atom::atom("$age"),
@@ -313,6 +314,7 @@ mod tests {
                     is_reference: false,
                     closure_this_type: None,
                     param_out_type: None,
+                    callable_invocation: None,
                 },
             ]
             .into(),
@@ -338,6 +340,7 @@ mod tests {
                 is_reference: false,
                 closure_this_type: None,
                 param_out_type: None,
+                callable_invocation: None,
             }]
             .into(),
             ..MethodInfo::virtual_method("getAttribute", None)
@@ -362,6 +365,7 @@ mod tests {
                     is_reference: false,
                     closure_this_type: None,
                     param_out_type: None,
+                    callable_invocation: None,
                 },
                 ParameterInfo {
                     name: crate::atom::atom("$out"),
@@ -374,6 +378,7 @@ mod tests {
                     is_reference: true,
                     closure_this_type: None,
                     param_out_type: None,
+                    callable_invocation: None,
                 },
             ]
             .into(),

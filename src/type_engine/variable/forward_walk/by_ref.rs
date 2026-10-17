@@ -10,12 +10,11 @@ use mago_span::HasSpan;
 use mago_syntax::cst::argument::Argument;
 
 use crate::atom::{atom, bytes_to_str};
-use crate::parser::with_parsed_program;
 use crate::php_type::{PhpType, ShapeEntry, TypeKind};
 use crate::type_engine::call_resolution::{
     OutParamCallee, effective_out_type, resolve_out_type_for_call,
 };
-use crate::types::ResolvedType;
+use crate::types::{CallableInvocation, ClassInfo, ParameterInfo, ResolvedType};
 
 pub(crate) fn process_by_ref_closure_captures<'b>(
     expr: &'b Expression<'b>,
@@ -51,7 +50,11 @@ pub(crate) fn process_by_ref_closure_captures<'b>(
             for arg in args.arguments.iter() {
                 let (arg_expr, selector) = arg_expr_and_selector(arg, &mut next_positional);
                 if let Expression::Closure(closure) = arg_expr {
-                    let certain = call_invokes_arg_immediately(call, &selector, scope, ctx);
+                    // Asking the callee is the expensive half, so it is only
+                    // asked about a closure with a capture for the answer to
+                    // apply to.
+                    let certain = captures_by_reference(closure)
+                        && call_invokes_arg_immediately(call, &selector, scope, ctx);
                     process_by_ref_closure_capture(closure, scope, ctx, certain, false);
                 } else {
                     process_by_ref_closure_captures(arg_expr, scope, ctx);
@@ -99,12 +102,13 @@ pub(crate) fn process_by_ref_closure_captures<'b>(
 /// returning, so a by-ref capture's final state can *replace* the outer
 /// variable rather than widen it.
 ///
-/// Follows PHPStan's defaults: function callable parameters are
-/// immediate unless tagged `@param-later-invoked-callable`; method
-/// callable parameters are later-invoked unless tagged
-/// `@param-immediately-invoked-callable`.  An unresolvable callee or
-/// receiver is not proof either way, so it answers `false` and the
-/// caller falls back to widening.
+/// Reads the callee's `@param-immediately-invoked-callable` /
+/// `@param-later-invoked-callable` tag, wherever the callee is declared,
+/// and otherwise follows PHPStan's defaults: a function runs what it is
+/// handed through a parameter typed as a callable immediately, and a
+/// method keeps it for later.  An unresolvable callee or receiver is not
+/// proof either way, so it answers `false` and the caller falls back to
+/// widening.
 pub(crate) fn call_invokes_arg_immediately(
     call: &Call<'_>,
     selector: &ArgSelector,
@@ -116,48 +120,128 @@ pub(crate) fn call_invokes_arg_immediately(
             let Expression::Identifier(ident) = fc.function else {
                 return false;
             };
-            function_invokes_callable_arg_immediately(bytes_to_str(ident.value()), selector, ctx)
+            // A name that resolves to nothing gives no signal either way,
+            // the same as an unresolvable receiver: `outer(inner(fn () use
+            // (&$x) {...}))` for undefined `outer`/`inner` stays uncertain.
+            ctx.loaders
+                .function_loader
+                .and_then(|load| load(bytes_to_str(ident.value()), fc.function.span().start.offset))
+                .is_some_and(|function| {
+                    param_runs_callable_immediately(&function.parameters, selector, true)
+                })
         }
-        Call::Method(mc) => {
-            let ClassLikeMemberSelector::Identifier(ident) = &mc.method else {
+        Call::Method(MethodCall { object, method, .. })
+        | Call::NullSafeMethod(NullSafeMethodCall { object, method, .. }) => {
+            let ClassLikeMemberSelector::Identifier(ident) = method else {
                 return false;
             };
-            let receiver_names = receiver_class_names(mc.object, scope, ctx);
-            !receiver_names.is_empty()
-                && method_invokes_callable_arg_immediately(
-                    &receiver_names,
-                    bytes_to_str(ident.value),
-                    selector,
-                    ctx,
-                )
-        }
-        Call::NullSafeMethod(mc) => {
-            let ClassLikeMemberSelector::Identifier(ident) = &mc.method else {
+            let method_name = bytes_to_str(ident.value);
+            let Expression::Variable(Variable::Direct(dv)) = crate::parser::unwrap_parens(object)
+            else {
                 return false;
             };
-            let receiver_names = receiver_class_names(mc.object, scope, ctx);
-            !receiver_names.is_empty()
-                && method_invokes_callable_arg_immediately(
-                    &receiver_names,
-                    bytes_to_str(ident.value),
-                    selector,
-                    ctx,
-                )
+            let var_name = bytes_to_str(dv.name);
+            let recorded = scope.get(var_name);
+            if recorded.is_empty() && var_name == "$this" {
+                return !ctx.current_class.name.is_empty()
+                    && method_runs_callable_immediately(
+                        ctx.current_class,
+                        method_name,
+                        selector,
+                        ctx,
+                    );
+            }
+            // Each class the receiver may hold has to promise it, or the
+            // call may land on one that keeps the callable for later.
+            let mut receivers = recorded
+                .iter()
+                .filter_map(|rt| rt.class_info.as_deref())
+                .peekable();
+            receivers.peek().is_some()
+                && receivers.all(|class| {
+                    method_runs_callable_immediately(class, method_name, selector, ctx)
+                })
         }
         Call::StaticMethod(sc) => {
             let ClassLikeMemberSelector::Identifier(ident) = &sc.method else {
                 return false;
             };
-            let receiver_names = static_receiver_class_names(sc.class, ctx);
-            !receiver_names.is_empty()
-                && method_invokes_callable_arg_immediately(
-                    &receiver_names,
-                    bytes_to_str(ident.value),
-                    selector,
-                    ctx,
-                )
+            ctx.written_names()
+                .static_receiver_class(sc.class, ctx.class_loader)
+                .is_some_and(|class| {
+                    method_runs_callable_immediately(
+                        &class,
+                        bytes_to_str(ident.value),
+                        selector,
+                        ctx,
+                    )
+                })
         }
     }
+}
+
+/// Whether `method_name`, as `class` declares or inherits it, runs the
+/// callable passed as the `selector` argument before returning.
+fn method_runs_callable_immediately(
+    class: &ClassInfo,
+    method_name: &str,
+    selector: &ArgSelector,
+    ctx: &ForwardWalkCtx<'_>,
+) -> bool {
+    let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
+        class,
+        ctx.class_loader,
+        ctx.resolved_class_cache,
+    );
+    merged
+        .get_method(method_name)
+        .is_some_and(|method| param_runs_callable_immediately(&method.parameters, selector, false))
+}
+
+/// Whether the parameter the `selector` argument fills runs the callable
+/// it is handed before the call returns.
+///
+/// A parameter whose docblock does not say is read as PHPStan reads it:
+/// immediately when it belongs to a function (`of_function`) and is typed
+/// as a callable, and later otherwise, since a parameter that takes
+/// anything (`mixed ...$args`) may just keep what it is given.  An
+/// argument no parameter takes is not proof either way.
+fn param_runs_callable_immediately(
+    parameters: &[ParameterInfo],
+    selector: &ArgSelector,
+    of_function: bool,
+) -> bool {
+    let param = match selector {
+        ArgSelector::Position(idx) => parameters
+            .get(*idx)
+            .or_else(|| parameters.last().filter(|param| param.is_variadic)),
+        ArgSelector::Name(name) => parameters
+            .iter()
+            .find(|param| param.name.strip_prefix('$') == Some(name.as_str())),
+    };
+    param.is_some_and(|param| match param.callable_invocation {
+        Some(invocation) => invocation == CallableInvocation::Immediate,
+        None => of_function && param.type_hint.as_ref().is_some_and(admits_a_callable),
+    })
+}
+
+/// Whether `ty` is a callable type, or a union with one among its members
+/// (`?callable`, `Closure|string`).
+fn admits_a_callable(ty: &PhpType) -> bool {
+    match ty.kind() {
+        TypeKind::Union(members) => members.iter().any(PhpType::is_callable),
+        _ => ty.is_callable(),
+    }
+}
+
+/// Whether `closure` captures any variable by reference (`use (&$x)`).
+fn captures_by_reference(closure: &Closure<'_>) -> bool {
+    closure.use_clause.as_ref().is_some_and(|use_clause| {
+        use_clause
+            .variables
+            .iter()
+            .any(|use_var| use_var.ampersand.is_some())
+    })
 }
 
 /// Extract a call argument's value expression and the selector that
@@ -180,159 +264,6 @@ pub(crate) fn arg_expr_and_selector<'b>(
             ArgSelector::Name(bytes_to_str(named.name.value).to_string()),
         ),
     }
-}
-
-/// Find the callee parameter that a call argument fills, honouring both
-/// positional and named binding.
-pub(crate) fn select_param<'p>(
-    parameters: impl Iterator<Item = &'p FunctionLikeParameter<'p>>,
-    selector: &ArgSelector,
-) -> Option<&'p FunctionLikeParameter<'p>> {
-    match selector {
-        ArgSelector::Position(idx) => parameters.into_iter().nth(*idx),
-        ArgSelector::Name(name) => parameters
-            .into_iter()
-            .find(|param| bytes_to_str(param.variable.name).trim_start_matches('$') == name),
-    }
-}
-
-/// Builtin functions PHPStan's own stubs tag `@param-later-invoked-callable`
-/// (`stubs/core.stub` upstream): the callback is stashed away to run later,
-/// rather than run before the call returns.
-///
-/// Every other builtin that takes a callable — `call_user_func`,
-/// `call_user_func_array`, `array_map`, `usort`, and the rest — runs it
-/// immediately, which is the function-parameter default
-/// [`function_invokes_callable_arg_immediately`] falls back to below for a
-/// callee the function loader can still resolve even though it is not
-/// declared in the current file.
-const LATER_INVOKED_CALLABLE_FUNCTIONS: &[&str] = &[
-    "pcntl_signal",
-    "set_error_handler",
-    "set_exception_handler",
-    "spl_autoload_register",
-    "register_shutdown_function",
-    "header_register_callback",
-    "register_tick_function",
-];
-
-pub(crate) fn function_invokes_callable_arg_immediately(
-    func_name: &str,
-    selector: &ArgSelector,
-    ctx: &ForwardWalkCtx<'_>,
-) -> bool {
-    let func_name = crate::util::strip_fqn_prefix(func_name);
-    with_parsed_program(
-        ctx.content,
-        "function_invokes_callable_arg",
-        |program, _| {
-            let mut stmts = Vec::new();
-            flatten_namespaced_statements(program.statements.iter(), &mut stmts);
-            let declared = stmts.into_iter().find_map(|stmt| {
-                if let Statement::Function(func) = stmt
-                    && bytes_to_str(func.name.value).eq_ignore_ascii_case(func_name)
-                {
-                    Some(func)
-                } else {
-                    None
-                }
-            });
-            let Some(func) = declared else {
-                // Not declared in this file: a builtin still has a
-                // signature the function loader can find (backed by the
-                // embedded stubs), and only a callee that genuinely
-                // resolves is one whose immediacy has a documented
-                // default to fall back to. A name that resolves to
-                // nothing gives no signal either way, the same as an
-                // unresolvable receiver — `outer(inner(fn () use (&$x)
-                // {...}))` for undefined `outer`/`inner` stays uncertain.
-                return ctx
-                    .loaders
-                    .function_loader
-                    .is_some_and(|loader| loader(func_name, 0).is_some())
-                    && !LATER_INVOKED_CALLABLE_FUNCTIONS
-                        .iter()
-                        .any(|later_invoked| later_invoked.eq_ignore_ascii_case(func_name));
-            };
-            let Some(param) = select_param(func.parameter_list.parameters.iter(), selector) else {
-                return false;
-            };
-            !node_param_has_invocation_tag(
-                func.name.span.start.offset as usize,
-                ctx.content,
-                bytes_to_str(param.variable.name),
-                "param-later-invoked-callable",
-            )
-        },
-    )
-}
-
-pub(crate) fn method_invokes_callable_arg_immediately(
-    receiver_names: &[String],
-    method_name: &str,
-    selector: &ArgSelector,
-    ctx: &ForwardWalkCtx<'_>,
-) -> bool {
-    with_parsed_program(ctx.content, "method_invokes_callable_arg", |program, _| {
-        let mut stmts = Vec::new();
-        flatten_namespaced_statements(program.statements.iter(), &mut stmts);
-        stmts.into_iter().any(|stmt| {
-            let members = match stmt {
-                Statement::Class(class)
-                    if class_name_matches_receiver(class.name.value, receiver_names) =>
-                {
-                    Some(class.members.iter())
-                }
-                _ => None,
-            };
-
-            let Some(members) = members else {
-                return false;
-            };
-
-            members.into_iter().any(|member| {
-                if let ClassLikeMember::Method(method) = member
-                    && bytes_to_str(method.name.value).eq_ignore_ascii_case(method_name)
-                {
-                    let Some(param) =
-                        select_param(method.parameter_list.parameters.iter(), selector)
-                    else {
-                        return false;
-                    };
-                    return node_param_has_invocation_tag(
-                        method.name.span.start.offset as usize,
-                        ctx.content,
-                        bytes_to_str(param.variable.name),
-                        "param-immediately-invoked-callable",
-                    );
-                }
-                false
-            })
-        })
-    })
-}
-
-pub(crate) fn node_param_has_invocation_tag(
-    node_start: usize,
-    content: &str,
-    param_name: &str,
-    tag_name: &str,
-) -> bool {
-    let Some(docblock) = preceding_docblock_text(content, node_start) else {
-        return false;
-    };
-    docblock.lines().any(|line| {
-        let line = line
-            .trim()
-            .trim_start_matches("/**")
-            .trim_start_matches('*')
-            .trim_end_matches("*/")
-            .trim();
-        line.starts_with(&format!("@{tag_name}"))
-            && line
-                .split_whitespace()
-                .any(|part| part.trim_matches(',') == param_name)
-    })
 }
 
 /// The `use (&$x)` variables a closure captures by reference, in

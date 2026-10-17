@@ -60,6 +60,24 @@ pub struct ParameterInfo {
     /// [`Self::out_type`], which falls back to the plain declared type
     /// when no `@param-out` tag is present.
     pub param_out_type: Option<PhpType>,
+    /// When the callee runs a callable passed for this parameter, declared
+    /// via `@param-immediately-invoked-callable` or
+    /// `@param-later-invoked-callable`.
+    ///
+    /// `None` when neither tag is present. A call site then falls back to
+    /// PHPStan's defaults: a function runs its callable arguments before
+    /// it returns, a method keeps them for later.
+    pub callable_invocation: Option<CallableInvocation>,
+}
+
+/// When a callee runs a callable it is handed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CallableInvocation {
+    /// Before the call returns, so what the callable writes through a
+    /// by-reference capture is there once the call is done.
+    Immediate,
+    /// Some time later, any number of times, or never.
+    Later,
 }
 
 impl ParameterInfo {
@@ -77,6 +95,7 @@ impl ParameterInfo {
             && self.is_reference == other.is_reference
             && self.closure_this_type == other.closure_this_type
             && self.param_out_type == other.param_out_type
+            && self.callable_invocation == other.callable_invocation
     }
 
     /// Fold `null` into the effective type when the default value is the

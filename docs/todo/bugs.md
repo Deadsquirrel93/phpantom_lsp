@@ -37,21 +37,28 @@ No outstanding items.
 
 ## Narrowing
 
-### B622. Whether a by-reference callback runs now is read from the current file's text only
+### B629. A method reached through a property or a chained call is not asked whether it runs its callback now
 
-**Impact: Low-Medium · Complexity: Medium**
+**Impact: Low · Complexity: Medium**
 
-`src/type_engine/variable/forward_walk/by_ref.rs` decides whether a
-callback argument is invoked immediately (so its by-reference writes
-reach the variables after the call) by re-walking the current file's AST
-with `with_parsed_program` and text-scanning the docblock above the callee
-for `@param-immediately-invoked-callable` /
-`@param-later-invoked-callable`. A callee declared in another file never
-has its tag seen and gets the default, and methods are matched by short
-class name within the current file. The re-parse also runs per call when
-no parse cache is active. The docblock parser already reads both tags
-(`docblock/parser.rs`): carry the invocation mode on `ParameterInfo` and
-look it up through the function loader and the resolved class.
+```php
+$found = null;
+$this->db->transaction(function () use (&$found) {   // tagged @param-immediately-invoked-callable
+    $found = new Order();
+});
+$found;   // Order|null, should be Order
+```
+
+`call_invokes_arg_immediately` (`type_engine/variable/forward_walk/by_ref.rs`)
+reads a method's `@param-immediately-invoked-callable` tag only when the
+receiver is `$this`, a plain variable or a static class name. Any other
+receiver (a property, a chained call, a parenthesised `new`) gets the
+later-invoked default, so a by-reference capture keeps its pre-call type
+alongside what the closure wrote. Resolving every receiver through the
+shared pipeline (`resolve_rhs_with_scope`) would cover these, but
+`receiver_mutation.rs` asks the question for every closure argument of every
+call, so the receiver's type has to come cheaply: the type the expression
+walk already resolved for it, rather than a second resolution.
 
 ## Array types
 

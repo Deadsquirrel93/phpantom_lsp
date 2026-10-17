@@ -789,6 +789,7 @@ async fn test_use_function_namespaced_detail_shows_signature() {
                         is_reference: false,
                         closure_this_type: None,
                         param_out_type: None,
+                        callable_invocation: None,
                     }]
                     .into(),
                     return_type: Some(PhpType::parse("mixed")),

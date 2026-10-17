@@ -1219,43 +1219,6 @@ fn returns_this(ty: &PhpType) -> bool {
     }
 }
 
-pub(crate) fn receiver_class_names(
-    expr: &Expression<'_>,
-    scope: &ScopeState,
-    ctx: &ForwardWalkCtx<'_>,
-) -> Vec<String> {
-    match expr {
-        Expression::Variable(Variable::Direct(dv)) => {
-            let var_name = bytes_to_str(dv.name);
-            if var_name == "$this" && !ctx.current_class.name.is_empty() {
-                return vec![
-                    ctx.current_class.name.to_string(),
-                    ctx.current_class.fqn().to_string(),
-                ];
-            }
-            scope
-                .get(var_name)
-                .iter()
-                .filter_map(|rt| rt.class_info.as_ref())
-                .flat_map(|cls| [cls.name.to_string(), cls.fqn().to_string()])
-                .collect()
-        }
-        Expression::Parenthesized(inner) => receiver_class_names(inner.expression, scope, ctx),
-        _ => Vec::new(),
-    }
-}
-
-pub(crate) fn static_receiver_class_names(
-    expr: &Expression<'_>,
-    ctx: &ForwardWalkCtx<'_>,
-) -> Vec<String> {
-    ctx.written_names()
-        .static_receiver_class_name(expr)
-        .filter(|fqn| !fqn.is_empty())
-        .into_iter()
-        .collect()
-}
-
 /// The class a static receiver (`Foo::`, `self::`, `new Foo`) names.
 fn static_receiver_class(
     expr: &Expression<'_>,
@@ -1272,12 +1235,4 @@ fn static_receiver_class(
         ctx.source_imports,
     )?;
     (ctx.class_loader)(&name)
-}
-
-pub(crate) fn class_name_matches_receiver(name: &[u8], receiver_names: &[String]) -> bool {
-    let class_name = bytes_to_str(name);
-    receiver_names.iter().any(|receiver| {
-        receiver.eq_ignore_ascii_case(class_name)
-            || crate::util::short_name(receiver).eq_ignore_ascii_case(class_name)
-    })
 }

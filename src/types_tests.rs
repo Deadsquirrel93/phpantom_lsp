@@ -42,6 +42,7 @@ fn param(name: &str, type_hint: &str) -> ParameterInfo {
         is_reference: false,
         closure_this_type: None,
         param_out_type: None,
+        callable_invocation: None,
     }
 }
 
@@ -90,6 +91,14 @@ fn param_signature_eq_different_default() {
     let mut b = param("$x", "int");
     b.default_value = Some("42".to_string());
     b.is_required = false;
+    assert!(!a.signature_eq(&b));
+}
+
+#[test]
+fn param_signature_eq_different_callable_invocation() {
+    let a = param("$x", "callable");
+    let mut b = param("$x", "callable");
+    b.callable_invocation = Some(crate::types::CallableInvocation::Later);
     assert!(!a.signature_eq(&b));
 }
 

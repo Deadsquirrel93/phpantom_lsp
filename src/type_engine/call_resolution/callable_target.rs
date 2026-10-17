@@ -933,6 +933,7 @@ fn callable_type_as_target(return_type: &PhpType) -> Option<ResolvedCallableTarg
                     is_reference: false,
                     closure_this_type: None,
                     param_out_type: None,
+                    callable_invocation: None,
                 })
                 .collect();
             Some(ResolvedCallableTarget {

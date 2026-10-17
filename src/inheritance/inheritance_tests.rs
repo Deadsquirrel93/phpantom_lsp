@@ -311,6 +311,7 @@ fn test_apply_substitution_to_method_modifies_return_and_params() {
             is_reference: false,
             closure_this_type: None,
             param_out_type: None,
+            callable_invocation: None,
         }]
         .into(),
         return_type: Some(PhpType::parse("TValue")),
