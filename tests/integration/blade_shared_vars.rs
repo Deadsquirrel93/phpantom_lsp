@@ -177,6 +177,67 @@ class ProfileComposer
         );
     }
 
+    /// A translation or a config value a composer passes reaches the
+    /// template typed by what its key names, the way the same call reads in
+    /// the provider itself.
+    #[tokio::test]
+    async fn a_composed_translation_or_config_value_is_what_its_key_names() {
+        const PROVIDER: &str = r#"<?php
+namespace App\Providers;
+
+use Illuminate\Support\Facades\View;
+
+class ViewServiceProvider
+{
+    public function boot(): void
+    {
+        View::composer('emails.*', function ($view) {
+            $view->with('footer', __('messages.welcome'));
+            $view->with('limit', config('mail.limit'));
+        });
+    }
+}
+"#;
+        const HELPERS: &str = "<?php\n/** @return string|array|null */\nfunction __($key = null, $replace = [], $locale = null) { return null; }\n";
+        const AUTOLOAD_FILES: &str = "<?php\n$vendorDir = dirname(__DIR__);\nreturn array(\n    'helpers' => $vendorDir . '/illuminate/Foundation/helpers.php',\n);\n";
+        let (backend, _dir) = create_psr4_workspace(
+            COMPOSER_JSON,
+            &[
+                ("bootstrap/providers.php", PROVIDERS_PHP),
+                ("app/Providers/ViewServiceProvider.php", PROVIDER),
+                (
+                    "vendor/illuminate/Foundation/Application.php",
+                    APPLICATION_CLASS,
+                ),
+                ("vendor/illuminate/Foundation/helpers.php", HELPERS),
+                ("vendor/composer/autoload_files.php", AUTOLOAD_FILES),
+                (
+                    "lang/en/messages.php",
+                    "<?php\nreturn ['welcome' => 'Welcome'];\n",
+                ),
+                ("config/mail.php", "<?php\nreturn ['limit' => 25];\n"),
+                (
+                    "resources/views/emails/welcome.blade.php",
+                    "{{ $footer }}\n{{ $limit }}\n",
+                ),
+            ],
+        );
+        let uri =
+            open_initialized_blade_template(&backend, "resources/views/emails/welcome.blade.php")
+                .await;
+
+        let footer = markup_hover_at(&backend, &uri, 0, 5).await;
+        assert!(
+            footer.contains("string") && !footer.contains("array"),
+            "the key names a single line, got: {footer}"
+        );
+        let limit = markup_hover_at(&backend, &uri, 1, 5).await;
+        assert!(
+            limit.contains("int"),
+            "the key names an integer, got: {limit}"
+        );
+    }
+
     /// A template's own `@var` declaration is closer to every use than an
     /// injected one, so the author still decides the type.
     #[tokio::test]

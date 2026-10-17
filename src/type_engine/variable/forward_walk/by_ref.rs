@@ -6,6 +6,8 @@
 
 use super::*;
 
+use std::sync::Arc;
+
 use mago_span::HasSpan;
 use mago_syntax::cst::argument::Argument;
 
@@ -136,13 +138,11 @@ pub(crate) fn call_invokes_arg_immediately(
                 return false;
             };
             let method_name = bytes_to_str(ident.value);
-            let Expression::Variable(Variable::Direct(dv)) = crate::parser::unwrap_parens(object)
-            else {
-                return false;
-            };
-            let var_name = bytes_to_str(dv.name);
-            let recorded = scope.get(var_name);
-            if recorded.is_empty() && var_name == "$this" {
+            let object = crate::parser::unwrap_parens(object);
+            if let Expression::Variable(Variable::Direct(dv)) = object
+                && dv.name == b"$this"
+                && scope.get("$this").is_empty()
+            {
                 return !ctx.current_class.name.is_empty()
                     && method_runs_callable_immediately(
                         ctx.current_class,
@@ -151,33 +151,80 @@ pub(crate) fn call_invokes_arg_immediately(
                         ctx,
                     );
             }
-            // Each class the receiver may hold has to promise it, or the
-            // call may land on one that keeps the callable for later.
-            let mut receivers = recorded
-                .iter()
-                .filter_map(|rt| rt.class_info.as_deref())
-                .peekable();
-            receivers.peek().is_some()
-                && receivers.all(|class| {
-                    method_runs_callable_immediately(class, method_name, selector, ctx)
-                })
+            // A variable is read from the scope, and any other receiver (a
+            // property, a chained call, a new object) is resolved against
+            // it the way the call's own type is.
+            let receivers = super::assignment::resolve_rhs_with_scope(object, scope, ctx);
+            every_class_runs_callable_immediately(
+                receivers.iter().filter_map(|rt| rt.class_info.as_deref()),
+                method_name,
+                selector,
+                ctx,
+            )
         }
         Call::StaticMethod(sc) => {
             let ClassLikeMemberSelector::Identifier(ident) = &sc.method else {
                 return false;
             };
-            ctx.written_names()
-                .static_receiver_class(sc.class, ctx.class_loader)
-                .is_some_and(|class| {
-                    method_runs_callable_immediately(
-                        &class,
-                        bytes_to_str(ident.value),
-                        selector,
-                        ctx,
-                    )
-                })
+            let method_name = bytes_to_str(ident.value);
+            if let Some(name) = ctx.written_names().static_receiver_class_name(sc.class) {
+                return (ctx.class_loader)(&name).is_some_and(|class| {
+                    method_runs_callable_immediately(&class, method_name, selector, ctx)
+                });
+            }
+            every_class_runs_callable_immediately(
+                static_call_value_classes(sc.class, scope, ctx)
+                    .iter()
+                    .map(|class| &**class),
+                method_name,
+                selector,
+                ctx,
+            )
         }
     }
+}
+
+/// The classes a static call on a value (`$db::locked()`,
+/// `$class::locked()`) dispatches on: the classes the value names, or else
+/// the class of the object it holds.
+fn static_call_value_classes(
+    value: &Expression<'_>,
+    scope: &ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> Vec<Arc<ClassInfo>> {
+    let held = super::assignment::resolve_rhs_with_scope(value, scope, ctx);
+    let owning_class = ctx.current_class.fqn();
+    let named: Vec<Arc<ClassInfo>> = held
+        .iter()
+        .flat_map(|rt| {
+            crate::type_engine::variable::class_string_resolution::classes_named_by_type(
+                &rt.type_string,
+                &owning_class,
+                ctx.all_classes,
+                ctx.class_loader,
+            )
+        })
+        .collect();
+    if named.is_empty() {
+        ResolvedType::into_arced_classes(held)
+    } else {
+        named
+    }
+}
+
+/// Whether `method_name` runs the callable passed as the `selector`
+/// argument before returning on each of `classes`, of which there has to
+/// be at least one.  Each class the receiver may hold has to promise it,
+/// or the call may land on one that keeps the callable for later.
+fn every_class_runs_callable_immediately<'c>(
+    classes: impl Iterator<Item = &'c ClassInfo>,
+    method_name: &str,
+    selector: &ArgSelector,
+    ctx: &ForwardWalkCtx<'_>,
+) -> bool {
+    let mut classes = classes.peekable();
+    classes.peek().is_some()
+        && classes.all(|class| method_runs_callable_immediately(class, method_name, selector, ctx))
 }
 
 /// Whether `method_name`, as `class` declares or inherits it, runs the

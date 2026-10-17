@@ -37,28 +37,7 @@ No outstanding items.
 
 ## Narrowing
 
-### B629. A method reached through a property or a chained call is not asked whether it runs its callback now
-
-**Impact: Low · Complexity: Medium**
-
-```php
-$found = null;
-$this->db->transaction(function () use (&$found) {   // tagged @param-immediately-invoked-callable
-    $found = new Order();
-});
-$found;   // Order|null, should be Order
-```
-
-`call_invokes_arg_immediately` (`type_engine/variable/forward_walk/by_ref.rs`)
-reads a method's `@param-immediately-invoked-callable` tag only when the
-receiver is `$this`, a plain variable or a static class name. Any other
-receiver (a property, a chained call, a parenthesised `new`) gets the
-later-invoked default, so a by-reference capture keeps its pre-call type
-alongside what the closure wrote. Resolving every receiver through the
-shared pipeline (`resolve_rhs_with_scope`) would cover these, but
-`receiver_mutation.rs` asks the question for every closure argument of every
-call, so the receiver's type has to come cheaply: the type the expression
-walk already resolved for it, rather than a second resolution.
+No outstanding items.
 
 ## Array types
 

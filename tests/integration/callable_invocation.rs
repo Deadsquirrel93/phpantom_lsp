@@ -261,6 +261,233 @@ function go(\Lib\Runner $runner): void {
     );
 }
 
+/// A `Db` whose methods run their callback before returning, which the
+/// tests below reach through receivers other than a variable.
+const DB_LIBRARY: &str = r#"<?php
+namespace Lib;
+
+class Db {
+    /** @param-immediately-invoked-callable $callback */
+    public function transaction(callable $callback): void {}
+
+    /** @param-immediately-invoked-callable $callback */
+    public static function locked(callable $callback): void {}
+}
+
+class Connection {
+    public function db(): Db {
+        return new Db();
+    }
+}
+"#;
+
+/// A method reached through a property, a chained call or a new object is
+/// asked when it runs the callback, the same as one called on a variable.
+#[test]
+fn a_method_reached_through_any_receiver_replaces_the_capture() {
+    let backend = create_test_backend();
+    backend.update_ast("file:///lib.php", DB_LIBRARY);
+    let content = r#"<?php
+namespace App;
+
+use Lib\Connection;
+use Lib\Db;
+
+class Orders {
+    public function __construct(private Db $db, private Connection $connection) {}
+
+    public function viaProperty(): void {
+        $a = null;
+        $this->db->transaction(function () use (&$a) {
+            $a = 1;
+        });
+        $a;
+    }
+
+    public function viaChainedCall(): void {
+        $b = null;
+        $this->connection->db()->transaction(function () use (&$b) {
+            $b = 1;
+        });
+        $b;
+    }
+
+    public function viaNewObject(): void {
+        $c = null;
+        (new Db())->transaction(function () use (&$c) {
+            $c = 1;
+        });
+        $c;
+    }
+}
+"#;
+    for (needle, expected, receiver) in [
+        ("$a;", "$a = 1\n", "a property"),
+        ("$b;", "$b = 1\n", "a chained call"),
+        ("$c;", "$c = 1\n", "a new object"),
+    ] {
+        let text = hover_last(&backend, content, needle);
+        assert!(
+            text.contains(expected),
+            "a method called on {receiver} runs the callback before returning: {text}"
+        );
+    }
+}
+
+/// `$db::locked()` and `$class::locked()` dispatch on the class the
+/// value names, so that class is asked when it runs the callback.
+#[test]
+fn a_static_method_called_through_a_value_replaces_the_capture() {
+    let backend = create_test_backend();
+    backend.update_ast("file:///lib.php", DB_LIBRARY);
+    let content = r#"<?php
+namespace App;
+
+use Lib\Db;
+
+function via_object(Db $db): void {
+    $d = null;
+    $db::locked(function () use (&$d) {
+        $d = 1;
+    });
+    $d;
+}
+
+function via_class_name(): void {
+    $class = Db::class;
+    $e = null;
+    $class::locked(function () use (&$e) {
+        $e = 1;
+    });
+    $e;
+}
+"#;
+    for (needle, expected, receiver) in [
+        ("$d;", "$d = 1\n", "an object"),
+        ("$e;", "$e = 1\n", "a class name"),
+    ] {
+        let text = hover_last(&backend, content, needle);
+        assert!(
+            text.contains(expected),
+            "a static call through {receiver} runs the callback before returning: {text}"
+        );
+    }
+}
+
+/// A property's receiver is the class its declaration names, not a class
+/// in the calling file that happens to share its short name.
+#[test]
+fn a_property_receiver_is_the_class_its_declaration_names() {
+    let backend = create_test_backend();
+    backend.update_ast(
+        "file:///lib.php",
+        r#"<?php
+namespace Lib;
+
+class Runner {
+    /** @param-immediately-invoked-callable $callback */
+    public function run(callable $callback): void {}
+}
+"#,
+    );
+    let content = r#"<?php
+namespace App;
+
+class Runner {
+    public function run(callable $callback): void {}
+}
+
+class Job {
+    public function __construct(private \Lib\Runner $runner) {}
+
+    public function go(): void {
+        $foo = null;
+        $this->runner->run(function () use (&$foo) {
+            $foo = 1;
+        });
+        $foo;
+    }
+}
+"#;
+    let text = hover_last(&backend, content, "$foo;");
+    assert!(
+        text.contains("$foo = 1\n"),
+        "Lib\\Runner::run runs the callback before returning: {text}"
+    );
+}
+
+/// A callback a method reached through a property runs before returning
+/// changes `$this` as if its body were written at the call, so what was
+/// known about a property it resets is gone.
+#[test]
+fn a_callback_run_through_a_property_receiver_forgets_what_it_changes() {
+    let backend = create_test_backend();
+    backend.update_ast("file:///lib.php", DB_LIBRARY);
+    let content = r#"<?php
+namespace App;
+
+use Lib\Db;
+
+class Item {}
+
+class Cart {
+    private ?Item $item = null;
+
+    public function __construct(private Db $db) {}
+
+    public function checkout(): void {
+        if ($this->item === null) {
+            return;
+        }
+        $this->db->transaction(function () {
+            $this->clear();
+        });
+        $item = $this->item;
+        $item;
+    }
+
+    private function clear(): void {
+        $this->item = null;
+    }
+}
+"#;
+    let text = hover_last(&backend, content, "$item;");
+    assert!(
+        text.contains("$item = ?Item\n"),
+        "the callback may have cleared the item: {text}"
+    );
+}
+
+/// A callback a method reached through a property runs before returning
+/// has run by the time the enclosing function writes the capture again.
+#[test]
+fn a_callback_run_through_a_property_receiver_misses_later_writes() {
+    let backend = create_test_backend();
+    backend.update_ast("file:///lib.php", DB_LIBRARY);
+    let content = r#"<?php
+namespace App;
+
+use Lib\Db;
+
+class Orders {
+    public function __construct(private Db $db) {}
+
+    public function find(): void {
+        $foo = 1;
+        $this->db->transaction(function () use (&$foo) {
+            echo $foo;
+        });
+        $foo = 'later';
+    }
+}
+"#;
+    let text = hover_last(&backend, content, "$foo;\n        });");
+    assert!(
+        text.contains("$foo = 1\n"),
+        "the write after the call cannot reach the callback: {text}"
+    );
+}
+
 /// The builtins PHPStan's stubs tag `@param-later-invoked-callable` keep
 /// their callback for later.
 #[test]

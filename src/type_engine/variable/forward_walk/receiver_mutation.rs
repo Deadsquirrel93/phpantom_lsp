@@ -480,8 +480,16 @@ fn call_node_invalidations<'b>(
                 }
             }
 
+            // What a callable argument does matters only to a scope holding
+            // something a call could change, and finding out means asking
+            // the callee, which resolves its receiver.
+            let arguments = if scope_holds_call_state(scope) {
+                args.arguments.as_slice()
+            } else {
+                &[]
+            };
             let mut next_positional = 0usize;
-            for arg in args.arguments.iter() {
+            for arg in arguments {
                 let (arg_expr, selector) = arg_expr_and_selector(arg, &mut next_positional);
                 // A callable argument the callee is known to invoke before
                 // returning (`call_user_func($cb)`, `array_map($cb, …)`)
@@ -899,6 +907,15 @@ fn any_argument_has_state(args: &ArgumentList<'_>, scope: &ScopeState) -> bool {
 fn scope_tracks_paths(scope: &ScopeState) -> bool {
     scope.locals.compound_keys().next().is_some()
         || scope.assertions.values().any(|checks| !checks.is_empty())
+}
+
+/// Whether the scope holds anything a call could invalidate: what
+/// [`scope_tracks_paths`] looks for, or a proof about some key, which
+/// [`ScopeState::invalidate_receiver_state`] drops along with the keys.
+fn scope_holds_call_state(scope: &ScopeState) -> bool {
+    scope_tracks_paths(scope)
+        || !scope.non_null_implications.is_empty()
+        || !scope.implied_narrowings.is_empty()
 }
 
 /// Whether the scope holds any synthetic key read through `subject`.

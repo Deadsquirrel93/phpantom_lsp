@@ -26,7 +26,7 @@ use mago_syntax::cst::*;
 use crate::Backend;
 use crate::parser::with_parsed_program;
 use crate::php_type::PhpType;
-use crate::type_engine::resolver::{Loaders, VarResolutionCtx};
+use crate::type_engine::resolver::{LendsLoaders, VarResolutionCtx};
 use crate::types::ClassInfo;
 use crate::virtual_members::laravel::SharedViewVar;
 
@@ -193,8 +193,7 @@ impl Backend {
         let _cache_guard =
             crate::virtual_members::with_active_resolved_class_cache(&self.resolved_class_cache);
         let file_ctx = self.file_context(uri);
-        let function_loader = self.function_loader(&file_ctx);
-        let function_loader_cl = |name: &str, offset: u32| function_loader(name, offset);
+        let owned_loaders = self.diagnostic_loaders(&file_ctx);
 
         with_parsed_program(content, "laravel_view_data_types", |program, content| {
             let default_class = ClassInfo::default();
@@ -226,11 +225,10 @@ impl Backend {
                     let enclosing =
                         crate::class_lookup::find_class_at_offset(&file_ctx.classes, offset);
                     let current_class = enclosing.unwrap_or(&default_class);
-                    let loaders = Loaders::with_function(Some(&function_loader_cl));
                     let var_ctx = VarResolutionCtx {
                         source_imports: Some(&use_map),
                         backend: Some(self),
-                        loaders,
+                        loaders: owned_loaders.loaders(),
                         resolved_class_cache: Some(&self.resolved_class_cache),
                         ..VarResolutionCtx::new(
                             "",
