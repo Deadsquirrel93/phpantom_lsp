@@ -241,7 +241,8 @@ impl Backend {
                 }
 
                 // Optionally include the constructor declaration site(s).
-                if include_declaration && let Some(classes) = self.get_classes_for_uri(file_uri) {
+                if include_declaration && let Some(classes) = self.shared_classes_for_uri(file_uri)
+                {
                     for class in &classes {
                         if !scoped.contains(&fold_class_fqn(&class.fqn())) {
                             continue;

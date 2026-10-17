@@ -359,7 +359,7 @@ impl Backend {
                 ctx.resolved_class_cache,
                 ctx.backend,
             );
-            let owner = concrete_owner.as_ref().unwrap_or(owner);
+            let owner = concrete_owner.as_deref().unwrap_or(owner);
 
             // Fully resolve the owner so post-resolution patches
             // (e.g. Laravel facade return-type corrections) and
@@ -741,31 +741,7 @@ impl Backend {
         ctx: &ResolutionCtx<'_>,
         mut return_type_hint_out: Option<&mut Option<PhpType>>,
     ) -> Vec<Arc<ClassInfo>> {
-        let content = ctx.content;
-        let cursor_offset = ctx.cursor_offset;
-
-        // 1. Try docblock annotation: `@var Closure(): User $fn`
-        if let Some(raw_type) = crate::docblock::find_iterable_raw_type_in_source(
-            content,
-            cursor_offset as usize,
-            var_name,
-        )
-        .map(|t| ctx.written_names().resolve_type(&t))
-            && let Some(ret_type) = raw_type.callable_return_type()
-        {
-            let classes: Vec<Arc<ClassInfo>> =
-                crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
-                    ret_type,
-                    "",
-                    ctx.all_classes,
-                    ctx.class_loader,
-                );
-            if !classes.is_empty() {
-                return classes;
-            }
-        }
-
-        // 2. Resolve the variable's own type.  Closures, arrow
+        // 1. Resolve the variable's own type.  Closures, arrow
         //    functions, and first-class callables are all
         //    inferred as a `TypeKind::Callable` (see
         //    `infer_closure_literal_type`), so `$fn`'s embedded

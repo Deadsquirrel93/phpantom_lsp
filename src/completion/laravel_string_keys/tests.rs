@@ -32,7 +32,7 @@ fn the_kinds_completed_elsewhere_offer_no_candidates() {
         LaravelStringKind::ContainerBinding,
     ] {
         assert!(
-            backend.string_key_candidates(&kind, None, "").is_empty(),
+            backend.string_key_candidates(&kind, "").is_empty(),
             "{kind:?} should offer no candidates"
         );
     }
@@ -49,7 +49,7 @@ fn configured_resource_candidates_include_database_roles_and_null_drivers() {
 
     assert_eq!(
         backend
-            .string_key_candidates(&LaravelStringKind::Config, None, "")
+            .string_key_candidates(&LaravelStringKind::Config, "")
             .as_ref(),
         [
             "cache.stores.redis",
@@ -61,31 +61,18 @@ fn configured_resource_candidates_include_database_roles_and_null_drivers() {
         backend
             .string_key_candidates(
                 &LaravelStringKind::ConfigResource(LaravelConfigResource::DatabaseConnection,),
-                Some("database.connections."),
                 "mysql::",
             )
             .as_ref(),
         ["mysql::read", "mysql::write", "mysql::direct"]
     );
-    for (resource, config_prefix, expected) in [
-        (
-            LaravelConfigResource::CacheStore,
-            "cache.stores.",
-            vec!["null", "redis"],
-        ),
-        (
-            LaravelConfigResource::QueueConnection,
-            "queue.connections.",
-            vec!["null", "sync"],
-        ),
+    for (resource, expected) in [
+        (LaravelConfigResource::CacheStore, vec!["null", "redis"]),
+        (LaravelConfigResource::QueueConnection, vec!["null", "sync"]),
     ] {
         assert_eq!(
             backend
-                .string_key_candidates(
-                    &LaravelStringKind::ConfigResource(resource),
-                    Some(config_prefix),
-                    "",
-                )
+                .string_key_candidates(&LaravelStringKind::ConfigResource(resource), "")
                 .as_ref(),
             expected,
         );
@@ -548,28 +535,22 @@ fn detects_static_config_mutators_and_translation_queries() {
 
 #[test]
 fn storage_argument_scanning_preserves_existing_static_contexts() {
-    for (expression, expected_kind, expected_prefix) in [
+    for (expression, value, expected_kind) in [
         (
             "DB::connection('primary')",
+            "primary",
             LaravelStringKind::ConfigResource(LaravelConfigResource::DatabaseConnection),
-            Some("database.connections."),
         ),
         (
             "Model::getActualClassNameForMorph('post')",
+            "post",
             LaravelStringKind::MorphAlias,
-            None,
         ),
     ] {
         let content = format!("<?php\n{expression};\n");
-        let value = if expected_prefix.is_some() {
-            "primary"
-        } else {
-            "post"
-        };
         let ctx = detect_at_end(&content, value)
             .unwrap_or_else(|| panic!("should preserve `{expression}` completion"));
         assert_eq!(ctx.kind, expected_kind);
-        assert_eq!(ctx.config_sub_prefix, expected_prefix);
     }
 }
 
@@ -593,11 +574,6 @@ fn detects_storage_disk_scalar_methods_and_named_arguments() {
             LaravelStringKind::ConfigResource(LaravelConfigResource::StorageDisk)
         ));
         assert_eq!(ctx.prefix, "arch", "prefix for `{expression}`");
-        assert_eq!(
-            ctx.config_sub_prefix,
-            Some("filesystems.disks."),
-            "config subtree for `{expression}`"
-        );
     }
 
     for expression in [
@@ -611,7 +587,6 @@ fn detects_storage_disk_scalar_methods_and_named_arguments() {
             ctx.kind,
             LaravelStringKind::ConfigResource(LaravelConfigResource::StorageDisk)
         ));
-        assert_eq!(ctx.config_sub_prefix, Some("filesystems.disks."));
     }
 }
 
@@ -918,7 +893,6 @@ fn detects_every_forget_disk_array_value_and_spelling() {
                 LaravelStringKind::ConfigResource(LaravelConfigResource::StorageDisk)
             ));
             assert_eq!(ctx.prefix, value);
-            assert_eq!(ctx.config_sub_prefix, Some("filesystems.disks."));
         }
     }
 }
@@ -1032,7 +1006,10 @@ use Illuminate\Support\Facades\Storage;
 Storage::forgetDisk([['nested'], wrap(fn () => new class {}), 'it\'s', 'archive']);"#;
     let ctx = detect_at_end(nested, "archive")
         .expect("balanced nested expressions must not hide the outer array");
-    assert_eq!(ctx.config_sub_prefix, Some("filesystems.disks."));
+    assert!(matches!(
+        ctx.kind,
+        LaravelStringKind::ConfigResource(LaravelConfigResource::StorageDisk)
+    ));
 
     assert!(callable_before_scalar_argument("Storage::disk(:").is_none());
     assert!(callable_before_scalar_argument("Storage::disk(name: value").is_none());

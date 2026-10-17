@@ -165,6 +165,8 @@ impl Backend {
                 }
             }
 
+            self.symbols.prune_orphaned_origins();
+
             // Refresh the cached package roots for path-based lookups.
             *self.workspace.vendor_package_origin_roots.write() = vendor_package_roots;
 

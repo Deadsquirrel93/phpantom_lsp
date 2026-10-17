@@ -432,7 +432,7 @@ impl ResolvedType {
             .collect()
     }
 
-    /// Run a narrowing function that operates on `&mut Vec<ClassInfo>`
+    /// Run a narrowing function that operates on `&mut Vec<Arc<ClassInfo>>`
     /// against a `Vec<ResolvedType>`, preserving type strings.
     ///
     /// Narrowing functions (instanceof, assert, custom type guards)
@@ -458,11 +458,11 @@ impl ResolvedType {
     /// `mixed` component) intact.
     pub(crate) fn apply_narrowing(
         results: &mut Vec<ResolvedType>,
-        f: impl FnOnce(&mut Vec<ClassInfo>) -> bool,
+        f: impl FnOnce(&mut Vec<Arc<ClassInfo>>) -> bool,
     ) {
-        let mut classes: Vec<ClassInfo> = results
+        let mut classes: Vec<Arc<ClassInfo>> = results
             .iter()
-            .filter_map(|rt| rt.class_info.as_ref().map(|arc| arc.as_ref().clone()))
+            .filter_map(|rt| rt.class_info.clone())
             .collect();
         let definite = f(&mut classes);
 
@@ -539,7 +539,7 @@ impl ResolvedType {
                 .iter()
                 .any(|rt| rt.class_info.as_ref().is_some_and(|c| c.fqn() == cls.fqn()))
             {
-                results.push(ResolvedType::from_class(cls));
+                results.push(ResolvedType::from_arc(cls));
                 added_new = true;
             }
         }

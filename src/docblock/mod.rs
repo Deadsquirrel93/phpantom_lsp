@@ -14,8 +14,7 @@
 //!   `@mixin`, `@deprecated`, `@phpstan-assert`, docblock text retrieval).
 //! - `type_override`: Choosing between a docblock type and a native type
 //!   hint.
-//! - `source_scan`: Backward scans of raw source text for `@var`, `@param`,
-//!   and `@return` annotations in the enclosing scope.
+//! - `lines`: Reading one docblock line as source text.
 //! - `templates`: Template, generics, and type alias tag extraction
 //!   (`@template`, `@extends`, `@implements`, `@use`, `@phpstan-type`,
 //!   `@phpstan-import-type`, and `class-string<T>` conditional synthesis).
@@ -27,8 +26,8 @@
 //! - `shapes`: Array shape and object shape parsing
 
 mod conditional;
+mod lines;
 pub(crate) mod parser;
-mod source_scan;
 mod tag_kind;
 mod tags;
 pub(crate) mod templates;
@@ -78,11 +77,8 @@ pub use type_override::{
     should_override_type_typed,
 };
 
-// Source-text annotation scans
-pub use source_scan::{
-    find_inline_var_docblock, find_iterable_raw_type_in_source, find_var_raw_type_in_source,
-};
-pub(crate) use source_scan::{find_var_tag, strip_docblock_line_delimiters};
+// Docblock lines as source text
+pub(crate) use lines::{find_var_tag, strip_docblock_line_delimiters};
 
 // Template / generics / type alias tags
 pub use templates::{

@@ -1075,6 +1075,8 @@ impl Backend {
         let file_ctx = self.file_context(uri);
         let loaders = self.file_loaders(&file_ctx);
         let resolved_class_loader = loaders.resolved_class_loader();
+        // Resolving each passed variable parses the caller again.
+        let _parse_guard = crate::parser::with_parse_cache(content);
 
         with_parsed_program(content, "blade_call_site_inference", |program, content| {
             // Collect the matching call expressions first, then resolve
@@ -1253,6 +1255,7 @@ impl Backend {
             crate::virtual_members::with_active_resolved_class_cache(&self.resolved_class_cache);
         let file_ctx = self.file_context(uri);
         let loaders = self.file_loaders(&file_ctx);
+        let _parse_guard = crate::parser::with_parse_cache(virtual_php);
 
         with_parsed_program(
             virtual_php,

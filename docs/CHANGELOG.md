@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Faster diagnostics in Blade templates.** A template is parsed once per diagnostic pass instead of once per check.
 - **Faster diagnostics while editing.** After an edit inside a function or method, only that function is type-checked again, and the rest of the file keeps its diagnostics, moved along with the text. In a 1,500-line class the type checking after such an edit is around 70 times cheaper. Saving still checks the whole file.
 - **Faster analysis of methods that check many properties.** Narrowing a property or a call's result no longer walks the method again from its first line.
 - **Faster analysis of loops.** A loop body is no longer walked again once its types have settled.
@@ -36,6 +37,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Constants in `switch` cases.** Hover, go-to-definition, find references and rename now work on a constant or class constant written in a `case` label, and an import used only there is no longer reported as unused.
+- **Unused imports named only in text.** An import whose name appears only in a string, a comment or as a property name is now reported as unused.
+- **Variables imported with `global`.** A function that reads a top-level variable through `global` now sees the type the top-level code gave it in diagnostics too, as hover already did.
+- **A docblock wider than the parameter's type.** `@param object $money` on a `Money $money` parameter no longer turns `$money` into a plain `object`; the native type stands, as in PHPStan.
+- **`@var` above code that sits behind other comments.** A `/** @var */` block is still applied when a plain comment, an empty docblock or a Blade component tag stands between it and the code, or when a string above it contains `/*`.
+- **Existence checks and attributes written in strings.** A `function_exists()`, `class_exists()` or `method_exists()` check, or a `#[`, that appears inside a string or comment no longer silences unknown-function, unknown-class or unknown-member diagnostics. A check in an `elseif` condition now covers its branch.
+- **Closure types in `@var`.** `@var Closure(int $x): void $cb` no longer counts `$x` as defined.
+- **Go-to-definition on `@property` and `@method` members.** Jumps to the tag in the docblock of the class that declares the member, not to the first tag of that name in the file, and to the key of an Eloquent `$casts` entry rather than a cast type spelled the same.
+- **A namespace declared on the `<?php` line.** `<?php namespace App\Models;` is no longer reported as a namespace mismatch, and the fix no longer offers to add a second declaration.
+- **Deleted files in workspace diagnostics.** A file deleted while workspace diagnostics are on no longer keeps reporting its problems.
+- **Non-ASCII variable names before `->can()`.** Such a variable no longer stops the file from being indexed.
+- **Hover on `model-property` arguments passed by name.** `where(column: 'email')` now hovers as the model property, like the positional form.
+- **Arrow functions that yield.** `fn () => yield $x` is now typed as a `Generator`.
+- **Enum backing types after a comment.** `enum Ratio /* exact */ : float` now reports the invalid backing type.
 - **Method calls typed in more places.** Some calls were only typed when assigned straight to a variable, and are now typed wherever they appear, such as in an argument, an array or a `return`: calls on a `$this` narrowed by `assert($this instanceof TestCase)` in a test closure, static calls on a variable holding a class name such as `$class = 'App\Stamp'`, and calls to an override without a docblock whose parent declares a conditional `@return`.
 - **Variables holding a class name follow the code's branches.** After `if (…) { $class = Apple::class; } else { $class = Pear::class; }`, a call such as `$class::make()`, `new $class`, and completion after `$class::` now cover both classes, not only the one assigned last in the file.
 - **The pipe operator with methods and closures.** `$input |> $formatter->format(...)`, `$input |> Stamp::fromString(...)`, and a closure or a variable holding one on the right of `|>` now give the callable's return type, as a function such as `trim(...)` already did.

@@ -12,45 +12,6 @@ use crate::parser::extract_hint_type;
 use crate::php_type::PhpType;
 use crate::types::ClassInfo;
 
-/// Check whether `cursor_offset` falls inside the RHS of an assignment
-/// like `$var = $var->…` on the same line.  Used to avoid applying an
-/// inline `@var` cast to the RHS reference.
-pub(super) fn is_cursor_in_self_assignment_rhs(
-    content: &str,
-    cursor_offset: usize,
-    var_name: &str,
-) -> bool {
-    let before = match content.get(..cursor_offset) {
-        Some(b) => b,
-        None => return false,
-    };
-    let line_start = before.rfind('\n').map_or(0, |pos| pos + 1);
-
-    let after = match content.get(cursor_offset..) {
-        Some(a) => a,
-        None => return false,
-    };
-    let line_end = after
-        .find('\n')
-        .map_or(content.len(), |pos| cursor_offset + pos);
-
-    let line = match content.get(line_start..line_end) {
-        Some(l) => l,
-        None => return false,
-    };
-
-    let needle = format!("{} = ", var_name);
-    if let Some(assign_pos) = line.find(&needle) {
-        let rhs_start_in_line = assign_pos + needle.len();
-        let cursor_in_line = cursor_offset - line_start;
-        let rhs = &line[rhs_start_in_line..];
-        if cursor_in_line >= rhs_start_in_line && rhs.contains(var_name) {
-            return true;
-        }
-    }
-    false
-}
-
 /// Check if the cursor is on a parameter definition and return it.
 ///
 /// Walks namespaces, classes, and functions to find a parameter list

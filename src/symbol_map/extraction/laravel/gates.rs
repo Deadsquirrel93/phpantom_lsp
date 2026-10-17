@@ -79,7 +79,8 @@ pub(in crate::symbol_map::extraction) fn chain_roots_at_gate(expr: &Expression<'
 pub(in crate::symbol_map::extraction) fn receiver_is_user_like(expr: &Expression<'_>) -> bool {
     fn ends_with_user(name: &str) -> bool {
         let name = name.trim_start_matches('$');
-        name.len() >= 4 && name[name.len() - 4..].eq_ignore_ascii_case("user")
+        let bytes = name.as_bytes();
+        bytes.len() >= 4 && bytes[bytes.len() - 4..].eq_ignore_ascii_case(b"user")
     }
 
     match expr {

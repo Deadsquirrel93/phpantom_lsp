@@ -114,8 +114,8 @@ pub(crate) fn seed_params<'b>(
         // parameter type, losing the docblock refinement).
         if param.is_promoted_property() {
             let param_offset = param.span().start.offset as usize;
-            if let Some((var_type, _name)) =
-                crate::docblock::find_inline_var_docblock(ctx.content, param_offset)
+            if let Some((var_type, _name)) = docblock_above(ctx.content, param_offset)
+                .and_then(crate::docblock::extract_var_type_with_name)
             {
                 let var_type = ctx.written_names().resolve_type(&var_type);
                 let native = native_type

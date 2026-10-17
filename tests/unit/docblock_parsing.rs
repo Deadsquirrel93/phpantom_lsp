@@ -614,63 +614,6 @@ fn var_type_with_name_generic_preserved() {
     );
 }
 
-// ── find_inline_var_docblock ────────────────────────────────────────
-
-#[test]
-fn inline_var_docblock_simple() {
-    let content = "<?php\n/** @var Session */\n$var = mystery();\n";
-    let stmt_start = content.find("$var").unwrap();
-    assert_eq!(
-        find_inline_var_docblock(content, stmt_start),
-        Some((PhpType::parse("Session"), None))
-    );
-}
-
-#[test]
-fn inline_var_docblock_with_var_name() {
-    let content = "<?php\n/** @var Session $var */\n$var = mystery();\n";
-    let stmt_start = content.find("$var =").unwrap();
-    assert_eq!(
-        find_inline_var_docblock(content, stmt_start),
-        Some((PhpType::parse("Session"), Some("$var".into())))
-    );
-}
-
-#[test]
-fn inline_var_docblock_fqn() {
-    let content = "<?php\n/** @var \\App\\Models\\User */\n$u = get();\n";
-    let stmt_start = content.find("$u").unwrap();
-    assert_eq!(
-        find_inline_var_docblock(content, stmt_start),
-        Some((PhpType::parse("\\App\\Models\\User"), None))
-    );
-}
-
-#[test]
-fn inline_var_docblock_no_docblock() {
-    let content = "<?php\n$var = mystery();\n";
-    let stmt_start = content.find("$var").unwrap();
-    assert_eq!(find_inline_var_docblock(content, stmt_start), None);
-}
-
-#[test]
-fn inline_var_docblock_regular_comment_ignored() {
-    // A `/* ... */` comment (not `/** */`) should not match.
-    let content = "<?php\n/* @var Session */\n$var = mystery();\n";
-    let stmt_start = content.find("$var").unwrap();
-    assert_eq!(find_inline_var_docblock(content, stmt_start), None);
-}
-
-#[test]
-fn inline_var_docblock_with_indentation() {
-    let content = "<?php\nclass A {\n    public function f() {\n        /** @var Session */\n        $var = mystery();\n    }\n}\n";
-    let stmt_start = content.find("$var").unwrap();
-    assert_eq!(
-        find_inline_var_docblock(content, stmt_start),
-        Some((PhpType::parse("Session"), None))
-    );
-}
-
 // ── should_override_type ────────────────────────────────────────────
 
 #[test]

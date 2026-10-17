@@ -53,47 +53,20 @@ pub(crate) fn find_shared_class_at_offset(
 ///
 /// A docblock on a *member* sits inside the class body, which
 /// [`find_class_at_offset`] already resolves.  A docblock on the *class*
-/// does not: it is trivia preceding the declaration, so it starts before
-/// even `decl_start_offset` (which covers attribute lists but not
-/// comments).  For that case the owner is the declaration the docblock
-/// runs straight into, since a docblock binds to whatever follows it.
-/// Anything else in between — a function, a `use` statement, another
-/// docblock — means the block documents that instead, and the class is
-/// none of its business.
-pub(crate) fn find_documented_class_at_offset<'a>(
-    classes: &'a [Arc<ClassInfo>],
-    content: &str,
+/// is trivia preceding the declaration, which the parser recorded as
+/// [`ClassInfo::class_docblock`].
+pub(crate) fn find_documented_class_at_offset(
+    classes: &[Arc<ClassInfo>],
     offset: u32,
-) -> Option<&'a ClassInfo> {
+) -> Option<&ClassInfo> {
     if let Some(class) = find_class_at_offset(classes, offset) {
         return Some(class);
     }
-    let rest = content.get(offset as usize..)?;
-    let doc_end = offset as usize + rest.find("*/")? + 2;
-    classes
-        .iter()
-        .map(|c| c.as_ref())
-        .filter(|c| c.decl_start_offset as usize >= doc_end)
-        .min_by_key(|c| c.decl_start_offset)
-        .filter(|c| {
-            content
-                .get(doc_end..c.decl_start_offset as usize)
-                .is_some_and(runs_into_declaration)
+    classes.iter().map(|c| c.as_ref()).find(|c| {
+        c.class_docblock.as_deref().is_some_and(|docblock| {
+            let start = c.class_docblock_start;
+            start <= offset && (offset as usize) < start as usize + docblock.len()
         })
-}
-
-/// Whether the source between a docblock's `*/` and a class declaration's
-/// start holds nothing that would break the two apart.
-///
-/// `decl_start_offset` points at the leading attribute list when there is
-/// one and at the `class` / `interface` / `trait` / `enum` keyword
-/// otherwise, so the modifiers that may precede that keyword are all this
-/// has to tolerate alongside whitespace.
-fn runs_into_declaration(between: &str) -> bool {
-    between.split_whitespace().all(|word| {
-        ["final", "abstract", "readonly"]
-            .iter()
-            .any(|modifier| word.eq_ignore_ascii_case(modifier))
     })
 }
 

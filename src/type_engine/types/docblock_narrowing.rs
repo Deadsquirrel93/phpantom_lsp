@@ -174,7 +174,13 @@ pub(crate) fn narrows_native(
     !hint_names_classes(native)
         || alternatives(settled)
             .iter()
-            .filter(|alternative| is_beyond(alternative, native, not_a_class))
+            // `object` and `mixed` name no class, but each takes in every
+            // class the hint names and more besides.
+            .filter(|alternative| {
+                alternative.is_object()
+                    || alternative.is_mixed()
+                    || is_beyond(alternative, native, not_a_class)
+            })
             .all(|alternative| {
                 crate::class_lookup::is_subtype_of_typed(alternative, native, class_loader)
             })

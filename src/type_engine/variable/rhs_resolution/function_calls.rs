@@ -312,26 +312,10 @@ fn named_function_call<'b>(
 /// type it holds, an array callable, or its class's `__invoke()`.
 fn variable_invocation(
     var_name: &str,
-    expr: &Expression<'_>,
+    _expr: &Expression<'_>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Vec<ResolvedType> {
-    let offset = expr.span().start.offset as usize;
-
-    // 1. Try docblock annotation:
-    //    `@var Closure(): User $fn` or
-    //    `@param callable(int): Response $fn`
-    if let Some(raw_type) =
-        crate::docblock::find_iterable_raw_type_in_source(ctx.content, offset, var_name)
-            .map(|t| ctx.written_names().resolve_type(&t))
-        && let Some(ret_type) = raw_type.callable_return_type()
-    {
-        let resolved = callable_return_resolution(ret_type, ctx);
-        if !resolved.is_empty() {
-            return resolved;
-        }
-    }
-
-    // 2. Resolve the variable's own type.  Closures, arrow functions,
+    // 1. Resolve the variable's own type.  Closures, arrow functions,
     //    and first-class callables are all inferred by
     //    `resolve_rhs_expression` as a `TypeKind::Callable` (see
     //    `infer_closure_literal_type`), so `$fn`'s embedded return
@@ -342,7 +326,7 @@ fn variable_invocation(
         return resolved;
     }
 
-    // 3. An array callable, `[$obj, 'method']`, calls the method.
+    // 2. An array callable, `[$obj, 'method']`, calls the method.
     for rt in &var_types {
         let resolved = array_callable_return(&rt.type_string, ctx);
         if !resolved.is_empty() {
@@ -350,7 +334,7 @@ fn variable_invocation(
         }
     }
 
-    // 4. An object with an `__invoke()` method returns what that does.
+    // 3. An object with an `__invoke()` method returns what that does.
     invoke_method_return(&var_types, ctx)
 }
 

@@ -362,7 +362,7 @@ impl Backend {
         uri: &str,
         content: &str,
         cursor_offset: u32,
-    ) -> Option<ClassInfo> {
+    ) -> Option<Arc<ClassInfo>> {
         let ctx = self.file_context_at(uri, cursor_offset);
         if let Some(target) =
             crate::virtual_members::laravel::macro_closure_this_target(content, cursor_offset)
@@ -370,12 +370,10 @@ impl Backend {
             let target = self.facade_macro_concrete(&target).unwrap_or(target);
             if let Some(class) = self.find_or_load_class(&target) {
                 let class_loader = self.class_loader(&ctx);
-                return Some(Arc::unwrap_or_clone(
-                    crate::virtual_members::resolve_class_fully_maybe_cached(
-                        &class,
-                        &class_loader,
-                        Some(&self.resolved_class_cache),
-                    ),
+                return Some(crate::virtual_members::resolve_class_fully_maybe_cached(
+                    &class,
+                    &class_loader,
+                    Some(&self.resolved_class_cache),
                 ));
             }
         }
@@ -541,12 +539,10 @@ impl Backend {
     pub(crate) fn docblock_scope_member(
         &self,
         file: &FileContext,
-        content: &str,
         offset: u32,
         name: &str,
     ) -> Option<(Arc<ClassInfo>, MemberKind)> {
-        let class =
-            crate::class_lookup::find_documented_class_at_offset(&file.classes, content, offset)?;
+        let class = crate::class_lookup::find_documented_class_at_offset(&file.classes, offset)?;
         let class_loader = self.class_loader(file);
         let resolved = crate::virtual_members::resolve_class_fully_cached(
             class,

@@ -84,6 +84,8 @@ struct ClassDocblockInfo {
     /// Raw class-level docblock text, kept for the consumers that render
     /// or re-scan the original text.
     raw_docblock: Option<String>,
+    /// Byte offset of `raw_docblock` in the file.
+    docblock_start: u32,
     /// `@method` / `@property` tags parsed out of `raw_docblock`.
     doc_members: Option<Arc<DocblockMembers>>,
 }
@@ -179,7 +181,8 @@ fn extract_class_docblock<'a>(
     let Some(ctx) = doc_ctx else {
         return ClassDocblockInfo::default();
     };
-    let Some(doc_text) = docblock::get_docblock_text_for_node(ctx.trivias, ctx.content, node)
+    let Some((doc_text, docblock_start)) =
+        crate::symbol_map::docblock::get_docblock_text_with_offset(ctx.trivias, ctx.content, node)
     else {
         return ClassDocblockInfo::default();
     };
@@ -237,6 +240,7 @@ fn extract_class_docblock<'a>(
         links: docblock::extract_link_urls_from_info(&info),
         see_refs: docblock::extract_see_references_from_info(&info),
         raw_docblock: Some(doc_text.to_string()),
+        docblock_start,
         doc_members: DocblockMembers::from_info(&info),
     }
 }
@@ -421,6 +425,7 @@ impl Backend {
                         trait_precedences,
                         trait_aliases,
                         class_docblock: doc_info.raw_docblock,
+                        class_docblock_start: doc_info.docblock_start,
                         doc_members: doc_info.doc_members,
                         attribute_targets: attr_targets,
                         laravel: Some(Box::new(laravel_metadata)),
@@ -534,6 +539,7 @@ impl Backend {
                         trait_precedences,
                         trait_aliases,
                         class_docblock: doc_info.raw_docblock,
+                        class_docblock_start: doc_info.docblock_start,
                         doc_members: doc_info.doc_members,
                         ..Default::default()
                     });
@@ -623,6 +629,7 @@ impl Backend {
                         trait_precedences,
                         trait_aliases,
                         class_docblock: doc_info.raw_docblock,
+                        class_docblock_start: doc_info.docblock_start,
                         doc_members: doc_info.doc_members,
                         laravel,
                         ..Default::default()
@@ -782,6 +789,7 @@ impl Backend {
                         implements_generics: doc_info.implements_generics,
                         type_aliases: doc_info.type_aliases,
                         class_docblock: doc_info.raw_docblock,
+                        class_docblock_start: doc_info.docblock_start,
                         doc_members: doc_info.doc_members,
                         backed_type: enum_def.backing_type_hint.as_ref().and_then(|h| {
                             let ty = crate::parser::extract_hint_type(&h.hint);

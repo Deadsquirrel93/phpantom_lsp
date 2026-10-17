@@ -179,41 +179,8 @@ pub(crate) fn resolve_foreach_iterable_type_raw<'b>(
         }
     }
 
-    // Fall back to resolve_rhs_expression for complex expressions.
     let resolved = resolve_rhs_with_scope(foreach.expression, scope, ctx);
-    if !resolved.is_empty() {
-        return Some(ResolvedType::types_joined(&resolved));
-    }
-
-    // Fallback: for simple `$variable` iterators, check for an inline
-    // `/** @var Type $var */` or `@param` annotation near the foreach.
-    // Handles cases where the variable's type comes from a docblock
-    // rather than an assignment.
-    if let Expression::Variable(Variable::Direct(dv)) = foreach.expression {
-        let var_name = bytes_to_str(dv.name).to_string();
-        let foreach_offset = foreach.foreach.span().start.offset as usize;
-        if let Some(docblock_type) = crate::docblock::find_iterable_raw_type_in_source(
-            ctx.content,
-            foreach_offset,
-            &var_name,
-        )
-        .map(|t| ctx.written_names().resolve_type(&t))
-        {
-            return Some(docblock_type);
-        }
-    }
-
-    // Final fallback: resolve the foreach expression as a "subject"
-    // through the full resolver pipeline (SubjectExpr::parse →
-    // property/method chain resolution).  Handles cases like
-    // `$this->getItems()` or `self::fetchAll()` where the expression
-    // type wasn't captured by scope lookup or resolve_rhs_expression
-    // above.
-    if let Some(iter_type) = resolve_foreach_expr_via_subject(foreach.expression, scope, ctx) {
-        return Some(iter_type);
-    }
-
-    None
+    (!resolved.is_empty()).then(|| ResolvedType::types_joined(&resolved))
 }
 
 /// The pieces of a forward-walk context the shared iterable element/key
@@ -319,78 +286,6 @@ pub(crate) fn process_foreach<'b>(
         return;
     }
 
-    // Apply any standalone `/** @var Type $var */` docblocks that precede
-    // the foreach keyword.  These are not separate AST statements (the
-    // parser attaches them as comments to the foreach), so they won't be
-    // processed by `process_expression_statement`.  Without this, variables
-    // typed only via docblock (common in Blade templates) won't be in scope
-    // when the iterable expression is resolved.
-    //
-    // We extract all variables referenced in the foreach expression and
-    // check for @var annotations for each one.
-    let foreach_offset = foreach.foreach.span().start.offset as usize;
-    if let Expression::Variable(Variable::Direct(dv)) = foreach.expression {
-        // `bytes_to_str(dv.name)` already includes the leading `$`, which
-        // is how scope keys and `find_var_raw_type_in_source` expect it.
-        let var_name = bytes_to_str(dv.name);
-        if let Some(var_type) =
-            crate::docblock::find_var_raw_type_in_source(ctx.content, foreach_offset, var_name)
-        {
-            let php_type = resolve_var_docblock_type(&var_type, ctx);
-            // An explicit inline `@var` seeds an empty scope entry, and it
-            // also refines a non-informative pre-existing type such as a
-            // `mixed` closure/function parameter or a bare `array`.  Without
-            // the second case, a `mixed` parameter would occupy the scope
-            // slot and shadow the developer's `@var iterable<T> $x`
-            // annotation, leaving the loop variable untyped.
-            let current = scope.get(var_name);
-            let should_apply = current.is_empty()
-                || current.iter().all(|rt| {
-                    crate::docblock::should_override_type_typed(&php_type, &rt.type_string)
-                });
-            if should_apply {
-                let resolved = ctx.resolved_types_for(php_type);
-                scope.set(var_name, resolved);
-            }
-        }
-    } else {
-        // For complex expressions like `$users->active()->byName()`,
-        // extract the base variable and resolve its type from @var.
-        let expr_start = foreach.expression.span().start.offset as usize;
-        let expr_end = foreach.expression.span().end.offset as usize;
-        if let Some(expr_text) = ctx.content.get(expr_start..expr_end) {
-            // Extract the base variable (e.g. "$users" from "$users->active()->byName()")
-            if let Some(base_end) = expr_text.find("->").or_else(|| expr_text.find("::")) {
-                let base_var = expr_text[..base_end].trim();
-                // Scope keys retain the leading `$` (e.g. "$users"), so the
-                // lookup and the insert must both use the `$`-prefixed name,
-                // matching the direct-variable branch above.
-                if base_var.starts_with('$')
-                    && let Some(var_type) = crate::docblock::find_var_raw_type_in_source(
-                        ctx.content,
-                        foreach_offset,
-                        base_var,
-                    )
-                {
-                    let php_type = resolve_var_docblock_type(&var_type, ctx);
-                    // As in the direct-variable branch: seed an unknown base
-                    // variable, or refine a non-informative pre-existing type
-                    // (e.g. a `mixed` parameter), but never clobber a more
-                    // precise type inferred from an assignment.
-                    let current = scope.get(base_var);
-                    let should_apply = current.is_empty()
-                        || current.iter().all(|rt| {
-                            crate::docblock::should_override_type_typed(&php_type, &rt.type_string)
-                        });
-                    if should_apply {
-                        let resolved = ctx.resolved_types_for(php_type);
-                        scope.set(base_var, resolved);
-                    }
-                }
-            }
-        }
-    }
-
     // The iterable expression is an expression position like any other,
     // so the writes it makes and the narrowing its own short-circuit
     // chains, ternary branches and `match (true)` arms prove have to reach
@@ -444,12 +339,7 @@ pub(crate) fn process_foreach<'b>(
     let mut value_docblock_override: Option<Vec<ResolvedType>> = None;
     let mut key_docblock_override: Option<Vec<ResolvedType>> = None;
     let foreach_offset = foreach.foreach.span().start.offset as usize;
-    let before = &ctx.content[..foreach_offset.min(ctx.content.len())];
-    let trimmed = before.trim_end();
-    if trimmed.ends_with("*/")
-        && let Some(doc_start) = trimmed.rfind("/**")
-    {
-        let doc_text = &trimmed[doc_start..trimmed.len()];
+    if let Some(doc_text) = docblock_above(ctx.content, foreach_offset) {
         let var_annotations = parse_var_docblock_pairs(doc_text);
         for (doc_var, php_type) in &var_annotations {
             if let Some(ref vn) = value_var_name
@@ -1248,79 +1138,6 @@ pub(crate) fn resolve_foreach_iterable_type<'b>(
         )
         .unwrap_or(raw),
     )
-}
-
-/// Resolve a foreach expression to a `PhpType` by treating it as a
-/// subject string and going through the full resolver pipeline.
-///
-/// It extracts the expression text, calls `resolve_target_classes` to
-/// get `ClassInfo` objects, and constructs a `TypeKind::Named` from the
-/// first resolved class.
-pub(crate) fn resolve_foreach_expr_via_subject<'b>(
-    expression: &'b Expression<'b>,
-    scope: &ScopeState,
-    ctx: &ForwardWalkCtx<'_>,
-) -> Option<PhpType> {
-    let expr_span = expression.span();
-    let expr_start = expr_span.start.offset as usize;
-    let expr_end = expr_span.end.offset as usize;
-    let expr_text = ctx.content.get(expr_start..expr_end)?.trim();
-    if expr_text.is_empty() {
-        return None;
-    }
-
-    // Build a ResolutionCtx from the forward walker's context.
-    let scope_resolver = scope.snapshot_resolver();
-    let var_ctx = ctx.var_ctx_for_with_scope(
-        "$__foreach",
-        expr_span.start.offset,
-        &scope_resolver,
-        Some(scope.proofs()),
-    );
-    let rctx = var_ctx.as_resolution_ctx();
-
-    let resolved = crate::type_engine::resolver::resolve_target_classes(
-        expr_text,
-        crate::types::AccessKind::Arrow,
-        &rctx,
-    );
-
-    if resolved.is_empty() {
-        return None;
-    }
-
-    // Construct a PhpType from the resolved classes.  If any resolved
-    // type has a structured type_string (e.g. `list<User>`,
-    // `Collection<int, Product>`), prefer that — it carries generic
-    // parameters that `extract_value_type` can use.
-    for rt in &resolved {
-        if rt.type_string.has_type_structure() {
-            let expanded = crate::type_engine::type_resolution::resolve_type_alias_typed(
-                &rt.type_string,
-                &ctx.current_class.fqn(),
-                ctx.all_classes,
-                ctx.class_loader,
-            )
-            .unwrap_or_else(|| rt.type_string.clone());
-            return Some(expanded);
-        }
-    }
-
-    // Fall back to the class name — `bind_foreach_value` Strategy 2
-    // will resolve it through inheritance to find element types.
-    // Use `fqn()` (not `name`) so that the returned `TypeKind::Named`
-    // carries the fully-qualified class name.  `ClassInfo.name` is
-    // always the short name (e.g. `OrderProductCollection`), while
-    // `fqn()` combines namespace + name into the FQN that the class
-    // loader needs to find and merge the class.
-    let first = resolved.first()?;
-    let name = first
-        .class_info
-        .as_ref()
-        .map(|c| c.fqn().to_string())
-        .or_else(|| first.type_string.base_name().map(|s| s.to_string()))?;
-
-    Some(PhpType::named(atom(&name)))
 }
 
 /// Bind a foreach value variable from the iterable's element type.

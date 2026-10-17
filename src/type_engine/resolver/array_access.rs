@@ -5,7 +5,6 @@
 use std::sync::Arc;
 
 use crate::Backend;
-use crate::docblock;
 use crate::php_type::PhpType;
 use crate::type_engine::subject_expr::{BracketSegment, SubjectExpr};
 use crate::types::*;
@@ -121,12 +120,6 @@ pub(super) fn resolve_array_access_subject(
         None
     };
 
-    let docblock_type: Option<PhpType> = docblock::find_iterable_raw_type_in_source(
-        ctx.content,
-        ctx.cursor_offset as usize,
-        &base_var,
-    )
-    .map(|t| ctx.written_names().resolve_type(&t));
     // resolve_variable_types is designed for bare `$variable` names;
     // property chains like `$this->query->joins` are handled by the
     // property_raw_type strategy above.  Skip this strategy for
@@ -163,16 +156,7 @@ pub(super) fn resolve_array_access_subject(
         None
     };
 
-    // The annotation goes first because the walker can lose its
-    // generics on the way through, but a walker type that refines
-    // the annotation is the annotation read further (an `@var
-    // array<T>` whose `T` it knows the bound of, a shape a guard
-    // has narrowed) and describes the value better.
-    let (first, second) = match (docblock_type, ast_type) {
-        (Some(doc), Some(ast)) if ast != doc && ast.is_subtype_of(&doc) => (Some(ast), Some(doc)),
-        (doc, ast) => (doc, ast),
-    };
-    let candidates = property_raw_type.into_iter().chain(first).chain(second);
+    let candidates = property_raw_type.into_iter().chain(ast_type);
 
     if let Some(resolved) =
         crate::completion::source::helpers::try_chained_array_access_with_candidates(

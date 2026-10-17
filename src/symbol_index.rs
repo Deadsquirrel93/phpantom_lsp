@@ -135,6 +135,29 @@ impl SymbolIndex {
         }
     }
 
+    /// Drop the completion origin of every class, function and constant
+    /// the discovery indexes no longer hold.  The origin maps are only
+    /// ever written beside those indexes, so a vendor rescan or a deleted
+    /// file that purges an entry would otherwise leave its origin behind.
+    pub(crate) fn prune_orphaned_origins(&self) {
+        {
+            let idx = self.fqn_uri_index.read();
+            self.fqn_origin_index
+                .write()
+                .retain(|fqn, _| idx.contains_key(fqn));
+        }
+        {
+            let idx = self.autoload_function_index.read();
+            self.autoload_function_origin_index
+                .write()
+                .retain(|fqn, _| idx.contains_key(fqn));
+        }
+        let idx = self.autoload_constant_index.read();
+        self.autoload_constant_origin_index
+            .write()
+            .retain(|name, _| idx.contains_key(name));
+    }
+
     pub(crate) fn function_index_generation(&self) -> u64 {
         self.function_index_generation.load(Ordering::Acquire)
     }

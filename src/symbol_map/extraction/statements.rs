@@ -470,7 +470,10 @@ pub(super) fn extract_from_switch_body<'a>(
     };
     for case in cases.iter() {
         match case {
-            SwitchCase::Expression(expr_case) => emit_keyword(&expr_case.case, ctx),
+            SwitchCase::Expression(expr_case) => {
+                emit_keyword(&expr_case.case, ctx);
+                extract_from_expression(expr_case.expression, ctx, scope_start);
+            }
             SwitchCase::Default(def_case) => emit_keyword(&def_case.default, ctx),
         }
         let case_end = case

@@ -10,7 +10,6 @@ use std::sync::Arc;
 use mago_span::HasSpan;
 
 use crate::atom::{atom, bytes_to_str};
-use crate::docblock;
 use crate::php_type::PhpType;
 use crate::type_engine::call_resolution::OutParamCallee;
 use crate::type_engine::resolver::VarResolutionCtx;
@@ -171,8 +170,8 @@ pub(in crate::type_engine) fn walker_scope_types(
 
 /// Resolve the raw iterable type of an argument expression.
 ///
-/// Handles `$variable` (via the walker's scope, then docblock scanning)
-/// and delegates to `resolve_expression_type` for method calls, property
+/// Handles `$variable` (via the walker's scope, then a resolution of the
+/// variable) and delegates to `resolve_expression_type` for method calls, property
 /// access, etc.
 pub(in crate::type_engine) fn resolve_arg_raw_type<'b>(
     arg_expr: &'b Expression<'b>,
@@ -181,24 +180,9 @@ pub(in crate::type_engine) fn resolve_arg_raw_type<'b>(
     if let Expression::Variable(Variable::Direct(dv)) = arg_expr {
         let var_text = bytes_to_str(dv.name).to_string();
         let offset = arg_expr.span().start.offset as usize;
-        let from_docblock =
-            docblock::find_iterable_raw_type_in_source(ctx.content, offset, &var_text)
-                .map(|t| ctx.written_names().resolve_type(&t));
-
         // The scope the forward walker recorded for this position, from
-        // whichever of its two channels is live.  Both are map reads,
-        // cheap enough to consult alongside the annotation.
+        // whichever of its two channels is live.
         let from_walker = walker_scope_types(&var_text, offset as u32, ctx.scope_var_resolver);
-
-        // Neither channel had it, so the only thing left below is a full
-        // re-resolution of the variable, and an annotation that already
-        // answered is taken as-is.
-        if from_walker.is_empty()
-            && ctx.scope_var_resolver.is_none()
-            && let Some(annotated) = from_docblock
-        {
-            return Some(annotated);
-        }
 
         // Resolve the variable's type to extract the raw iterable type.
         // This handles cases like `$users = $this->getUsers();
@@ -229,25 +213,11 @@ pub(in crate::type_engine) fn resolve_arg_raw_type<'b>(
         let from_scope = (!resolved.is_empty())
             .then(|| crate::types::ResolvedType::types_joined(&resolved))
             // `skip_scalar` stays off: a `list<int>` carries an element type
-            // every bit as usable as a `list<User>`, and asking whether the
-            // element is non-scalar drops every scalar-element array back to
-            // the annotation the walker has since narrowed.
+            // every bit as usable as a `list<User>`.
             .filter(|joined| joined.extract_value_type(false).is_some());
 
-        match (from_docblock, from_scope) {
-            // The annotation is where the walker's own type came from, so
-            // when the two disagree the walker has narrowed it since
-            // (`assert($a !== [])` proving `non-empty-array`, or an
-            // `is_array()` guard ruling out the `string` arm) and its answer
-            // is the one that describes the value at this call.  Anything
-            // wider than the annotation is the walker having lost the
-            // generics on the way through, and the annotation still stands.
-            (Some(annotated), Some(scoped)) if scoped.is_subtype_of(&annotated) => {
-                return Some(scoped);
-            }
-            (Some(annotated), _) => return Some(annotated),
-            (None, Some(scoped)) => return Some(scoped),
-            (None, None) => {}
+        if from_scope.is_some() {
+            return from_scope;
         }
     }
     // Fall back to the unified pipeline (method calls, etc.)

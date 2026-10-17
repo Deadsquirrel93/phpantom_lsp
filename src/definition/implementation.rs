@@ -43,7 +43,7 @@ use crate::atom::Atom;
 use crate::class_lookup::find_class_at_offset;
 use crate::config::IndexingStrategy;
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind};
-use crate::text_position::{LineIndex, line_start_byte_offset, position_to_offset};
+use crate::text_position::position_to_offset;
 use crate::types::{ClassInfo, ClassLikeKind, FileContext, MAX_INHERITANCE_DEPTH, ResolvedType};
 use crate::util::{collect_php_files, short_name};
 
@@ -268,12 +268,8 @@ impl Backend {
                 };
                 if let Some((class_uri, class_content)) =
                     self.find_class_file_content(&iface_name, uri, content)
-                    && let Some(member_pos) = Self::find_member_position_in_class(
-                        &class_content,
-                        member_name,
-                        member_kind,
-                        &iface,
-                    )
+                    && let Some(member_pos) =
+                        Self::find_member_position(&class_content, member_name, member_kind, &iface)
                     && let Ok(parsed_uri) = Url::parse(&class_uri)
                 {
                     let loc = point_location(parsed_uri, member_pos);
@@ -295,7 +291,7 @@ impl Backend {
             if parent_cls.has_method(member_name)
                 && let Some((class_uri, class_content)) =
                     self.find_class_file_content(&parent_name, uri, content)
-                && let Some(member_pos) = Self::find_member_position_in_class(
+                && let Some(member_pos) = Self::find_member_position(
                     &class_content,
                     member_name,
                     MemberKind::Method,
@@ -380,12 +376,8 @@ impl Backend {
             .filter_map(|provider| {
                 let (class_uri, class_content) =
                     self.find_class_file_content(&provider.fqn(), uri, content)?;
-                let member_pos = Self::find_member_position_in_class(
-                    &class_content,
-                    member_name,
-                    member_kind,
-                    provider,
-                )?;
+                let member_pos =
+                    Self::find_member_position(&class_content, member_name, member_kind, provider)?;
                 Some(point_location(Url::parse(&class_uri).ok()?, member_pos))
             })
             .collect();
@@ -992,42 +984,6 @@ impl Backend {
                         depth + 1,
                     )
             })
-    }
-
-    /// Find a member position scoped to a specific class body.
-    ///
-    /// When multiple classes in the same file define a method with the same
-    /// name, [`find_member_position`](Self::find_member_position) would
-    /// always return the first match.  This variant restricts the search
-    /// to lines that fall within the class's `start_offset..end_offset`
-    /// byte range so that each implementing class resolves to its own
-    /// definition.
-    fn find_member_position_in_class(
-        content: &str,
-        member_name: &str,
-        kind: MemberKind,
-        cls: &ClassInfo,
-    ) -> Option<Position> {
-        // Fast path: use stored AST offset when available.
-        let name_offset = cls.member_name_offset(member_name, kind.as_str());
-        if name_offset.is_some() {
-            return Self::find_member_position(content, member_name, kind, name_offset);
-        }
-
-        // Restrict the search to lines within the class's byte range, so
-        // that a member name shared with another class in the same file
-        // resolves to this class's own definition.
-        let index = LineIndex::new(content);
-        let start_line = index.line_of(cls.start_offset as usize);
-        let end_line = index.line_of(cls.end_offset as usize);
-        let start_byte = line_start_byte_offset(content, start_line);
-        let end_byte = line_start_byte_offset(content, end_line + 1);
-        let class_body = &content[start_byte..end_byte];
-
-        Self::find_member_position(class_body, member_name, kind, None).map(|pos| Position {
-            line: pos.line + start_line as u32,
-            character: pos.character,
-        })
     }
 
     /// Find the location of a class declaration for an implementor.

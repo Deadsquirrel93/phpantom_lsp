@@ -15,7 +15,6 @@ use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
 use crate::atom::{atom, bytes_to_str};
-use crate::docblock;
 use crate::parser::with_parsed_program;
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::{ClassInfo, ResolvedType};
@@ -264,7 +263,6 @@ pub(crate) fn resolve_variable_php_type(
     backend: Option<&Backend>,
     loaders: Loaders<'_>,
 ) -> Option<PhpType> {
-    // Ensure the variable name is $-prefixed for docblock lookups.
     let prefixed = if var_name.starts_with('$') {
         var_name.to_owned()
     } else {
@@ -282,17 +280,7 @@ pub(crate) fn resolve_variable_php_type(
         )
     };
 
-    // 1. Inline @var override (skip for self-assignment RHS).
-    let var_override: Option<PhpType> = if let Some(var_type) =
-        docblock::find_var_raw_type_in_source(content, cursor_offset as usize, &prefixed)
-        && !is_cursor_in_self_assignment_rhs(content, cursor_offset as usize, &prefixed)
-    {
-        Some(written_names().resolve_type(&var_type))
-    } else {
-        None
-    };
-
-    // 2. Forward walker resolution.
+    // 1. Forward walker resolution.
     let dummy_class;
     let effective_class = match current_class {
         Some(cc) => cc,
@@ -319,7 +307,7 @@ pub(crate) fn resolve_variable_php_type(
         return Some(ResolvedType::types_joined(&resolved));
     }
 
-    // 3. Parameter definition site fallback.
+    // 2. Parameter definition site fallback.
     //    When the cursor is on a parameter declaration (inside the
     //    parameter list, not the body), the forward walker won't find
     //    it because it only processes body statements.  Parse the file
@@ -332,12 +320,7 @@ pub(crate) fn resolve_variable_php_type(
             })
             .or_else(|| find_catch_var_type_at_cursor(&stmts, &prefixed, cursor_offset))
     });
-    if let Some(written) = param_type {
-        return Some(written_names().resolve_type(&written));
-    }
-
-    // Fall back to the @var override.
-    var_override
+    param_type.map(|written| written_names().resolve_type(&written))
 }
 
 /// Walk a sequence of top-level statements to find the class or
@@ -455,11 +438,7 @@ pub(in crate::type_engine) fn resolve_variable_in_statements<'b>(
         // or `$x = new class { … };`).  If the cursor falls inside one,
         // resolve variables from its member methods just like we do for
         // named classes above.
-        let stmt_span = stmt.span();
-        if ctx.cursor_offset >= stmt_span.start.offset
-            && ctx.cursor_offset <= stmt_span.end.offset
-            && let Some(anon) = find_anonymous_class_containing_cursor(stmt, ctx.cursor_offset)
-        {
+        if let Some(anon) = anonymous_class_body_at(stmt, ctx.cursor_offset) {
             return resolve_variable_in_members(anon.members.iter(), ctx);
         }
     }
@@ -491,227 +470,6 @@ pub(in crate::type_engine) fn resolve_variable_in_statements<'b>(
     }
 
     vec![]
-}
-
-/// Recursively walk a statement's expression tree looking for an
-/// `AnonymousClass` whose body (between `{` and `}`) contains the
-/// given cursor offset.  Returns a reference to the first matching
-/// anonymous class node, or `None`.
-fn find_anonymous_class_containing_cursor<'a>(
-    stmt: &'a Statement<'a>,
-    cursor_offset: u32,
-) -> Option<&'a AnonymousClass<'a>> {
-    /// Walk an expression tree for an anonymous class containing the cursor.
-    fn walk_expr<'a>(expr: &'a Expression<'a>, cursor: u32) -> Option<&'a AnonymousClass<'a>> {
-        let sp = expr.span();
-        if cursor < sp.start.offset || cursor > sp.end.offset {
-            return None;
-        }
-        match expr {
-            Expression::AnonymousClass(anon) => {
-                if cursor >= anon.left_brace.start.offset && cursor <= anon.right_brace.end.offset {
-                    return Some(anon);
-                }
-                None
-            }
-            Expression::Parenthesized(p) => walk_expr(p.expression, cursor),
-            Expression::Assignment(a) => {
-                walk_expr(a.lhs, cursor).or_else(|| walk_expr(a.rhs, cursor))
-            }
-            Expression::Binary(b) => walk_expr(b.lhs, cursor).or_else(|| walk_expr(b.rhs, cursor)),
-            Expression::Conditional(c) => walk_expr(c.condition, cursor)
-                .or_else(|| c.then.and_then(|e| walk_expr(e, cursor)))
-                .or_else(|| walk_expr(c.r#else, cursor)),
-            Expression::Call(call) => match call {
-                Call::Function(fc) => walk_args(&fc.argument_list.arguments, cursor),
-                Call::Method(mc) => walk_expr(mc.object, cursor)
-                    .or_else(|| walk_args(&mc.argument_list.arguments, cursor)),
-                Call::NullSafeMethod(mc) => walk_expr(mc.object, cursor)
-                    .or_else(|| walk_args(&mc.argument_list.arguments, cursor)),
-                Call::StaticMethod(sc) => walk_expr(sc.class, cursor)
-                    .or_else(|| walk_args(&sc.argument_list.arguments, cursor)),
-            },
-            Expression::Array(arr) => {
-                for elem in arr.elements.iter() {
-                    let found = match elem {
-                        ArrayElement::KeyValue(kv) => {
-                            walk_expr(kv.key, cursor).or_else(|| walk_expr(kv.value, cursor))
-                        }
-                        ArrayElement::Value(v) => walk_expr(v.value, cursor),
-                        ArrayElement::Variadic(v) => walk_expr(v.value, cursor),
-                        _ => None,
-                    };
-                    if found.is_some() {
-                        return found;
-                    }
-                }
-                None
-            }
-            Expression::LegacyArray(arr) => {
-                for elem in arr.elements.iter() {
-                    let found = match elem {
-                        ArrayElement::KeyValue(kv) => {
-                            walk_expr(kv.key, cursor).or_else(|| walk_expr(kv.value, cursor))
-                        }
-                        ArrayElement::Value(v) => walk_expr(v.value, cursor),
-                        ArrayElement::Variadic(v) => walk_expr(v.value, cursor),
-                        _ => None,
-                    };
-                    if found.is_some() {
-                        return found;
-                    }
-                }
-                None
-            }
-            Expression::Closure(closure) => {
-                // The anonymous class could be inside a closure body.
-                for inner in closure.body.statements.iter() {
-                    if let Some(anon) = find_anonymous_class_containing_cursor(inner, cursor) {
-                        return Some(anon);
-                    }
-                }
-                None
-            }
-            Expression::ArrowFunction(arrow) => walk_expr(arrow.expression, cursor),
-            Expression::Instantiation(inst) => {
-                if let Some(ref args) = inst.argument_list {
-                    walk_args(&args.arguments, cursor)
-                } else {
-                    None
-                }
-            }
-            Expression::UnaryPrefix(u) => walk_expr(u.operand, cursor),
-            Expression::UnaryPostfix(u) => walk_expr(u.operand, cursor),
-            Expression::Throw(t) => walk_expr(t.exception, cursor),
-            Expression::Clone(c) => walk_expr(c.object, cursor),
-            Expression::Match(m) => {
-                if let Some(found) = walk_expr(m.expression, cursor) {
-                    return Some(found);
-                }
-                for arm in m.arms.iter() {
-                    if let Some(found) = walk_expr(arm.expression(), cursor) {
-                        return Some(found);
-                    }
-                }
-                None
-            }
-            _ => None,
-        }
-    }
-
-    /// Walk a list of call arguments.
-    fn walk_args<'a>(
-        arguments: &'a mago_syntax::cst::sequence::TokenSeparatedSequence<'a, Argument<'a>>,
-        cursor: u32,
-    ) -> Option<&'a AnonymousClass<'a>> {
-        for arg in arguments.iter() {
-            let arg_expr = match arg {
-                Argument::Positional(pos) => pos.value,
-                Argument::Named(named) => named.value,
-            };
-            if let Some(found) = walk_expr(arg_expr, cursor) {
-                return Some(found);
-            }
-        }
-        None
-    }
-
-    match stmt {
-        Statement::Expression(expr_stmt) => walk_expr(expr_stmt.expression, cursor_offset),
-        Statement::Return(ret) => ret.value.as_ref().and_then(|v| walk_expr(v, cursor_offset)),
-        Statement::Block(block) => {
-            for inner in block.statements.iter() {
-                if let Some(anon) = find_anonymous_class_containing_cursor(inner, cursor_offset) {
-                    return Some(anon);
-                }
-            }
-            None
-        }
-        Statement::If(if_stmt) => match &if_stmt.body {
-            IfBody::Statement(body) => {
-                find_anonymous_class_containing_cursor(body.statement, cursor_offset)
-            }
-            IfBody::ColonDelimited(body) => {
-                for inner in body.statements.iter() {
-                    if let Some(anon) = find_anonymous_class_containing_cursor(inner, cursor_offset)
-                    {
-                        return Some(anon);
-                    }
-                }
-                None
-            }
-        },
-        Statement::Foreach(foreach) => match &foreach.body {
-            ForeachBody::Statement(inner) => {
-                find_anonymous_class_containing_cursor(inner, cursor_offset)
-            }
-            ForeachBody::ColonDelimited(body) => {
-                for inner in body.statements.iter() {
-                    if let Some(anon) = find_anonymous_class_containing_cursor(inner, cursor_offset)
-                    {
-                        return Some(anon);
-                    }
-                }
-                None
-            }
-        },
-        Statement::While(while_stmt) => match &while_stmt.body {
-            WhileBody::Statement(inner) => {
-                find_anonymous_class_containing_cursor(inner, cursor_offset)
-            }
-            WhileBody::ColonDelimited(body) => {
-                for inner in body.statements.iter() {
-                    if let Some(anon) = find_anonymous_class_containing_cursor(inner, cursor_offset)
-                    {
-                        return Some(anon);
-                    }
-                }
-                None
-            }
-        },
-        Statement::For(for_stmt) => match &for_stmt.body {
-            ForBody::Statement(inner) => {
-                find_anonymous_class_containing_cursor(inner, cursor_offset)
-            }
-            ForBody::ColonDelimited(body) => {
-                for inner in body.statements.iter() {
-                    if let Some(anon) = find_anonymous_class_containing_cursor(inner, cursor_offset)
-                    {
-                        return Some(anon);
-                    }
-                }
-                None
-            }
-        },
-        Statement::DoWhile(dw) => {
-            find_anonymous_class_containing_cursor(dw.statement, cursor_offset)
-        }
-        Statement::Try(try_stmt) => {
-            for inner in try_stmt.block.statements.iter() {
-                if let Some(anon) = find_anonymous_class_containing_cursor(inner, cursor_offset) {
-                    return Some(anon);
-                }
-            }
-            for catch in try_stmt.catch_clauses.iter() {
-                for inner in catch.block.statements.iter() {
-                    if let Some(anon) = find_anonymous_class_containing_cursor(inner, cursor_offset)
-                    {
-                        return Some(anon);
-                    }
-                }
-            }
-            if let Some(finally) = &try_stmt.finally_clause {
-                for inner in finally.block.statements.iter() {
-                    if let Some(anon) = find_anonymous_class_containing_cursor(inner, cursor_offset)
-                    {
-                        return Some(anon);
-                    }
-                }
-            }
-            None
-        }
-        _ => None,
-    }
 }
 
 /// Try to resolve the target variable inside a `Function` declaration.
@@ -929,3 +687,20 @@ fn resolve_abstract_method_param(
 #[cfg(test)]
 #[path = "resolution_tests.rs"]
 mod tests;
+
+/// The innermost anonymous class in `stmt` whose body (between `{` and
+/// `}`) holds `cursor_offset`.
+fn anonymous_class_body_at<'a>(
+    stmt: &'a Statement<'a>,
+    cursor_offset: u32,
+) -> Option<&'a AnonymousClass<'a>> {
+    crate::parser::innermost_node_at(Node::Statement(stmt), cursor_offset, |node| match node {
+        Node::AnonymousClass(anon)
+            if cursor_offset >= anon.left_brace.start.offset
+                && cursor_offset <= anon.right_brace.end.offset =>
+        {
+            Some(anon)
+        }
+        _ => None,
+    })
+}

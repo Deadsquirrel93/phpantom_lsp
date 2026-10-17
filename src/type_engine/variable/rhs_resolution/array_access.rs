@@ -9,7 +9,6 @@ use mago_syntax::cst::*;
 
 use crate::Backend;
 use crate::atom::{atom, bytes_to_str, literal_bytes_to_str};
-use crate::docblock;
 use crate::php_type::{LiteralValue, PhpType, TypeKind};
 use crate::types::ResolvedType;
 
@@ -48,44 +47,38 @@ pub(super) fn resolve_rhs_array_access<'b>(
     // Resolve the base expression's type.
     // For bare variables (`$var['key']`), use docblock or assignment scanning.
     // For property chains (`$obj->prop['key']`), resolve the property type.
-    let raw_type: Option<PhpType> = if let Expression::Variable(Variable::Direct(base_dv)) =
-        current_expr
-    {
-        let base_var = bytes_to_str(base_dv.name).to_string();
-        // The forward walker's scope comes before the docblock scan.  It
-        // already incorporates @var annotations AND applies
-        // condition-based narrowing (e.g. null stripping on array
-        // shape keys through guard clauses, or the `string` arm an
-        // enclosing `is_array()` ruled out), which the raw docblock
-        // discards.  The two channels the walker publishes it through are
-        // consulted in turn: the resolver it threads down its own call
-        // tree, then the snapshot cache it leaves for the diagnostic
-        // consumers it does not drive.
-        let scope_result = if ctx.scope_var_resolver.is_some() {
-            let resolved = resolve_var_types(&base_var, ctx, access_offset as u32);
-            if resolved.is_empty() {
-                None
+    let raw_type: Option<PhpType> =
+        if let Expression::Variable(Variable::Direct(base_dv)) = current_expr {
+            let base_var = bytes_to_str(base_dv.name).to_string();
+            // The forward walker's scope comes before the docblock scan.  It
+            // already incorporates @var annotations AND applies
+            // condition-based narrowing (e.g. null stripping on array
+            // shape keys through guard clauses, or the `string` arm an
+            // enclosing `is_array()` ruled out), which the raw docblock
+            // discards.  The two channels the walker publishes it through are
+            // consulted in turn: the resolver it threads down its own call
+            // tree, then the snapshot cache it leaves for the diagnostic
+            // consumers it does not drive.
+            let scope_result = if ctx.scope_var_resolver.is_some() {
+                let resolved = resolve_var_types(&base_var, ctx, access_offset as u32);
+                if resolved.is_empty() {
+                    None
+                } else {
+                    Some(ResolvedType::types_joined(&resolved))
+                }
             } else {
-                Some(ResolvedType::types_joined(&resolved))
-            }
-        } else {
-            let resolved = crate::type_engine::variable::resolution::walker_scope_types(
-                &base_var,
-                access_offset as u32,
-                None,
-            );
-            if resolved.is_empty() {
-                None
-            } else {
-                Some(ResolvedType::types_joined(&resolved))
-            }
-        };
-        scope_result
-            .or_else(|| {
-                docblock::find_iterable_raw_type_in_source(ctx.content, access_offset, &base_var)
-                    .map(|t| ctx.written_names().resolve_type(&t))
-            })
-            .or_else(|| {
+                let resolved = crate::type_engine::variable::resolution::walker_scope_types(
+                    &base_var,
+                    access_offset as u32,
+                    None,
+                );
+                if resolved.is_empty() {
+                    None
+                } else {
+                    Some(ResolvedType::types_joined(&resolved))
+                }
+            };
+            scope_result.or_else(|| {
                 let resolved = resolve_var_types(&base_var, ctx, access_offset as u32);
                 if resolved.is_empty() {
                     None
@@ -93,16 +86,16 @@ pub(super) fn resolve_rhs_array_access<'b>(
                     Some(ResolvedType::types_joined(&resolved))
                 }
             })
-    } else {
-        // Non-variable base (e.g. property access `$obj->prop['key']`,
-        // method call `$obj->getItems()['key']`, etc.).
-        let base_resolved = resolve_rhs_expression(current_expr, ctx);
-        if base_resolved.is_empty() {
-            None
         } else {
-            Some(ResolvedType::types_joined(&base_resolved))
-        }
-    };
+            // Non-variable base (e.g. property access `$obj->prop['key']`,
+            // method call `$obj->getItems()['key']`, etc.).
+            let base_resolved = resolve_rhs_expression(current_expr, ctx);
+            if base_resolved.is_empty() {
+                None
+            } else {
+                Some(ResolvedType::types_joined(&base_resolved))
+            }
+        };
 
     let Some(mut current) = raw_type else {
         // The base expression's type is unknown (e.g. an untyped parameter

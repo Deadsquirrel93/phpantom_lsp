@@ -345,6 +345,28 @@ pub(crate) fn for_each_nested_function<'s, 'ast>(
     });
 }
 
+/// The walker behind [`for_each_own_yield`]: visits each `yield` without
+/// entering the closures, arrow functions, functions and classes nested in
+/// what it walks.
+struct OwnYields;
+
+impl<'ast, 'arena: 'ast, F: FnMut(&'ast mago_syntax::cst::Yield<'arena>)>
+    mago_syntax::walker::Walker<'ast, 'arena, F> for OwnYields
+{
+    fn walk_closure(&self, _: &'ast mago_syntax::cst::Closure<'arena>, _: &mut F) {}
+    fn walk_arrow_function(&self, _: &'ast mago_syntax::cst::ArrowFunction<'arena>, _: &mut F) {}
+    fn walk_function(&self, _: &'ast mago_syntax::cst::Function<'arena>, _: &mut F) {}
+    fn walk_anonymous_class(&self, _: &'ast mago_syntax::cst::AnonymousClass<'arena>, _: &mut F) {}
+    fn walk_class(&self, _: &'ast mago_syntax::cst::Class<'arena>, _: &mut F) {}
+    fn walk_interface(&self, _: &'ast mago_syntax::cst::Interface<'arena>, _: &mut F) {}
+    fn walk_trait(&self, _: &'ast mago_syntax::cst::Trait<'arena>, _: &mut F) {}
+    fn walk_enum(&self, _: &'ast mago_syntax::cst::Enum<'arena>, _: &mut F) {}
+
+    fn walk_in_yield(&self, yield_expr: &'ast mago_syntax::cst::Yield<'arena>, visit: &mut F) {
+        visit(yield_expr);
+    }
+}
+
 /// Call `visit` with each `yield` the function body `statements` owns,
 /// wherever it sits in an expression (`$sent = yield $value;`,
 /// `log(yield)`).
@@ -355,29 +377,19 @@ pub(crate) fn for_each_own_yield<'ast, 'arena: 'ast>(
     statements: impl IntoIterator<Item = &'ast mago_syntax::cst::Statement<'arena>>,
     mut visit: impl FnMut(&'ast mago_syntax::cst::Yield<'arena>),
 ) {
-    use mago_syntax::cst::*;
     use mago_syntax::walker::Walker;
-
-    struct OwnYields;
-
-    impl<'ast, 'arena: 'ast, F: FnMut(&'ast Yield<'arena>)> Walker<'ast, 'arena, F> for OwnYields {
-        fn walk_closure(&self, _: &'ast Closure<'arena>, _: &mut F) {}
-        fn walk_arrow_function(&self, _: &'ast ArrowFunction<'arena>, _: &mut F) {}
-        fn walk_function(&self, _: &'ast Function<'arena>, _: &mut F) {}
-        fn walk_anonymous_class(&self, _: &'ast AnonymousClass<'arena>, _: &mut F) {}
-        fn walk_class(&self, _: &'ast Class<'arena>, _: &mut F) {}
-        fn walk_interface(&self, _: &'ast Interface<'arena>, _: &mut F) {}
-        fn walk_trait(&self, _: &'ast Trait<'arena>, _: &mut F) {}
-        fn walk_enum(&self, _: &'ast Enum<'arena>, _: &mut F) {}
-
-        fn walk_in_yield(&self, yield_expr: &'ast Yield<'arena>, visit: &mut F) {
-            visit(yield_expr);
-        }
-    }
-
     for stmt in statements {
         OwnYields.walk_statement(stmt, &mut visit);
     }
+}
+
+/// [`for_each_own_yield`] for an arrow function's body expression.
+pub(crate) fn for_each_own_yield_in_expression<'ast, 'arena: 'ast>(
+    expression: &'ast mago_syntax::cst::Expression<'arena>,
+    mut visit: impl FnMut(&'ast mago_syntax::cst::Yield<'arena>),
+) {
+    use mago_syntax::walker::Walker;
+    OwnYields.walk_expression(expression, &mut visit);
 }
 
 /// Whether the function body `statements` makes its function a generator:
@@ -388,4 +400,67 @@ pub(crate) fn contains_own_yield<'ast, 'arena: 'ast>(
     let mut found = false;
     for_each_own_yield(statements, |_| found = true);
     found
+}
+
+/// What `pick` makes of the innermost node inside `root` that holds
+/// `offset` and that it accepts.
+///
+/// The walk only descends into the subtree holding `offset`, so it costs
+/// the depth of the offset rather than the size of `root`.  Spans are
+/// inclusive at both ends: an offset just past a construct is still on it.
+/// It loops rather than recursing, so a deeply nested expression (a long
+/// left-associative concatenation) cannot overflow the stack.
+pub(crate) fn innermost_node_at<'ast, 'arena, T>(
+    root: mago_syntax::cst::Node<'ast, 'arena>,
+    offset: u32,
+    mut pick: impl FnMut(mago_syntax::cst::Node<'ast, 'arena>) -> Option<T>,
+) -> Option<T> {
+    use mago_span::HasSpan;
+    let holds = |node: &mago_syntax::cst::Node<'_, '_>| {
+        let span = node.span();
+        span.start.offset <= offset && offset <= span.end.offset
+    };
+    if !holds(&root) {
+        return None;
+    }
+    let mut found = None;
+    let mut node = root;
+    loop {
+        if let Some(picked) = pick(node) {
+            found = Some(picked);
+        }
+        // An offset on the boundary of two siblings belongs to the later.
+        let mut next = None;
+        node.visit_children(|child| {
+            if holds(&child) {
+                next = Some(child);
+            }
+        });
+        match next {
+            Some(child) => node = child,
+            None => return found,
+        }
+    }
+}
+
+/// Call `visit` with every node under `root`, in source order, together
+/// with the nodes enclosing it (outermost first).
+///
+/// Walks with an explicit stack rather than recursing, so a deeply nested
+/// expression cannot overflow the thread's stack.
+pub(crate) fn for_each_node_with_ancestors<'ast, 'arena>(
+    root: mago_syntax::cst::Node<'ast, 'arena>,
+    mut visit: impl FnMut(mago_syntax::cst::Node<'ast, 'arena>, &[mago_syntax::cst::Node<'ast, 'arena>]),
+) {
+    let mut ancestors: Vec<mago_syntax::cst::Node<'ast, 'arena>> = Vec::new();
+    // Each entry is a node and the number of ancestors it has.
+    let mut pending = vec![(root, 0usize)];
+    let mut children = Vec::new();
+    while let Some((node, depth)) = pending.pop() {
+        ancestors.truncate(depth);
+        visit(node, &ancestors);
+        ancestors.push(node);
+        node.visit_children(|child| children.push(child));
+        pending.extend(children.drain(..).rev().map(|child| (child, depth + 1)));
+    }
 }

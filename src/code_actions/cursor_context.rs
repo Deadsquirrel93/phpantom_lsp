@@ -135,27 +135,9 @@ pub(crate) fn find_enclosing_function<'a>(
 pub(crate) fn innermost_at<'ast, 'arena, T>(
     program: &'ast Program<'arena>,
     offset: u32,
-    mut pick: impl FnMut(Node<'ast, 'arena>) -> Option<T>,
+    pick: impl FnMut(Node<'ast, 'arena>) -> Option<T>,
 ) -> Option<T> {
-    fn descend<'ast, 'arena, T>(
-        node: Node<'ast, 'arena>,
-        offset: u32,
-        pick: &mut impl FnMut(Node<'ast, 'arena>) -> Option<T>,
-        found: &mut Option<T>,
-    ) {
-        let span = node.span();
-        if offset < span.start.offset || offset > span.end.offset {
-            return;
-        }
-        if let Some(picked) = pick(node) {
-            *found = Some(picked);
-        }
-        node.visit_children(|child| descend(child, offset, pick, found));
-    }
-
-    let mut found = None;
-    descend(Node::Program(program), offset, &mut pick, &mut found);
-    found
+    crate::parser::innermost_node_at(Node::Program(program), offset, pick)
 }
 
 /// A `$var = value;` statement: a plain `=` to a variable other than

@@ -22,7 +22,6 @@ use std::sync::Arc;
 
 use crate::atom::atom;
 use crate::class_lookup::{find_class_by_fqn, find_or_load_resolved};
-use crate::inheritance::build_generic_subs;
 use crate::php_type::{PhpType, TypeKind, is_builtin_non_class_type};
 use crate::types::*;
 use crate::util::short_name;
@@ -534,68 +533,12 @@ fn resolve_named_type(
             {
                 let generic_arg_strings: Vec<String> =
                     generic_args.iter().map(|a| a.to_string()).collect();
-                // Threaded through the same entry point with or without an
-                // active cache: it applies the substitution *and* the
-                // post-substitution fixups that depend on concrete type
-                // arguments (higher-order collection proxy members), which
-                // an inline `apply_generic_args` would skip.
-                let resolved = virtual_members::resolve_class_fully_with_generics(
+                vec![virtual_members::resolve_class_for_type_hint(
                     &cls,
                     class_loader,
-                    virtual_members::active_resolved_class_cache(),
                     &generic_arg_strings,
                     generic_args,
-                );
-                let mut result = Arc::unwrap_or_clone(resolved);
-
-                // ── Template-param mixin resolution ────────────────
-                // When a class declares `@mixin TParam` where `TParam`
-                // is a template parameter, the mixin cannot be resolved
-                // during `resolve_class_fully` because the concrete type
-                // is not yet known.  Now that generic args are concrete,
-                // resolve those mixins and merge their members.
-                if cls
-                    .mixins
-                    .iter()
-                    .any(|m| cls.template_params.iter().any(|t| t == m.as_str()))
-                {
-                    let subs = build_generic_subs(&cls, generic_args);
-                    if !subs.is_empty() {
-                        let mixin_members = virtual_members::phpdoc::resolve_template_param_mixins(
-                            &cls,
-                            &subs,
-                            class_loader,
-                        );
-                        if !mixin_members.is_empty() {
-                            virtual_members::merge_virtual_members(&mut result, mixin_members);
-                        }
-                    }
-                }
-
-                // ── Eloquent Builder scope injection ───────────────
-                laravel::try_inject_builder_scopes(
-                    &mut result,
-                    &cls,
-                    name,
-                    generic_args,
-                    class_loader,
-                );
-
-                // ── Inherited Builder mixin scope injection ────────
-                // When a class inherits `@mixin Builder<TRelatedModel>`
-                // from an ancestor (e.g. HasMany inherits it from
-                // Relation), the mixin expansion adds Builder's own
-                // methods but not model-specific scopes.  Now that
-                // generic args are concrete, resolve the model type
-                // and inject its scopes.
-                laravel::try_inject_mixin_builder_scopes(
-                    &mut result,
-                    &cls,
-                    generic_args,
-                    class_loader,
-                );
-
-                vec![Arc::new(result)]
+                )]
             } else {
                 vec![cls]
             }

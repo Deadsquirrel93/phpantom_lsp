@@ -249,7 +249,6 @@ pub(crate) fn eager_callback_arguments<'a>(
         &scope_resolver,
         Some(scope.proofs()),
     );
-    let rctx = var_ctx.as_resolution_ctx();
     let receivers = if is_static {
         let name = ctx.written_names().static_receiver_class_name(receiver)?;
         let owner = super::super::closure_resolution::find_owner_by_name(
@@ -259,12 +258,7 @@ pub(crate) fn eager_callback_arguments<'a>(
         )?;
         vec![ResolvedType::from_arc(owner)]
     } else {
-        let span = receiver.span();
-        super::super::closure_resolution::resolve_receiver_types(
-            span.start.offset,
-            span.end.offset,
-            &rctx,
-        )
+        super::super::rhs_resolution::resolve_rhs_expression(receiver, &var_ctx)
     };
     let receivers: Vec<_> = receivers
         .into_iter()

@@ -510,6 +510,25 @@ impl Backend {
         // parse_and_cache_file when needed (issue #99).
     }
 
+    /// [`clear_file_maps`](Self::clear_file_maps) for a closed file the
+    /// workspace index does not cover, which also gives up the functions
+    /// and constants it declared and the record that it was parsed.  A
+    /// vendor or autoload file is parsed again on its next lookup.
+    ///
+    /// Its classes stay in `fqn_class_index` (see `clear_file_maps`), and
+    /// so do their inheritance edges, which describe those classes.
+    pub(crate) fn forget_closed_file(&self, uri: &str) {
+        self.clear_file_maps(uri);
+        self.parsed_uris.write().remove(uri);
+        let uris = std::collections::HashSet::from([uri.to_string()]);
+        self.withdraw_functions_for_uris(&uris);
+        self.symbols
+            .global_defines
+            .write()
+            .retain(|_, d| d.file_uri.as_str() != uri);
+        self.symbols.uri_globals_index.write().remove(uri);
+    }
+
     /// The on-disk path of `uri` when it is a PHP file the workspace index
     /// covers: inside the workspace root, outside the vendor directories,
     /// not excluded by `[indexing] exclude`, and with a PHP extension.

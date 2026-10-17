@@ -121,6 +121,9 @@ impl Backend {
         // fast diagnostics the caller already collected.
         let slow_start = out.len();
         let _lines = crate::text_position::PassLineTable::new(content);
+        // The collectors and the forward walk all parse the file; share one
+        // AST between them, as the fast pass does.
+        let _parse_guard = crate::parser::with_parse_cache(content);
 
         // ── Phase 2: forward-walked diagnostic scope cache ──────
         // Walk every function/method body in the file once with the

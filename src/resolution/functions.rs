@@ -150,9 +150,14 @@ impl Backend {
         // ones like "Brotli\\compress") to the raw PHP source of the file
         // that defines them.  We parse the entire file, cache all discovered
         // functions in global_functions, and return the one we need.
-        let stub_fn_idx = self.stub_function_index.read();
         for &name in candidates {
-            if let Some(&stub_content) = stub_fn_idx.get(name) {
+            // Copy the `&'static str` out: the guard must not be held across
+            // the `global_functions` write below.
+            let stub_content = self.stub_function_index.read().get(name).copied();
+            if let Some(stub_content) = stub_content {
+                // The functions, the namespace and the classes below are
+                // all read from this one parse.
+                let _parse_guard = crate::parser::with_parse_cache(stub_content);
                 let ver = Some(self.php_version());
                 let mut functions = self.parse_functions_versioned(stub_content, ver);
 

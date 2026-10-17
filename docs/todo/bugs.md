@@ -149,39 +149,6 @@ method's. Locate the function through the parsed AST instead
 from and the docblock (already `paren_function_docblock`) from that one
 node.
 
-### B626. A namespace declared on the `<?php` line is reported as a PSR-4 mismatch
-
-**Impact: Low · Complexity: Low**
-
-```php
-<?php namespace App\Models;   // Namespace `<global>` does not match PSR-4 expected `App\Models`
-
-final class User {}
-```
-
-`namespace_decl_from_content` (`diagnostics/namespace_mismatch.rs:76-119`)
-takes the first line that starts with `namespace `, so a declaration that
-shares the `<?php` line is never seen and the file counts as global. "Fix
-namespace" (`code_actions/fix_namespace.rs:43`) reads the same function and
-offers to insert a second declaration. The diagnostic already parses the
-file (`is_structural_single_classlike_file`); read the `Namespace`
-statement's name span from that AST.
-
-### B628. A deleted file's workspace diagnostics are still reported
-
-**Impact: Low-Medium · Complexity: Low**
-
-With workspace diagnostics on, a file the background pass diagnosed keeps
-its entries in `diag.workspace_diags` (`diagnostics/workspace.rs:411-427`)
-after it is deleted: the watched-file deletion path
-(`indexing/reindex.rs:122-150`) purges the file's indexes but not this
-store, and the pull handler goes on reporting the URI through
-`tracked_uris` (`diagnostics/pull.rs:194-200`), so its problems outlive
-the file until the session restarts. Clear the native and external
-entries for a deleted URI; its result id stays, so the next pull tells
-the client the set is empty. Found by reading the code, not yet
-reproduced in an editor.
-
 ### B630. An unclosed call inside a braced `namespace` block drops the block
 
 **Impact: Low · Complexity: Medium**

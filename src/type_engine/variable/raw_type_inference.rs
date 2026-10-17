@@ -10,7 +10,6 @@ use mago_syntax::cst::*;
 use super::array_func_rules::{ArrayFuncArgs, array_func_element_type, array_func_raw_type};
 
 use crate::atom::{atom, bytes_to_str, literal_bytes_to_str};
-use crate::docblock;
 use crate::parser::extract_hint_type;
 use crate::php_type::PhpType;
 
@@ -581,19 +580,11 @@ fn infer_element_type<'b>(
             if let Some(t) = scope_type {
                 return Some(t);
             }
-            // A `@var`/`@param` annotation read straight out of the source
-            // (e.g. `@var list<User> $items`), for a variable nothing above
-            // could type.
-            let annotated = || {
-                docblock::find_iterable_raw_type_in_source(ctx.content, offset, &var_text)
-                    .map(|t| ctx.written_names().resolve_type(&t))
-            };
             // Inside the forward walker the scope above was the only
-            // narrowing-aware answer on offer: running the full pipeline
-            // here would walk the enclosing body all over again.  The
-            // annotation is what is left.
+            // answer on offer: running the full pipeline here would walk the
+            // enclosing body all over again.
             if ctx.scope_var_resolver.is_some() {
-                return annotated();
+                return None;
             }
             // Outside the walker the full pipeline (parameter type hints,
             // `@param`/`@var` docblocks, assignments, foreach bindings)
@@ -619,7 +610,6 @@ fn infer_element_type<'b>(
                 ctx.backend,
                 ctx.loaders,
             )
-            .or_else(annotated)
         }
         // ── Parenthesized ──
         Expression::Parenthesized(p) => infer_element_type(p.expression, ctx),
@@ -882,7 +872,7 @@ fn infer_callback_return_type(
     // on that class with no instantiation to substitute from.
     let seed_member = |ty: &PhpType| -> ResolvedType {
         match ty.base_name().and_then(|name| (ctx.class_loader)(name)) {
-            Some(cls) => ResolvedType::from_both(ty.clone(), (*cls).clone()),
+            Some(cls) => ResolvedType::from_both_arc(ty.clone(), cls),
             None => ResolvedType::from_type_string(ty.clone()),
         }
     };

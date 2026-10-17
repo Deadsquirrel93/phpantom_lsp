@@ -57,6 +57,11 @@ pub(crate) struct LaravelAliases {
     /// Global facade class alias → facade class FQN
     /// (e.g. `"App"` → `"Illuminate\\Support\\Facades\\App"`).
     pub(crate) facade: HashMap<String, String>,
+    /// Facade FQN → the concrete class its `getFacadeAccessor()` names,
+    /// filled on first use by [`Backend::facade_macro_concrete`].  Facades
+    /// are framework source, so the answer holds until the tables are
+    /// rebuilt.
+    facade_concrete: RwLock<HashMap<String, Option<String>>>,
 }
 
 impl LaravelAliases {
@@ -291,11 +296,20 @@ impl Backend {
         if !aliases.facade.values().any(|fqn| fqn == target) {
             return None;
         }
-        let source = read_source_by_fqn(self, target)?;
-        match parse_facade_accessor(&source)? {
-            FacadeAccessor::Alias(key) => aliases.container.get(key.as_str()).cloned(),
-            FacadeAccessor::Class(fqn) => Some(fqn.to_string()),
+        if let Some(concrete) = aliases.facade_concrete.read().get(target) {
+            return concrete.clone();
         }
+        let concrete = read_source_by_fqn(self, target)
+            .and_then(|source| parse_facade_accessor(&source))
+            .and_then(|accessor| match accessor {
+                FacadeAccessor::Alias(key) => aliases.container.get(key.as_str()).cloned(),
+                FacadeAccessor::Class(fqn) => Some(fqn.to_string()),
+            });
+        aliases
+            .facade_concrete
+            .write()
+            .insert(target.to_string(), concrete.clone());
+        concrete
     }
 
     /// The memoized Laravel alias tables, built on first use from the installed
@@ -367,7 +381,11 @@ fn build_laravel_aliases(backend: &Backend) -> LaravelAliases {
         }
     }
 
-    LaravelAliases { container, facade }
+    LaravelAliases {
+        container,
+        facade,
+        facade_concrete: RwLock::default(),
+    }
 }
 
 // ─── Source access ────────────────────────────────────────────────────────

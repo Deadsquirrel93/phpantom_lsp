@@ -38,8 +38,8 @@ impl Backend {
         // earlier for end-of-token edge cases).
         let span = self.lookup_symbol_at_position(uri, content, position)?;
 
-        let maps = self.symbol_maps.read();
-        let symbol_map = maps.get(uri)?;
+        let symbol_map = self.symbol_maps.read().get(uri)?.clone();
+        let symbol_map = &*symbol_map;
 
         let highlights = match &span.kind {
             SymbolKind::Variable { name } | SymbolKind::CompactVariable { name } => {

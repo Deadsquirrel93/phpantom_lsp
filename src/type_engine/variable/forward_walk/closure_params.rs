@@ -21,8 +21,8 @@ use crate::types::{ClassInfo, ResolvedType};
 /// above it.
 fn adjacent_docblock(content: &str, fn_offset: usize) -> Option<&str> {
     let before = content.get(..fn_offset)?.trim_end();
-    if before.ends_with("*/") {
-        return docblock_ending_at(before);
+    if let Some(doc) = docblock_ending_at(content, before.len()) {
+        return Some(doc);
     }
     // Allow `static` keyword between docblock and `fn(…)`:
     //   /** @param T $x */ static fn(T $x) => …
@@ -30,8 +30,8 @@ fn adjacent_docblock(content: &str, fn_offset: usize) -> Option<&str> {
     let before = before
         .trim_end_matches(|c: char| c.is_ascii_alphanumeric() || c == '_')
         .trim_end();
-    if before.ends_with("*/") {
-        return docblock_ending_at(before);
+    if let Some(doc) = docblock_ending_at(content, before.len()) {
+        return Some(doc);
     }
     // A closure stored in a variable carries its docblock above the whole
     // statement, because that is where PHP attaches the comment:
@@ -43,17 +43,7 @@ fn adjacent_docblock(content: &str, fn_offset: usize) -> Option<&str> {
     // assignment is stepped over — a call argument or an array element is
     // not — which is what keeps a sibling closure's annotation out.
     let start = assignment_target_start(before)?;
-    docblock_ending_at(before[..start].trim_end())
-}
-
-/// The `/** … */` block that `text` ends with, or `None` when it ends
-/// with something else (including a plain `/* … */` comment).
-fn docblock_ending_at(text: &str) -> Option<&str> {
-    let body = text.strip_suffix("*/")?;
-    let open = body.rfind("/**")?;
-    // A `*/` in between means the nearest `/**` closed earlier and
-    // `text` ends with a plain comment instead.
-    (!body[open + 3..].contains("*/")).then(|| &text[open..])
+    docblock_ending_at(content, before[..start].trim_end().len())
 }
 
 /// Byte offset of the assignment target in text that ends with a plain
@@ -103,9 +93,8 @@ pub(crate) fn seed_closure_params(
 
         // Only the docblock attached to this closure/arrow function is
         // read for its `@param` tags.
-        let doc_type = docblock.and_then(|doc| {
-            crate::docblock::find_iterable_raw_type_in_source(doc, doc.len(), &pname)
-        });
+        let doc_type =
+            docblock.and_then(|doc| crate::docblock::extract_param_raw_type(doc, &pname));
         let declared = declared_param_type(&pname, param, doc_type, &enclosing, ctx);
         let mut param_results = match inferred_types.get(idx) {
             Some(inferred) => refine_by_inferred(declared, inferred, ctx),

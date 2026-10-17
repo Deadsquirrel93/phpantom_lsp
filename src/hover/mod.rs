@@ -421,7 +421,11 @@ impl Backend {
                 }
             }
 
-            SymbolKind::ClassReference { name, is_fqn, .. } => {
+            SymbolKind::ClassReference {
+                name,
+                is_fqn,
+                context,
+            } => {
                 // A fully qualified reference (`\stdClass`, stored without
                 // its backslash) must not go through the file's imports
                 // and namespace again.
@@ -430,17 +434,11 @@ impl Backend {
                 } else {
                     &class_loader
                 };
-                // Check whether this class reference is in a `new ClassName` context.
-                // If so, show the __construct method hover instead of the class hover.
-                let before = content.get(..symbol.start as usize)?;
-                let trimmed = before.trim_end();
-                let is_new_context = trimmed.ends_with("new")
-                    && trimmed
-                        .as_bytes()
-                        .get(trimmed.len().wrapping_sub(4))
-                        .is_none_or(|&b| !b.is_ascii_alphanumeric() && b != b'_');
-
-                if is_new_context && let Some(cls) = class_loader(name) {
+                // On `new ClassName`, show the __construct method hover
+                // instead of the class hover.
+                if *context == crate::symbol_map::ClassRefContext::New
+                    && let Some(cls) = class_loader(name)
+                {
                     let merged = crate::virtual_members::resolve_class_fully_cached(
                         &cls,
                         &resolved_class_loader,
@@ -485,7 +483,7 @@ impl Backend {
                 // class's own member first, as phpDocumentor reads it.
                 if *is_docblock_reference
                     && let Some((class, kind)) =
-                        self.docblock_scope_member(&ctx, content, symbol.start, name)
+                        self.docblock_scope_member(&ctx, symbol.start, name)
                     && let Some(hit) =
                         Self::find_member_for_hover(&class, name, kind == MemberKind::Method)
                 {
@@ -514,6 +512,7 @@ impl Backend {
                     }
                     SelfStaticParentKind::This => self
                         .resolve_closure_this_override(uri, content, cursor_offset)
+                        .map(Arc::unwrap_or_clone)
                         .or_else(|| current_class.cloned()),
                     SelfStaticParentKind::Parent => current_class
                         .and_then(|cc| cc.parent_class.as_ref())

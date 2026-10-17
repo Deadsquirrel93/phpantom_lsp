@@ -178,6 +178,7 @@ fn walk_file_for_scopes(
         loaders,
         resolved_class_cache,
         targets,
+        globals: None,
     };
 
     with_parsed_program(content, "build_diagnostic_scopes", |program, _content| {
@@ -201,6 +202,24 @@ pub(crate) fn walk_top_level_statements<'a, 'b: 'a>(
     default_class: &ClassInfo,
     diag_ctx: &DiagnosticWalkCtx<'_>,
 ) {
+    let statements: Vec<&'b Statement<'b>> = statements.collect();
+    let ctx = diag_ctx.forward_walk_ctx(default_class);
+
+    // A `global` statement reads the variables the file's top-level code
+    // leaves behind, the same scope the request path builds for it.
+    let globals = (diag_ctx.globals.is_none() && diag_ctx.content.contains("global "))
+        .then(|| top_level_scope_for_globals(statements.iter().copied(), &ctx).locals);
+    let globals_ctx;
+    let diag_ctx = match &globals {
+        Some(locals) => {
+            globals_ctx = DiagnosticWalkCtx {
+                globals: Some(locals),
+                ..*diag_ctx
+            };
+            &globals_ctx
+        }
+        None => diag_ctx,
+    };
     let ctx = diag_ctx.forward_walk_ctx(default_class);
 
     let mut top_level_scope = ScopeState::new();
@@ -438,6 +457,10 @@ pub(crate) struct DiagnosticWalkCtx<'a> {
     /// Sorted byte offsets the caller needs scopes for, or empty to walk
     /// the whole file.
     targets: &'a [u32],
+    /// The file's top-level variables, which a `global` statement in a
+    /// body imports.  `None` until the top-level walk has built them, and
+    /// in a file that never says `global`.
+    globals: Option<&'a Locals>,
 }
 
 impl<'a> DiagnosticWalkCtx<'a> {
@@ -484,7 +507,7 @@ impl<'a> DiagnosticWalkCtx<'a> {
             loaders: self.loaders,
             resolved_class_cache: self.resolved_class_cache,
             enclosing_return_type: None,
-            top_level_scope: None,
+            top_level_scope: self.globals.cloned(),
             in_loop: false,
             template_markers: None,
             cursor_scope: None,

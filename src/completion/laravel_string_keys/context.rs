@@ -26,11 +26,6 @@ pub(super) struct LaravelStringKeyContext<'a> {
     pub(super) prefix: &'a str,
     /// Byte offset of the string content start (right after the opening quote).
     pub(super) content_start_offset: usize,
-    /// When set, the key is a sub-key under this config path prefix.
-    /// For example, `#[Database('mysql')]` sets this to `"database.connections."`
-    /// so completion filters to `database.connections.*` keys and strips the
-    /// prefix, showing just `mysql`, `sqlite`, etc.
-    pub(super) config_sub_prefix: Option<&'static str>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -312,7 +307,10 @@ pub(super) fn resolve_known_class_reference(
                     continue;
                 };
                 let prefix = clause[..open].trim();
-                if let Some(target) = clause[open + 1..close].split(',').find_map(|item| {
+                let Some(members) = clause.get(open + 1..close) else {
+                    continue;
+                };
+                if let Some(target) = members.split(',').find_map(|item| {
                     imported_item_target(
                         item,
                         Some(prefix),
@@ -782,18 +780,10 @@ pub(super) fn detect_laravel_string_key_context_inner<'a>(
             start,
         } => (kind, prefix, literal_start + start),
     };
-    let config_sub_prefix = match &kind {
-        LaravelStringKind::ConfigResource(resource) => {
-            Some(crate::symbol_map::laravel_resources::descriptor(*resource).config_prefix)
-        }
-        _ => None,
-    };
-
     Some(LaravelStringKeyContext {
         kind,
         prefix,
         content_start_offset,
-        config_sub_prefix,
     })
 }
 

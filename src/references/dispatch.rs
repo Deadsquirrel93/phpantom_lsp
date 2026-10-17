@@ -200,7 +200,7 @@ impl Backend {
                     // span doesn't encode static-ness.  Check the
                     // uri_classes_index to determine the correct flag.
                     let is_static = self
-                        .get_classes_for_uri(uri)
+                        .shared_classes_for_uri(uri)
                         .iter()
                         .flat_map(|classes| classes.iter())
                         .flat_map(|c| c.properties.iter())

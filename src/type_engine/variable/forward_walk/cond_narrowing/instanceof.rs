@@ -207,7 +207,7 @@ pub(super) fn commit_chain_instanceof<'b>(
                     let entry = alternative_results.entry(var_name.clone()).or_default();
                     ResolvedType::extend_unique(
                         entry,
-                        union.into_iter().map(ResolvedType::from_class).collect(),
+                        union.into_iter().map(ResolvedType::from_arc).collect(),
                     );
                 }
                 continue;
@@ -232,7 +232,7 @@ pub(super) fn commit_chain_instanceof<'b>(
                         let entry = alternative_results.entry(var_name.clone()).or_default();
                         ResolvedType::extend_unique(
                             entry,
-                            union.into_iter().map(ResolvedType::from_class).collect(),
+                            union.into_iter().map(ResolvedType::from_arc).collect(),
                         );
                     }
                 }

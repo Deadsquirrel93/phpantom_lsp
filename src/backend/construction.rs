@@ -251,7 +251,6 @@ impl Backend {
     /// specific stubs should use [`new_test_with_stubs`] or
     /// [`new_test_with_all_stubs`] instead.
     pub fn new_test() -> Self {
-        virtual_members::phpdoc::clear_mixin_cache();
         Self::test_defaults()
     }
 
@@ -264,7 +263,6 @@ impl Backend {
     /// use this when the test specifically exercises stub-backed
     /// behaviour.
     pub fn new_test_with_full_stubs() -> Self {
-        virtual_members::phpdoc::clear_mixin_cache();
         let backend = Self::defaults_with(WorkspaceEnv::new_isolated(), StubIndices::embedded());
         backend.set_php_version(backend.php_version());
         backend
@@ -275,7 +273,6 @@ impl Backend {
     /// This allows tests to inject minimal stub content (e.g. `UnitEnum`,
     /// `BackedEnum`) without depending on `composer install` having been run.
     pub fn new_test_with_stubs(stub_index: HashMap<&'static str, &'static str>) -> Self {
-        virtual_members::phpdoc::clear_mixin_cache();
         let backend = Self {
             stub_index: Arc::new(RwLock::new(CiMap::from(stub_index))),
             ..Self::test_defaults()
@@ -294,7 +291,6 @@ impl Backend {
         stub_function_index: HashMap<&'static str, &'static str>,
         stub_constant_index: HashMap<&'static str, &'static str>,
     ) -> Self {
-        virtual_members::phpdoc::clear_mixin_cache();
         let backend = Self {
             stub_index: Arc::new(RwLock::new(CiMap::from(stub_index))),
             stub_function_index: Arc::new(RwLock::new(blade::with_marker_stubs(CiMap::from(
@@ -313,7 +309,6 @@ impl Backend {
         workspace_root: PathBuf,
         psr4_mappings: Vec<composer::Psr4Mapping>,
     ) -> Self {
-        virtual_members::phpdoc::clear_mixin_cache();
         Self {
             workspace: WorkspaceEnv {
                 workspace_root: Arc::new(RwLock::new(Some(workspace_root))),

@@ -544,6 +544,82 @@ pub fn resolve_class_fully_with_type_args(
     )
 }
 
+/// The marker that ends the generic-argument list of a cache key holding a
+/// [`resolve_class_for_type_hint`] result, keeping it apart from the plain
+/// specialisation under the same arguments.
+const TYPE_HINT_KEY_MARKER: &str = "\0type-hint";
+
+/// [`resolve_class_fully_with_generics`] followed by the stages that need a
+/// type hint's concrete arguments: `@mixin TParam` mixins whose template
+/// parameter the arguments bind, and the Eloquent scopes of the model a
+/// `Builder<Model>` (or a relation inheriting `@mixin Builder<TModel>`)
+/// names.
+///
+/// The result is cached alongside the plain specialisation, so a type such
+/// as `Builder<User>` is specialised and given its scopes once rather than
+/// copied and re-injected at every resolution.
+pub fn resolve_class_for_type_hint(
+    class: &ClassInfo,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    generic_arg_strings: &[String],
+    generic_args: &[PhpType],
+) -> Arc<ClassInfo> {
+    let cache = super::cache::active_resolved_class_cache();
+    let fqn = class.fqn();
+    let key: ResolvedClassCacheKey = (
+        fqn,
+        generic_arg_strings
+            .iter()
+            .cloned()
+            .chain(std::iter::once(TYPE_HINT_KEY_MARKER.to_string()))
+            .collect(),
+    );
+    if let Some(cached) = cache.and_then(|c| c.read().get(&key).cloned()) {
+        return cached;
+    }
+
+    let specialised = resolve_class_fully_with_generics(
+        class,
+        class_loader,
+        cache,
+        generic_arg_strings,
+        generic_args,
+    );
+    // A specialisation that was left uncached is a partial result handed
+    // to a re-entrant caller, and so is anything built on it.
+    let cacheable =
+        cache.is_some_and(|c| c.read().contains_key(&(fqn, generic_arg_strings.to_vec())));
+
+    let mut result = Arc::unwrap_or_clone(specialised);
+    if class
+        .mixins
+        .iter()
+        .any(|m| class.template_params.iter().any(|t| t == m.as_str()))
+    {
+        let subs = crate::inheritance::build_generic_subs(class, generic_args);
+        if !subs.is_empty() {
+            let mixin_members =
+                super::phpdoc::resolve_template_param_mixins(class, &subs, class_loader);
+            if !mixin_members.is_empty() {
+                super::merge_virtual_members(&mut result, mixin_members);
+            }
+        }
+    }
+    laravel::try_inject_builder_scopes(&mut result, class, &fqn, generic_args, class_loader);
+    // A class inheriting `@mixin Builder<TRelatedModel>` (a `HasMany`
+    // through `Relation`) gets Builder's own methods from the mixin
+    // expansion, but the model's scopes only once the model is known.
+    laravel::try_inject_mixin_builder_scopes(&mut result, class, generic_args, class_loader);
+
+    let result = Arc::new(result);
+    if let Some(c) = cache
+        && cacheable
+    {
+        c.write().insert(key, Arc::clone(&result));
+    }
+    result
+}
+
 /// Shared implementation behind the `resolve_class_fully*` entry points.
 ///
 /// This always produces the *base* resolution, cached under the bare

@@ -11,10 +11,8 @@
 //! and `@mixin SomeClass` where `SomeClass` also has an `$id` property,
 //! the `@property` tag wins.
 
-use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::atom::{Atom, AtomSet};
 use crate::inheritance;
@@ -32,60 +30,6 @@ use crate::util::short_name;
 /// itself, the forwarder returns `$this` instead.
 const FORWARDS_CALLS_FQN: &str = "Illuminate\\Support\\Traits\\ForwardsCalls";
 const FORWARDS_CALLS_SHORT: &str = "ForwardsCalls";
-
-/// Global generation counter, incremented every time a file is re-parsed.
-/// Thread-local caches compare against this to detect staleness.
-static MIXIN_GENERATION: AtomicU64 = AtomicU64::new(0);
-
-/// Bump the mixin-cache generation so that all threads discard stale entries
-/// on their next access.  Called from [`Backend::update_ast`] whenever a file
-/// changes.
-pub fn bump_mixin_generation() {
-    MIXIN_GENERATION.fetch_add(1, Ordering::Relaxed);
-}
-
-thread_local! {
-    /// Thread-local cache of base-resolved mixin classes.
-    ///
-    /// Keyed by fully-qualified mixin name, stores the result of
-    /// [`resolve_class_with_inheritance`](crate::inheritance::resolve_class_with_inheritance)
-    /// so that expensive inheritance walks (e.g. for
-    /// `\Illuminate\Database\Eloquent\Builder`) are performed at most
-    /// once per thread.
-    ///
-    /// Automatically invalidated when the global generation counter
-    /// advances (i.e. when any file is re-parsed).
-    static MIXIN_CACHE: RefCell<(u64, HashMap<String, Arc<ClassInfo>>)> =
-        RefCell::new((0, HashMap::new()));
-}
-
-/// Clear the thread-local mixin resolution cache.
-///
-/// In production the cache lives for the lifetime of the thread and is
-/// safe because the same FQN always maps to the same class.  In tests,
-/// however, each test may define classes with identical short names but
-/// different members.  Call this function when creating a new test
-/// backend so that stale entries from a previous test do not leak.
-pub fn clear_mixin_cache() {
-    MIXIN_CACHE.with(|cache| {
-        let mut inner = cache.borrow_mut();
-        inner.0 = MIXIN_GENERATION.load(Ordering::Relaxed);
-        inner.1.clear();
-    });
-}
-
-/// Ensure the thread-local cache is current with the global generation.
-/// Clears the cache if stale.
-fn ensure_mixin_cache_fresh() {
-    MIXIN_CACHE.with(|cache| {
-        let current_gen = MIXIN_GENERATION.load(Ordering::Relaxed);
-        let mut inner = cache.borrow_mut();
-        if inner.0 != current_gen {
-            inner.0 = current_gen;
-            inner.1.clear();
-        }
-    });
-}
 
 /// Accumulates mixin members during collection, grouping the output
 /// vectors and dedup sets into a single value to keep the argument
@@ -858,28 +802,11 @@ fn collect_mixin_members(
         } else if let Some(active) = super::active_resolved_class_cache() {
             super::resolve_class_fully_maybe_cached(&mixin_class, class_loader, Some(active))
         } else {
-            // No shared cache is active — memoize per thread so that a deep
-            // mixin (e.g. the Eloquent query builder) is fully resolved at
-            // most once per thread.  The full resolution runs virtual member
-            // providers, which recurse back into this function for nested
-            // mixins, so it must happen *outside* the cache borrow: get,
-            // release, resolve, then insert.
-            ensure_mixin_cache_fresh();
-            let cached = MIXIN_CACHE
-                .with(|thread_cache| thread_cache.borrow().1.get(&resolved_mixin_name).cloned());
-            if let Some(cached) = cached {
-                cached
-            } else {
-                let resolved =
-                    super::resolve_class_fully_maybe_cached(&mixin_class, class_loader, None);
-                MIXIN_CACHE.with(|thread_cache| {
-                    thread_cache
-                        .borrow_mut()
-                        .1
-                        .insert(resolved_mixin_name.clone(), Arc::clone(&resolved));
-                });
-                resolved
-            }
+            // No shared cache is active: resolve against a throwaway one,
+            // so the nested mixins this resolution reaches are each
+            // resolved once within it.
+            let scratch = super::cache::new_resolved_class_cache();
+            super::resolve_class_fully_maybe_cached(&mixin_class, class_loader, Some(&scratch))
         };
 
         // Build a substitution map from the mixin class's template params

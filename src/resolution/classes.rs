@@ -380,7 +380,8 @@ impl Backend {
         // vendor class is missing from the class index, it fails visibly
         // rather than being silently resolved, making stale classmaps
         // obvious (fix: run `composer dump-autoload`).
-        if let Some(workspace_root) = self.workspace.workspace_root.read().clone() {
+        let workspace_root = self.workspace.workspace_root.read().clone();
+        if let Some(workspace_root) = workspace_root {
             let file_path = {
                 let mappings = self.workspace.psr4_mappings.read();
                 composer::resolve_class_path(&mappings, &workspace_root, class_name)

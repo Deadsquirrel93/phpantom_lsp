@@ -460,14 +460,14 @@ impl ResolvedCacheInner {
     pub fn insert(&mut self, key: ResolvedClassCacheKey, value: Arc<ClassInfo>) {
         // When replacing an existing entry, drop its old reverse-dep edges
         // first so a changed dependency set does not leave stale edges.
-        if let Some(old_deps) = self.map.get(&key).map(|c| dependency_keys(c)) {
+        if let Some(old_deps) = self.map.get(&key).map(|c| dependency_keys(&key, c)) {
             for dep in old_deps {
                 self.unlink_reverse_edge(&dep, &key);
             }
         }
 
         let fqn = key.0.to_string();
-        for dep in dependency_keys(&value) {
+        for dep in dependency_keys(&key, &value) {
             self.reverse_deps
                 .entry(dep)
                 .or_default()
@@ -586,7 +586,7 @@ impl ResolvedCacheInner {
         };
         for key in keys {
             if let Some(value) = self.map.remove(&key) {
-                for dep in dependency_keys(&value) {
+                for dep in dependency_keys(&key, &value) {
                     self.unlink_reverse_edge(&dep, &key);
                 }
             }
@@ -916,7 +916,9 @@ pub fn evict_fqn(cache: &mut ResolvedCacheInner, fqn: &str) -> Vec<String> {
 
 /// Collect the dependency strings a class references through its
 /// `parent_class`, `used_traits`, `interfaces`, `mixins`, and
-/// `casts_definitions`.
+/// `casts_definitions`, plus the classes its generic arguments name: a
+/// specialisation such as `Builder<User>` carries members read from
+/// `User` (its scopes), which go stale when `User` changes.
 ///
 /// Each value is stored verbatim as it appears on the class: it may be a
 /// fully-qualified name (cross-file, post-resolution) or a short name
@@ -926,8 +928,17 @@ pub fn evict_fqn(cache: &mut ResolvedCacheInner, fqn: &str) -> Vec<String> {
 ///
 /// Cast values may carry a `:argument` suffix (e.g. `"DecimalCast:8:2"`);
 /// only the class portion is recorded.
-fn dependency_keys(cls: &ClassInfo) -> Vec<String> {
+fn dependency_keys(key: &ResolvedClassCacheKey, cls: &ClassInfo) -> Vec<String> {
     let mut keys: Vec<String> = Vec::new();
+
+    for arg in &key.1 {
+        if arg.starts_with('\0') {
+            continue;
+        }
+        if let Some(name) = crate::php_type::PhpType::parse(arg).base_name() {
+            keys.push(name.to_string());
+        }
+    }
 
     if let Some(ref parent) = cls.parent_class {
         keys.push(parent.to_string());

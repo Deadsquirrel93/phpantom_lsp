@@ -122,19 +122,27 @@ pub(crate) fn extract_macro_registrations(
 pub(crate) fn macro_closure_this_target(content: &str, cursor_offset: u32) -> Option<String> {
     memchr::memmem::find(content.as_bytes(), b"macro(")?;
 
-    let arena = mago_allocator::LocalArena::new();
-    let file_id = FileId::new(b"input.php");
-    let program = parse_file_content(&arena, file_id, content.as_bytes());
-    let resolved = NameResolver::new(&arena).resolve(program);
-    let owned = OwnedResolvedNames::from_resolved(&resolved);
-
-    let mut calls: Vec<&StaticMethodCall<'_>> = Vec::new();
-    collect_macro_calls(Node::Program(program), &mut calls);
-
-    calls.into_iter().find_map(|call| {
-        let target = resolve_target_fqn(call.class, &owned)?;
-        let closure_expr = call.argument_list.arguments.iter().nth(1)?.value();
-        cursor_inside_closure_body(closure_expr, cursor_offset).then_some(target)
+    crate::parser::with_parsed_program(content, "macro_closure_this_target", |program, _| {
+        let mut calls: Vec<&StaticMethodCall<'_>> = Vec::new();
+        collect_macro_calls(Node::Program(program), &mut calls);
+        calls.retain(|call| {
+            call.argument_list
+                .arguments
+                .iter()
+                .nth(1)
+                .is_some_and(|arg| cursor_inside_closure_body(arg.value(), cursor_offset))
+        });
+        if calls.is_empty() {
+            return None;
+        }
+        // Names are resolved only once the cursor is known to sit in a
+        // macro closure.
+        let arena = mago_allocator::LocalArena::new();
+        let resolved = NameResolver::new(&arena).resolve(program);
+        let owned = OwnedResolvedNames::from_resolved(&resolved);
+        calls
+            .into_iter()
+            .find_map(|call| resolve_target_fqn(call.class, &owned))
     })
 }
 

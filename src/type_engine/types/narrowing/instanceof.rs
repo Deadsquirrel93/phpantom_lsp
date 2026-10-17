@@ -39,7 +39,7 @@ pub(in crate::type_engine) fn apply_instanceof_inclusion(
     ty: &PhpType,
     exact: bool,
     ctx: &VarResolutionCtx<'_>,
-    results: &mut Vec<ClassInfo>,
+    results: &mut Vec<Arc<ClassInfo>>,
 ) -> bool {
     include_resolved_classes(
         super::resolve::resolve_narrowing_target(ty, ctx),
@@ -54,9 +54,9 @@ fn include_resolved_classes(
     resolved: Vec<Arc<ClassInfo>>,
     exact: bool,
     ctx: &VarResolutionCtx<'_>,
-    results: &mut Vec<ClassInfo>,
+    results: &mut Vec<Arc<ClassInfo>>,
 ) -> bool {
-    let narrowed: Vec<ClassInfo> = resolved.into_iter().map(Arc::unwrap_or_clone).collect();
+    let narrowed = resolved;
     if narrowed.is_empty() {
         // No class for the check to name, and a class list has no way to
         // hold one it cannot load.  Callers that track type strings go
@@ -70,7 +70,7 @@ fn include_resolved_classes(
     // if results = [Zoo] and we narrow to ZooBase, Zoo extends ZooBase
     // so Zoo is already more specific — keep it.
     if !exact {
-        let already_subtypes: Vec<ClassInfo> = results
+        let already_subtypes: Vec<Arc<ClassInfo>> = results
             .iter()
             .filter(|r| {
                 narrowed.iter().any(|n| {
@@ -133,7 +133,7 @@ fn include_resolved_classes(
     // replace with the narrowed type.
     results.clear();
     for cls in narrowed {
-        ClassInfo::push_unique(results, cls);
+        ClassInfo::push_unique_arc(results, cls);
     }
     true
 }
@@ -153,7 +153,7 @@ fn include_resolved_classes(
 pub(in crate::type_engine) fn apply_instanceof_exclusion(
     ty: &PhpType,
     ctx: &VarResolutionCtx<'_>,
-    results: &mut Vec<ClassInfo>,
+    results: &mut Vec<Arc<ClassInfo>>,
 ) -> bool {
     exclude_resolved_classes(
         super::resolve::resolve_narrowing_target(ty, ctx),
@@ -166,9 +166,9 @@ pub(in crate::type_engine) fn apply_instanceof_exclusion(
 fn exclude_resolved_classes(
     resolved: Vec<Arc<ClassInfo>>,
     ctx: &VarResolutionCtx<'_>,
-    results: &mut Vec<ClassInfo>,
+    results: &mut Vec<Arc<ClassInfo>>,
 ) -> bool {
-    let excluded: Vec<ClassInfo> = resolved.into_iter().map(Arc::unwrap_or_clone).collect();
+    let excluded = resolved;
     if !excluded.is_empty() {
         results.retain(|r| {
             !excluded.iter().any(|e| {

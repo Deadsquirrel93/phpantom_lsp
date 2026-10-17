@@ -388,7 +388,7 @@ fn group_statement_bounds(lines: &[&str], line_idx: usize) -> Option<(usize, usi
 
     let brace_start = full_stmt.find('{')?;
     let brace_end = full_stmt.find('}')?;
-    let members_text = &full_stmt[brace_start + 1..brace_end];
+    let members_text = full_stmt.get(brace_start + 1..brace_end)?;
     let member_count = members_text
         .split(',')
         .filter(|m| !m.trim().is_empty())

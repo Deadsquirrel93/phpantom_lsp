@@ -45,7 +45,7 @@ pub(crate) fn apply_class_match_arm_narrowing<'b>(
     }
     scope.set(
         subject_var,
-        union.into_iter().map(ResolvedType::from_class).collect(),
+        union.into_iter().map(ResolvedType::from_arc).collect(),
     );
 }
 
@@ -297,7 +297,7 @@ fn apply_condition_narrowing_inverse_single<'b>(
             if !union.is_empty() {
                 commit_instanceof_narrowing(
                     var_name,
-                    union.into_iter().map(ResolvedType::from_class).collect(),
+                    union.into_iter().map(ResolvedType::from_arc).collect(),
                     CheckShape::default(),
                     scope,
                     ctx,

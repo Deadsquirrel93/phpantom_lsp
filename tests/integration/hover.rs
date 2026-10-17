@@ -14927,6 +14927,56 @@ function test(): void {
     );
 }
 
+/// An arrow function whose body is a `yield` is a generator too.
+#[test]
+fn hover_generator_arrow_function_infers_return_type() {
+    let backend = create_test_backend();
+    let uri = "file:///generator_arrow.php";
+    let content = r#"<?php
+function test(): void {
+    $arrow = fn () => yield 'x';
+    $arrow;
+}
+"#;
+
+    let hover =
+        hover_text(&hover_at(&backend, uri, content, 3, 6).expect("hover $arrow")).to_string();
+    assert!(
+        hover.contains("Generator<int, string, mixed, void>"),
+        "$arrow should be a Generator of strings, got: {hover}"
+    );
+}
+
+/// A string passed where a `model-property<Model>` parameter is expected
+/// hovers as that model's property, passed by position or by name.
+#[test]
+fn hover_model_property_string_argument() {
+    let backend = create_test_backend();
+    let uri = "file:///model_property.php";
+    let content = r#"<?php
+class User { /** The login address. */ public string $email = ''; }
+class Query {
+    /** @param model-property<User> $column */
+    public function where(string $column): static { return $this; }
+}
+function f(Query $q): void {
+    $q->where('email');
+    $q->where(column: 'email');
+}
+"#;
+    for line in [7, 8] {
+        let column = if line == 7 { 16 } else { 24 };
+        let hover = hover_text(
+            &hover_at(&backend, uri, content, line, column).expect("hover the column name"),
+        )
+        .to_string();
+        assert!(
+            hover.contains("$email"),
+            "line {line} should hover as `User::$email`, got: {hover}"
+        );
+    }
+}
+
 // ─── Package provenance badges ──────────────────────────────────────────────
 
 #[test]

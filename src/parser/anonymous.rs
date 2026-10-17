@@ -122,6 +122,7 @@ impl Backend {
             links: Vec::new(),
             see_refs: Vec::new(),
             class_docblock: None,
+            class_docblock_start: 0,
             doc_members: None,
             file_namespace: None,
             backed_type: None,

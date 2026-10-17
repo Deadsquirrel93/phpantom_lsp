@@ -246,7 +246,7 @@ impl Backend {
                 Ok(content) => {
                     backend.update_ast(uri, &content);
                 }
-                Err(_) => backend.clear_file_maps(uri),
+                Err(_) => backend.forget_closed_file(uri),
             };
             if self.sync_ast_updates {
                 reparse(self, &uri);
@@ -266,7 +266,7 @@ impl Backend {
                 });
             }
         } else {
-            self.clear_file_maps(&uri);
+            self.forget_closed_file(&uri);
         }
 
         // Clear diagnostics so stale warnings don't linger after the file is closed

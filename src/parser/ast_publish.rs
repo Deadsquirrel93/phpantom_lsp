@@ -25,7 +25,7 @@ use super::ast_update::{AstIndexUpdate, BladeLowering};
 struct PreparedAstIndexUpdate {
     uri: String,
     parse_errors: Vec<ParseErrorEntry>,
-    old_classes: Vec<ClassInfo>,
+    old_classes: Vec<Arc<ClassInfo>>,
     old_fqns: Vec<String>,
     new_fqns: Vec<String>,
     /// The anonymous classes this file declared on its *previous*
@@ -263,21 +263,11 @@ impl Backend {
             .epoch
             .begin_publication(updates.iter().map(|update| update.uri.as_str()));
 
-        let old_classes_by_update: Vec<Vec<ClassInfo>> = {
+        let old_classes_by_update: Vec<Vec<Arc<ClassInfo>>> = {
             let uri_classes = self.symbols.uri_classes_index.read();
             updates
                 .iter()
-                .map(|update| {
-                    uri_classes
-                        .get(&update.uri)
-                        .map(|classes| {
-                            classes
-                                .iter()
-                                .map(|class| ClassInfo::clone(class))
-                                .collect()
-                        })
-                        .unwrap_or_default()
-                })
+                .map(|update| uri_classes.get(&update.uri).cloned().unwrap_or_default())
                 .collect()
         };
 
@@ -308,7 +298,7 @@ impl Backend {
             let old_fqns: Vec<String> = old_classes
                 .iter()
                 .filter(|class| !class.name.starts_with("__anonymous@"))
-                .map(class_info_fqn)
+                .map(|class| class_info_fqn(class))
                 .collect();
             let classes: Vec<Arc<ClassInfo>> = update.classes.into_iter().map(Arc::new).collect();
             let new_fqns: Vec<String> = classes

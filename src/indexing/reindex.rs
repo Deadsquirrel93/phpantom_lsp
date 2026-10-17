@@ -126,7 +126,7 @@ impl Backend {
             } else {
                 vec![uri_str.as_str(), canonical_uri.as_str()]
             };
-            for uri in spellings {
+            for &uri in &spellings {
                 self.clear_file_maps(uri);
                 self.symbols.uri_classes_index.write().remove(uri);
                 self.parsed_uris.write().remove(uri);
@@ -147,6 +147,9 @@ impl Backend {
                 if *change_type == FileChangeType::DELETED {
                     self.forget_laravel_file_contributions(uri);
                 }
+            }
+            if *change_type == FileChangeType::DELETED {
+                self.forget_workspace_diagnostics(&spellings);
             }
         }
 
@@ -191,6 +194,8 @@ impl Backend {
                 }
             }
         }
+
+        self.symbols.prune_orphaned_origins();
 
         // Retired after the index inserts so a lookup that read the index
         // before them cannot record a miss that outlives the clear.

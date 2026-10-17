@@ -475,6 +475,9 @@ pub struct ClassInfo {
     /// resolution depends on is parsed at extraction time into the typed
     /// fields above and into [`Self::doc_members`].
     pub class_docblock: Option<String>,
+    /// Byte offset of [`Self::class_docblock`] in the file the class is
+    /// declared in, `0` when it has none.
+    pub class_docblock_start: u32,
     /// `@method` and `@property` / `@property-read` / `@property-write`
     /// tags parsed out of [`Self::class_docblock`].
     ///
@@ -902,23 +905,14 @@ impl ClassInfo {
         off.filter(|&o| o > 0)
     }
 
-    /// Push a `ClassInfo` into `results` only if no existing entry shares
-    /// the same FQN.  This is the single place where completion /
+    /// Push an `Arc<ClassInfo>` into `results` only if no existing entry
+    /// shares the same FQN.  This is the single place where completion /
     /// resolution code deduplicates candidate classes.
     ///
     /// The comparison is on the FQN, not the short name: two classes with
     /// the same short name in different namespaces (`NsA\Thing` and
     /// `NsB\Thing`) are distinct receivers and both must survive, or a
     /// union spanning them loses every member of the second.
-    pub(crate) fn push_unique(results: &mut Vec<ClassInfo>, cls: ClassInfo) {
-        let fqn = cls.fqn();
-        if !results.iter().any(|c| c.fqn() == fqn) {
-            results.push(cls);
-        }
-    }
-
-    /// Push an `Arc<ClassInfo>` into `results` only if no existing entry
-    /// shares the same FQN.
     pub(crate) fn push_unique_arc(results: &mut Vec<Arc<ClassInfo>>, cls: Arc<ClassInfo>) {
         let fqn = cls.fqn();
         if !results.iter().any(|c| c.fqn() == fqn) {

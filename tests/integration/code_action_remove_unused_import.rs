@@ -303,3 +303,28 @@ namespace B {
     assert_eq!(diagnostics.len(), 1, "got {diagnostics:?}");
     assert_eq!(diagnostics[0].range.start.line, 7);
 }
+
+/// A `case` label is a reference like any other expression: a class
+/// constant or an imported constant matched there keeps its import.
+#[test]
+fn an_import_used_only_in_a_switch_case_is_kept() {
+    let backend = create_test_backend();
+    let content = "<?php\nuse App\\Status;\nuse const E_STRICT;\n\nfunction f(int $s): void {\n    switch ($s) {\n        case Status::Open:\n        case E_STRICT:\n            break;\n    }\n}\n";
+    for line in [1, 2] {
+        let actions = actions_at(&backend, content, line, 4);
+        assert!(
+            find_action(&actions, SINGLE).is_none(),
+            "the import on line {line} is used by a case label"
+        );
+    }
+}
+
+/// The name written in a string, in docblock prose, or as a property name
+/// is not a reference to the imported class.
+#[test]
+fn a_name_that_only_appears_as_text_does_not_keep_its_import() {
+    let backend = create_test_backend();
+    let content = "<?php\nuse App\\Address;\n\n/** @param object $o An Address or similar */\nfunction f(object $o): string {\n    return 'Address' . $o->Address;\n}\n";
+    let actions = actions_at(&backend, content, 1, 4);
+    assert!(find_action(&actions, SINGLE).is_some());
+}

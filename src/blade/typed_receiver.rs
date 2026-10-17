@@ -115,6 +115,7 @@ impl Backend {
 
         let file_ctx = self.file_context(uri);
         let loaders = self.file_loaders(&file_ctx);
+        let _parse_guard = crate::parser::with_parse_cache(content);
 
         with_parsed_program(content, "blade_typed_receiver", |program, content| {
             let mut calls: Vec<ReceiverCall<'_, '_, '_>> = Vec::new();

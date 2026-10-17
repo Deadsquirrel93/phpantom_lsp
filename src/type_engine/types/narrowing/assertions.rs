@@ -196,14 +196,20 @@ fn build_method_assertion_info<'a>(
 ) -> Option<CallAssertionInfo<'a>> {
     let (method, _) =
         find_assertion_method_in_chain(class, method_name, ctx.class_loader, &mut Vec::new(), 0)?;
-    let extras = method.extras.map(|e| *e).unwrap_or_default();
+    let extras = method.extras.as_deref();
     Some(CallAssertionInfo {
-        assertions: extras.type_assertions,
-        parameters: method.parameters,
+        assertions: extras
+            .map(|e| e.type_assertions.clone())
+            .unwrap_or_default(),
+        parameters: method.parameters.clone(),
         argument_list,
         receiver_key,
-        template_params: extras.template_params,
-        template_bindings: extras.template_bindings,
+        template_params: extras
+            .map(|e| e.template_params.clone())
+            .unwrap_or_default(),
+        template_bindings: extras
+            .map(|e| e.template_bindings.clone())
+            .unwrap_or_default(),
     })
 }
 
@@ -212,8 +218,8 @@ fn build_method_assertion_info<'a>(
 /// chain (in PHP resolution order).  Uses raw class loads only, so it never
 /// mutates the shared resolved-class cache.
 ///
-/// Returns an owned clone of the first matching method that has non-empty
-/// `type_assertions`, paired with the FQN of the class that declared it.
+/// Returns the first matching method that has non-empty `type_assertions`,
+/// paired with the FQN of the class that declared it.
 /// The declaring class is what an unqualified name in the tag resolves
 /// against, which is not necessarily the receiver's own class.  A
 /// `visited` set and `depth` bound guard against cyclic hierarchies.
@@ -223,7 +229,7 @@ pub(in crate::type_engine) fn find_assertion_method_in_chain(
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     visited: &mut Vec<Atom>,
     depth: usize,
-) -> Option<(crate::types::MethodInfo, Atom)> {
+) -> Option<(Arc<crate::types::MethodInfo>, Atom)> {
     find_method_in_chain_where(
         class,
         method_name,
@@ -244,12 +250,14 @@ pub(in crate::type_engine) fn find_assertion_method_in_chain(
 fn bind_ancestor_templates(
     class: &ClassInfo,
     ancestor: &ClassInfo,
-    (mut method, declaring): (crate::types::MethodInfo, Atom),
-) -> (crate::types::MethodInfo, Atom) {
+    (method, declaring): (Arc<crate::types::MethodInfo>, Atom),
+) -> (Arc<crate::types::MethodInfo>, Atom) {
     if !ancestor.template_params.is_empty() {
         let subs = crate::inheritance::build_substitution_map(class, ancestor, &Default::default());
         if !subs.is_empty() {
+            let mut method = Arc::unwrap_or_clone(method);
             crate::inheritance::apply_substitution_to_method(&mut method, &subs);
+            return (Arc::new(method), declaring);
         }
     }
     (method, declaring)
@@ -268,7 +276,7 @@ pub(in crate::type_engine) fn find_method_in_chain_where(
     carries_metadata: &dyn Fn(&crate::types::MethodInfo) -> bool,
     visited: &mut Vec<Atom>,
     depth: usize,
-) -> Option<(crate::types::MethodInfo, Atom)> {
+) -> Option<(Arc<crate::types::MethodInfo>, Atom)> {
     if depth > 15 {
         return None;
     }
@@ -288,7 +296,7 @@ pub(in crate::type_engine) fn find_method_in_chain_where(
         .find(|m| m.name.eq_ignore_ascii_case(method_name))
         && carries_metadata(method)
     {
-        return Some((method.as_ref().clone(), fqn));
+        return Some((Arc::clone(method), fqn));
     }
 
     // Traits mixed into this class.
@@ -408,7 +416,7 @@ pub(in crate::type_engine) fn scalar_assert_guard_kind(ty: &PhpType) -> Option<T
 pub(in crate::type_engine) fn try_apply_custom_assert_narrowing(
     expr: &Expression<'_>,
     ctx: &VarResolutionCtx<'_>,
-    results: &mut Vec<ClassInfo>,
+    results: &mut Vec<Arc<ClassInfo>>,
     type_guard: &mut Option<(TypeGuardKind, bool)>,
     intersected: &mut bool,
 ) -> bool {
@@ -1062,8 +1070,8 @@ fn conditional_return_from_chain<'a>(
         0,
     )?;
     Some(CallReturnInfo {
-        return_type: method.extras?.conditional_return?,
-        parameters: method.parameters,
+        return_type: method.extras.as_ref()?.conditional_return.clone()?,
+        parameters: method.parameters.clone(),
         argument_list,
     })
 }

@@ -784,8 +784,6 @@ fn mixin_only_no_docblock() {
 /// so that `EventsApi`'s public members appear on the child class.
 #[test]
 fn mixin_template_param_substituted_via_ancestor_walk() {
-    clear_mixin_cache();
-
     let provider = PHPDocProvider;
 
     // The child class: extends Subclient<EventsApi>

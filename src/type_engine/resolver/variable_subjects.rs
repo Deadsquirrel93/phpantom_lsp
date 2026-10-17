@@ -233,36 +233,6 @@ pub(super) fn resolve_variable_fallback(
         vec![]
     };
 
-    // ── @var docblock fallback ───────────────────────────────────
-    // When the statement walk found no assignments for this variable,
-    // check for a standalone `/** @var Type $var */` annotation above
-    // the cursor.  This handles Blade templates and files where the
-    // only type source is a docblock assertion.
-    let resolved_types = if resolved_types.is_empty() && bare_variable {
-        let prefixed = if var_name.starts_with('$') {
-            var_name.to_string()
-        } else {
-            format!("${}", var_name)
-        };
-        if let Some(var_type) = crate::docblock::find_var_raw_type_in_source(
-            ctx.content,
-            ctx.cursor_offset as usize,
-            &prefixed,
-        ) {
-            let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
-                &var_type,
-                &effective_class.fqn(),
-                all_classes,
-                class_loader,
-            );
-            classes.into_iter().map(ResolvedType::from_arc).collect()
-        } else {
-            vec![]
-        }
-    } else {
-        resolved_types
-    };
-
     // ── `class-string<T>` unwrapping for `$var::` access ────────
     // When the variable holds a class name (`$cls = Foo::class`, a
     // `@param class-string<BackedEnum> $class` annotation, a string

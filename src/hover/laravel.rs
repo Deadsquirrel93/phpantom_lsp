@@ -296,39 +296,55 @@ impl Backend {
         content: &str,
         position: Position,
     ) -> Option<Hover> {
-        use crate::completion::eloquent_string::detect_string_call_context;
+        let cursor_offset = crate::text_position::position_to_offset(content, position);
+        let symbol_map = self.symbol_map_for(uri)?;
+        let call = symbol_map.find_enclosing_call_site(cursor_offset)?;
 
-        let cursor_offset = crate::text_position::position_to_offset(content, position) as usize;
-        let code =
-            crate::completion::source::code_context::code_context_at(content, cursor_offset)?;
-        let sc = detect_string_call_context(content, cursor_offset, &code)?;
-
-        // For hover we need the FULL string content, not just the
-        // partial typed before the cursor.  Scan forward from the
-        // content start to find the closing quote.
-        let full_string = {
-            let bytes = content.as_bytes();
-            let start = sc.string_content_start;
-            let quote = sc.quote_char as u8;
-            let mut end = start;
-            while end < bytes.len() && bytes[end] != quote {
-                end += 1;
-            }
-            &content[start..end]
-        };
+        // The string literal the cursor is on, written as an argument of
+        // that call itself.
+        let (string_start, full_string) =
+            crate::parser::with_parsed_program(content, "model_property_hover", |program, _| {
+                crate::parser::innermost_node_at(
+                    mago_syntax::cst::Node::Program(program),
+                    cursor_offset,
+                    |node| match node {
+                        mago_syntax::cst::Node::LiteralString(string) => Some((
+                            mago_span::HasSpan::span(string).start.offset,
+                            crate::atom::literal_bytes_to_str(string.value?)?.to_string(),
+                        )),
+                        _ => None,
+                    },
+                )
+            })?;
         if full_string.is_empty() {
             return None;
         }
+        let arg_index = call
+            .comma_offsets
+            .iter()
+            .filter(|&&comma| comma < string_start)
+            .count();
 
-        let ctx = self.file_context_at(uri, cursor_offset as u32);
-        let call_expr = match &sc.subject {
-            Some(subj) if sc.is_static => format!("{}::{}", subj, sc.method_name),
-            Some(subj) => format!("{}->{}", subj, sc.method_name),
-            None => sc.method_name.clone(),
+        let ctx = self.file_context_at(uri, cursor_offset);
+        let resolved =
+            self.resolve_callable_target(call.call_expression, content, position, &ctx)?;
+        let named = call
+            .named_arg_indices
+            .iter()
+            .position(|&index| index as usize == arg_index)
+            .and_then(|k| call.named_arg_names.get(k));
+        // A positional argument is the literal itself; a named one starts at
+        // its name, which the literal follows.
+        if named.is_none() && call.arg_offsets.get(arg_index) != Some(&string_start) {
+            return None;
+        }
+        let param = match named {
+            Some(name) => resolved
+                .parameters
+                .iter()
+                .find(|p| p.name.strip_prefix('$').unwrap_or(&p.name) == name)?,
+            None => resolved.parameters.get(arg_index)?,
         };
-
-        let resolved = self.resolve_callable_target(&call_expr, content, position, &ctx)?;
-        let param = resolved.parameters.get(sc.arg_index)?;
         let param_type = param.type_hint.as_ref()?;
 
         let model_name = extract_model_name_from_model_property_type(param_type)?;
@@ -345,7 +361,7 @@ impl Backend {
         let property = resolved_model
             .properties
             .iter()
-            .find(|p| &*p.name == full_string)?;
+            .find(|p| *p.name == full_string)?;
 
         Some(self.hover_for_property(property, &resolved_model, &class_loader))
     }

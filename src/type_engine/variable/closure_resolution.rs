@@ -86,7 +86,7 @@ impl Drop for ClosureThisGuard {
 }
 
 use crate::parser::with_parsed_program;
-use crate::types::{AccessKind, ClassInfo, FunctionInfo, MethodInfo, ResolvedType};
+use crate::types::{ClassInfo, FunctionInfo, MethodInfo, ResolvedType};
 
 // ─── @param-closure-this resolution ─────────────────────────────────────────
 
@@ -100,11 +100,10 @@ use crate::types::{AccessKind, ClassInfo, FunctionInfo, MethodInfo, ResolvedType
 /// closure body refers to a different object.  The
 /// `@param-closure-this` PHPDoc tag declares what `$this` should
 /// resolve to.
-pub(crate) fn find_closure_this_override(ctx: &ResolutionCtx<'_>) -> Option<ClassInfo> {
+pub(crate) fn find_closure_this_override(ctx: &ResolutionCtx<'_>) -> Option<Arc<ClassInfo>> {
     find_closure_this_types(ctx)?
         .into_iter()
         .find_map(|rt| rt.class_info)
-        .map(Arc::unwrap_or_clone)
 }
 
 /// What `$this` is bound to inside the closure at the cursor, when a call
@@ -348,14 +347,7 @@ pub(crate) fn closure_this_for_argument(
         }
         Call::Method(MethodCall { object, method, .. })
         | Call::NullSafeMethod(NullSafeMethodCall { object, method, .. }) => {
-            let obj_span = object.span();
-            closure_this_from_receiver(
-                obj_span.start.offset,
-                obj_span.end.offset,
-                method_name(method)?,
-                arg_idx,
-                ctx,
-            )
+            closure_this_from_receiver(object, method_name(method)?, arg_idx, ctx)
         }
         Call::StaticMethod(sc) => {
             closure_this_from_static_receiver(sc.class, method_name(&sc.method)?, arg_idx, ctx)
@@ -379,8 +371,8 @@ fn closure_call_this(mc: &MethodCall<'_>, ctx: &ResolutionCtx<'_>) -> Option<Vec
     if let Some(nested) = walk_closure_body_for_closure_this(closure, ctx) {
         return Some(nested);
     }
-    let new_this = mc.argument_list.arguments.first()?.value().span();
-    let types = resolve_receiver_types(new_this.start.offset, new_this.end.offset, ctx);
+    let new_this = mc.argument_list.arguments.first()?.value();
+    let types = resolve_receiver_types(new_this, ctx);
     (!types.is_empty()).then_some(types)
 }
 
@@ -484,29 +476,42 @@ fn closure_this_from_function_params(
 // resolution; they differ only in what they pull out of the matched
 // method (`closure_this_type` vs. `callable(...)` parameter types).
 
-/// Resolve the receiver classes of an instance/nullsafe method call from
-/// its object span.
+/// Resolve the receiver of an instance/nullsafe method call, `object`.
 ///
-/// Overrides `cursor_offset` to the object's start so that variable
-/// resolution looks up the scope snapshot *before* the call (where the
-/// receiver variable is actually in scope), not at a position inside a
-/// later closure argument where the variable doesn't exist yet.
+/// Resolves at the object's start so that variable resolution looks up the
+/// scope snapshot *before* the call (where the receiver variable is
+/// actually in scope), not at a position inside a later closure argument
+/// where the variable doesn't exist yet.
 pub(in crate::type_engine) fn resolve_receiver_types(
-    obj_start: u32,
-    obj_end: u32,
+    object: &Expression<'_>,
     ctx: &ResolutionCtx<'_>,
 ) -> Vec<ResolvedType> {
-    let start = obj_start as usize;
-    let end = obj_end as usize;
-    if end > ctx.content.len() {
-        return vec![];
-    }
-    let obj_text = ctx.content[start..end].trim();
-    let obj_ctx = ResolutionCtx {
-        cursor_offset: obj_start,
-        ..*ctx
+    let at = object.span().start.offset;
+    let placeholder;
+    let current_class = match ctx.current_class {
+        Some(class) => class,
+        None => {
+            placeholder = crate::class_lookup::class_context_placeholder(ctx.content, at);
+            &placeholder
+        }
     };
-    crate::type_engine::resolver::resolve_target_classes(obj_text, AccessKind::Arrow, &obj_ctx)
+    let var_ctx = crate::type_engine::resolver::VarResolutionCtx {
+        source_imports: ctx.source_imports,
+        backend: ctx.backend,
+        loaders: crate::type_engine::resolver::Loaders::with_function(ctx.function_loader),
+        resolved_class_cache: ctx.resolved_class_cache,
+        scope_var_resolver: ctx.scope_var_resolver,
+        ..crate::type_engine::resolver::VarResolutionCtx::new(
+            "",
+            current_class,
+            ctx.all_classes,
+            ctx.content,
+            at,
+            ctx.class_loader,
+            ctx.source_class_loader,
+        )
+    };
+    super::rhs_resolution::resolve_rhs_expression(object, &var_ctx)
 }
 
 /// Look up a class by its FQN: local classes first, then the cross-file
@@ -524,16 +529,14 @@ pub(in crate::type_engine) fn find_owner_by_name(
 }
 
 /// Look up `closure_this_type` on an instance method's parameter at
-/// `arg_idx`, resolving the receiver from the source span.
+/// `arg_idx`, resolving the receiver `object`.
 fn closure_this_from_receiver(
-    obj_start: u32,
-    obj_end: u32,
+    object: &Expression<'_>,
     method_name: &str,
     arg_idx: usize,
     ctx: &ResolutionCtx<'_>,
 ) -> Option<Vec<ResolvedType>> {
-    let receiver_classes =
-        ResolvedType::into_arced_classes(resolve_receiver_types(obj_start, obj_end, ctx));
+    let receiver_classes = ResolvedType::into_arced_classes(resolve_receiver_types(object, ctx));
     for cls in &receiver_classes {
         let resolved = crate::virtual_members::resolve_class_fully_maybe_cached(
             cls,

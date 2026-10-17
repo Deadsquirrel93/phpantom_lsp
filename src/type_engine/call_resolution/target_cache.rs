@@ -400,7 +400,7 @@ fn infer_body_return_type(
 
 /// The request-scoped memos the type engine keeps, activated as a unit.
 ///
-/// All four are pure memos: without them the type engine reaches the
+/// All of them are pure memos: without them the type engine reaches the
 /// same answers, just by re-doing work it has already done for this
 /// file.
 /// They are activated at the chokepoints every request passes through so
@@ -410,6 +410,7 @@ pub(crate) struct TypeEngineCaches {
     _body_infer: BodyInferMemoGuard,
     _out_type: super::out_param::OutTypeMemoGuard,
     _walk: crate::type_engine::variable::forward_walk::WalkMemoGuard,
+    _form_request_rules: crate::virtual_members::laravel::validation_rules::RulesMemoGuard,
 }
 
 /// Activate every request-scoped type-engine memo for the current
@@ -428,6 +429,7 @@ pub(crate) fn activate_type_engine_caches() -> TypeEngineCaches {
         _body_infer: with_body_infer_memo(),
         _out_type: super::out_param::with_out_type_memo(),
         _walk: crate::type_engine::variable::forward_walk::with_walk_memo(),
+        _form_request_rules: crate::virtual_members::laravel::validation_rules::with_rules_memo(),
     }
 }
 

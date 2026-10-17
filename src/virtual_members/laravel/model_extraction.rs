@@ -326,7 +326,7 @@ fn initializer_text<'c>(
 
 /// The plain property items among `members` named `name` (without the
 /// `$`), each with the declaration it belongs to, in source order.
-fn plain_properties<'a>(
+pub(crate) fn plain_properties<'a>(
     members: impl Iterator<Item = &'a class_like::member::ClassLikeMember<'a>>,
     name: &str,
 ) -> impl Iterator<
@@ -376,7 +376,7 @@ fn first_return_value<'a>(
 
 /// The value of the first top-level `return` in the first method named
 /// `name` (case-insensitively).
-fn method_return_value<'a>(
+pub(crate) fn method_return_value<'a>(
     mut members: impl Iterator<Item = &'a class_like::member::ClassLikeMember<'a>>,
     name: &str,
 ) -> Option<&'a Expression<'a>> {
@@ -389,6 +389,55 @@ fn method_return_value<'a>(
         _ => None,
     })?;
     first_return_value(method)
+}
+
+/// Where a model's attribute arrays name `attribute`: the offset of the
+/// first character inside the quotes of the string literal, in `$casts`,
+/// `$attributes` or a `casts()` method's returned array as a key, or in
+/// `$fillable`, `$guarded`, `$hidden`, `$visible`, `$appends` or `$dates`
+/// as an entry.
+pub(crate) fn attribute_entry_offset(
+    members: &[class_like::member::ClassLikeMember<'_>],
+    attribute: &str,
+) -> Option<u32> {
+    let names = |literal: Option<&Expression<'_>>| -> Option<u32> {
+        let Some(Expression::Literal(Literal::String(string))) = literal else {
+            return None;
+        };
+        (crate::atom::literal_bytes_to_str(string.value?)? == attribute)
+            .then(|| string.span().start.offset + 1)
+    };
+    let in_array = |array: &Expression<'_>, keyed: bool| {
+        crate::parser::array_literal_elements(array)?
+            .iter()
+            .find_map(|element| {
+                names(if keyed {
+                    crate::parser::array_element_key(element)
+                } else {
+                    crate::parser::array_element_value(element)
+                })
+            })
+    };
+    let property_entry = |name: &str, keyed: bool| {
+        plain_properties(members.iter(), name).find_map(|(_, item)| match item {
+            class_like::property::PropertyItem::Concrete(concrete) => {
+                in_array(concrete.value, keyed)
+            }
+            class_like::property::PropertyItem::Abstract(_) => None,
+        })
+    };
+    property_entry("casts", true)
+        .or_else(|| {
+            method_return_value(members.iter(), "casts").and_then(|ret| in_array(ret, true))
+        })
+        .or_else(|| property_entry("attributes", true))
+        .or_else(|| {
+            [
+                "fillable", "guarded", "hidden", "visible", "appends", "dates",
+            ]
+            .into_iter()
+            .find_map(|name| property_entry(name, false))
+        })
 }
 
 /// Extract the model class explicitly configured on a Laravel factory.

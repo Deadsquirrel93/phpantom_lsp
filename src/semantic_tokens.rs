@@ -147,8 +147,8 @@ impl Backend {
             }));
         }
 
-        let vc_handle = self.blade_virtual_content.read();
-        let effective_content = vc_handle.get(uri).map(|s| s.as_str()).unwrap_or(content);
+        let virtual_php = self.blade_virtual_php_arc(uri);
+        let effective_content = virtual_php.as_deref().map_or(content, String::as_str);
 
         let mut tokens = self.collect_tokens(&symbol_map, effective_content, uri, &ctx, mode);
 

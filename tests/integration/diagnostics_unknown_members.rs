@@ -16203,3 +16203,59 @@ class Post extends Model {
         ],
     );
 }
+
+/// A `global` statement imports the type the file's top-level code gave
+/// the variable, in the diagnostic pass as on hover.
+#[test]
+fn a_global_variable_keeps_its_top_level_type() {
+    let backend = create_test_backend();
+    let uri = "file:///globals.php";
+    let text = r#"<?php
+class Bag { public function all(): array { return []; } }
+/** @var Bag $errors */
+$errors = new Bag();
+function render(): void {
+    global $errors;
+    $errors->all();
+    $errors->missing();
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("'all'")),
+        "`$errors` is `Bag`, got: {diags:?}",
+    );
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("'missing'") && d.message.contains("Bag")),
+        "`missing()` must be flagged on `Bag`, got: {diags:?}",
+    );
+}
+
+/// A `@param object` is wider than the class the parameter's hint names,
+/// so the hint is what the parameter holds.
+#[test]
+fn a_wider_object_param_tag_keeps_the_class_hint() {
+    let backend = create_test_backend();
+    let uri = "file:///wider_param.php";
+    let text = r#"<?php
+class Money { public function amount(): int { return 0; } }
+class Wallet
+{
+    /** @param object $money */
+    public function add(Money $money): void
+    {
+        $money->amount();
+        $money->missing();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("'missing'") && d.message.contains("Money")),
+        "`missing()` must be flagged on `Money`, got: {diags:?}",
+    );
+}

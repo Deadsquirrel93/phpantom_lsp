@@ -6,6 +6,7 @@ use std::sync::Arc;
 use crate::docblock;
 use crate::php_type::{PhpType, TypeKind, is_keyword_type};
 use crate::type_engine::resolver::WrittenNames;
+use crate::type_engine::variable::forward_walk::{docblock_above, preceding_docblock_text};
 use crate::types::ClassInfo;
 
 /// Mark the method/function-level template parameters a type names with
@@ -35,10 +36,7 @@ pub(in crate::type_engine::variable) fn substitute_template_param_bounds(
         return ty;
     }
 
-    let before = &content[..method_start_offset];
-    let docblock = extract_preceding_docblock(before);
-
-    let Some(docblock) = docblock else {
+    let Some(docblock) = docblock_above(content, method_start_offset) else {
         return ty;
     };
 
@@ -62,7 +60,7 @@ pub(in crate::type_engine) fn declaration_template_markers(
     decl_start: usize,
     names: &WrittenNames<'_>,
 ) -> Option<std::sync::Arc<std::collections::HashMap<String, PhpType>>> {
-    let docblock = extract_preceding_docblock(content.get(..decl_start)?)?;
+    let docblock = docblock_above(content, decl_start)?;
     if !docblock.contains("template") {
         return None;
     }
@@ -117,7 +115,7 @@ pub(in crate::type_engine::variable) fn references_method_template(
     if !type_may_contain_template_param(ty) {
         return false;
     }
-    extract_preceding_docblock(&content[..method_start_offset]).is_some_and(|docblock| {
+    docblock_above(content, method_start_offset).is_some_and(|docblock| {
         ty.references_any_template_param(&docblock::extract_template_params(docblock))
     })
 }
@@ -153,7 +151,7 @@ pub(in crate::type_engine::variable) fn param_docblock_narrows_hint(
             || current_class.type_aliases.keys().any(|alias| alias == name)
             || declared_templates
                 .get_or_init(|| {
-                    extract_preceding_docblock(&content[..decl_start])
+                    docblock_above(content, decl_start)
                         .map(docblock::extract_template_params)
                         .unwrap_or_default()
                 })
@@ -212,13 +210,8 @@ pub(in crate::type_engine::variable) fn substitute_class_string_template_bounds(
         return ty;
     };
 
-    // Extract the method's docblock to find template parameter bounds.
-    // The docblock sits immediately before the method declaration, so
-    // we search backward from the method's start offset.
-    let before = &content[..method_start_offset];
-    let docblock = extract_preceding_docblock(before);
-
-    let Some(docblock) = docblock else {
+    // The method's docblock gives the template parameter bounds.
+    let Some(docblock) = docblock_above(content, method_start_offset) else {
         return ty;
     };
 
@@ -235,26 +228,18 @@ pub(in crate::type_engine::variable) fn substitute_class_string_template_bounds(
 /// The declaration's own docblock is read first, through the tag parser,
 /// so a vendor tag (`@phpstan-param`, `@psalm-param`) takes precedence
 /// over a plain `@param` for the same parameter the way it does in the
-/// signature.  The backward source scan is the fallback for the shapes
-/// that parser does not see, such as a docblock sharing its line with the
-/// code of a closure.
+/// signature.  A closure is also documented by the docblock above the
+/// statement it is part of (`register(\n    'name',\n    function ($x) {…}`),
+/// as long as no statement or block boundary separates the two.
 pub(crate) fn declared_param_docblock_type(
     content: &str,
     decl_start: usize,
     pname: &str,
 ) -> Option<PhpType> {
-    let before = content.get(..decl_start)?;
-    extract_preceding_docblock(before)
-        .and_then(|doc| docblock::extract_param_raw_type(doc, pname))
-        .or_else(|| {
-            // The scan is confined to the declaration's own preamble.  Its
-            // brace counting cannot see a method whose body sits on one
-            // line, so left to itself it would walk on into that method's
-            // docblock and hand its `@param $filter` to this declaration's
-            // unrelated `$filter`.
-            let preamble = &before[declaration_preamble_start(before)..];
-            docblock::find_iterable_raw_type_in_source(preamble, preamble.len(), pname)
-        })
+    let param_in = |doc: &str| docblock::extract_param_raw_type(doc, pname);
+    docblock_above(content, decl_start)
+        .and_then(param_in)
+        .or_else(|| preceding_docblock_text(content, decl_start).and_then(param_in))
 }
 
 /// The `@return` type the docblock of the declaration starting at
@@ -263,54 +248,5 @@ pub(in crate::type_engine) fn declared_return_docblock_type(
     content: &str,
     decl_start: usize,
 ) -> Option<PhpType> {
-    extract_preceding_docblock(content.get(..decl_start)?).and_then(docblock::extract_return_type)
-}
-
-/// Where the text that can document a declaration starting at the end of
-/// `before` begins: just past the last line of code above it that ends a
-/// statement, opens a block, or closes one.
-///
-/// Comment lines are crossed, and so is a closure's own statement when it
-/// runs over several lines (`register(`, `'name',`), which is what lets a
-/// docblock above the statement document the closure.
-fn declaration_preamble_start(before: &str) -> usize {
-    // The text of the declaration's own line before it is always kept: it
-    // is indentation, or the statement a closure is part of.
-    let Some(mut line_end) = before.rfind('\n') else {
-        return 0;
-    };
-    loop {
-        let line_start = before[..line_end].rfind('\n').map_or(0, |i| i + 1);
-        let line = before[line_start..line_end].trim();
-        let is_comment = line.starts_with('*')
-            || line.starts_with("/*")
-            || line.starts_with("//")
-            || line.starts_with('#');
-        if !is_comment && (line.ends_with(';') || line.ends_with('{') || line.ends_with('}')) {
-            return line_end + 1;
-        }
-        if line_start == 0 {
-            return 0;
-        }
-        line_end = line_start - 1;
-    }
-}
-
-/// Extract the docblock comment immediately preceding a given offset.
-///
-/// Scans backward from `before` (the source text up to the method start)
-/// to find the closest `/** ... */` block.  Returns `None` when no
-/// docblock is found or when there is non-whitespace between the
-/// docblock and the method declaration.
-fn extract_preceding_docblock(before: &str) -> Option<&str> {
-    let trimmed = before.trim_end();
-    let body = trimmed.strip_suffix("*/")?;
-    let open_pos = body.rfind("/**")?;
-    // The docblock has to be the comment that ends here.  A `/**` closed
-    // before that belongs to an earlier declaration, with a plain
-    // `/* … */` comment between it and this one.
-    if body[open_pos + 3..].contains("*/") {
-        return None;
-    }
-    Some(&trimmed[open_pos..])
+    docblock_above(content, decl_start).and_then(docblock::extract_return_type)
 }

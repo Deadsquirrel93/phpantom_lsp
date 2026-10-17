@@ -54,6 +54,8 @@ struct CachedFile {
     /// The template parameters and type aliases the file's docblocks
     /// declare, with their scopes, collected on first use.
     docblock_type_names: std::cell::OnceCell<crate::names::DocblockTypeNames>,
+    /// The file's comments, collected from its trivia on first use.
+    comments: std::cell::OnceCell<Vec<CommentSpan>>,
     /// Address and length of each borrowed copy of `content` a live
     /// [`ParseCacheGuard`] registered this file from.
     ///
@@ -74,6 +76,7 @@ impl CachedFile {
             namespaces: std::cell::OnceCell::new(),
             fcc_assignments: std::cell::OnceCell::new(),
             docblock_type_names: std::cell::OnceCell::new(),
+            comments: std::cell::OnceCell::new(),
             aliases: RefCell::new(Vec::new()),
         })
     }
@@ -389,6 +392,79 @@ pub(crate) fn with_fcc_assignments<T: Default>(
                 program.statements.as_slice(),
                 content,
             ))
+        }),
+    }
+}
+
+/// What kind of comment a [`CommentSpan`] is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CommentKind {
+    /// `// …` or `# …`.
+    Line,
+    /// `/* … */`.
+    Block,
+    /// `/** … */`.
+    Doc,
+}
+
+/// One comment in a file, by byte range.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct CommentSpan {
+    pub(crate) start: u32,
+    pub(crate) end: u32,
+    pub(crate) kind: CommentKind,
+}
+
+fn collect_comments(program: &Program<'_>) -> Vec<CommentSpan> {
+    use mago_syntax::cst::TriviaKind;
+    program
+        .trivia
+        .iter()
+        .filter_map(|trivia| {
+            let kind = match trivia.kind {
+                TriviaKind::WhiteSpace => return None,
+                TriviaKind::SingleLineComment | TriviaKind::HashComment => CommentKind::Line,
+                TriviaKind::MultiLineComment => CommentKind::Block,
+                TriviaKind::DocBlockComment => CommentKind::Doc,
+            };
+            Some(CommentSpan {
+                start: trivia.span.start.offset,
+                end: trivia.span.end.offset,
+                kind,
+            })
+        })
+        .collect()
+}
+
+/// Pass `content`'s comments, in source order, to `f`.
+///
+/// A file in the active parse cache collects them once per pass, so the
+/// forward walker can look up the docblock above every statement it visits
+/// without scanning the text before it.  Other text is parsed per call.
+pub(crate) fn with_comments<T: Default>(content: &str, f: impl FnOnce(&[CommentSpan]) -> T) -> T {
+    let cached = PARSE_CACHE.with(|cell| cell.borrow().as_ref().and_then(|c| c.find(content)));
+    match cached {
+        Some(file) => {
+            let collected = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                file.comments
+                    .get_or_init(|| collect_comments(file.program()))
+                    .as_slice()
+            }));
+            match collected {
+                Ok(comments) => f(comments),
+                Err(_) => {
+                    PARSE_CACHE.with(|cell| {
+                        if let Some(cache) = cell.borrow_mut().as_mut() {
+                            cache.evict(&file);
+                        }
+                    });
+                    tracing::error!("PHPantom: parser panicked in with_comments");
+                    T::default()
+                }
+            }
+        }
+        None => with_parsed_program(content, "with_comments", |program, _| {
+            f(&collect_comments(program))
         }),
     }
 }

@@ -34,7 +34,6 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::class_lookup::find_class_at_offset;
-use crate::docblock;
 use crate::php_type::PhpType;
 use crate::text_position::position_to_offset;
 use crate::type_engine::resolver::Loaders;
@@ -294,10 +293,8 @@ impl Backend {
                 (t, file_ctx.classes.as_slice())
             }
             Some(t) => {
-                // The docblock text scan (`find_iterable_raw_type_in_source`)
-                // found the annotation directly from source text and does not
-                // need a parsed class, so it can succeed even though the AST
-                // failed to recover the class enclosing the cursor (typically
+                // The type resolved even though the AST failed to recover
+                // the class enclosing the cursor (typically
                 // because of the unclosed `$var['` bracket at the cursor —
                 // classes parsed *before* the error can still show up in
                 // `file_ctx.classes`, so an emptiness check alone is not
@@ -542,9 +539,9 @@ impl Backend {
 
     /// Resolve the raw (uncleaned) type annotation for a variable.
     ///
-    /// Searches for `@var` and `@param` annotations, and also follows
-    /// simple assignments from function/method calls to extract their
-    /// `@return` type.
+    /// Reads `@var` and `@param` annotations, and also follows simple
+    /// assignments from function/method calls to extract their `@return`
+    /// type.
     ///
     /// Returns the raw type (e.g. `array{name: string, user: User}`)
     /// or `None` if no type annotation is found.
@@ -555,28 +552,13 @@ impl Backend {
         cursor_offset: usize,
         file_ctx: &FileContext,
     ) -> Option<PhpType> {
-        // 1. Direct @var / @param annotation on the variable.
         let current_class = find_class_at_offset(&file_ctx.classes, cursor_offset as u32);
         let class_loader = self.class_loader(file_ctx);
         let resolved_class_loader = self.resolved_class_loader(file_ctx);
 
-        if let Some(raw) =
-            docblock::find_iterable_raw_type_in_source(content, cursor_offset, var_name)
-        {
-            return Some(crate::names::resolve_source_php_type_names(
-                &raw,
-                file_ctx.namespace_at(cursor_offset as u32).as_deref(),
-                Some(file_ctx.use_map_at(cursor_offset as u32)),
-                content,
-                crate::names::written_name_region(content, current_class, cursor_offset as u32),
-                &file_ctx.classes,
-                &class_loader,
-            ));
-        }
-
-        // 2. Unified variable resolver — handles array literals with
-        //    incremental key assignments, push-style assignments, and
-        //    standalone function return types (via source docblock scan).
+        // The unified variable resolver handles `@var`/`@param`
+        // annotations, array literals with incremental key assignments,
+        // push-style assignments, and function return types.
         let dummy_class;
         let effective_class = match current_class {
             Some(cc) => cc,

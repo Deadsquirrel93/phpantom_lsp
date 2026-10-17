@@ -92,7 +92,7 @@ fn static_call_on_class(
         ctx.resolved_class_cache,
         ctx.backend,
     );
-    let owner = concrete_owner.as_ref().unwrap_or(owner);
+    let owner = concrete_owner.as_deref().unwrap_or(owner);
     // `parent::get()` (or `Foo::get()` written out) from inside a
     // class that `@extends Foo<Dog>` reads the parent's `T` as the
     // `Dog` the child bound it to, just as `$this->get()` does.

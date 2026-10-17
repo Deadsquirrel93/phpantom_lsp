@@ -336,8 +336,9 @@ fn read_out_type(
         crate::type_engine::resolver::with_isolated_chain_cache(),
     );
 
-    // The request's parse cache holds only the request's own file, so this
-    // one parse serves both finding the body and walking it.
+    // Every resolution while the walk below reads the body parses the
+    // declaring file, so share one parse of it with the rest of the pass.
+    let _parse_guard = crate::parser::with_parse_cache_arc(std::sync::Arc::clone(&content));
     let types = with_parsed_program(&content, "out_param_body", |program, content| {
         let Some(body) = body_block(program, name_offset) else {
             return Vec::new();

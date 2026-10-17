@@ -129,6 +129,7 @@ pub(crate) fn walk_body_forward<'b>(
     // missing assignments made inside the branch and causing false-
     // positive diagnostics.
     let record_snapshots = is_diagnostic_scope_active();
+    let mut cursor_seen = false;
 
     for stmt in statements {
         // Stop when we have passed the cursor.  We use `>` rather than
@@ -140,6 +141,7 @@ pub(crate) fn walk_body_forward<'b>(
         if stmt.span().start.offset > ctx.cursor_offset {
             break;
         }
+        cursor_seen |= stmt.span().end.offset >= ctx.cursor_offset;
 
         // Check whether the cursor is inside a closure/arrow function
         // within this statement.  If so, we need to resolve within
@@ -199,6 +201,14 @@ pub(crate) fn walk_body_forward<'b>(
             walk_closures_in_statement(stmt, closure_scope, scope, ctx);
             record_scope_snapshot(stmt_span.end.offset, scope);
         }
+    }
+
+    // No statement here reaches the cursor, so the code at the cursor may
+    // be a statement the parser dropped.  A body that ends before the
+    // cursor reads the same docblocks, but the body around the cursor
+    // reads them last, so what it sets is what the cursor sees.
+    if !cursor_seen && ctx.cursor_offset != u32::MAX {
+        apply_var_docblocks_above_unparsed_cursor(scope, ctx);
     }
 }
 

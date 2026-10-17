@@ -2483,3 +2483,22 @@ class Person {
     );
     assert!(diags[0].message.contains("$local"));
 }
+
+/// A parameter named inside a closure type is part of the type, not the
+/// variable the `@var` tag declares.
+#[test]
+fn a_closure_types_parameter_in_var_does_not_define_it() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+function test(): void {
+    /** @var \Closure(int $x): void $cb */
+    $cb = fn (int $y) => null;
+    echo $x;
+}
+"#,
+    );
+    assert!(
+        diags.iter().any(|d| d.message.contains("$x")),
+        "`$x` is only a parameter of the closure type, got: {diags:?}"
+    );
+}

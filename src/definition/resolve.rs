@@ -15,7 +15,6 @@
 //! variable-definition index.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use crate::symbol_map::VarDefKind;
 use tower_lsp::lsp_types::*;
@@ -176,7 +175,7 @@ impl Backend {
     /// in `parser/classes.rs`), so this checks membership there instead of
     /// teaching the symbol map a new `VarDefKind`.
     pub(crate) fn is_promoted_property_param(&self, uri: &str, offset: u32) -> bool {
-        self.get_classes_for_uri(uri)
+        self.shared_classes_for_uri(uri)
             .iter()
             .flat_map(|classes| classes.iter())
             .flat_map(|c| c.properties.iter())
@@ -365,7 +364,7 @@ impl Backend {
                 // falls through to a global function when it has none.
                 if *is_docblock_reference
                     && let Some((class, kind)) =
-                        self.docblock_scope_member(&ctx, content, cursor_offset, name)
+                        self.docblock_scope_member(&ctx, cursor_offset, name)
                 {
                     let subject = class.fqn();
                     let mctx = MemberDefinitionCtx {
@@ -515,12 +514,20 @@ impl Backend {
         let workspace_root = self.workspace.workspace_root.read().clone();
 
         if let Some(workspace_root) = workspace_root {
-            let mappings = self.workspace.psr4_mappings.read();
-            for fqn in &candidates {
-                if let Some(file_path) =
-                    composer::resolve_class_path(&mappings, &workspace_root, fqn)
-                    && let Some(location) = self.resolve_class_in_file(&file_path, fqn)
-                {
+            // Resolve the paths first: `resolve_class_in_file` parses, and
+            // must not run under the mappings guard.
+            let paths: Vec<_> = {
+                let mappings = self.workspace.psr4_mappings.read();
+                candidates
+                    .iter()
+                    .filter_map(|fqn| {
+                        composer::resolve_class_path(&mappings, &workspace_root, fqn)
+                            .map(|path| (path, fqn))
+                    })
+                    .collect()
+            };
+            for (file_path, fqn) in paths {
+                if let Some(location) = self.resolve_class_in_file(&file_path, fqn) {
                     return Some(location);
                 }
             }
@@ -626,18 +633,19 @@ impl Backend {
         // Look up classes from uri_classes_index first, then fall back
         // to fqn_class_index and disk.  Each lock is dropped before
         // calling parse_and_cache_file (which takes write locks).
-        let classes = if let Some(cached) = self
+        let cached = self
             .symbols
             .uri_classes_index
             .read()
             .get(target_uri)
-            .cloned()
-        {
-            cached
-        } else if let Some(cls) = self.symbols.fqn_class_index.read().get(fqn) {
-            vec![Arc::clone(cls)]
-        } else {
-            self.parse_and_cache_uri(target_uri)?
+            .cloned();
+        let indexed = || self.symbols.fqn_class_index.read().get(fqn).cloned();
+        let classes = match cached {
+            Some(cached) => cached,
+            None => match indexed() {
+                Some(cls) => vec![cls],
+                None => self.parse_and_cache_uri(target_uri)?,
+            },
         };
 
         // Match by short name + namespace, same logic as

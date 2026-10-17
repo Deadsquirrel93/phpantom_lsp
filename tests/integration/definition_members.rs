@@ -6087,3 +6087,40 @@ async fn test_goto_definition_parent_constant_skips_the_child_redeclaration() {
         "self::LIMIT should resolve to Child::LIMIT"
     );
 }
+
+/// A `@property` tag is found in the docblock of the class that declares
+/// it, not at the first tag of that name anywhere in the file.
+#[tokio::test]
+async fn test_goto_definition_virtual_property_in_its_own_classs_docblock() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///virtual_props.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "/** @property int $id */\n",
+        "class First {}\n",
+        "/** @property string $id */\n",
+        "class Second {}\n",
+        "function f(Second $s): void {\n",
+        "    $s->id;\n",
+        "}\n",
+    );
+    open_php(&backend, &uri, text).await;
+    let result = backend
+        .goto_definition(GotoDefinitionParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position::new(6, 9),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .unwrap();
+    let Some(GotoDefinitionResponse::Scalar(location)) = result else {
+        panic!("expected a location, got {result:?}");
+    };
+    assert_eq!(
+        location.range.start.line, 3,
+        "Second's tag, got {location:?}"
+    );
+}

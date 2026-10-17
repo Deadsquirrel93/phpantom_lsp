@@ -4,11 +4,9 @@
 
 use std::cell::RefCell;
 use std::collections::HashSet;
-use std::sync::Arc;
 
 use crate::Backend;
-use crate::docblock;
-use crate::php_type::{PhpType, TypeKind};
+use crate::php_type::PhpType;
 use crate::type_engine::subject_expr::SubjectExpr;
 use crate::types::*;
 
@@ -227,9 +225,7 @@ impl Backend {
                 .all(|c| c.is_alphanumeric() || c == '_')
         {
             // The walker's scope comes first: it knows which guard the
-            // call sits behind, while the backward `@var` scan below
-            // describes the variable at the annotation, before any
-            // narrowing the guard proved.
+            // call sits behind.
             let from_scope = crate::type_engine::variable::resolution::walker_scope_types(
                 arg_text,
                 ctx.cursor_offset,
@@ -242,36 +238,6 @@ impl Backend {
                 }
             }
 
-            // Try docblock annotation (@var / @param).
-            if let Some(raw) = docblock::find_iterable_raw_type_in_source(
-                ctx.content,
-                ctx.cursor_offset as usize,
-                arg_text,
-            )
-            .map(|t| ctx.written_names().resolve_type(&t))
-            {
-                // A bare identifier that isn't a known keyword type and
-                // doesn't resolve to a loadable class is most likely an
-                // unbound method-level `@template` parameter (e.g.
-                // `@template T of Token[]` used as `@param T $tokens`).
-                // The raw scan above is a text-only lookup that doesn't
-                // apply template-bound substitution, so trusting it here
-                // would leave the caller with an unresolvable `T` instead
-                // of the array-of-`Token` type the forward walker would
-                // produce.  Fall through to the unified pipeline below,
-                // which resolves the variable through the forward walker
-                // and substitutes template params with their bounds.
-                let looks_like_unbound_template = match &raw.kind() {
-                    TypeKind::Named(name) => {
-                        !crate::php_type::is_keyword_type(name)
-                            && (ctx.class_loader)(name).is_none()
-                    }
-                    _ => false,
-                };
-                if !looks_like_unbound_template {
-                    return Some(raw);
-                }
-            }
             // Fall back to the unified variable resolution pipeline.
             let default_class;
             let effective_class = match current_class {
@@ -340,8 +306,7 @@ impl Backend {
                     }
                 }
                 SubjectExpr::StaticMethodCall { class, method } => {
-                    let owner = class_loader(&ctx.written_names().resolve_class(class))
-                        .map(Arc::unwrap_or_clone);
+                    let owner = class_loader(&ctx.written_names().resolve_class(class));
                     if let Some(ref cls) = owner
                         && let Some(rt) = crate::inheritance::resolve_method_return_type(
                             cls,

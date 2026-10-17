@@ -102,10 +102,6 @@ impl Backend {
     /// changed (or a class was added/removed), meaning other open files
     /// that reference those classes may have stale diagnostics.
     pub fn update_ast(&self, uri: &str, content: &str) -> bool {
-        // Invalidate thread-local mixin cache so stale ClassInfo is not
-        // served after a file changes.
-        crate::virtual_members::phpdoc::bump_mixin_generation();
-
         let blade = self.lower_blade_template(uri, content);
         let content_to_parse = blade.as_ref().map_or_else(
             || Arc::new(content.to_string()),

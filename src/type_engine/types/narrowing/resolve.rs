@@ -56,18 +56,18 @@ pub(in crate::type_engine) fn resolve_narrowing_target(
     out
 }
 
-/// Resolve a list of `PhpType` values into a deduplicated `Vec<ClassInfo>`.
+/// Resolve a list of `PhpType` values into a deduplicated class list.
 ///
 /// This is a shared helper for the compound instanceof/assert narrowing
 /// patterns that produce a union of classes from multiple branches.
 pub(crate) fn resolve_class_names_to_union(
     classes: &[PhpType],
     ctx: &VarResolutionCtx<'_>,
-) -> Vec<ClassInfo> {
+) -> Vec<Arc<ClassInfo>> {
     let mut union = Vec::new();
     for ty in classes {
         for arc_cls in resolve_narrowing_target(ty, ctx) {
-            ClassInfo::push_unique(&mut union, Arc::unwrap_or_clone(arc_cls));
+            ClassInfo::push_unique_arc(&mut union, arc_cls);
         }
     }
     union

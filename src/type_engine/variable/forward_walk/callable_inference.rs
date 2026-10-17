@@ -73,14 +73,14 @@ pub(crate) fn infer_callable_params_from_function_fw(
 /// Infer callable parameter types for a closure passed at position
 /// `arg_idx` to an instance method call.
 pub(crate) fn infer_callable_params_from_receiver_fw(
-    obj_span: (u32, u32),
+    receiver: &Expression<'_>,
     method_name: &str,
     arg_idx: usize,
     argument_list: &ArgumentList<'_>,
     scope: &ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) -> Vec<PhpType> {
-    let (obj_start, obj_end) = obj_span;
+    let obj_start = receiver.span().start.offset;
     let scope_resolver = scope_variable_resolver(scope);
     let var_ctx =
         ctx.var_ctx_for_with_scope("$__infer", obj_start, &scope_resolver, Some(scope.proofs()));
@@ -88,8 +88,7 @@ pub(crate) fn infer_callable_params_from_receiver_fw(
     // Keep the raw ResolvedTypes so we can extract generic args from
     // the receiver's type_string (e.g. `Builder<Product>` carries the
     // concrete `Product` arg that must substitute `TModel`).
-    let resolved_types =
-        super::super::closure_resolution::resolve_receiver_types(obj_start, obj_end, &rctx);
+    let resolved_types = super::super::rhs_resolution::resolve_rhs_expression(receiver, &var_ctx);
     let receiver_classes = ResolvedType::into_arced_classes(resolved_types.clone());
 
     // For relation-query methods (whereHas, etc.), override the closure
@@ -130,6 +129,10 @@ pub(crate) fn infer_callable_params_from_receiver_fw(
         ctx,
     );
 
+    let receiver_is_this = matches!(
+        receiver,
+        Expression::Variable(Variable::Direct(dv)) if dv.name == b"$this"
+    );
     // Replace `$this`/`static` tokens with the receiver's full type.
     let params = if let Some(receiver) = receiver_classes.first() {
         let receiver_type = super::super::closure_resolution::build_receiver_self_type_pub(
@@ -140,7 +143,7 @@ pub(crate) fn infer_callable_params_from_receiver_fw(
         // (`$this->`, or a receiver that is itself still bound); any other
         // receiver pins `static` to the class it was declared as, just as
         // it does for a `@return static` on the same call.
-        let forwards = ctx.content.get(obj_start as usize..obj_end as usize) == Some("$this")
+        let forwards = receiver_is_this
             || resolved_types.iter().any(|rt| {
                 matches!(
                     rt.type_string.kind(),
@@ -649,9 +652,8 @@ pub(crate) fn infer_callable_params_for_call(
     let ClassLikeMemberSelector::Identifier(ident) = method else {
         return vec![];
     };
-    let receiver_span = receiver.span();
     infer_callable_params_from_receiver_fw(
-        (receiver_span.start.offset, receiver_span.end.offset),
+        receiver,
         bytes_to_str(ident.value),
         arg_idx,
         argument_list,

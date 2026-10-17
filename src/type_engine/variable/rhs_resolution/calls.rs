@@ -154,18 +154,7 @@ pub(crate) fn resolve_arg_variable_raw_type(
         return None;
     }
 
-    // 1. Try docblock annotation (@var).
-    if let Some(raw) = crate::docblock::find_iterable_raw_type_in_source(
-        rctx.content,
-        rctx.cursor_offset as usize,
-        var_name,
-    )
-    .map(|t| rctx.written_names().resolve_type(&t))
-    {
-        return Some(raw);
-    }
-
-    // 2. When the diagnostic scope cache is active (and not still being
+    // 1. When the diagnostic scope cache is active (and not still being
     //    built), read the variable's type from the pre-computed forward-
     //    walked scope snapshots.  This avoids hitting the backward
     //    scanner during diagnostic collection.
@@ -465,6 +454,75 @@ pub(super) fn resolve_return_type(ty: PhpType, ctx: &VarResolutionCtx<'_>) -> Ve
     )]
 }
 
+/// The `Generator` a closure or arrow function literal returns when its
+/// body yields: its keys and values from its own `yield`s, and its return
+/// from its own `return`s.  `None` when the body does not yield.
+fn closure_generator_type(expr: &Expression<'_>, ctx: &VarResolutionCtx<'_>) -> Option<PhpType> {
+    let mut found = false;
+    let mut keys: Vec<PhpType> = Vec::new();
+    let mut values: Vec<PhpType> = Vec::new();
+    // Nothing declares these types, so a literal stands for its kind
+    // (`yield 1` makes a generator of `int`).
+    let resolved = |expr: &Expression<'_>| {
+        let types = resolve_rhs_expression(expr, ctx);
+        if types.is_empty() {
+            PhpType::mixed()
+        } else {
+            ResolvedType::types_joined(&types).widen_scalar_literals()
+        }
+    };
+    let mut visit = |yield_expr: &Yield<'_>| {
+        found = true;
+        match yield_expr {
+            // A bare `yield $value` is keyed by position.
+            Yield::Value(value) => {
+                keys.push(PhpType::int());
+                values.push(value.value.map_or_else(PhpType::null, resolved));
+            }
+            Yield::Pair(pair) => {
+                keys.push(resolved(pair.key));
+                values.push(resolved(pair.value));
+            }
+            // `yield from` delegates to another iterator.
+            Yield::From(_) => {}
+        }
+    };
+    let returns = match expr {
+        Expression::Closure(closure) => {
+            crate::parser::for_each_own_yield(closure.body.statements.iter(), &mut visit);
+            let mut returns = Vec::new();
+            crate::return_collection::collect_returns(closure.body.statements.iter(), &mut returns);
+            returns
+        }
+        Expression::ArrowFunction(arrow) => {
+            crate::parser::for_each_own_yield_in_expression(arrow.expression, &mut visit);
+            Vec::new()
+        }
+        _ => return None,
+    };
+    if !found {
+        return None;
+    }
+    let returned: Vec<PhpType> = returns
+        .iter()
+        .map(|(value, ..)| value.map_or_else(PhpType::void, resolved))
+        .collect();
+    let join = |types: Vec<PhpType>, empty: PhpType| match types.len() {
+        0 => empty,
+        1 => types.into_iter().next().unwrap_or(empty),
+        _ => PhpType::union(types),
+    };
+    Some(PhpType::generic(
+        "Generator",
+        vec![
+            join(keys, PhpType::int()),
+            join(values, PhpType::mixed()),
+            PhpType::mixed(),
+            join(returned, PhpType::void()),
+        ],
+    ))
+}
+
 pub(crate) fn infer_closure_literal_type(
     expr: &Expression<'_>,
     ctx: &VarResolutionCtx<'_>,
@@ -485,14 +543,8 @@ pub(crate) fn infer_closure_literal_type(
 
     // The declared `: ReturnType`, else the `Generator` the body's yields
     // make the closure return.  Both name their classes in full already.
-    let explicit_or_yield = extract_closure_or_arrow_return_type(expr, ctx).or_else(|| {
-        let span = expr.span();
-        let start = (span.start.offset as usize).min(ctx.content.len());
-        let end = (span.end.offset as usize).min(ctx.content.len());
-        ctx.content
-            .get(start..end)
-            .and_then(crate::completion::source::helpers::infer_generator_type_from_closure_yields)
-    });
+    let explicit_or_yield = extract_closure_or_arrow_return_type(expr, ctx)
+        .or_else(|| closure_generator_type(expr, ctx));
 
     // What the body actually produces, independent of any declared
     // return type: an arrow function's expression, or a full closure
