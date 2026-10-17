@@ -323,6 +323,7 @@ fn read_out_type(
     let resolved_class_loader = backend.resolved_class_loader_with(&file_ctx.classes);
     let function_loader = backend.function_loader_with(
         file_ctx.resolved_names.as_deref(),
+        use_map,
         &file_ctx.symbol_imports_at(name_offset).functions,
         namespace,
     );

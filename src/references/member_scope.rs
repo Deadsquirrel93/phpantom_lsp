@@ -229,6 +229,7 @@ impl Backend {
         let resolved_class_loader = self.resolved_class_loader_with(&ctx.classes);
         let function_loader = self.function_loader_with(
             ctx.resolved_names.as_deref(),
+            use_map,
             &ctx.symbol_imports_at(access_offset).functions,
             namespace,
         );

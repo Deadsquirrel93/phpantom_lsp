@@ -2347,6 +2347,72 @@ fn replace_deprecated_function_call_action_offered() {
     );
 }
 
+#[test]
+fn replace_deprecated_function_named_through_a_class_import() {
+    use phpantom_lsp::types::FunctionInfo;
+
+    let backend = create_test_backend();
+    let uri = "file:///test_replace_imported_func.php";
+    let text = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "use Lib\\Exif;\n",
+        "Exif\\read_data('photo.jpg');\n",
+    );
+
+    {
+        let mut fmap = backend.global_functions().write();
+        fmap.insert(
+            "Lib\\Exif\\read_data".to_string(),
+            (
+                "file:///lib.php".to_string(),
+                FunctionInfo {
+                    name: atom("read_data"),
+                    namespace: Some("Lib\\Exif".to_string()),
+                    return_type: Some(PhpType::parse("array")),
+                    deprecation_message: Some("since 2.0".to_string()),
+                    deprecated_replacement: Some("\\Lib\\Exif\\read(%parametersList%)".to_string()),
+                    ..Default::default()
+                },
+            ),
+        );
+    }
+
+    backend.update_ast(uri, text);
+
+    let params = CodeActionParams {
+        text_document: TextDocumentIdentifier {
+            uri: uri.parse().unwrap(),
+        },
+        range: Range {
+            start: Position::new(3, 0),
+            end: Position::new(3, 14),
+        },
+        context: CodeActionContext {
+            diagnostics: vec![],
+            only: None,
+            trigger_kind: None,
+        },
+        work_done_progress_params: WorkDoneProgressParams {
+            work_done_token: None,
+        },
+        partial_result_params: PartialResultParams {
+            partial_result_token: None,
+        },
+    };
+
+    let actions = backend.handle_code_action(uri, text, &params);
+    let replace_actions = find_actions_containing(&actions, "Replace");
+    let edit = replace_actions
+        .first()
+        .and_then(|action| action.edit.as_ref())
+        .and_then(|edit| edit.changes.as_ref())
+        .and_then(|changes| changes.values().next())
+        .and_then(|edits| edits.first())
+        .expect("Should offer a 'Replace' code action with an edit");
+    assert_eq!(edit.new_text, "\\Lib\\Exif\\read('photo.jpg')");
+}
+
 // ─── No replacement action when no replacement template ─────────────────────
 
 #[test]

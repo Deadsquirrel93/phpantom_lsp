@@ -95,17 +95,21 @@ impl Backend {
             .get(uri)
             .cloned()
             .unwrap_or_default();
-        let (file_use_map, file_namespace) = self.use_map_and_namespace_at(uri, offset);
-        let class_loader = self.class_loader_with(&local_classes, &file_use_map, &file_namespace);
-        let function_imports = self.symbol_imports_for(uri).functions;
-        let function_loader = self.function_loader_with(None, &function_imports, &file_namespace);
+        let block = self.import_block_at(uri, offset as usize);
+        let class_loader = self.class_loader_with(&local_classes, &block.use_map, &block.namespace);
+        let function_loader = self.function_loader_with(
+            None,
+            &block.use_map,
+            &block.symbol_imports.functions,
+            &block.namespace,
+        );
 
         infer_return_type_at(
             content,
             offset,
             &local_classes,
             &class_loader,
-            Some(&file_use_map),
+            Some(&block.use_map),
             Some(self),
             Some(&function_loader),
             self_as_marker,

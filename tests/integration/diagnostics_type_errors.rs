@@ -1716,6 +1716,44 @@ function test(string $k): void {
     );
 }
 
+/// A `use const` import belongs to the `namespace` block that declares it,
+/// so the same bare name in another block still reads the global constant.
+#[test]
+fn constant_import_stays_in_its_namespace_block() {
+    let php = r#"<?php
+namespace Lib {
+    const LIMIT = 10;
+}
+namespace {
+    const LIMIT = [];
+    function takes_array(array $a): void {}
+}
+namespace A {
+    use const Lib\LIMIT;
+    \takes_array(LIMIT);
+}
+namespace B {
+    \takes_array(LIMIT);
+}
+"#;
+    let diags = collect(php);
+    let lines: Vec<u32> = diags
+        .iter()
+        .filter(|d| {
+            d.code.as_ref().is_some_and(
+                |c| matches!(c, NumberOrString::String(s) if s == "type_mismatch_argument"),
+            )
+        })
+        .map(|d| d.range.start.line)
+        .collect();
+    assert_eq!(
+        lines,
+        vec![10],
+        "Only block A's `LIMIT` is the imported int, got: {}",
+        messages_with_code(&diags, "type_mismatch_argument").join("; ")
+    );
+}
+
 /// A read that lands on a value the target cannot hold still reports, and
 /// names the specific value that fails rather than its base type.
 #[test]

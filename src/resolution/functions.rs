@@ -278,8 +278,7 @@ impl Backend {
         self.find_or_load_class(&format!("{}\\{}", ns, name))
     }
 
-    /// Resolve a function name using the file's `use function` imports and
-    /// namespace.
+    /// Resolve a function name using the file's imports and namespace.
     ///
     /// Equivalent to [`resolve_function_name_at`](Self::resolve_function_name_at)
     /// with no per-offset name resolution.  Prefer the offset-aware
@@ -289,10 +288,11 @@ impl Backend {
     pub(crate) fn resolve_function_name(
         &self,
         name: &str,
+        use_map: &HashMap<String, String>,
         function_imports: &HashMap<String, String>,
         file_namespace: &Option<String>,
     ) -> Option<FunctionInfo> {
-        self.resolve_function_name_at(name, None, 0, function_imports, file_namespace)
+        self.resolve_function_name_at(name, None, 0, use_map, function_imports, file_namespace)
     }
 
     /// Whether discovery or full parsing has seen this exact function FQN.
@@ -334,8 +334,9 @@ impl Backend {
     /// `offset` is the starting byte offset of the function-name
     /// identifier in the source file.  Pass `0` (and/or `None`
     /// `resolved_names`) when no offset is available; the name is then
-    /// qualified from `function_imports` and `file_namespace` alone, which
-    /// cannot expand a qualified name through a class import.
+    /// qualified from the imports and `file_namespace`: the first segment
+    /// of a qualified name through the class imports (`use_map`), a bare
+    /// name through `function_imports`.
     ///
     /// Either way the lookup follows PHP's rule (see
     /// [`function_lookup_names`](crate::names::function_lookup_names)): only
@@ -345,6 +346,7 @@ impl Backend {
         name: &str,
         resolved_names: Option<&crate::names::OwnedResolvedNames>,
         offset: u32,
+        use_map: &HashMap<String, String>,
         function_imports: &HashMap<String, String>,
         file_namespace: &Option<String>,
     ) -> Option<FunctionInfo> {
@@ -354,12 +356,8 @@ impl Backend {
         let offset_resolved = (offset != 0)
             .then(|| resolved_names.and_then(|rn| rn.get(offset)))
             .flatten();
-        let (fqn, fallback) = crate::names::function_lookup_names(
-            name,
-            &HashMap::new(),
-            function_imports,
-            file_namespace,
-        );
+        let (fqn, fallback) =
+            crate::names::function_lookup_names(name, use_map, function_imports, file_namespace);
         let fqn = offset_resolved.unwrap_or(&fqn);
         match fallback {
             Some(global) if global != fqn => self.find_or_load_function(&[fqn, global]),

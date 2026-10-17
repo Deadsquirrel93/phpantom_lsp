@@ -108,6 +108,7 @@ fn resolve_call(
     }
     let loader = backend.function_loader_with(
         context.resolved_names.as_deref(),
+        context.use_map_at(offset),
         &context.symbol_imports_at(offset).functions,
         context.namespace_at(offset),
     );
@@ -184,6 +185,7 @@ fn resolve_member_owner(
     let source_class_loader = backend.class_loader_with(&context.classes, use_map, namespace);
     let function_loader = backend.function_loader_with(
         context.resolved_names.as_deref(),
+        use_map,
         &context.symbol_imports_at(offset).functions,
         namespace,
     );

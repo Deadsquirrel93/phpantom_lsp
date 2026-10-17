@@ -164,16 +164,12 @@ impl Backend {
     ) -> Option<Vec<usize>> {
         let (class_name, method_name) = match call_kind {
             ByRefCallKind::Function(name) => {
-                let (fqn, fallback) = crate::names::function_lookup_names(
+                let func_info = self.resolve_function_name(
                     name,
                     file_use_map,
                     function_imports,
                     file_namespace,
-                );
-                let func_info = match fallback {
-                    Some(global) => self.find_or_load_function(&[&fqn, global]),
-                    None => self.find_or_load_function(&[&fqn]),
-                }?;
+                )?;
                 return Some(by_ref_positions(&func_info.parameters));
             }
             ByRefCallKind::StaticMethod(class_name, method_name)

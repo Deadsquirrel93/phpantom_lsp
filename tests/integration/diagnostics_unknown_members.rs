@@ -255,6 +255,43 @@ class Consumer {
     );
 }
 
+/// A `use function` import belongs to the `namespace` block that declares
+/// it, so the same bare name in another block still falls back to the
+/// global function.
+#[test]
+fn function_import_stays_in_its_namespace_block() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+namespace Lib {
+    class Widget { public function spin(): void {} }
+    function make(): Widget { return new Widget(); }
+}
+namespace {
+    class Gadget { public function press(): void {} }
+    function make(): Gadget { return new Gadget(); }
+}
+namespace A {
+    use function Lib\make;
+    $widget = make();
+    $widget->spin();
+}
+namespace B {
+    $gadget = make();
+    $gadget->spin();
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    let lines: Vec<u32> = diags.iter().map(|d| d.range.start.line).collect();
+    assert_eq!(
+        lines,
+        vec![16],
+        "Only block B's `make()` is the global Gadget one, got: {:?}",
+        diags
+    );
+    assert!(diags[0].message.contains("Gadget"), "got: {:?}", diags);
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Basic detection — instance properties
 // ═══════════════════════════════════════════════════════════════════════════

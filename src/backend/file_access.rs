@@ -365,31 +365,36 @@ impl Backend {
             if let Some(spans) = nmap.get(uri)
                 && spans.len() > 1
             {
-                return spans
-                    .iter()
-                    .map(|span| ImportBlock {
-                        namespace: span.namespace.clone(),
-                        use_map: span.use_map.clone(),
-                        symbol_imports: span.symbol_imports.clone(),
-                        range: Some((span.start as usize, span.end as usize)),
-                    })
-                    .collect();
+                return spans.iter().map(ImportBlock::of_span).collect();
             }
         }
-        vec![ImportBlock {
-            namespace: self.first_file_namespace(uri),
-            use_map: self.file_use_map(uri),
-            symbol_imports: self.symbol_imports_for(uri),
-            range: None,
-        }]
+        vec![self.whole_file_import_block(uri)]
     }
 
     /// The [`import_blocks`](Self::import_blocks) entry for the block
     /// containing `offset`.
     pub(crate) fn import_block_at(&self, uri: &str, offset: usize) -> ImportBlock {
-        let mut blocks = self.import_blocks(uri);
-        let index = ImportBlock::index_at(&blocks, offset);
-        blocks.swap_remove(index)
+        {
+            let nmap = self.file_namespaces.read();
+            if let Some(spans) = nmap.get(uri)
+                && spans.len() > 1
+                && let Some(span) = NamespaceSpan::containing(spans, offset as u32)
+            {
+                return ImportBlock::of_span(span);
+            }
+        }
+        self.whole_file_import_block(uri)
+    }
+
+    /// The one [`ImportBlock`] of a file that does not declare several
+    /// `namespace` blocks.
+    fn whole_file_import_block(&self, uri: &str) -> ImportBlock {
+        ImportBlock {
+            namespace: self.first_file_namespace(uri),
+            use_map: self.file_use_map(uri),
+            symbol_imports: self.symbol_imports_for(uri),
+            range: None,
+        }
     }
 
     /// The byte range of the block containing `offset`, as
@@ -578,6 +583,16 @@ pub(crate) struct ImportBlock {
 }
 
 impl ImportBlock {
+    /// The block `span` covers, in a file that declares several.
+    fn of_span(span: &NamespaceSpan) -> ImportBlock {
+        ImportBlock {
+            namespace: span.namespace.clone(),
+            use_map: span.use_map.clone(),
+            symbol_imports: span.symbol_imports.clone(),
+            range: Some((span.start as usize, span.end as usize)),
+        }
+    }
+
     /// The index of the block containing `offset`, or of the last block
     /// for an offset past every block (e.g. code after its closing brace).
     pub(crate) fn index_at(blocks: &[ImportBlock], offset: usize) -> usize {

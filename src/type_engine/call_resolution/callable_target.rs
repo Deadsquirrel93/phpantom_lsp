@@ -613,6 +613,7 @@ impl Backend {
         let resolved_class_loader = self.resolved_class_loader_with(&file_ctx.classes);
         let function_loader_cl = self.function_loader_with(
             file_ctx.resolved_names.as_deref(),
+            use_map,
             function_imports,
             namespace,
         );
@@ -697,7 +698,8 @@ impl Backend {
 
             // ── Standalone function call: `functionName(…)` ─────────
             SubjectExpr::FunctionCall(name) => {
-                let func = self.resolve_function_name(name, function_imports, namespace)?;
+                let func =
+                    self.resolve_function_name(name, use_map, function_imports, namespace)?;
                 Some(Self::function_to_callable_with_subs(
                     &func,
                     effective_args_text,
@@ -729,7 +731,8 @@ impl Backend {
             // as `ClassName` (since it can't distinguish class names
             // from function names without context).
             SubjectExpr::ClassName(name) => {
-                let func = self.resolve_function_name(name, function_imports, namespace)?;
+                let func =
+                    self.resolve_function_name(name, use_map, function_imports, namespace)?;
                 Some(Self::function_to_callable_with_subs(
                     &func,
                     effective_args_text,

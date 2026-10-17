@@ -65,9 +65,7 @@ impl Backend {
         // Every span considered below overlaps the request range, so the
         // namespace block covering its start is the right one for all of
         // them, including in a file that declares several blocks.
-        let (file_use_map, file_namespace) =
-            self.use_map_and_namespace_at(uri, request_start as u32);
-        let function_imports = self.symbol_imports_for(uri).functions;
+        let block = self.import_block_at(uri, request_start);
         let local_classes: Vec<Arc<ClassInfo>> = self
             .symbols
             .uri_classes_index
@@ -80,9 +78,9 @@ impl Backend {
         let cache = &self.resolved_class_cache;
 
         let file_ctx = FileCtx {
-            use_map: &file_use_map,
-            function_imports: &function_imports,
-            namespace: &file_namespace,
+            use_map: &block.use_map,
+            function_imports: &block.symbol_imports.functions,
+            namespace: &block.namespace,
             local_classes: &local_classes,
         };
 
@@ -96,8 +94,9 @@ impl Backend {
                 SymbolKind::FunctionCall { name, .. } => {
                     let func_info = match self.resolve_function_name(
                         name,
-                        &function_imports,
-                        &file_namespace,
+                        file_ctx.use_map,
+                        file_ctx.function_imports,
+                        file_ctx.namespace,
                     ) {
                         Some(f) => f,
                         None => continue,
@@ -499,7 +498,8 @@ fn resolve_subject_to_class(
 ) -> Option<ClassInfo> {
     let class_loader = backend.class_loader_with(ctx.local_classes, ctx.use_map, ctx.namespace);
     let resolved_class_loader = backend.resolved_class_loader_with(ctx.local_classes);
-    let function_loader = backend.function_loader_with(None, ctx.function_imports, ctx.namespace);
+    let function_loader =
+        backend.function_loader_with(None, ctx.use_map, ctx.function_imports, ctx.namespace);
     let res_ctx = crate::type_engine::subject_resolution::SubjectResolutionCtx {
         local_classes: ctx.local_classes,
         use_map: ctx.use_map,

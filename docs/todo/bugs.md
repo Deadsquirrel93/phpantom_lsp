@@ -78,28 +78,30 @@ No outstanding items.
 
 ## Name resolution
 
-### B625. A qualified function call through a class import is not found without a resolved name
+### B631. Top-level code in two `namespace` blocks shares one cached subject type
 
-**Impact: Low · Complexity: Medium**
+**Impact: Low · Complexity: Low**
 
 ```php
-namespace App;
-use Lib\Helpers;
-Helpers\greet(   // no signature help for Lib\Helpers\greet()
+<?php
+namespace A {
+    use function Lib\make;   // returns Lib\Widget, which has spin()
+    make()->spin();
+}
+namespace B {
+    make()->spin();          // the global make() returns Gadget: not reported
+}
 ```
 
-PHP expands the first segment of a qualified function name through the
-file's class imports. `Backend::resolve_function_name_at`
-(`resolution/functions.rs`) only gets that right when mago's resolved
-name for the call's offset is available. Without it, the
-`names::function_lookup_names` fallback gets the `use function` table
-and no class imports, so it builds `App\Helpers\greet`. The callers that
-pass no resolved name are `resolve_function_name` (signature help through
-`callable_target.rs`, `replace_deprecated.rs`) and every
-`function_loader_with(None, …)` (Blade echoes, discovery, the
-fix-return-type inference). Give the function loader the class `use` map
-as well (or the `FileContext` it comes from) and pass it to
-`function_lookup_names`.
+The unknown-member pass caches each subject's type under a
+`SubjectCacheKey` (`diagnostics/subject_cache.rs`), and top-level code gets
+the same scope, `ScopeKey::TopLevel { fn_scope_start: 0 }`, in every
+`namespace` block of the file. The first block to resolve `make()` answers
+for the same text in every later block, though the name means something
+else there, and a class subject such as `Foo::` is shared the same way
+between blocks that import different `Foo`s. Key top-level code by its
+namespace block as well (the start of the `NamespaceSpan` containing the
+access).
 
 ## Miscellaneous
 
@@ -179,3 +181,32 @@ the file until the session restarts. Clear the native and external
 entries for a deleted URI; its result id stays, so the next pull tells
 the client the set is empty. Found by reading the code, not yet
 reproduced in an editor.
+
+### B630. An unclosed call inside a braced `namespace` block drops the block
+
+**Impact: Low · Complexity: Medium**
+
+```php
+<?php
+namespace Lib {
+    function greet(string $name): void {}
+}
+namespace App {
+    use function Lib\greet;
+    greet(   // until the `)` is typed, this line reads as `namespace Lib`
+}
+```
+
+While a call inside a braced `namespace App { … }` block is missing its
+`)`, mago's parser leaves the whole block out of `program.statements`, so
+`update_ast` (`parser/ast_update.rs`) records no `NamespaceSpan` for it and
+indexes none of its imports, classes or functions. An offset in it falls
+into the last block the parse kept (`NamespaceSpan::containing`), and
+every name typed there resolves against that block's namespace and imports
+until the call is closed. Signature help runs on exactly this text, so it
+shows the wrong function or none. A file that declares its blocks as
+`namespace App;` keeps every block. The block survives only if the
+parser's recovery ends the argument list at the block's `}` instead of
+dropping the statement: upstream in `mago-syntax`, or by re-parsing with
+the call closed, as signature help's text fallback already does for the
+classes (`patch_content_for_signature`).

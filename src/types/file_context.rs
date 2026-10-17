@@ -139,17 +139,27 @@ impl FileContext {
         &'a self,
         mut build: impl FnMut(&'a HashMap<String, String>, &'a Option<String>) -> T,
     ) -> PerBlock<'a, T> {
+        self.per_block_with_symbol_imports(|use_map, _, namespace| build(use_map, namespace))
+    }
+
+    /// [`per_block`](Self::per_block), also handing `build` the block's
+    /// `use function` and `use const` imports, for a function or constant
+    /// loader.
+    pub fn per_block_with_symbol_imports<'a, T>(
+        &'a self,
+        mut build: impl FnMut(&'a HashMap<String, String>, &'a SymbolImports, &'a Option<String>) -> T,
+    ) -> PerBlock<'a, T> {
         match self.namespace_spans.as_deref() {
             Some(spans) => PerBlock {
                 spans,
                 items: spans
                     .iter()
-                    .map(|span| build(&span.use_map, &span.namespace))
+                    .map(|span| build(&span.use_map, &span.symbol_imports, &span.namespace))
                     .collect(),
             },
             None => PerBlock {
                 spans: &[],
-                items: vec![build(&self.use_map, &self.namespace)],
+                items: vec![build(&self.use_map, &self.symbol_imports, &self.namespace)],
             },
         }
     }

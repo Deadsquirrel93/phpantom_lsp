@@ -451,6 +451,28 @@ function test(): void {
     }
 
     #[test]
+    fn flags_too_few_args_to_function_named_through_a_class_import() {
+        let php = r#"<?php
+namespace Lib\Helpers {
+    function greet(string $name, int $times): void {}
+}
+namespace App {
+    use Lib\Helpers;
+    function test(): void {
+        Helpers\greet("x");
+    }
+}
+"#;
+        let diags = collect(php);
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.message.contains("Expected 2") && d.message.contains("got 1")),
+            "Expected too-few-args diagnostic, got: {diags:?}",
+        );
+    }
+
+    #[test]
     fn no_diagnostic_for_correct_user_function_call() {
         let php = r#"<?php
 function myHelper(string $a, int $b = 0): void {}

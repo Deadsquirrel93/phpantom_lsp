@@ -244,19 +244,28 @@ impl Backend {
         &'a self,
         ctx: &'a FileContext,
     ) -> impl Fn(&str, u32) -> Option<FunctionInfo> + 'a {
-        self.function_loader_in(ctx, &ctx.namespace)
+        self.function_loader_in(
+            ctx,
+            &ctx.use_map,
+            &ctx.symbol_imports.functions,
+            &ctx.namespace,
+        )
     }
 
-    /// The function loader for `ctx`'s file with `namespace` in force,
-    /// which binds `$this` in a Pest test's closures.
+    /// The function loader for `ctx`'s file with one block's imports and
+    /// namespace in force.  It also binds `$this` in a Pest test's
+    /// closures.
     fn function_loader_in<'a>(
         &'a self,
         ctx: &'a FileContext,
+        use_map: &'a HashMap<String, String>,
+        function_imports: &'a HashMap<String, String>,
         namespace: &'a Option<String>,
     ) -> impl Fn(&str, u32) -> Option<FunctionInfo> + 'a {
         let load = self.function_loader_with(
             ctx.resolved_names.as_deref(),
-            &ctx.symbol_imports.functions,
+            use_map,
+            function_imports,
             namespace,
         );
         move |name: &str, offset: u32| {
@@ -276,17 +285,26 @@ impl Backend {
                 Box::new(self.class_loader_with(&ctx.classes, use_map, namespace))
             }),
             resolved_class_loader: Box::new(self.resolved_class_loader_with(&ctx.classes)),
-            function_loaders: ctx.per_block(|_, namespace| -> BoxedFunctionLoader<'a> {
-                Box::new(self.function_loader_in(ctx, namespace))
-            }),
-            constant_loaders: ctx.per_block(|use_map, namespace| -> BoxedConstantLoader<'a> {
-                Box::new(self.constant_loader_with(
-                    ctx.resolved_names.as_deref(),
-                    use_map,
-                    &ctx.symbol_imports.constants,
-                    namespace,
-                ))
-            }),
+            function_loaders: ctx.per_block_with_symbol_imports(
+                |use_map, symbol_imports, namespace| -> BoxedFunctionLoader<'a> {
+                    Box::new(self.function_loader_in(
+                        ctx,
+                        use_map,
+                        &symbol_imports.functions,
+                        namespace,
+                    ))
+                },
+            ),
+            constant_loaders: ctx.per_block_with_symbol_imports(
+                |use_map, symbol_imports, namespace| -> BoxedConstantLoader<'a> {
+                    Box::new(self.constant_loader_with(
+                        ctx.resolved_names.as_deref(),
+                        use_map,
+                        &symbol_imports.constants,
+                        namespace,
+                    ))
+                },
+            ),
             placeholders: ctx.per_block(|_, namespace| {
                 crate::class_lookup::placeholder_in_namespace(namespace.as_deref())
             }),
@@ -304,21 +322,30 @@ impl Backend {
     /// components.
     ///
     /// Useful when the caller does not have a full `FileContext` or
-    /// needs to use different imports / namespace.  `function_imports` is
-    /// the file's `use function` table.  The closure's
-    /// second argument is the byte offset of the function-name
-    /// identifier; pass `0` when no offset is available.  Callers that
-    /// have per-offset name resolution should supply `resolved_names` so
-    /// functions declared in a different `namespace` block of the same
-    /// file resolve correctly.
+    /// needs to use different imports / namespace.  `use_map` is the
+    /// class import table, which the first segment of a qualified name
+    /// goes through, and `function_imports` the `use function` table.
+    /// The closure's second argument is the byte offset of the
+    /// function-name identifier; pass `0` when no offset is available.
+    /// Callers that have per-offset name resolution should supply
+    /// `resolved_names` so functions declared in a different `namespace`
+    /// block of the same file resolve correctly.
     pub(crate) fn function_loader_with<'a>(
         &'a self,
         resolved_names: Option<&'a crate::names::OwnedResolvedNames>,
+        use_map: &'a HashMap<String, String>,
         function_imports: &'a HashMap<String, String>,
         namespace: &'a Option<String>,
     ) -> impl Fn(&str, u32) -> Option<FunctionInfo> + 'a {
         move |name: &str, offset: u32| {
-            self.resolve_function_name_at(name, resolved_names, offset, function_imports, namespace)
+            self.resolve_function_name_at(
+                name,
+                resolved_names,
+                offset,
+                use_map,
+                function_imports,
+                namespace,
+            )
         }
     }
 

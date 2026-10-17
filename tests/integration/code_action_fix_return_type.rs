@@ -643,6 +643,50 @@ function myFunc() {
 }
 
 #[test]
+fn missing_return_type_infers_function_named_through_a_class_import() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+namespace App\Helpers {
+    function total(): string { return ''; }
+}
+namespace Lib\Helpers {
+    function total(): int { return 1; }
+}
+namespace App {
+    use Lib\Helpers;
+    class Cart {
+        public function sum() {
+            return Helpers\total();
+        }
+    }
+}
+"#;
+    backend.update_ast(uri, content);
+
+    inject_phpstan_diag(
+        &backend,
+        uri,
+        10,
+        "Method App\\Cart::sum() has no return type specified.",
+        "missingType.return",
+    );
+
+    let actions = get_code_actions_on_line(&backend, uri, content, 10);
+    let action = find_action(&actions, "Add return type").expect("should offer 'Add return type'");
+
+    let resolved = resolve_action(&backend, uri, content, action);
+    let edits = extract_edits(&resolved);
+    let result = apply_edits(content, &edits);
+
+    assert!(
+        result.contains("sum(): int"),
+        "should insert `: int`:\n{}",
+        result
+    );
+}
+
+#[test]
 fn missing_return_type_brace_on_next_line() {
     let backend = create_test_backend();
     let uri = "file:///test.php";

@@ -204,6 +204,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Service providers in a `config/app.php` written with `array()`.** Only the classes listed under `providers` are now read as service providers, as they already were for the `[…]` spelling.
 - **Find References no longer hangs on constructors or Laravel macros.** Finding the references of a `__construct` method could leave the server unresponsive until it was restarted, and so could finding or renaming a macro while a file that registers macros was being edited.
 - **By-reference captures follow the callee's invocation tags across files.** After a closure with `use (&$x)` is passed to a function or method declared anywhere, `$x` reflects whether the callee's `@param-immediately-invoked-callable` or `@param-later-invoked-callable` tag, or one it inherits, says the closure has already run. Without a tag, only a function parameter typed as a callable is taken to run the closure before returning, as in PHPStan.
+- **Functions called through an imported namespace.** With `use Lib\Helpers;`, a call such as `Helpers\greet()` now reaches `Lib\Helpers\greet()` in signature help and the other features that look the function up, instead of being looked for in the current namespace.
+- **`use function` and `use const` stay in their own `namespace` block.** In a file with several `namespace { }` blocks, an import in one block no longer changes which function or constant the same name means in another.
 
 ## [0.11.1] - 2026-10-07
 

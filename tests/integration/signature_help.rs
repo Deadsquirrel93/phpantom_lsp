@@ -92,12 +92,67 @@ async fn imported_function_shadows_a_global_one() {
         "}\n",
         "namespace App {\n",
         "    use function Lib\\greet;\n",
-        "    greet(\n",
+        "    greet();\n",
         "}\n",
     );
 
     let sh = sig_help_at(&backend, &uri, text, 9, 10).await.unwrap();
     assert_eq!(sig_label(&sh), "(string $name): void");
+}
+
+#[tokio::test]
+async fn qualified_function_expands_through_a_class_import() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///sig_class_import_func.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace App\\Helpers {\n",
+        "    function greet(int $times): void {}\n",
+        "}\n",
+        "namespace Lib\\Helpers {\n",
+        "    function greet(string $name): void {}\n",
+        "}\n",
+        "namespace App {\n",
+        "    use Lib\\Helpers;\n",
+        "    Helpers\\greet();\n",
+        "}\n",
+    );
+
+    let sh = sig_help_at(&backend, &uri, text, 9, 18).await.unwrap();
+    assert_eq!(sig_label(&sh), "(string $name): void");
+}
+
+#[tokio::test]
+async fn qualified_function_from_another_file_through_a_class_import() {
+    let backend = create_test_backend();
+    let lib_uri = Url::parse("file:///sig_lib_helpers.php").unwrap();
+    let lib = concat!(
+        "<?php\n",
+        "namespace Lib\\Helpers;\n",
+        "function greet(string $name, int $times): void {}\n",
+    );
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: lib_uri,
+                language_id: "php".to_string(),
+                version: 1,
+                text: lib.to_string(),
+            },
+        })
+        .await;
+
+    let uri = Url::parse("file:///sig_app_caller.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "use Lib\\Helpers as H;\n",
+        "h\\greet('Ada', \n",
+    );
+
+    let sh = sig_help_at(&backend, &uri, text, 3, 15).await.unwrap();
+    assert_eq!(sig_label(&sh), "(string $name, int $times): void");
+    assert_eq!(active_param(&sh), 1);
 }
 
 #[tokio::test]
