@@ -1,6 +1,10 @@
-//! Unit tests for [`super::namespace_at_offset`] and [`super::NamespaceDecls`].
+//! Unit tests for [`super::namespace_at_offset`], [`super::NamespaceDecls`]
+//! and the top-level scanners.
 
-use super::{NamespaceDecls, namespace_at_offset, split_top_level_commas, top_level_commas};
+use super::{
+    NamespaceDecls, find_semicolon_balanced, namespace_at_offset, split_top_level_commas,
+    top_level_commas,
+};
 
 /// Return the namespace in force where `|` sits in `src` (the marker is
 /// stripped before scanning).
@@ -157,6 +161,15 @@ fn commas_in_comments_do_not_split() {
         split_top_level_commas("'view' /* one, two */, ['a' => 1]"),
         vec!["'view' /* one, two */", " ['a' => 1]"]
     );
+}
+
+/// The statement ends at its own `;`, not at one in a comment, a string or
+/// a nested body.
+#[test]
+fn the_statement_semicolon_skips_comments_strings_and_brackets() {
+    let text = " $a // why; not\n    ?? fn () => { $b; } ?? ';' ?? f(';');\nnext();";
+    assert_eq!(find_semicolon_balanced(text), text.find(";\n"));
+    assert_eq!(find_semicolon_balanced(" $a /* ; */"), None);
 }
 
 #[test]

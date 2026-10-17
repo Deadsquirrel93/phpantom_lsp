@@ -80,8 +80,7 @@ pub use type_override::{
 
 // Source-text annotation scans
 pub use source_scan::{
-    find_enclosing_return_type, find_inline_var_docblock, find_iterable_raw_type_in_source,
-    find_var_raw_type_in_source,
+    find_inline_var_docblock, find_iterable_raw_type_in_source, find_var_raw_type_in_source,
 };
 pub(crate) use source_scan::{find_var_tag, strip_docblock_line_delimiters};
 

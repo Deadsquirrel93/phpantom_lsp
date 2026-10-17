@@ -139,7 +139,7 @@ pub struct ResolvedCacheInner {
     /// happens to collide with the freed address fails the
     /// `Weak::upgrade` + `ptr_eq` validation and the entry is simply
     /// replaced, so stale entries can never leak a wrong method.
-    substituted_methods: HashMap<(usize, u128), SubstitutedEntry>,
+    substituted_methods: SubstitutedMembers<MethodInfo>,
     /// Interned transformed properties, keyed the same way as
     /// [`substituted_methods`](Self::substituted_methods) (origin
     /// `Arc<PropertyInfo>` identity plus a [`TransformFingerprint`]).
@@ -150,13 +150,7 @@ pub struct ResolvedCacheInner {
     /// generic parent substitutes the same template bounds and so
     /// produces value-identical transformed properties, which interning
     /// collapses to one allocation shared across all of them.
-    substituted_properties: HashMap<(usize, u128), SubstitutedPropertyEntry>,
-    /// Length of [`substituted_methods`](Self::substituted_methods) after
-    /// its last dead-witness sweep.  See [`sweep_dead_witnesses`].
-    substituted_methods_swept_len: usize,
-    /// Same as [`substituted_methods_swept_len`](Self::substituted_methods_swept_len),
-    /// for [`substituted_properties`](Self::substituted_properties).
-    substituted_properties_swept_len: usize,
+    substituted_properties: SubstitutedMembers<PropertyInfo>,
     /// Loaded classes as linked by `Backend::link_loaded_class` (their
     /// `@phpstan-import-type` aliases linked into their members, and their
     /// docblock types checked against the native hints), keyed by the
@@ -211,20 +205,75 @@ pub(crate) enum PendingClaim {
     OwnedByOtherThread,
 }
 
-/// One interned transformed method: the origin witness plus the shared
-/// transformed value.  See
+/// Interned transformed copies of one kind of member, keyed by the
+/// identity of the original `Arc` plus a [`TransformFingerprint`].  See
 /// [`ResolvedCacheInner::substituted_methods`].
-struct SubstitutedEntry {
-    witness: Weak<MethodInfo>,
-    value: Arc<MethodInfo>,
+struct SubstitutedMembers<T> {
+    entries: HashMap<(usize, u128), SubstitutedEntry<T>>,
+    /// Length of `entries` after its last dead-witness sweep.  See
+    /// [`sweep_dead_witnesses`].
+    swept_len: usize,
 }
 
-/// One interned transformed property: the origin witness plus the shared
-/// transformed value.  See
-/// [`ResolvedCacheInner::substituted_properties`].
-struct SubstitutedPropertyEntry {
-    witness: Weak<PropertyInfo>,
-    value: Arc<PropertyInfo>,
+/// One interned transformed member: the origin witness plus the shared
+/// transformed value.
+struct SubstitutedEntry<T> {
+    witness: Weak<T>,
+    value: Arc<T>,
+}
+
+impl<T> Default for SubstitutedMembers<T> {
+    fn default() -> Self {
+        SubstitutedMembers {
+            entries: HashMap::new(),
+            swept_len: 0,
+        }
+    }
+}
+
+impl<T> SubstitutedMembers<T> {
+    /// The member interned for `origin` under the transform identified by
+    /// `fp`.
+    ///
+    /// `None` when no entry exists or when the stored entry's witness no
+    /// longer matches `origin` (the origin died and its address was
+    /// reused): the caller then builds and [inserts](Self::insert) a fresh
+    /// value.
+    fn get(&self, origin: &Arc<T>, fp: u128) -> Option<Arc<T>> {
+        let entry = self.entries.get(&(Arc::as_ptr(origin) as usize, fp))?;
+        let alive = entry.witness.upgrade()?;
+        Arc::ptr_eq(&alive, origin).then(|| Arc::clone(&entry.value))
+    }
+
+    /// Intern a transformed member built from `origin` under `fp`.
+    fn insert(&mut self, origin: &Arc<T>, fp: u128, value: Arc<T>) {
+        sweep_dead_witnesses(&mut self.entries, &mut self.swept_len, |e| {
+            e.witness.strong_count() > 0
+        });
+        self.entries.insert(
+            (Arc::as_ptr(origin) as usize, fp),
+            SubstitutedEntry {
+                witness: Arc::downgrade(origin),
+                value,
+            },
+        );
+    }
+
+    fn clear(&mut self) {
+        self.entries.clear();
+        self.swept_len = 0;
+    }
+
+    /// The approximate bytes of the table's buckets.
+    #[cfg(feature = "mem-audit")]
+    fn bucket_bytes(&self) -> usize {
+        let cap = self.entries.capacity();
+        if cap == 0 {
+            return 0;
+        }
+        let slot = std::mem::size_of::<((usize, u128), SubstitutedEntry<T>)>();
+        ((cap * 8).div_ceil(7).max(4)).next_power_of_two() * (slot + 1)
+    }
 }
 
 /// Ceiling on the live entries of each map [`sweep_dead_witnesses`] keeps
@@ -273,10 +322,8 @@ impl Default for ResolvedCacheInner {
             laravel_aliases: crate::virtual_members::laravel::new_alias_slot(),
             in_flight: HashSet::new(),
             pending: HashMap::new(),
-            substituted_methods: HashMap::new(),
-            substituted_properties: HashMap::new(),
-            substituted_methods_swept_len: 0,
-            substituted_properties_swept_len: 0,
+            substituted_methods: SubstitutedMembers::default(),
+            substituted_properties: SubstitutedMembers::default(),
             linked_classes: HashMap::new(),
             linked_classes_swept_len: 0,
             member_pool: parking_lot::Mutex::default(),
@@ -303,20 +350,8 @@ impl ResolvedCacheInner {
         &HashMap<String, HashSet<ResolvedClassCacheKey>>,
         usize,
     ) {
-        let bucket = |cap: usize, slot: usize| {
-            if cap == 0 {
-                0
-            } else {
-                ((cap * 8).div_ceil(7).max(4)).next_power_of_two() * (slot + 1)
-            }
-        };
-        let substituted = bucket(
-            self.substituted_methods.capacity(),
-            std::mem::size_of::<((usize, u128), SubstitutedEntry)>(),
-        ) + bucket(
-            self.substituted_properties.capacity(),
-            std::mem::size_of::<((usize, u128), SubstitutedPropertyEntry)>(),
-        );
+        let substituted =
+            self.substituted_methods.bucket_bytes() + self.substituted_properties.bucket_bytes();
         (&self.map, &self.fqn_keys, &self.reverse_deps, substituted)
     }
 
@@ -453,8 +488,6 @@ impl ResolvedCacheInner {
         self.reverse_deps.clear();
         self.substituted_methods.clear();
         self.substituted_properties.clear();
-        self.substituted_methods_swept_len = 0;
-        self.substituted_properties_swept_len = 0;
         self.linked_classes.clear();
         self.linked_classes_swept_len = 0;
         self.member_pool.get_mut().clear();
@@ -530,92 +563,6 @@ impl ResolvedCacheInner {
             !reads
         });
         owners
-    }
-
-    /// Look up an interned transformed method for `origin` under the
-    /// transform identified by `fp`.
-    ///
-    /// Returns `None` when no entry exists or when the stored entry's
-    /// witness no longer matches `origin` (the origin died and its
-    /// address was reused) — the caller then builds and
-    /// [inserts](Self::insert_substituted) a fresh value.
-    pub(crate) fn get_substituted(
-        &self,
-        origin: &Arc<MethodInfo>,
-        fp: u128,
-    ) -> Option<Arc<MethodInfo>> {
-        let key = (Arc::as_ptr(origin) as usize, fp);
-        let entry = self.substituted_methods.get(&key)?;
-        let alive = entry.witness.upgrade()?;
-        if Arc::ptr_eq(&alive, origin) {
-            Some(Arc::clone(&entry.value))
-        } else {
-            None
-        }
-    }
-
-    /// Intern a transformed method built from `origin` under `fp`.
-    pub(crate) fn insert_substituted(
-        &mut self,
-        origin: &Arc<MethodInfo>,
-        fp: u128,
-        value: Arc<MethodInfo>,
-    ) {
-        sweep_dead_witnesses(
-            &mut self.substituted_methods,
-            &mut self.substituted_methods_swept_len,
-            |e| e.witness.strong_count() > 0,
-        );
-        self.substituted_methods.insert(
-            (Arc::as_ptr(origin) as usize, fp),
-            SubstitutedEntry {
-                witness: Arc::downgrade(origin),
-                value,
-            },
-        );
-    }
-
-    /// Look up an interned transformed property for `origin` under the
-    /// transform identified by `fp`.
-    ///
-    /// The witness validation mirrors
-    /// [`get_substituted`](Self::get_substituted): a stale entry whose
-    /// origin died (its address reused) fails `Weak::upgrade` + `ptr_eq`
-    /// and is treated as a miss.
-    pub(crate) fn get_substituted_property(
-        &self,
-        origin: &Arc<PropertyInfo>,
-        fp: u128,
-    ) -> Option<Arc<PropertyInfo>> {
-        let key = (Arc::as_ptr(origin) as usize, fp);
-        let entry = self.substituted_properties.get(&key)?;
-        let alive = entry.witness.upgrade()?;
-        if Arc::ptr_eq(&alive, origin) {
-            Some(Arc::clone(&entry.value))
-        } else {
-            None
-        }
-    }
-
-    /// Intern a transformed property built from `origin` under `fp`.
-    pub(crate) fn insert_substituted_property(
-        &mut self,
-        origin: &Arc<PropertyInfo>,
-        fp: u128,
-        value: Arc<PropertyInfo>,
-    ) {
-        sweep_dead_witnesses(
-            &mut self.substituted_properties,
-            &mut self.substituted_properties_swept_len,
-            |e| e.witness.strong_count() > 0,
-        );
-        self.substituted_properties.insert(
-            (Arc::as_ptr(origin) as usize, fp),
-            SubstitutedPropertyEntry {
-                witness: Arc::downgrade(origin),
-                value,
-            },
-        );
     }
 
     /// Remove `key` from the reverse-dependency edge under `dep`, pruning
@@ -847,14 +794,15 @@ pub(crate) fn intern_transformed_method(
     let Some(cache) = active_resolved_class_cache() else {
         return Arc::new(build());
     };
-    if let Some(hit) = cache.read().get_substituted(origin, fp.0) {
+    if let Some(hit) = cache.read().substituted_methods.get(origin, fp.0) {
         return hit;
     }
     let built = build();
     let value = cache.read().member_pool.lock().share_method(built);
     cache
         .write()
-        .insert_substituted(origin, fp.0, Arc::clone(&value));
+        .substituted_methods
+        .insert(origin, fp.0, Arc::clone(&value));
     value
 }
 
@@ -875,14 +823,15 @@ pub(crate) fn intern_transformed_property(
     let Some(cache) = active_resolved_class_cache() else {
         return Arc::new(build());
     };
-    if let Some(hit) = cache.read().get_substituted_property(origin, fp.0) {
+    if let Some(hit) = cache.read().substituted_properties.get(origin, fp.0) {
         return hit;
     }
     let built = build();
     let value = cache.read().member_pool.lock().share_property(built);
     cache
         .write()
-        .insert_substituted_property(origin, fp.0, Arc::clone(&value));
+        .substituted_properties
+        .insert(origin, fp.0, Arc::clone(&value));
     value
 }
 

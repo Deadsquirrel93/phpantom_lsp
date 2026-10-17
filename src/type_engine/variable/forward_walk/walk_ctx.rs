@@ -228,16 +228,22 @@ impl<'a> ForwardWalkCtx<'a> {
 
     /// Return a copy of this context for walking the body of the
     /// declaration starting at `decl_start`, with that declaration's
-    /// bounded templates as [`template_markers`](Self::template_markers).
+    /// bounded templates as [`template_markers`](Self::template_markers)
+    /// and its docblock's `@return` type as the
+    /// [`enclosing_return_type`](Self::enclosing_return_type).
     pub(crate) fn for_declaration(&self, decl_start: u32) -> ForwardWalkCtx<'a> {
+        use crate::type_engine::variable::resolution::{
+            declaration_template_markers, declared_return_docblock_type,
+        };
+        let names = self.written_names();
         ForwardWalkCtx {
-            template_markers:
-                crate::type_engine::variable::resolution::declaration_template_markers(
-                    self.content,
-                    decl_start as usize,
-                    &self.written_names(),
-                ),
-            enclosing_return_type: self.enclosing_return_type.clone(),
+            template_markers: declaration_template_markers(
+                self.content,
+                decl_start as usize,
+                &names,
+            ),
+            enclosing_return_type: declared_return_docblock_type(self.content, decl_start as usize)
+                .map(|ty| names.resolve_type(&ty)),
             top_level_scope: self.top_level_scope.clone(),
             ..*self
         }

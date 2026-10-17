@@ -10,11 +10,12 @@ use tower_lsp::lsp_types::Position;
 
 use crate::symbol_map::LaravelStringKind;
 use crate::symbol_map::extraction::laravel::{
-    facade_static_call_first_arg_kind, is_gate_check_method, is_request_route_pattern_method,
+    facade_static_call_first_arg_kind, helper_function_accepts_name_list,
+    helper_function_first_arg_kind, is_gate_check_method, is_request_route_pattern_method,
     is_route_facade_pattern_method, is_route_name_method,
 };
 use crate::text_position::position_to_offset;
-use crate::text_scan::{is_escaped, skip_php_trivia};
+use crate::text_scan::{CodeOffsets, is_escaped, skip_php_trivia};
 
 pub(super) struct LaravelStringKeyContext<'a> {
     pub(super) kind: LaravelStringKind,
@@ -439,72 +440,10 @@ pub(super) fn semantic_class_reference<'a>(
 /// Find the last syntactic PHP attribute opener before `end`.
 /// Attribute-looking text inside strings and comments is deliberately ignored.
 pub(super) fn last_attribute_open_before(content: &str, end: usize) -> Option<usize> {
-    let bytes = content.as_bytes();
-    let end = end.min(bytes.len());
-    let mut state = PhpLexState::Code;
-    let mut last = None;
-    let mut index = 0usize;
-
-    while index < end {
-        let byte = bytes[index];
-        match state {
-            PhpLexState::Code => match byte {
-                b'\'' => {
-                    state = PhpLexState::SingleQuoted;
-                    index += 1;
-                }
-                b'"' => {
-                    state = PhpLexState::DoubleQuoted;
-                    index += 1;
-                }
-                b'/' if bytes.get(index + 1) == Some(&b'/') => {
-                    state = PhpLexState::LineComment;
-                    index += 2;
-                }
-                b'/' if bytes.get(index + 1) == Some(&b'*') => {
-                    state = PhpLexState::BlockComment;
-                    index += 2;
-                }
-                b'#' if bytes.get(index + 1) == Some(&b'[') => {
-                    last = Some(index);
-                    index += 2;
-                }
-                b'#' => {
-                    state = PhpLexState::LineComment;
-                    index += 1;
-                }
-                _ => index += 1,
-            },
-            PhpLexState::SingleQuoted => {
-                if byte == b'\'' && !is_escaped(bytes, index) {
-                    state = PhpLexState::Code;
-                }
-                index += 1;
-            }
-            PhpLexState::DoubleQuoted => {
-                if byte == b'"' && !is_escaped(bytes, index) {
-                    state = PhpLexState::Code;
-                }
-                index += 1;
-            }
-            PhpLexState::LineComment => {
-                if byte == b'\n' || byte == b'\r' {
-                    state = PhpLexState::Code;
-                }
-                index += 1;
-            }
-            PhpLexState::BlockComment => {
-                if byte == b'*' && bytes.get(index + 1) == Some(&b'/') {
-                    state = PhpLexState::Code;
-                    index += 2;
-                } else {
-                    index += 1;
-                }
-            }
-        }
-    }
-
-    last
+    let bytes = &content.as_bytes()[..end.min(content.len())];
+    CodeOffsets::new(bytes)
+        .filter(|&index| bytes[index..].starts_with(b"#["))
+        .last()
 }
 
 /// Start of the class name for the attribute call ending at `name_start`.
@@ -575,76 +514,35 @@ pub(super) fn receiver_chain_start(prefix: &str) -> usize {
     let mut boundary = 0usize;
     let mut round = 0usize;
     let mut square = 0usize;
-    let mut state = PhpLexState::Code;
-    let mut index = 0usize;
+    let mut offsets = CodeOffsets::new(bytes);
 
-    while index < bytes.len() {
-        let byte = bytes[index];
-        match state {
-            PhpLexState::Code => {
-                if bytes
-                    .get(index..index.saturating_add(5))
-                    .is_some_and(|tag| tag.eq_ignore_ascii_case(b"<?php"))
-                {
-                    boundary = index + 5;
-                    index += 5;
-                    continue;
-                }
-                if bytes.get(index..index.saturating_add(3)) == Some(b"<?=") {
-                    boundary = index + 3;
-                    index += 3;
-                    continue;
-                }
-                if bytes.get(index..index.saturating_add(2)) == Some(b"?>") {
-                    boundary = index + 2;
-                    index += 2;
-                    continue;
-                }
-                match byte {
-                    b'\'' => state = PhpLexState::SingleQuoted,
-                    b'"' => state = PhpLexState::DoubleQuoted,
-                    b'/' if bytes.get(index + 1) == Some(&b'/') => {
-                        state = PhpLexState::LineComment;
-                        index += 1;
-                    }
-                    b'/' if bytes.get(index + 1) == Some(&b'*') => {
-                        state = PhpLexState::BlockComment;
-                        index += 1;
-                    }
-                    b'#' if bytes.get(index + 1) != Some(&b'[') => {
-                        state = PhpLexState::LineComment;
-                    }
-                    b'(' => round += 1,
-                    b')' if round > 0 => round -= 1,
-                    b'[' => square += 1,
-                    b']' if square > 0 => square -= 1,
-                    b';' | b'{' | b'}' if round == 0 && square == 0 => boundary = index + 1,
-                    _ => {}
-                }
-            }
-            PhpLexState::SingleQuoted => {
-                if byte == b'\'' && !is_escaped(bytes, index) {
-                    state = PhpLexState::Code;
-                }
-            }
-            PhpLexState::DoubleQuoted => {
-                if byte == b'"' && !is_escaped(bytes, index) {
-                    state = PhpLexState::Code;
-                }
-            }
-            PhpLexState::LineComment => {
-                if byte == b'\n' || byte == b'\r' {
-                    state = PhpLexState::Code;
-                }
-            }
-            PhpLexState::BlockComment => {
-                if byte == b'*' && bytes.get(index + 1) == Some(&b'/') {
-                    state = PhpLexState::Code;
-                    index += 1;
-                }
-            }
+    while let Some(index) = offsets.next() {
+        let rest = &bytes[index..];
+        let open_or_close_tag = if rest
+            .get(..5)
+            .is_some_and(|tag| tag.eq_ignore_ascii_case(b"<?php"))
+        {
+            5
+        } else if rest.starts_with(b"<?=") {
+            3
+        } else if rest.starts_with(b"?>") {
+            2
+        } else {
+            0
+        };
+        if open_or_close_tag > 0 {
+            boundary = index + open_or_close_tag;
+            offsets.skip_to(boundary);
+            continue;
         }
-        index += 1;
+        match bytes[index] {
+            b'(' => round += 1,
+            b')' if round > 0 => round -= 1,
+            b'[' => square += 1,
+            b']' if square > 0 => square -= 1,
+            b';' | b'{' | b'}' if round == 0 && square == 0 => boundary = index + 1,
+            _ => {}
+        }
     }
 
     boundary
@@ -1104,16 +1002,9 @@ pub(super) fn detect_laravel_string_key_context_inner<'a>(
             }
         }
     } else {
-        let fn_lower = func_name.to_ascii_lowercase();
-        // The Blade preprocessor lowers `@includeFirst`/`@componentFirst`/
-        // `@extendsFirst` and `@canany` to markers that name their candidates
-        // inside an array literal rather than as a plain first argument.
-        let accepts_array = matches!(
-            fn_lower.as_str(),
-            "blade_view_directive" | "blade_component_directive" | "blade_can_directive"
-        );
         if argument.shape != StringArgumentShape::Scalar
-            && (!accepts_array || !before_quote.trim_end().ends_with('['))
+            && (!helper_function_accepts_name_list(func_name)
+                || !before_quote.trim_end().ends_with('['))
         {
             return None;
         }
@@ -1139,20 +1030,7 @@ pub(super) fn detect_laravel_string_key_context_inner<'a>(
         } else if argument.named_argument.is_some() {
             None
         } else {
-            match fn_lower.as_str() {
-                "route" | "to_route" => Some(LaravelStringKind::Route),
-                "config" => Some(LaravelStringKind::Config),
-                "view"
-                | "blade_view_directive"
-                | "blade_component_directive"
-                | "blade_each_directive" => Some(LaravelStringKind::View),
-                "__" | "trans" | "trans_choice" => Some(LaravelStringKind::Trans),
-                "env" => Some(LaravelStringKind::Env),
-                // The Blade preprocessor lowers `@can`/`@cannot`/`@canany` to
-                // this call, so completion inside the directive works too.
-                "blade_can_directive" => Some(LaravelStringKind::GateAbility),
-                _ => None,
-            }
+            helper_function_first_arg_kind(func_name)
         }
     };
 

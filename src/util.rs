@@ -245,50 +245,6 @@ pub(crate) fn build_fqn(short_name: &str, namespace: Option<&str>) -> String {
     }
 }
 
-/// Strip trailing PHP visibility/modifier keywords from a string.
-///
-/// Given a string like `"  /** ... */\n    public static"`, returns
-/// `"  /** ... */"` (after stripping `static` and `public`).
-///
-/// Recognised modifiers: `public`, `protected`, `private`, `static`,
-/// `abstract`, `final`, `readonly`.
-pub(crate) fn strip_trailing_modifiers(s: &str) -> &str {
-    const MODIFIERS: &[&str] = &[
-        "public",
-        "protected",
-        "private",
-        "static",
-        "abstract",
-        "final",
-        "readonly",
-    ];
-
-    let mut result = s;
-    loop {
-        let trimmed = result.trim_end();
-        let mut found = false;
-        for &kw in MODIFIERS {
-            if let Some(prefix) = trimmed.strip_suffix(kw) {
-                // Make sure the keyword isn't part of a larger identifier.
-                if prefix.is_empty()
-                    || prefix
-                        .as_bytes()
-                        .last()
-                        .is_some_and(|&b| !b.is_ascii_alphanumeric() && b != b'_')
-                {
-                    result = prefix;
-                    found = true;
-                    break;
-                }
-            }
-        }
-        if !found {
-            break;
-        }
-    }
-    result.trim_end()
-}
-
 /// Check if a line contains the `function` keyword as a standalone word
 /// (not part of a larger identifier like `$functionality`).
 pub(crate) fn contains_function_keyword(line: &str) -> bool {
@@ -336,25 +292,6 @@ pub(crate) fn find_enclosing_method_block_in_members<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn strips_public_static() {
-        assert_eq!(strip_trailing_modifiers("    public static").trim(), "");
-    }
-
-    #[test]
-    fn strips_protected() {
-        assert_eq!(
-            strip_trailing_modifiers("some code\n    protected").trim(),
-            "some code"
-        );
-    }
-
-    #[test]
-    fn does_not_strip_partial_keyword() {
-        // `mypublic` should not be stripped.
-        assert_eq!(strip_trailing_modifiers("mypublic"), "mypublic");
-    }
 
     #[test]
     fn unescape_string_literal_collapses_namespace_separators() {

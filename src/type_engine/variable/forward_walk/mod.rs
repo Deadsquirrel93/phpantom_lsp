@@ -310,7 +310,7 @@ pub(crate) fn resolve_in_method_body<'b>(
         .contains(var_name)
         .then(|| scope.get(var_name).to_vec());
     if types.as_ref().is_none_or(Vec::is_empty)
-        && let Some(inferred) = try_generator_yield_inference(var_name, ctx)
+        && let Some(inferred) = try_generator_yield_inference(var_name, &body, ctx)
     {
         return Some(inferred);
     }
@@ -383,72 +383,18 @@ pub(crate) fn top_level_scope_for_globals<'b>(
 // ─── Generator yield reverse inference ──────────────────────────────────────
 
 /// When the enclosing function/method returns a `Generator<TKey, TValue>`,
-/// scan the source text for `yield $varName` and infer the variable's type
-/// as `TValue`.  This handles the pattern where a variable is yielded but
-/// never explicitly assigned — its type comes from the Generator's return
-/// type annotation.
+/// a variable the body yields as a value (`yield $var`, `yield $key =>
+/// $var`) is a `TValue`.  This handles the pattern where a variable is
+/// yielded but never explicitly assigned — its type comes from the
+/// Generator's return type annotation.
 fn try_generator_yield_inference(
     var_name: &str,
+    body: &[&Statement<'_>],
     ctx: &ForwardWalkCtx<'_>,
 ) -> Option<Vec<ResolvedType>> {
     let return_type = ctx.enclosing_return_type.as_ref()?;
     let value_type = return_type.extract_value_type(false)?;
-
-    let cursor = ctx.cursor_offset as usize;
-    let content = ctx.content;
-
-    // Find the enclosing function body boundaries by scanning backward
-    // for the opening `{`.
-    let search_before = content.get(..cursor).unwrap_or("");
-    let mut brace_depth = 0i32;
-    let mut body_start = None;
-    for (i, ch) in search_before.char_indices().rev() {
-        match ch {
-            '}' => brace_depth += 1,
-            '{' => {
-                brace_depth -= 1;
-                if brace_depth < 0 {
-                    body_start = Some(i + 1);
-                    break;
-                }
-            }
-            _ => {}
-        }
-    }
-
-    let start = body_start?;
-
-    // Find the matching closing `}`.
-    let after_open = content.get(start..).unwrap_or("");
-    let mut depth = 0i32;
-    let mut body_end = content.len();
-    for (i, ch) in after_open.char_indices() {
-        match ch {
-            '{' => depth += 1,
-            '}' => {
-                depth -= 1;
-                if depth < 0 {
-                    body_end = start + i;
-                    break;
-                }
-            }
-            _ => {}
-        }
-    }
-
-    let body = content.get(start..body_end).unwrap_or("");
-
-    // Look for `yield $varName` or `=> $varName` in yield context.
-    let yield_pattern = format!("yield {}", var_name);
-    let has_yield = body.contains(&yield_pattern);
-
-    let yield_pair_needle = format!("=> {}", var_name);
-    let has_yield_pair = body.lines().any(|line| {
-        let trimmed = line.trim();
-        trimmed.contains("yield ") && trimmed.contains(&yield_pair_needle)
-    });
-
-    if !has_yield && !has_yield_pair {
+    if !body_yields_variable(body, var_name) {
         return None;
     }
 
@@ -462,4 +408,46 @@ fn try_generator_yield_inference(
         return None;
     }
     Some(ResolvedType::from_classes(classes))
+}
+
+/// Whether `body` yields the variable `var_name` as a value, outside the
+/// closures and declarations nested in it, which yield for themselves.
+fn body_yields_variable(body: &[&Statement<'_>], var_name: &str) -> bool {
+    use mago_syntax::walker::Walker;
+
+    struct YieldedVariable<'n>(&'n str);
+
+    impl<'ast, 'arena> Walker<'ast, 'arena, bool> for YieldedVariable<'_> {
+        fn walk_closure(&self, _: &'ast Closure<'arena>, _: &mut bool) {}
+        fn walk_arrow_function(&self, _: &'ast ArrowFunction<'arena>, _: &mut bool) {}
+        fn walk_function(&self, _: &'ast Function<'arena>, _: &mut bool) {}
+        fn walk_anonymous_class(&self, _: &'ast AnonymousClass<'arena>, _: &mut bool) {}
+        fn walk_class(&self, _: &'ast Class<'arena>, _: &mut bool) {}
+        fn walk_interface(&self, _: &'ast Interface<'arena>, _: &mut bool) {}
+        fn walk_trait(&self, _: &'ast Trait<'arena>, _: &mut bool) {}
+        fn walk_enum(&self, _: &'ast Enum<'arena>, _: &mut bool) {}
+
+        fn walk_in_yield(&self, yield_expr: &'ast Yield<'arena>, found: &mut bool) {
+            let value = match yield_expr {
+                Yield::Value(value) => value.value,
+                Yield::Pair(pair) => Some(pair.value),
+                Yield::From(_) => None,
+            };
+            if let Some(Expression::Variable(Variable::Direct(variable))) = value
+                && crate::atom::bytes_to_str(variable.name) == self.0
+            {
+                *found = true;
+            }
+        }
+    }
+
+    let walker = YieldedVariable(var_name);
+    let mut found = false;
+    for stmt in body {
+        walker.walk_statement(stmt, &mut found);
+        if found {
+            return true;
+        }
+    }
+    false
 }

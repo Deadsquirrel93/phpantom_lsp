@@ -7,7 +7,7 @@
 //! [`ScopeLines`], so an annotation in a sibling function or class is
 //! never picked up.
 
-use super::tags::{extract_return_type, extract_var_type_with_name};
+use super::tags::extract_var_type_with_name;
 use super::type_strings::split_type_token;
 use crate::php_type::PhpType;
 
@@ -493,83 +493,6 @@ pub fn find_iterable_raw_type_in_source(
     }
 
     None
-}
-
-/// Find the `@return` type annotation of the enclosing function or method.
-///
-/// Scans backward from `cursor_offset` through `content`, crossing the
-/// opening `{` of the enclosing function body, to locate the docblock
-/// that immediately precedes the function/method declaration.  If a
-/// `@return` tag is found, its type string is returned.
-///
-/// This is used inside generator bodies to reverse-infer variable types
-/// from the declared `@return Generator<TKey, TValue, TSend, TReturn>`.
-///
-/// Returns `None` when no enclosing function docblock or `@return` tag
-/// can be found.
-pub fn find_enclosing_return_type(content: &str, cursor_offset: usize) -> Option<PhpType> {
-    let search_area = content.get(..cursor_offset)?;
-
-    // Walk backward, tracking brace depth.  We start inside a function
-    // body (depth 0).  When we cross the opening `{` (depth goes to -1),
-    // we have exited the function body and are in the function signature
-    // region.  From there, look for the docblock above.
-    let mut brace_depth = 0i32;
-
-    // Find the byte offset of the opening `{` of the enclosing function.
-    let mut func_open_brace: Option<usize> = None;
-    for (i, ch) in search_area.char_indices().rev() {
-        match ch {
-            '}' => brace_depth += 1,
-            '{' => {
-                brace_depth -= 1;
-                if brace_depth < 0 {
-                    func_open_brace = Some(i);
-                    break;
-                }
-            }
-            _ => {}
-        }
-    }
-
-    let brace_pos = func_open_brace?;
-
-    // The region before the `{` should contain the function signature
-    // and (optionally) the docblock above it.
-    let before_brace = content.get(..brace_pos)?;
-
-    // Find the `*/` that ends the docblock.  It must appear in the
-    // region before the opening brace.  We search for the last `*/`
-    // before the `function` keyword.
-    //
-    // First, locate the `function` keyword so we know where the
-    // signature starts.
-    let mut sig_start = before_brace.len().saturating_sub(2000);
-    // Adjust to a valid UTF-8 char boundary so we don't panic on
-    // multi-byte characters (e.g. `─` in comment banners).
-    while sig_start > 0 && !before_brace.is_char_boundary(sig_start) {
-        sig_start -= 1;
-    }
-    let sig_region = before_brace.get(sig_start..)?;
-    let func_kw_rel = sig_region.rfind("function")?;
-    let func_kw_pos = sig_start + func_kw_rel;
-
-    // Everything before `function` (after trimming whitespace and
-    // modifiers) should end with the docblock.
-    let before_func = content.get(..func_kw_pos)?;
-
-    // Scan backward over modifier keywords and whitespace.
-    let trimmed = before_func.trim_end();
-    let after_mods = crate::util::strip_trailing_modifiers(trimmed);
-
-    if !after_mods.ends_with("*/") {
-        return None;
-    }
-
-    let open_pos = after_mods.rfind("/**")?;
-    let docblock = after_mods.get(open_pos..)?;
-
-    extract_return_type(docblock)
 }
 
 /// Count `{` and `}` characters on a line, skipping those inside string

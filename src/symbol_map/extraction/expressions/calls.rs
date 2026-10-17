@@ -302,20 +302,6 @@ fn extract_function_call<'a>(
                     is_docblock_reference: false,
                 },
             });
-            // `@includeFirst` and its `@componentFirst` /
-            // `@extendsFirst` siblings put their candidates in an
-            // array literal, so the compiled directive names several
-            // templates at once.
-            if name_clean.eq_ignore_ascii_case("blade_view_directive")
-                || name_clean.eq_ignore_ascii_case("blade_component_directive")
-            {
-                try_emit_laravel_view_span_at(
-                    0,
-                    &func_call.argument_list,
-                    ctx.content,
-                    &mut ctx.spans,
-                );
-            }
             // `@yield`/`@section`/`@stack`/`@push` and their
             // helpers lower to markers of their own, so the
             // section or stack they name is extracted here.
@@ -325,50 +311,51 @@ fn extract_function_call<'a>(
                 ctx.content,
                 &mut ctx.spans,
             );
-            // Detect Laravel helper calls and emit a
-            // LaravelStringKey span for the first string arg.
-            // Uses if-else to short-circuit (most function calls
-            // won't match) and avoids to_ascii_lowercase() heap
-            // allocations.
-            // The `config()` helper is the one that both reads and
-            // writes, so it takes a path of its own rather than the
-            // read-only mapping below.
-            if name_clean.eq_ignore_ascii_case("config") {
-                try_emit_laravel_config_helper_spans(
-                    &func_call.argument_list,
-                    ctx.content,
-                    &mut ctx.spans,
-                );
-            }
-            let laravel_kind = if name_clean.eq_ignore_ascii_case("view")
-                || name_clean.eq_ignore_ascii_case("blade_each_directive")
-            {
+            match helper_function_first_arg_kind(name_clean) {
+                // The `config()` helper both reads and writes.
+                Some(crate::symbol_map::LaravelStringKind::Config) => {
+                    try_emit_laravel_config_helper_spans(
+                        &func_call.argument_list,
+                        ctx.content,
+                        &mut ctx.spans,
+                    );
+                }
+                // `@can`, `@cannot` and `@canany` check the ability
+                // against the arguments that follow it.
+                Some(crate::symbol_map::LaravelStringKind::GateAbility) => {
+                    try_emit_gate_ability_spans(
+                        &func_call.argument_list,
+                        0,
+                        Some(1),
+                        AbilityRole::Check,
+                        ctx.content,
+                        &mut ctx.spans,
+                        &mut ctx.gate_subjects,
+                    );
+                }
+                // `@includeFirst` and its `@componentFirst` /
+                // `@extendsFirst` siblings put their candidates in an
+                // array literal, so the compiled directive names several
+                // templates at once.
                 Some(crate::symbol_map::LaravelStringKind::View)
-            } else if name_clean.eq_ignore_ascii_case("route")
-                || name_clean.eq_ignore_ascii_case("to_route")
-            {
-                Some(crate::symbol_map::LaravelStringKind::Route)
-            } else if name_clean.eq_ignore_ascii_case("__")
-                || name_clean.eq_ignore_ascii_case("trans")
-                || name_clean.eq_ignore_ascii_case("trans_choice")
-            {
-                Some(crate::symbol_map::LaravelStringKind::Trans)
-            } else if name_clean.eq_ignore_ascii_case("app")
-                || name_clean.eq_ignore_ascii_case("resolve")
-            {
-                Some(crate::symbol_map::LaravelStringKind::ContainerBinding)
-            } else if name_clean.eq_ignore_ascii_case("env") {
-                Some(crate::symbol_map::LaravelStringKind::Env)
-            } else {
-                None
-            };
-            if let Some(kind) = laravel_kind {
-                try_emit_laravel_string_span(
-                    kind,
-                    &func_call.argument_list,
-                    ctx.content,
-                    &mut ctx.spans,
-                );
+                    if helper_function_accepts_name_list(name_clean) =>
+                {
+                    try_emit_laravel_view_span_at(
+                        0,
+                        &func_call.argument_list,
+                        ctx.content,
+                        &mut ctx.spans,
+                    );
+                }
+                Some(kind) => {
+                    try_emit_laravel_string_span(
+                        kind,
+                        &func_call.argument_list,
+                        ctx.content,
+                        &mut ctx.spans,
+                    );
+                }
+                None => {}
             }
             if let Some(trigger) = crate::symbol_map::laravel_resources::auth_helper_trigger(
                 ctx.content,
@@ -393,20 +380,6 @@ fn extract_function_call<'a>(
                 {
                     ctx.defer_laravel_spans_since(span_start, dependency);
                 }
-            }
-            // The Blade preprocessor lowers `@can`/`@cannot`/`@canany`
-            // to this call so the ability string is extracted here
-            // like any other authorization check.
-            if name_clean == BLADE_CAN_DIRECTIVE {
-                try_emit_gate_ability_spans(
-                    &func_call.argument_list,
-                    0,
-                    Some(1),
-                    AbilityRole::Check,
-                    ctx.content,
-                    &mut ctx.spans,
-                    &mut ctx.gate_subjects,
-                );
             }
         }
         _ => {

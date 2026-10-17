@@ -200,21 +200,33 @@ impl Backend {
         // ── Enclosing context ───────────────────────────────────────
         let enclosing = find_enclosing_context(content, start as u32, uses_this)?;
 
+        // ── Return types ────────────────────────────────────────────
+        let enclosing_returns = if matches!(
+            return_strategy,
+            ReturnStrategy::TrailingReturn
+                | ReturnStrategy::SentinelNull
+                | ReturnStrategy::NullGuardWithValue(_)
+        ) {
+            enclosing_return_types(content, start as u32)
+        } else {
+            EnclosingReturnTypes::none()
+        };
+        let trailing_return_type = enclosing_returns.native;
+
         // ── Naming ──────────────────────────────────────────────────
         let body_line_start_for_naming = find_line_start(content, start);
         let body_text_for_naming = &content[body_line_start_for_naming..end];
-        let pre_trailing_return_type = if matches!(return_strategy, ReturnStrategy::TrailingReturn)
-        {
-            resolve_enclosing_return_type(content, start as u32)
-        } else {
-            PhpType::untyped()
-        };
+        let untyped = PhpType::untyped();
         let naming_ctx = NamingContext {
             enclosing_name: &enclosing.enclosing_name,
             return_strategy: &return_strategy,
             body_text: body_text_for_naming,
             return_var_names: &classification.return_values,
-            trailing_return_type: &pre_trailing_return_type,
+            trailing_return_type: if matches!(return_strategy, ReturnStrategy::TrailingReturn) {
+                &trailing_return_type
+            } else {
+                &untyped
+            },
         };
         let fn_name = generate_function_name(content, &enclosing, &naming_ctx);
 
@@ -246,26 +258,12 @@ impl Backend {
         let body_line_start = find_line_start(content, start);
         let body_text = content[body_line_start..end].to_string();
 
-        // ── Return type resolution ──────────────────────────────────
-        let trailing_return_type = if matches!(
-            return_strategy,
-            ReturnStrategy::TrailingReturn
-                | ReturnStrategy::SentinelNull
-                | ReturnStrategy::NullGuardWithValue(_)
-        ) {
-            resolve_enclosing_return_type(content, start as u32)
-        } else {
-            PhpType::untyped()
-        };
-
-        let enclosing_docblock_return: Option<PhpType> = if matches!(
-            return_strategy,
-            ReturnStrategy::TrailingReturn | ReturnStrategy::SentinelNull
-        ) {
-            crate::docblock::find_enclosing_return_type(content, start)
-        } else {
-            None
-        };
+        let enclosing_docblock_return = enclosing_returns.docblock.filter(|_| {
+            matches!(
+                return_strategy,
+                ReturnStrategy::TrailingReturn | ReturnStrategy::SentinelNull
+            )
+        });
 
         // ── PHPDoc generation ───────────────────────────────────────
         let return_type_for_docblock = build_return_type_hint_for_docblock(

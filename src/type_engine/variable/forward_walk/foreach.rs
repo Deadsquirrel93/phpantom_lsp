@@ -387,22 +387,14 @@ pub(crate) fn process_foreach<'b>(
 
     let pre_loop_scope = scope.clone();
 
-    // When the cursor is inside the loop body (completion path), discovery
-    // passes must walk the ENTIRE body; the final pass uses the real
-    // cursor_offset so it stops at the cursor as usual.
-    let body_span = match &foreach.body {
-        ForeachBody::Statement(inner) => inner.span(),
-        ForeachBody::ColonDelimited(body) => body.span(),
-    };
-    let cursor_in_body =
-        ctx.cursor_offset >= body_span.start.offset && ctx.cursor_offset <= body_span.end.offset;
-    let discovery_ctx = (if cursor_in_body && !is_diagnostic_scope_active() {
-        ctx.with_cursor_offset(u32::MAX)
-    } else {
-        ctx.with_cursor_offset(ctx.cursor_offset)
-    })
-    .with_in_loop(true);
-    let loop_body_ctx = ctx.with_in_loop(true);
+    let loop_ctxs = LoopBodyCtxs::new(
+        ctx,
+        match &foreach.body {
+            ForeachBody::Statement(inner) => inner.span(),
+            ForeachBody::ColonDelimited(body) => body.span(),
+        },
+    );
+    let cursor_in_body = loop_ctxs.cursor_in_body;
 
     // Bind the value variable (and optionally the key variable).
     match &foreach.target {
@@ -560,11 +552,11 @@ pub(crate) fn process_foreach<'b>(
             }
         }
         let exit_frame = ExitFrameGuard::push();
-        walk_body_forward(body_stmts.iter().copied(), scope, &loop_body_ctx);
+        walk_body_forward(body_stmts.iter().copied(), scope, &loop_ctxs.body_ctx);
         exit_frame.pop();
         // A cursor inside the body is answered by the walk that stopped at
         // it, as for any other loop below.
-        if !(cursor_in_body && !is_diagnostic_scope_active()) {
+        if !loop_ctxs.answers_cursor() {
             *scope = pre_loop_scope;
         }
         return;
@@ -574,13 +566,7 @@ pub(crate) fn process_foreach<'b>(
     walk_loop_body_to_fixed_point(
         &body_stmts,
         scope,
-        LoopWalk {
-            pre_loop_scope: &pre_loop_scope,
-            assignment_depth,
-            fold_exit_edges: !cursor_in_body,
-            ctx: &loop_body_ctx,
-            discovery_ctx: &discovery_ctx,
-        },
+        loop_ctxs.walk(&pre_loop_scope, assignment_depth),
         |next_scope, point| {
             if point != LoopSeedPoint::Entry {
                 return;
@@ -636,7 +622,7 @@ pub(crate) fn process_foreach<'b>(
     // the pre-loop scope (the loop might not run) would bring back what an
     // enclosing loop's earlier pass left in a variable the body has since
     // reassigned above the cursor.
-    if cursor_in_body && !is_diagnostic_scope_active() {
+    if loop_ctxs.answers_cursor() {
         return;
     }
 

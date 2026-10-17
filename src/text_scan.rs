@@ -425,52 +425,20 @@ fn namespace_name_after(content: &str, after_keyword: usize) -> Option<&str> {
     (len > 0).then(|| &content[start..start + len])
 }
 
-/// Find the first `;` in `s` that is not nested inside `()`, `[]`,
-/// `{}`, or string literals.
+/// Find the first `;` in `s` that is not inside a quote, a comment, or a
+/// bracket (see [`scan_top_level`]): the end of the statement `s` starts
+/// in.
 ///
 /// Returns the byte offset of the semicolon, or `None` if no
-/// top-level semicolon exists.  Used by multiple completion modules
-/// to delimit the right-hand side of assignment statements.
+/// top-level semicolon exists.
 pub(crate) fn find_semicolon_balanced(s: &str) -> Option<usize> {
-    let mut depth_paren = 0i32;
-    let mut depth_bracket = 0i32;
-    let mut depth_brace = 0i32;
-    let mut in_single_quote = false;
-    let mut in_double_quote = false;
-    let mut prev_char = '\0';
-
-    for (i, ch) in s.char_indices() {
-        if in_single_quote {
-            if ch == '\'' && prev_char != '\\' {
-                in_single_quote = false;
-            }
-            prev_char = ch;
-            continue;
+    scan_top_level(s.as_bytes(), |bytes, i| {
+        if bytes[i] == b';' {
+            ScanStep::Stop
+        } else {
+            ScanStep::Skip(1)
         }
-        if in_double_quote {
-            if ch == '"' && prev_char != '\\' {
-                in_double_quote = false;
-            }
-            prev_char = ch;
-            continue;
-        }
-        match ch {
-            '\'' => in_single_quote = true,
-            '"' => in_double_quote = true,
-            '(' => depth_paren += 1,
-            ')' => depth_paren -= 1,
-            '[' => depth_bracket += 1,
-            ']' => depth_bracket -= 1,
-            '{' => depth_brace += 1,
-            '}' => depth_brace -= 1,
-            ';' if depth_paren == 0 && depth_bracket == 0 && depth_brace == 0 => {
-                return Some(i);
-            }
-            _ => {}
-        }
-        prev_char = ch;
-    }
-    None
+    })
 }
 
 /// Find the position of the closing delimiter that matches the opening

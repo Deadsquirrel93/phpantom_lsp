@@ -1,5 +1,5 @@
-//! Reading the `@template` bounds and `@param` docblocks of the
-//! declaration a body belongs to.
+//! Reading the `@template` bounds and the `@param` and `@return` docblocks
+//! of the declaration a body belongs to.
 
 use std::sync::Arc;
 
@@ -255,6 +255,15 @@ pub(crate) fn declared_param_docblock_type(
             let preamble = &before[declaration_preamble_start(before)..];
             docblock::find_iterable_raw_type_in_source(preamble, preamble.len(), pname)
         })
+}
+
+/// The `@return` type the docblock of the declaration starting at
+/// `decl_start` gives it, as written.
+pub(in crate::type_engine) fn declared_return_docblock_type(
+    content: &str,
+    decl_start: usize,
+) -> Option<PhpType> {
+    extract_preceding_docblock(content.get(..decl_start)?).and_then(docblock::extract_return_type)
 }
 
 /// Where the text that can document a declaration starting at the end of

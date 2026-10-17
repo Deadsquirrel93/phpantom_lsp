@@ -36,6 +36,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A `;` in a comment inside a statement.** The quick fix that removes a returned value now edits the whole `return` statement, and the outline covers the whole property or constant declaration, when a comment inside it holds a `;`.
+- **Generators.** In a method documented as returning `Generator<int, string, Task, void>`, the result of `$task = yield …` is now a `Task` for diagnostics as well as for completion and hover, and the docblock is found even when an attribute sits between it and the method. A variable only takes the yielded type when the generator itself yields it, not when it yields a similarly named one such as `$users`.
+- **Variables reassigned further down a `do`-`while` body.** Completion and hover inside a `do { … } while (…)` loop now see the type a variable is given further down the body, which is what it holds on every iteration after the first, the same as in the other loops.
+- **Method names in array callables held in a variable.** Completion inside `[$handler, '…']` now offers the handler's methods when the variable was assigned the result of a function call.
 - **Laravel name completion in facade calls.** Completion now offers view names, morph aliases, and the other Laravel names in every static call that go-to-definition and diagnostics already recognise, such as `View::first()` and `Response::view()`. A class that only shares a facade's short name, such as `Acme\View`, no longer gets them.
 - **Imported functions that share a name with a global one.** After `use function Lib\greet;`, signature help and the other features that look the function up show `Lib\greet`, not a global `greet()`.
 - **Hover on inherited members shows the class that declares them.** A parent's own method now wins over the same method in a trait it uses, and members from a trait used by a trait or declared only on an interface show where they come from.

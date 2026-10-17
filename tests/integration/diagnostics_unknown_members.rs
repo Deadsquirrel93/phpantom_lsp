@@ -128,6 +128,34 @@ class Consumer {
     );
 }
 
+/// A value sent into a generator has the type its `@return Generator`
+/// declares for it, in diagnostics as in hover and completion.
+#[test]
+fn flags_unknown_method_on_value_sent_into_generator() {
+    let backend = create_test_backend();
+    let uri = "file:///generator_send.php";
+    let text = r#"<?php
+class Request {
+    public function getMethod(): string { return ''; }
+}
+
+class Processor {
+    /** @return \Generator<int, string, Request, void> */
+    public function process(): \Generator {
+        $request = yield 'ready';
+        $request->getMethod();
+        $request->nonexistent();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    let messages: Vec<&str> = diags.iter().map(|d| d.message.as_str()).collect();
+    assert!(
+        messages.len() == 1 && messages[0].contains("nonexistent"),
+        "Expected one unknown method diagnostic for nonexistent, got: {messages:?}"
+    );
+}
+
 /// A function declared in any branch of a top-level `if`, or in an `if`
 /// nested inside one, is checked like a top-level function.
 #[test]

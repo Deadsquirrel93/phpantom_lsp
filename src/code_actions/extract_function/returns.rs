@@ -376,33 +376,46 @@ pub(crate) fn sort_params_by_enclosing_order(
     params
 }
 
-/// Resolve the return type of the enclosing function/method at `offset`.
-///
-/// Extracts the native return type hint from the function signature.
-pub(crate) fn resolve_enclosing_return_type(content: &str, offset: u32) -> PhpType {
-    crate::parser::with_parsed_program(content, "extract_function", |program, _| {
-        let ctx = find_cursor_context(&program.statements, offset);
+/// The return types the function or method enclosing an offset declares.
+pub(crate) struct EnclosingReturnTypes {
+    /// The native return type hint, or untyped without one.
+    pub(crate) native: PhpType,
+    /// The `@return` type its docblock declares, as written.
+    pub(crate) docblock: Option<PhpType>,
+}
 
-        let ty = match ctx {
-            CursorContext::InClassLike { member, .. } => {
-                if let MemberContext::Method(method, true) = member {
-                    method
-                        .return_type_hint
-                        .as_ref()
-                        .map(|h| crate::parser::extract_hint_type(&h.hint))
-                        .unwrap_or_else(PhpType::untyped)
-                } else {
-                    PhpType::untyped()
-                }
-            }
-            CursorContext::InFunction(func, true) => func
-                .return_type_hint
-                .as_ref()
-                .map(|h| crate::parser::extract_hint_type(&h.hint))
-                .unwrap_or_else(PhpType::untyped),
-            _ => PhpType::untyped(),
+impl EnclosingReturnTypes {
+    pub(crate) fn none() -> Self {
+        EnclosingReturnTypes {
+            native: PhpType::untyped(),
+            docblock: None,
+        }
+    }
+}
+
+/// The return types the function or method whose body holds `offset`
+/// declares.
+pub(crate) fn enclosing_return_types(content: &str, offset: u32) -> EnclosingReturnTypes {
+    crate::parser::with_parsed_program(content, "extract_function", |program, content| {
+        let (hint, span) = match find_cursor_context(&program.statements, offset) {
+            CursorContext::InClassLike {
+                member: MemberContext::Method(method, true),
+                ..
+            } => (method.return_type_hint.as_ref(), method.span()),
+            CursorContext::InFunction(func, true) => (func.return_type_hint.as_ref(), func.span()),
+            _ => return None,
         };
-        Some(ty)
+        Some(EnclosingReturnTypes {
+            native: hint.map_or_else(PhpType::untyped, |h| {
+                crate::parser::extract_hint_type(&h.hint)
+            }),
+            docblock: crate::docblock::get_docblock_text_for_node(
+                program.trivia.as_slice(),
+                content,
+                &span,
+            )
+            .and_then(crate::docblock::extract_return_type),
+        })
     })
-    .unwrap_or_else(PhpType::untyped)
+    .unwrap_or_else(EnclosingReturnTypes::none)
 }

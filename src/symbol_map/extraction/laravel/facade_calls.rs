@@ -1,10 +1,12 @@
-//! The names static calls on Laravel's facades take in their first
-//! argument: `Config::get('app.name')`, `Lang::get('messages.saved')`,
-//! `Env::get('APP_KEY')`, `Artisan::call('app:sync')` and the rest.
+//! The names static calls on Laravel's facades and its helper functions
+//! take in their first argument: `Config::get('app.name')`,
+//! `Lang::get('messages.saved')`, `Artisan::call('app:sync')`,
+//! `route('home')`, `env('APP_KEY')` and the rest.
 //!
 //! The symbol map emits its spans through the per-family predicates here,
 //! and completion classifies the call it is typed into through
-//! [`facade_static_call_first_arg_kind`], so the two cannot disagree about
+//! [`facade_static_call_first_arg_kind`] and
+//! [`helper_function_first_arg_kind`], so the two cannot disagree about
 //! which calls name what.
 
 use super::*;
@@ -100,4 +102,52 @@ pub(crate) fn facade_static_call_first_arg_kind(
     } else {
         None
     }
+}
+
+/// The marker functions the Blade preprocessor lowers the `@include` and
+/// `@extends` families, `@component`/`@componentFirst` and `@each` to.
+const BLADE_VIEW_MARKERS: [&str; 3] = [
+    "blade_view_directive",
+    "blade_component_directive",
+    "blade_each_directive",
+];
+
+/// The kind of name a Laravel helper function takes in its first argument,
+/// by the function's name as written (without a leading `\`).
+///
+/// A Blade directive that names a template or an ability is lowered to a
+/// marker call, so the marker names what the directive does.
+pub(crate) fn helper_function_first_arg_kind(name: &str) -> Option<LaravelStringKind> {
+    let is_one_of = |names: &[&str]| names.iter().any(|n| name.eq_ignore_ascii_case(n));
+    if name.eq_ignore_ascii_case("view") || is_one_of(&BLADE_VIEW_MARKERS) {
+        Some(LaravelStringKind::View)
+    } else if is_one_of(&["route", "to_route"]) {
+        Some(LaravelStringKind::Route)
+    } else if is_one_of(&["__", "trans", "trans_choice"]) {
+        Some(LaravelStringKind::Trans)
+    } else if name.eq_ignore_ascii_case("config") {
+        Some(LaravelStringKind::Config)
+    } else if name.eq_ignore_ascii_case("env") {
+        Some(LaravelStringKind::Env)
+    } else if is_one_of(&["app", "resolve"]) {
+        Some(LaravelStringKind::ContainerBinding)
+    } else if name.eq_ignore_ascii_case(BLADE_CAN_DIRECTIVE) {
+        Some(LaravelStringKind::GateAbility)
+    } else {
+        None
+    }
+}
+
+/// Whether a helper takes a list of names in its first argument as well as
+/// a single one: `@includeFirst`, `@componentFirst` and `@extendsFirst`
+/// lower to their directive's marker with an array of candidate templates,
+/// and `@canany` to the `@can` marker with an array of abilities.
+pub(crate) fn helper_function_accepts_name_list(name: &str) -> bool {
+    [
+        "blade_view_directive",
+        "blade_component_directive",
+        BLADE_CAN_DIRECTIVE,
+    ]
+    .iter()
+    .any(|n| name.eq_ignore_ascii_case(n))
 }

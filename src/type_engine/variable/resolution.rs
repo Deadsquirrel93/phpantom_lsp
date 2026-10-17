@@ -729,19 +729,9 @@ fn try_resolve_in_function(
     if ctx.cursor_offset < body_start || ctx.cursor_offset > body_end {
         return None;
     }
-    // Extract the enclosing function's @return type for generator
-    // yield inference inside the body.  Use body_start + 1 (just
-    // past the opening `{`) so the backward brace scan in
-    // find_enclosing_return_type immediately finds the function's
-    // own `{` and does NOT get confused by intermediate `{`/`}`
-    // from nested control-flow.
-    let enclosing_ret =
-        crate::docblock::find_enclosing_return_type(ctx.content, (body_start + 1) as usize)
-            .map(|ty| ctx.written_names().resolve_type(&ty));
 
     // ── Forward walker (sole resolver) ──
     let fw_ctx = super::forward_walk::ForwardWalkCtx {
-        enclosing_return_type: enclosing_ret,
         top_level_scope: ctx.top_level_scope.clone(),
         ..super::forward_walk::ForwardWalkCtx::fresh_from_var_ctx(ctx)
     };
@@ -818,21 +808,7 @@ fn resolve_variable_in_members<'b>(
                 let blk_start = block.left_brace.start.offset;
                 let blk_end = block.right_brace.end.offset;
                 if ctx.cursor_offset >= blk_start && ctx.cursor_offset <= blk_end {
-                    // Extract the enclosing method's @return type for
-                    // generator yield inference inside the body.
-                    // Use blk_start + 1 (just past the opening `{`)
-                    // so the brace scan in find_enclosing_return_type
-                    // immediately finds the method's own `{` and does
-                    // NOT get confused by intermediate `{`/`}` from
-                    // nested control-flow.
-                    let enclosing_ret = crate::docblock::find_enclosing_return_type(
-                        ctx.content,
-                        (blk_start + 1) as usize,
-                    )
-                    .map(|ty| ctx.written_names().resolve_type(&ty));
-
                     let fw_ctx = super::forward_walk::ForwardWalkCtx {
-                        enclosing_return_type: enclosing_ret,
                         top_level_scope: ctx.top_level_scope.clone(),
                         ..super::forward_walk::ForwardWalkCtx::fresh_from_var_ctx(ctx)
                     };

@@ -79,6 +79,34 @@ async fn inserts_plain_method_name() {
     assert_ne!(handle.insert_text_format, Some(InsertTextFormat::SNIPPET));
 }
 
+/// `[$handler, '|']` offers the methods of the class the variable holds,
+/// read through a function's return type.
+#[tokio::test]
+async fn completes_variable_callable_from_function_return() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///variable_callable.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Handler {\n",
+        "    public function onSave(): void {}\n",
+        "}\n",
+        "function makeHandler(): Handler { return new Handler(); }\n",
+        "$handler = makeHandler();\n",
+        "$route = [$handler, ''];\n",
+    );
+    let line = text.lines().position(|l| l.contains("$route")).unwrap() as u32;
+    let col = text
+        .lines()
+        .nth(line as usize)
+        .unwrap()
+        .find("'']")
+        .unwrap() as u32
+        + 1;
+
+    let labels = method_labels(&complete_at(&backend, &uri, text, line, col).await);
+    assert!(labels.contains(&"onSave".to_string()), "got {labels:?}");
+}
+
 /// A partial prefix filters the offered methods.
 #[tokio::test]
 async fn filters_by_prefix() {

@@ -6,12 +6,13 @@ use super::*;
 fn resolve_return_type_standalone_function() {
     let php = "<?php\nfunction classify(int $code): string\n{\n    if ($code < 0) return 'negative';\n    return 'ok';\n}\n";
     let offset = php.find("if ($code").unwrap() as u32;
-    let result = resolve_enclosing_return_type(php, offset);
+    let result = enclosing_return_types(php, offset);
     assert_eq!(
-        result,
+        result.native,
         PhpType::parse("string"),
         "should resolve enclosing function return type"
     );
+    assert_eq!(result.docblock, None);
 }
 
 #[test]
@@ -19,12 +20,34 @@ fn resolve_return_type_method() {
     let php =
         "<?php\nclass Foo {\n    public function bar(): int\n    {\n        return 42;\n    }\n}\n";
     let offset = php.find("return 42").unwrap() as u32;
-    let result = resolve_enclosing_return_type(php, offset);
+    let result = enclosing_return_types(php, offset);
     assert_eq!(
-        result,
+        result.native,
         PhpType::parse("int"),
         "should resolve enclosing method return type"
     );
+}
+
+#[test]
+fn resolve_docblock_return_type_above_attributes_and_nested_blocks() {
+    let php = concat!(
+        "<?php\n",
+        "class Foo {\n",
+        "    /** @return list<int> */\n",
+        "    #[\\Deprecated]\n",
+        "    public function bar(): array\n",
+        "    {\n",
+        "        if (true) {\n",
+        "            return [1];\n",
+        "        }\n",
+        "        return [];\n",
+        "    }\n",
+        "}\n",
+    );
+    let offset = php.find("return [1]").unwrap() as u32;
+    let result = enclosing_return_types(php, offset);
+    assert_eq!(result.native, PhpType::parse("array"));
+    assert_eq!(result.docblock, Some(PhpType::parse("list<int>")));
 }
 
 // ── Statement boundary validation ───────────────────────────────
