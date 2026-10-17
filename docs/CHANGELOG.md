@@ -36,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A plain comment above a method is not its docblock.** A method with a `/* … */` comment above it no longer reads the `@param`, `@template` or `@return` tags of an earlier method's docblock, which could give its parameters the wrong type and report members as missing.
 - **A `;` in a comment inside a statement.** The quick fix that removes a returned value now edits the whole `return` statement, and the outline covers the whole property or constant declaration, when a comment inside it holds a `;`.
 - **Generators.** In a method documented as returning `Generator<int, string, Task, void>`, the result of `$task = yield …` is now a `Task` for diagnostics as well as for completion and hover, and the docblock is found even when an attribute sits between it and the method. A variable only takes the yielded type when the generator itself yields it, not when it yields a similarly named one such as `$users`.
 - **Variables reassigned further down a `do`-`while` body.** Completion and hover inside a `do { … } while (…)` loop now see the type a variable is given further down the body, which is what it holds on every iteration after the first, the same as in the other loops.

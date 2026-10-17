@@ -304,10 +304,13 @@ fn declaration_preamble_start(before: &str) -> usize {
 /// docblock and the method declaration.
 fn extract_preceding_docblock(before: &str) -> Option<&str> {
     let trimmed = before.trim_end();
-    if !trimmed.ends_with("*/") {
+    let body = trimmed.strip_suffix("*/")?;
+    let open_pos = body.rfind("/**")?;
+    // The docblock has to be the comment that ends here.  A `/**` closed
+    // before that belongs to an earlier declaration, with a plain
+    // `/* … */` comment between it and this one.
+    if body[open_pos + 3..].contains("*/") {
         return None;
     }
-    let close_pos = trimmed.len();
-    let open_pos = trimmed.rfind("/**")?;
-    Some(&trimmed[open_pos..close_pos])
+    Some(&trimmed[open_pos..])
 }

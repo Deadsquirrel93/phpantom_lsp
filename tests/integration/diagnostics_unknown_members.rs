@@ -128,6 +128,41 @@ class Consumer {
     );
 }
 
+/// A plain `/* … */` comment above a method is not its docblock, so the
+/// method does not read an earlier method's `@param` through it.
+#[test]
+fn plain_comment_above_a_method_does_not_borrow_an_earlier_docblock() {
+    let backend = create_test_backend();
+    let uri = "file:///plain_comment_docblock.php";
+    let text = r#"<?php
+class Foo {
+    public function fooOnly(): void {}
+}
+
+class Bar {
+    public function barOnly(): void {}
+}
+
+class Probe {
+    /** @param Foo $x */
+    public function first($x): void {
+        $x->fooOnly();
+    }
+
+    /* A plain comment, not a docblock. */
+    public function second($x): void {
+        $x->barOnly();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "`second()`'s `$x` is untyped, got: {:?}",
+        diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
 /// A value sent into a generator has the type its `@return Generator`
 /// declares for it, in diagnostics as in hover and completion.
 #[test]

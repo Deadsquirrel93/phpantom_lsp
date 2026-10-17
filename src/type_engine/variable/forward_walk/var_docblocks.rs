@@ -19,6 +19,14 @@ pub(crate) fn preceding_docblock_text(content: &str, node_start: usize) -> Optio
         return None;
     }
     let doc_start = before[..doc_end].rfind("/**")?;
+    // An earlier docblock, closed before the comment that ends here, is
+    // not this node's.
+    if before
+        .get(doc_start + 3..doc_end - 2)
+        .is_some_and(|inner| inner.contains("*/"))
+    {
+        return None;
+    }
     Some(&before[doc_start..doc_end])
 }
 
