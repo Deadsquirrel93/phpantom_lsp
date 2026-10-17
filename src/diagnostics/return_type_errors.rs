@@ -464,53 +464,8 @@ fn process_top_level_statement(
                 );
             }
         }
-        Statement::Class(class) => {
-            for member in class.members.iter() {
-                process_class_member(
-                    member,
-                    content,
-                    file_ctx,
-                    class_loader,
-                    resolved_class_loader,
-                    function_loader,
-                    constant_loader,
-                    backend,
-                    out,
-                );
-            }
-        }
-        Statement::Interface(iface) => {
-            for member in iface.members.iter() {
-                process_class_member(
-                    member,
-                    content,
-                    file_ctx,
-                    class_loader,
-                    resolved_class_loader,
-                    function_loader,
-                    constant_loader,
-                    backend,
-                    out,
-                );
-            }
-        }
-        Statement::Trait(trait_def) => {
-            for member in trait_def.members.iter() {
-                process_class_member(
-                    member,
-                    content,
-                    file_ctx,
-                    class_loader,
-                    resolved_class_loader,
-                    function_loader,
-                    constant_loader,
-                    backend,
-                    out,
-                );
-            }
-        }
-        Statement::Enum(enum_def) => {
-            for member in enum_def.members.iter() {
+        _ if let Some(body) = crate::parser::class_like_body(stmt) => {
+            for member in body.members {
                 process_class_member(
                     member,
                     content,

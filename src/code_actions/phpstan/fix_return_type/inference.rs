@@ -333,9 +333,7 @@ fn declared_body<'a>(
                 }
                 continue;
             }
-            Statement::Class(class) => class.members.as_slice(),
-            Statement::Trait(trait_) => trait_.members.as_slice(),
-            Statement::Enum(enum_) => enum_.members.as_slice(),
+            _ if let Some(body) = crate::parser::class_like_body(stmt) => body.members,
             _ => continue,
         };
         let mut found = None;

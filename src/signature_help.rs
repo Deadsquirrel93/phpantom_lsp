@@ -330,27 +330,10 @@ fn collect_fcc_targets(
                 out.push(found);
             }
         }
-        Statement::Class(cls) => {
-            use mago_syntax::cst::class_like::member::ClassLikeMember;
-            use mago_syntax::cst::class_like::method::MethodBody;
-            for member in cls.members.iter() {
-                if let ClassLikeMember::Method(method) = member
-                    && let MethodBody::Concrete(block) = &method.body
-                {
-                    walk!(block.statements.iter(), span_of(method.span()));
-                }
-            }
-        }
-        Statement::Trait(t) => {
-            use mago_syntax::cst::class_like::member::ClassLikeMember;
-            use mago_syntax::cst::class_like::method::MethodBody;
-            for member in t.members.iter() {
-                if let ClassLikeMember::Method(method) = member
-                    && let MethodBody::Concrete(block) = &method.body
-                {
-                    walk!(block.statements.iter(), span_of(method.span()));
-                }
-            }
+        _ if let Some(body) = crate::parser::class_like_body(stmt) => {
+            crate::parser::for_each_concrete_method(body.members, |method, block| {
+                walk!(block.statements.iter(), span_of(method.span()));
+            });
         }
         Statement::Function(func) => {
             walk!(func.body.statements.iter(), span_of(func.body.span()));

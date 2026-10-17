@@ -60,12 +60,9 @@ fn collect_from_statements<'a>(
             Statement::Namespace(namespace) => {
                 collect_from_statements(namespace.statements().iter(), units)
             }
-            Statement::Class(class) => collect_from_members(class.members.iter(), units),
-            Statement::Interface(interface) => {
-                collect_from_members(interface.members.iter(), units)
+            _ if let Some(body) = crate::parser::class_like_body(statement) => {
+                collect_from_members(body.members.iter(), units)
             }
-            Statement::Trait(trait_def) => collect_from_members(trait_def.members.iter(), units),
-            Statement::Enum(enum_def) => collect_from_members(enum_def.members.iter(), units),
             Statement::Function(function) => units.push(function_unit(function)),
             Statement::If(_) => {
                 crate::parser::for_each_nested_function(statement, &mut |function| {

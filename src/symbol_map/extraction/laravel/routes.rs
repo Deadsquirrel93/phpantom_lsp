@@ -178,20 +178,8 @@ pub(in crate::symbol_map::extraction) fn laravel_route_find_controller_in_chain(
 /// `"WorkItemResourceController"` or `"App\\Http\\Controllers\\Foo"`).
 fn laravel_route_extract_class_arg(args: &ArgumentList<'_>) -> Option<String> {
     let first_arg = args.arguments.iter().next()?;
-    if let Expression::Access(Access::ClassConstant(cca)) = first_arg.value() {
-        let is_class = matches!(
-            &cca.constant,
-            ClassLikeConstantSelector::Identifier(ident)
-                if bytes_to_str(ident.value).eq_ignore_ascii_case("class")
-        );
-        if is_class {
-            let name = expr_to_subject_text(cca.class);
-            if !name.is_empty() {
-                return Some(name);
-            }
-        }
-    }
-    None
+    let name = expr_to_subject_text(crate::parser::class_fetch_target(first_arg.value())?);
+    (!name.is_empty()).then_some(name)
 }
 
 /// Walk the closure (or arrow function) body passed to `->group()`.

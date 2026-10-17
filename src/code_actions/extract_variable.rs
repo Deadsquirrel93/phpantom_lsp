@@ -13,7 +13,7 @@ use crate::code_actions::cursor_context::{CursorContext, MemberContext, find_cur
 use crate::code_actions::naming::{snake_to_camel, to_camel_case};
 use crate::parser::with_parsed_program;
 use crate::scope_collector::ScopeMap;
-use crate::text_position::{offset_to_position, position_to_byte_offset};
+use crate::text_position::offset_to_position;
 use crate::text_scan::{ScanStep, scan_top_level};
 
 // ─── Name generation ────────────────────────────────────────────────────────
@@ -468,16 +468,11 @@ impl Backend {
         params: &CodeActionParams,
         out: &mut Vec<CodeActionOrCommand>,
     ) {
-        if params.range.start == params.range.end {
+        let Some((start_offset, end_offset)) =
+            crate::code_actions::selected_byte_range(content, params.range)
+        else {
             return;
-        }
-
-        let start_offset = position_to_byte_offset(content, params.range.start);
-        let end_offset = position_to_byte_offset(content, params.range.end);
-
-        if start_offset >= end_offset || end_offset > content.len() {
-            return;
-        }
+        };
 
         let in_executable_body = crate::parser::with_parsed_program(
             content,
@@ -582,12 +577,8 @@ impl Backend {
         let all_occurrences =
             crate::code_actions::extract_wants_all_occurrences(data, "refactor.extractVariableAll");
 
-        let start_offset = position_to_byte_offset(content, data.range.start);
-        let end_offset = position_to_byte_offset(content, data.range.end);
-
-        if start_offset >= end_offset || end_offset > content.len() {
-            return None;
-        }
+        let (start_offset, end_offset) =
+            crate::code_actions::selected_byte_range(content, data.range)?;
 
         let selected_text = &content[start_offset..end_offset];
         let trimmed = selected_text.trim();

@@ -1215,12 +1215,9 @@ pub(crate) fn resolve_rhs_with_types<'b>(
     // useful type for this (it looks for a constant named "class"
     // on the class and finds nothing).  Handle it here so that
     // subsequent `new $var` can resolve the class-string.
-    if let Expression::Access(Access::ClassConstant(cca)) = rhs
-        && let ClassLikeConstantSelector::Identifier(ident) = &cca.constant
-        && ident.value == b"class"
-    {
+    if let Some(class) = crate::parser::class_fetch_target(rhs) {
         let class_name = crate::class_lookup::class_expression_name(
-            cca.class,
+            class,
             ctx.current_class,
             ctx.all_classes,
             ctx.source_class_loader,

@@ -184,6 +184,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **By-reference parameters of namespaced functions.** A variable passed to a by-reference parameter of `App\fill()` from inside `namespace App` is no longer reported as undefined when a global `fill()` also exists.
 - **Config key completion in `Config::string()`, `integer()` and `float()`.** The typed getters on the `Config` facade now offer config keys, as `Config::get()` and `Config::boolean()` already did.
 - **Escaped quotes in `#[Config]` and `#[RedirectToRoute]` keys.** A key such as `#[Config('app.it\'s')]` now names `app.it's`, the way PHP reads it, as a `config()` call already did.
+- **`::CLASS` in any letter case.** `Foo::CLASS` now means the class name, as `Foo::class` does, instead of being reported as a missing constant, and `new $name()` on it resolves.
+- **`#[Scope]` applies to its own method only.** A method written near a `#[Scope]` method, or in a model with `#[ScopedBy]`, no longer has its `Builder` parameter read as a builder of that model, so diagnostics agree with hover.
+- **Superglobals inside functions and methods.** Hover and completion now type `$_SERVER`, `$_GET` and the other superglobals as arrays inside a function or method body, as they already did in top-level code.
+- **Signature help for callables in enum methods.** After `$fn = makePen(...);` inside an enum method, `$fn(` now shows `makePen`'s signature, as it does in classes and traits.
+- **Docblock generation after an attribute on the same line.** Typing `/**` above `#[\Override] public function save(array $rows): void` now generates the method's docblock instead of skipping the line.
 
 ## [0.11.1] - 2026-10-07
 

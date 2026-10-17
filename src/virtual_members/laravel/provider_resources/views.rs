@@ -9,7 +9,6 @@ use super::super::const_eval::{Scope, const_string};
 use super::super::view_data::{
     ViewDataRegistration, is_view_facade, is_view_factory_expr, view_data_registration,
 };
-use super::bindings::class_string_fqn;
 use super::extract::{ProviderFile, names_facade};
 use super::{PathContext, ProviderResource, ProviderResources, resolve_path_arg};
 
@@ -228,7 +227,7 @@ fn names_blade_compiler(file: &ProviderFile<'_, '_>, argument_list: &ArgumentLis
         return false;
     };
     let named = const_string(first.value(), file.content, file.scope)
-        .or_else(|| class_string_fqn(first.value(), file.resolved));
+        .or_else(|| file.resolved.class_fetch_fqn(first.value()));
     named.is_some_and(|name| {
         name == "blade.compiler" || crate::util::short_name(&name) == "BladeCompiler"
     })

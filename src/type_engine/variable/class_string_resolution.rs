@@ -79,32 +79,9 @@ fn resolve_class_string_in_statements<'b>(
     // Check class bodies first (same pattern as resolve_variable_in_statements).
     for &stmt in &stmts {
         match stmt {
-            Statement::Class(class) => {
-                let start = class.left_brace.start.offset;
-                let end = class.right_brace.end.offset;
-                if ctx.cursor_offset >= start && ctx.cursor_offset <= end {
-                    return resolve_class_string_in_members(class.members.iter(), ctx);
-                }
-            }
-            Statement::Interface(iface) => {
-                let start = iface.left_brace.start.offset;
-                let end = iface.right_brace.end.offset;
-                if ctx.cursor_offset >= start && ctx.cursor_offset <= end {
-                    return resolve_class_string_in_members(iface.members.iter(), ctx);
-                }
-            }
-            Statement::Enum(enum_def) => {
-                let start = enum_def.left_brace.start.offset;
-                let end = enum_def.right_brace.end.offset;
-                if ctx.cursor_offset >= start && ctx.cursor_offset <= end {
-                    return resolve_class_string_in_members(enum_def.members.iter(), ctx);
-                }
-            }
-            Statement::Trait(trait_def) => {
-                let start = trait_def.left_brace.start.offset;
-                let end = trait_def.right_brace.end.offset;
-                if ctx.cursor_offset >= start && ctx.cursor_offset <= end {
-                    return resolve_class_string_in_members(trait_def.members.iter(), ctx);
+            _ if let Some(body) = crate::parser::class_like_body(stmt) => {
+                if body.contains(ctx.cursor_offset) {
+                    return resolve_class_string_in_members(body.members.iter(), ctx);
                 }
             }
             Statement::Namespace(ns) => {

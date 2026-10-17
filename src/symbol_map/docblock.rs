@@ -1222,9 +1222,15 @@ fn emit_see_reference(reference: &str, file_offset: u32, spans: &mut Vec<SymbolS
         (reference, 0u32)
     };
 
-    if let Some(sep_pos) = reference.find("::") {
+    // `Class::member` names a static member; the legacy phpDocumentor
+    // fragment syntax `Class#member` an instance property or method.
+    let member_separator = match reference.find("::") {
+        Some(pos) => Some((pos, 2, true)),
+        None => reference.find('#').map(|pos| (pos, 1, false)),
+    };
+    if let Some((sep_pos, sep_len, is_static)) = member_separator {
         let class_part = &reference[..sep_pos];
-        let member_part = &reference[sep_pos + 2..];
+        let member_part = &reference[sep_pos + sep_len..];
 
         if class_part.is_empty() || member_part.is_empty() {
             return;
@@ -1255,15 +1261,10 @@ fn emit_see_reference(reference: &str, file_offset: u32, spans: &mut Vec<SymbolS
             spans,
         );
 
-        let member_start = file_offset + sep_pos as u32 + 2 - prefix_len;
+        let member_start = file_offset + (sep_pos + sep_len) as u32 - prefix_len;
         // The subject keeps the leading `\` too: the resolver reads the bare
         // name as relative to the file's namespace, as in code.
-        let is_property = member_part.starts_with('$');
-        let member_name = if is_property {
-            &member_part[1..] // strip $
-        } else {
-            member_part
-        };
+        let member_name = member_part.strip_prefix('$').unwrap_or(member_part);
         if !member_name.is_empty() {
             let member_end = member_start + member_part.len() as u32;
             spans.push(SymbolSpan {
@@ -1272,7 +1273,7 @@ fn emit_see_reference(reference: &str, file_offset: u32, spans: &mut Vec<SymbolS
                 kind: SymbolKind::MemberAccess {
                     subject_text: SubjectText::owned(class_part.to_string()),
                     member_name: crate::atom::atom(member_name),
-                    is_static: true,
+                    is_static,
                     is_method_call: false,
                     docblock_ref: DocblockMemberRef::See,
                     is_array_callable: false,
@@ -1280,47 +1281,6 @@ fn emit_see_reference(reference: &str, file_offset: u32, spans: &mut Vec<SymbolS
                 },
             });
         }
-    } else if let Some(sep_pos) = reference.find('#') {
-        // Legacy phpDocumentor fragment syntax: `Class#member` refers to
-        // an instance property or method, unlike `Class::member`.
-        let class_part = &reference[..sep_pos];
-        let member_part = &reference[sep_pos + 1..];
-
-        if class_part.is_empty() || member_part.is_empty() {
-            return;
-        }
-
-        let clean_class = class_part.trim_start_matches('\\');
-        let is_self_like = self_static_parent_kind(clean_class).is_some();
-        if !is_self_like && !is_navigable_type(clean_class) {
-            return;
-        }
-
-        let class_start = file_offset;
-        let class_end = file_offset + class_part.len() as u32 - prefix_len;
-        emit_identifier_span_in(
-            class_part,
-            class_start,
-            class_end,
-            ClassRefContext::DocblockSee,
-            spans,
-        );
-
-        let member_start = file_offset + sep_pos as u32 + 1 - prefix_len;
-        let member_end = member_start + member_part.len() as u32;
-        spans.push(SymbolSpan {
-            start: member_start,
-            end: member_end,
-            kind: SymbolKind::MemberAccess {
-                subject_text: SubjectText::owned(class_part.to_string()),
-                member_name: crate::atom::atom(member_part),
-                is_static: false,
-                is_method_call: false,
-                docblock_ref: DocblockMemberRef::See,
-                is_array_callable: false,
-                is_nullsafe: false,
-            },
-        });
     } else {
         // No `::` or `#` — either a class name or a standalone function.
         // Bail out unless this is self/static/parent or a navigable type

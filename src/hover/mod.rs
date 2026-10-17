@@ -243,11 +243,7 @@ impl Backend {
             } => {
                 let rctx = loaders.resolution_ctx_at(content, cursor_offset);
 
-                let access_kind = if *is_static {
-                    AccessKind::DoubleColon
-                } else {
-                    AccessKind::Arrow
-                };
+                let access_kind = AccessKind::of_member_access(*is_static);
 
                 let source = self.symbol_map_source(uri, content)?;
                 let candidates = ResolvedType::into_arced_classes(

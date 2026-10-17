@@ -16757,3 +16757,27 @@ namespace Eloquent {
         "groupBy should keep the element type: {grouped}"
     );
 }
+
+/// PHP's superglobals exist in every scope, so a method body sees them the
+/// way top-level code does.
+#[test]
+fn hover_superglobal_inside_method() {
+    let backend = create_test_backend();
+    let uri = "file:///superglobal_in_method.php";
+    let content = r#"<?php
+class Test {
+    public function run(): void {
+        echo $_SERVER;
+    }
+}
+echo $_SERVER;
+"#;
+    for (line, character) in [(3, 15), (6, 7)] {
+        let hover = hover_at(&backend, uri, content, line, character).expect("expected hover");
+        let text = hover_text(&hover);
+        assert!(
+            text.contains("$_SERVER = array"),
+            "line {line}: superglobals are arrays in every scope, got: {text}"
+        );
+    }
+}

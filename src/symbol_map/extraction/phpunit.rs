@@ -275,19 +275,9 @@ fn class_like_argument(arg: &PartialArgument<'_>, content: &str) -> Option<(Stri
 
 /// The subject text and span of a `Foo::class` argument.
 fn class_constant_argument<'a>(arg: &'a PartialArgument<'a>) -> Option<(String, Span)> {
-    let Some(Expression::Access(Access::ClassConstant(access))) = arg.value() else {
-        return None;
-    };
-    let names_class_constant = matches!(
-        &access.constant,
-        ClassLikeConstantSelector::Identifier(ident)
-            if bytes_to_str(ident.value).eq_ignore_ascii_case("class")
-    );
-    if !names_class_constant {
-        return None;
-    }
-    let subject = expr_to_subject_text(access.class);
-    (!subject.is_empty()).then(|| (subject, access.class.span()))
+    let class = crate::parser::class_fetch_target(arg.value()?)?;
+    let subject = expr_to_subject_text(class);
+    (!subject.is_empty()).then(|| (subject, class.span()))
 }
 
 /// The content of a plain string-literal argument and the span it occupies

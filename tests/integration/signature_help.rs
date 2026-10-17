@@ -1263,6 +1263,27 @@ async fn first_class_callable_invocation() {
     assert_eq!(active_param(&sh), 0);
 }
 
+#[tokio::test]
+async fn first_class_callable_invocation_in_enum_method() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///sig_fcc_enum.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "function makePen(string $ink): Pen { return new Pen(); }\n",
+        "class Pen {}\n",
+        "enum Demo {\n",
+        "    public function test() {\n",
+        "        $fn = makePen(...);\n",
+        "        $fn();\n",
+        "    }\n",
+        "}\n",
+    );
+    let sh = sig_help_at(&backend, &uri, text, 6, 12)
+        .await
+        .expect("signature help for the callable");
+    assert!(sig_label(&sh).contains("string $ink"));
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 //  Default values in parameter labels
 // ═══════════════════════════════════════════════════════════════════════════

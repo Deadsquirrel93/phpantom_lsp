@@ -1,7 +1,7 @@
-//! Seeding a scope with a function's parameters: the native hint, the
-//! `@param` docblock, the merged class info, and the Eloquent scope
-//! enrichment, plus the property-hook scope and the trait prototype lookup
-//! the parameter types resolve through.
+//! Seeding the scope a function-like body starts with: `$this`, the
+//! parameters (the native hint, the `@param` docblock, the merged class
+//! info, and the Eloquent scope enrichment), plus the property-hook scope
+//! and the trait prototype lookup the parameter types resolve through.
 
 use super::*;
 
@@ -11,6 +11,68 @@ use crate::atom::bytes_to_str;
 use crate::parser::extract_hint_type;
 use crate::php_type::PhpType;
 use crate::types::{MethodInfo, ResolvedType};
+
+/// What seeding a function-like body needs to know about its declaration.
+#[derive(Clone, Copy)]
+pub(crate) struct BodyOwner<'a> {
+    /// The method's name; `None` for a function.
+    pub method_name: Option<&'a str>,
+    /// The body runs without `$this`.
+    pub is_static: bool,
+    /// The method carries `#[Scope]`, for Eloquent query scopes.
+    pub has_scope_attr: bool,
+}
+
+impl<'a> BodyOwner<'a> {
+    /// A standalone function: no `$this`, and never a query scope.
+    pub(crate) const FUNCTION: Self = Self {
+        method_name: None,
+        is_static: true,
+        has_scope_attr: false,
+    };
+
+    pub(crate) fn method(method: &'a Method<'a>) -> Self {
+        Self {
+            method_name: Some(bytes_to_str(method.name.value)),
+            is_static: method.modifiers.contains_static(),
+            has_scope_attr: crate::virtual_members::laravel::has_scope_attribute(method),
+        }
+    }
+}
+
+/// The scope a function-like body starts with: `$this` and the
+/// constructor's readonly properties for an instance method, the
+/// parameters, the superglobals, and the `static` locals `body` declares.
+pub(crate) fn seed_body_scope<'b>(
+    parameters: impl Iterator<Item = &'b FunctionLikeParameter<'b>>,
+    body: &[&'b Statement<'b>],
+    span_start: u32,
+    owner: BodyOwner<'_>,
+    ctx: &ForwardWalkCtx<'_>,
+) -> ScopeState {
+    let mut scope = ScopeState::new();
+    if !owner.is_static {
+        seed_this(&mut scope, ctx);
+        super::readonly_properties::seed_constructor_readonly_properties(
+            &mut scope,
+            owner.method_name,
+            ctx,
+        );
+    }
+    seed_params(
+        &mut scope,
+        parameters,
+        span_start,
+        owner.method_name,
+        owner.has_scope_attr,
+        ctx,
+    );
+    seed_superglobals(&mut scope);
+    // A `static $var;` local holds whatever an earlier call left in it,
+    // which the top-to-bottom walk cannot see.
+    super::static_locals::seed_static_locals(&mut scope, body, ctx);
+    scope
+}
 
 /// Seed the scope with types from function/method parameters.
 ///

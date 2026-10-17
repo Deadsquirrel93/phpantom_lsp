@@ -42,25 +42,23 @@ pub(super) fn extract_access_expr<'a>(
             let subject_text = subject_text_of(cca.class, ctx.content);
             emit_class_expr_span(cca.class, ClassRefContext::Other, ctx, scope_start);
 
-            if let ClassLikeConstantSelector::Identifier(ident) = &cca.constant {
-                let const_name = bytes_to_str(ident.value);
-                if const_name == "class" {
-                    // `Foo::class` — the navigable part is `Foo`.
-                } else {
-                    ctx.spans.push(SymbolSpan {
-                        start: ident.span.start.offset,
-                        end: ident.span.end.offset,
-                        kind: SymbolKind::MemberAccess {
-                            subject_text,
-                            member_name: crate::atom::atom(const_name),
-                            is_static: true,
-                            is_method_call: false,
-                            docblock_ref: DocblockMemberRef::No,
-                            is_array_callable: false,
-                            is_nullsafe: false,
-                        },
-                    });
-                }
+            // In `Foo::class` the navigable part is `Foo`.
+            if let ClassLikeConstantSelector::Identifier(ident) = &cca.constant
+                && !crate::parser::is_class_fetch(cca)
+            {
+                ctx.spans.push(SymbolSpan {
+                    start: ident.span.start.offset,
+                    end: ident.span.end.offset,
+                    kind: SymbolKind::MemberAccess {
+                        subject_text,
+                        member_name: crate::atom::atom(bytes_to_str(ident.value)),
+                        is_static: true,
+                        is_method_call: false,
+                        docblock_ref: DocblockMemberRef::No,
+                        is_array_callable: false,
+                        is_nullsafe: false,
+                    },
+                });
             }
         }
     }

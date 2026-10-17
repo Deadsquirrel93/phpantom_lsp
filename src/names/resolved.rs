@@ -60,6 +60,25 @@ impl OwnedResolvedNames {
         self.names.get(&offset).map(|(name, _)| name.as_str())
     }
 
+    /// The FQN, without a leading `\`, that the class name `ident` stands
+    /// for: the name recorded at its offset, else the name as written.
+    /// `None` for an empty name.
+    pub fn class_fqn(&self, ident: &mago_syntax::cst::Identifier<'_>) -> Option<String> {
+        use mago_span::HasSpan;
+        let fqn = self
+            .get(ident.span().start.offset)
+            .unwrap_or_else(|| bytes_to_str(ident.value()))
+            .trim_start_matches('\\');
+        (!fqn.is_empty()).then(|| fqn.to_string())
+    }
+
+    /// The FQN a `Foo::class` fetch names, as [`Self::class_fqn`] reads it.
+    /// `None` for `self::class`, `static::class`, `parent::class`, and any
+    /// other expression.
+    pub fn class_fetch_fqn(&self, expr: &mago_syntax::cst::Expression<'_>) -> Option<String> {
+        self.class_fqn(crate::parser::class_fetch_identifier(expr)?)
+    }
+
     /// Whether the name at `offset` was introduced by an explicit `use`
     /// statement.
     ///

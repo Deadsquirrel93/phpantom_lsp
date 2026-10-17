@@ -21,7 +21,7 @@ use crate::code_actions::CodeActionData;
 use crate::code_actions::cursor_context::{CursorContext, MemberContext, find_cursor_context};
 use crate::code_actions::naming::string_to_screaming_snake;
 use crate::php_type::PhpType;
-use crate::text_position::{offset_to_position, position_to_byte_offset};
+use crate::text_position::offset_to_position;
 use crate::type_engine::variable::rhs_resolution::infer_type_from_constant_value;
 use crate::types::PhpVersion;
 
@@ -360,55 +360,25 @@ fn find_class_info_in_statement(
             }
             None
         }
-        Statement::Class(class) => {
-            let span = class.span();
-            if cursor >= span.start.offset && cursor <= span.end.offset {
-                Some(extract_class_body_info(
-                    &class.members,
+        _ => {
+            let body = crate::parser::class_like_body(stmt)?;
+            let span = stmt.span();
+            (cursor >= span.start.offset && cursor <= span.end.offset).then(|| {
+                extract_class_body_info(
+                    body.members,
                     content,
-                    class.left_brace.start.offset as usize,
-                    class.right_brace.end.offset as usize,
+                    body.left_brace.start.offset as usize,
+                    body.right_brace.end.offset as usize,
                     cursor,
-                ))
-            } else {
-                None
-            }
+                )
+            })
         }
-        Statement::Trait(tr) => {
-            let span = tr.span();
-            if cursor >= span.start.offset && cursor <= span.end.offset {
-                Some(extract_class_body_info(
-                    &tr.members,
-                    content,
-                    tr.left_brace.start.offset as usize,
-                    tr.right_brace.end.offset as usize,
-                    cursor,
-                ))
-            } else {
-                None
-            }
-        }
-        Statement::Enum(en) => {
-            let span = en.span();
-            if cursor >= span.start.offset && cursor <= span.end.offset {
-                Some(extract_class_body_info(
-                    &en.members,
-                    content,
-                    en.left_brace.start.offset as usize,
-                    en.right_brace.end.offset as usize,
-                    cursor,
-                ))
-            } else {
-                None
-            }
-        }
-        _ => None,
     }
 }
 
 /// Extract class body metadata from a sequence of class-like members.
 fn extract_class_body_info(
-    members: &Sequence<'_, ClassLikeMember<'_>>,
+    members: &[ClassLikeMember<'_>],
     content: &str,
     body_start: usize,
     body_end: usize,
@@ -554,17 +524,11 @@ impl Backend {
         params: &CodeActionParams,
         out: &mut Vec<CodeActionOrCommand>,
     ) {
-        // Only activate when the selection is non-empty.
-        if params.range.start == params.range.end {
+        let Some((start_offset, end_offset)) =
+            crate::code_actions::selected_byte_range(content, params.range)
+        else {
             return;
-        }
-
-        let start_offset = position_to_byte_offset(content, params.range.start);
-        let end_offset = position_to_byte_offset(content, params.range.end);
-
-        if start_offset >= end_offset || end_offset > content.len() {
-            return;
-        }
+        };
 
         let selected_text = &content[start_offset..end_offset];
         let trimmed = selected_text.trim();
@@ -626,12 +590,8 @@ impl Backend {
         let all_occurrences =
             crate::code_actions::extract_wants_all_occurrences(data, "refactor.extractConstantAll");
 
-        let start_offset = position_to_byte_offset(content, data.range.start);
-        let end_offset = position_to_byte_offset(content, data.range.end);
-
-        if start_offset >= end_offset || end_offset > content.len() {
-            return None;
-        }
+        let (start_offset, end_offset) =
+            crate::code_actions::selected_byte_range(content, data.range)?;
 
         let selected_text = &content[start_offset..end_offset];
         let trimmed = selected_text.trim();

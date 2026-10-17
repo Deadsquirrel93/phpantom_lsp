@@ -221,30 +221,9 @@ fn collect_from_statement(
             }
         }
 
-        Statement::Class(class) => {
-            emit_brace_pair(class.left_brace, class.right_brace, idx, ranges);
-            for member in class.members.iter() {
-                collect_from_class_member(member, idx, ranges);
-            }
-        }
-
-        Statement::Interface(iface) => {
-            emit_brace_pair(iface.left_brace, iface.right_brace, idx, ranges);
-            for member in iface.members.iter() {
-                collect_from_class_member(member, idx, ranges);
-            }
-        }
-
-        Statement::Trait(trait_def) => {
-            emit_brace_pair(trait_def.left_brace, trait_def.right_brace, idx, ranges);
-            for member in trait_def.members.iter() {
-                collect_from_class_member(member, idx, ranges);
-            }
-        }
-
-        Statement::Enum(enum_def) => {
-            emit_brace_pair(enum_def.left_brace, enum_def.right_brace, idx, ranges);
-            for member in enum_def.members.iter() {
+        _ if let Some(body) = crate::parser::class_like_body(stmt) => {
+            emit_brace_pair(body.left_brace, body.right_brace, idx, ranges);
+            for member in body.members {
                 collect_from_class_member(member, idx, ranges);
             }
         }

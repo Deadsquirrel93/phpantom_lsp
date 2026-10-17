@@ -205,16 +205,7 @@ fn resolve_mixin_argument_fqn(
 ) -> Option<String> {
     match expr {
         Expression::Instantiation(inst) => resolve_target_fqn(inst.class, resolved),
-        Expression::Access(Access::ClassConstant(access))
-            if matches!(
-                &access.constant,
-                ClassLikeConstantSelector::Identifier(constant)
-                    if bytes_to_str(constant.value).eq_ignore_ascii_case("class")
-            ) =>
-        {
-            resolve_target_fqn(access.class, resolved)
-        }
-        _ => None,
+        _ => resolve_target_fqn(crate::parser::class_fetch_target(expr)?, resolved),
     }
 }
 
@@ -470,13 +461,8 @@ pub(crate) fn extract_date_factory_class(content: &str) -> Option<String> {
                 )
             })
             && let Some(arg) = call.argument_list.arguments.first()
-            && let Expression::Access(Access::ClassConstant(access)) = arg.value()
-            && matches!(
-                &access.constant,
-                ClassLikeConstantSelector::Identifier(constant)
-                    if bytes_to_str(constant.value).eq_ignore_ascii_case("class")
-            )
-            && let Some(class) = resolve_target_fqn(access.class, resolved)
+            && let Some(class) = crate::parser::class_fetch_target(arg.value())
+            && let Some(class) = resolve_target_fqn(class, resolved)
         {
             *configured = Some(class);
         }
@@ -1018,7 +1004,8 @@ pub(super) fn expr_source_text(expr: Option<&Expression<'_>>, content: &str) -> 
 
 /// Resolve a class-name identifier expression to a fully-qualified name via
 /// the file's resolved `use` statements.  `self`/`static`/`parent` are
-/// skipped (a relative target carries no concrete FQN here).
+/// expression kinds of their own and give `None` (a relative target carries
+/// no concrete FQN here).
 pub(super) fn resolve_target_fqn(
     class: &Expression<'_>,
     resolved: &OwnedResolvedNames,
@@ -1026,18 +1013,7 @@ pub(super) fn resolve_target_fqn(
     let Expression::Identifier(ident) = class else {
         return None;
     };
-    let raw = bytes_to_str(ident.value());
-    if matches!(
-        raw.to_ascii_lowercase().as_str(),
-        "self" | "static" | "parent"
-    ) {
-        return None;
-    }
-    let offset = ident.span().start.offset;
-    if let Some(fqn) = resolved.get(offset) {
-        return Some(fqn.trim_start_matches('\\').to_string());
-    }
-    (!raw.is_empty()).then(|| raw.trim_start_matches('\\').to_string())
+    resolved.class_fqn(ident)
 }
 
 /// The text of a plain single- or double-quoted string literal, or `None`
@@ -1190,13 +1166,7 @@ fn collect_class_refs(
         Node::Instantiation(instantiation) => {
             push_resolved_expr_fqn(instantiation.class, resolved, seen, out)
         }
-        Node::ClassConstantAccess(access)
-            if matches!(
-                &access.constant,
-                ClassLikeConstantSelector::Identifier(id)
-                    if bytes_to_str(id.value).eq_ignore_ascii_case("class")
-            ) =>
-        {
+        Node::ClassConstantAccess(access) if crate::parser::is_class_fetch(access) => {
             push_resolved_expr_fqn(access.class, resolved, seen, out)
         }
         _ => {}
@@ -1212,28 +1182,9 @@ fn push_resolved_expr_fqn(
     seen: &mut HashSet<String>,
     out: &mut Vec<String>,
 ) {
-    let Expression::Identifier(ident) = expr else {
-        return;
-    };
-    let raw = bytes_to_str(ident.value());
-    if matches!(
-        raw.to_ascii_lowercase().as_str(),
-        "self" | "static" | "parent"
-    ) {
-        return;
-    }
-    let Some(fqn) = resolved.get(ident.span().start.offset) else {
-        if raw.is_empty() {
-            return;
-        }
-        let raw = raw.trim_start_matches('\\').to_string();
-        if seen.insert(raw.clone()) {
-            out.push(raw);
-        }
-        return;
-    };
-    let fqn = fqn.trim_start_matches('\\').to_string();
-    if seen.insert(fqn.clone()) {
+    if let Some(fqn) = resolve_target_fqn(expr, resolved)
+        && seen.insert(fqn.clone())
+    {
         out.push(fqn);
     }
 }
@@ -1243,24 +1194,10 @@ fn push_resolved_expr_fqn(
 /// `self`/`static`/`parent` are skipped (no concrete FQN).
 fn collect_class_consts(node: Node<'_, '_>, resolved: &OwnedResolvedNames, out: &mut Vec<String>) {
     if let Node::ClassConstantAccess(cca) = node
-        && let ClassLikeConstantSelector::Identifier(id) = &cca.constant
-        && bytes_to_str(id.value).eq_ignore_ascii_case("class")
-        && let Expression::Identifier(ident) = cca.class
+        && crate::parser::is_class_fetch(cca)
+        && let Some(fqn) = resolve_target_fqn(cca.class, resolved)
     {
-        let raw = bytes_to_str(ident.value());
-        if !matches!(
-            raw.to_ascii_lowercase().as_str(),
-            "self" | "static" | "parent"
-        ) {
-            let offset = ident.span().start.offset;
-            let fqn = resolved
-                .get(offset)
-                .map(|f| f.trim_start_matches('\\').to_string())
-                .or_else(|| (!raw.is_empty()).then(|| raw.trim_start_matches('\\').to_string()));
-            if let Some(fqn) = fqn {
-                out.push(fqn);
-            }
-        }
+        out.push(fqn);
     }
     node.visit_children(|child| collect_class_consts(child, resolved, out));
 }

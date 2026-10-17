@@ -178,104 +178,25 @@ pub(crate) fn find_uncaught_throw_types_with_context(
     let class_loader: OptClassLoader<'_> =
         ctx.map(|c| c.class_loader as &dyn Fn(&str) -> Option<Arc<ClassInfo>>);
 
-    // 1. Direct `throw new Type(…)` statements
-    for throw in &throws {
+    // In order: direct `throw new Type(…)` statements, `throw
+    // $this->method()` (the method's return type is the thrown type),
+    // `@throws` propagated from same-file calls, inline `/** @throws Type */`
+    // annotations, `throw $variable` resolved from the catch clause's type,
+    // and `@throws` propagated from calls into other files.
+    let inline = find_inline_throws_annotations(&body);
+    let thrown = throws
+        .iter()
+        .chain(&throw_expr_types)
+        .chain(&propagated)
+        .chain(&inline)
+        .chain(&throw_vars)
+        .chain(&cross_file_propagated);
+    for throw in thrown {
         if let Some(exc_type) =
             normalize_throw_type(&throw.type_name, use_map, file_namespace, class_loader)
             && !is_caught_by(
                 &catches,
                 throw.offset,
-                &exc_type,
-                use_map,
-                file_namespace,
-                class_loader,
-            )
-            && seen.insert(exc_type.to_string())
-        {
-            uncaught.push(exc_type);
-        }
-    }
-
-    // 2. `throw $this->method()` -- return type of method is the thrown type
-    for te in &throw_expr_types {
-        if let Some(exc_type) =
-            normalize_throw_type(&te.type_name, use_map, file_namespace, class_loader)
-            && !is_caught_by(
-                &catches,
-                te.offset,
-                &exc_type,
-                use_map,
-                file_namespace,
-                class_loader,
-            )
-            && seen.insert(exc_type.to_string())
-        {
-            uncaught.push(exc_type);
-        }
-    }
-
-    // 3. Propagated @throws from called methods (same-file text search)
-    for prop in &propagated {
-        if let Some(exc_type) =
-            normalize_throw_type(&prop.type_name, use_map, file_namespace, class_loader)
-            && !is_caught_by(
-                &catches,
-                prop.offset,
-                &exc_type,
-                use_map,
-                file_namespace,
-                class_loader,
-            )
-            && seen.insert(exc_type.to_string())
-        {
-            uncaught.push(exc_type);
-        }
-    }
-
-    // 4. Inline `/** @throws ExceptionType */` annotations in the body
-    let inline = find_inline_throws_annotations(&body);
-    for info in &inline {
-        if let Some(exc_type) =
-            normalize_throw_type(&info.type_name, use_map, file_namespace, class_loader)
-            && !is_caught_by(
-                &catches,
-                info.offset,
-                &exc_type,
-                use_map,
-                file_namespace,
-                class_loader,
-            )
-            && seen.insert(exc_type.to_string())
-        {
-            uncaught.push(exc_type);
-        }
-    }
-
-    // 5. `throw $variable` — resolved from catch clause variable type
-    for tv in &throw_vars {
-        if let Some(exc_type) =
-            normalize_throw_type(&tv.type_name, use_map, file_namespace, class_loader)
-            && !is_caught_by(
-                &catches,
-                tv.offset,
-                &exc_type,
-                use_map,
-                file_namespace,
-                class_loader,
-            )
-            && seen.insert(exc_type.to_string())
-        {
-            uncaught.push(exc_type);
-        }
-    }
-
-    // 6. Cross-file propagated @throws from all call patterns
-    for prop in &cross_file_propagated {
-        if let Some(exc_type) =
-            normalize_throw_type(&prop.type_name, use_map, file_namespace, class_loader)
-            && !is_caught_by(
-                &catches,
-                prop.offset,
                 &exc_type,
                 use_map,
                 file_namespace,

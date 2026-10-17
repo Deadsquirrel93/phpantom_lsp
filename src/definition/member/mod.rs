@@ -714,11 +714,7 @@ impl Backend {
                 is_static,
                 ..
             } => {
-                let access_kind = if *is_static {
-                    AccessKind::DoubleColon
-                } else {
-                    AccessKind::Arrow
-                };
+                let access_kind = AccessKind::of_member_access(*is_static);
                 Some((subject_text.as_str(source).to_string(), access_kind))
             }
             _ => None,

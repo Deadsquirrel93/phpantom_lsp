@@ -315,26 +315,7 @@ fn element_enum_class(element: &ArrayElement<'_>) -> Option<String> {
 /// `self::class` and friends are relative to a declaration site the rules
 /// array does not carry, so they name nothing here.
 fn class_const_name(expr: &Expression<'_>) -> Option<String> {
-    let Expression::Access(Access::ClassConstant(access)) = expr else {
-        return None;
-    };
-    let ClassLikeConstantSelector::Identifier(constant) = &access.constant else {
-        return None;
-    };
-    if !bytes_to_str(constant.value).eq_ignore_ascii_case("class") {
-        return None;
-    }
-    let Expression::Identifier(class) = access.class else {
-        return None;
-    };
-    let name = bytes_to_str(class.value());
-    if matches!(
-        name.to_ascii_lowercase().as_str(),
-        "self" | "static" | "parent"
-    ) {
-        return None;
-    }
-    Some(name.to_string())
+    crate::parser::class_fetch_identifier(expr).map(|class| bytes_to_str(class.value()).to_string())
 }
 
 /// Resolve the enum class names in `rules` against the imports of the file

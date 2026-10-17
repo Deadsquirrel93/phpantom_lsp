@@ -392,87 +392,45 @@ fn method_return_value<'a>(
 }
 
 /// Extract the model class explicitly configured on a Laravel factory.
-///
-/// A `SomeModel::class` initializer follows PHP class-name resolution, so
-/// its written name is left for the normal name-resolution pass. A quoted
-/// class name is already a runtime string and is therefore marked absolute
-/// before that pass, preventing the factory's namespace from being prepended.
 fn extract_factory_model<'a>(
     members: impl Iterator<Item = &'a class_like::member::ClassLikeMember<'a>>,
 ) -> Option<PhpType> {
     // `Factory::modelName()` reads `$this->model`, which a static
     // property of the same name never answers.
-    let items = plain_properties(members, "model")
-        .filter(|(plain, _)| !plain.modifiers.iter().any(|modifier| modifier.is_static()));
-    for (_, item) in items {
-        let class_like::property::PropertyItem::Concrete(concrete) = item else {
-            continue;
-        };
-
-        if let Expression::Access(Access::ClassConstant(access)) = concrete.value
-            && matches!(
-                &access.constant,
-                ClassLikeConstantSelector::Identifier(constant)
-                    if bytes_to_str(constant.value).eq_ignore_ascii_case("class")
-            )
-            && let Expression::Identifier(identifier) = access.class
-        {
-            let name = bytes_to_str(identifier.value()).trim();
-            return (!name.is_empty()
-                && !name.eq_ignore_ascii_case("self")
-                && !name.eq_ignore_ascii_case("static")
-                && !name.eq_ignore_ascii_case("parent"))
-            .then(|| PhpType::named(atom(name)));
-        }
-
-        let Expression::Literal(Literal::String(literal)) = concrete.value else {
-            continue;
-        };
-        let Some(name) = literal.value.and_then(literal_bytes_to_str) else {
-            continue;
-        };
-        let name = name.trim();
-        if name.is_empty() {
-            continue;
-        }
-        let absolute = if name.starts_with('\\') {
-            name.to_string()
-        } else {
-            format!("\\{name}")
-        };
-        return Some(PhpType::named(atom(&absolute)));
-    }
-
-    None
+    plain_properties(members, "model")
+        .filter(|(plain, _)| !plain.modifiers.iter().any(|modifier| modifier.is_static()))
+        .find_map(|(_, item)| class_named_by_default(item))
 }
 
 fn extract_class_property<'a>(
     members: impl Iterator<Item = &'a class_like::member::ClassLikeMember<'a>>,
     property: &str,
 ) -> Option<PhpType> {
-    let items = plain_properties(members, property)
-        .filter(|(plain, _)| plain.modifiers.iter().any(|modifier| modifier.is_static()));
-    for (_, item) in items {
-        let class_like::property::PropertyItem::Concrete(concrete) = item else {
-            continue;
-        };
-        if let Expression::Access(Access::ClassConstant(access)) = concrete.value
-            && matches!(&access.constant, ClassLikeConstantSelector::Identifier(identifier)
-                if bytes_to_str(identifier.value).eq_ignore_ascii_case("class"))
-            && let Expression::Identifier(identifier) = access.class
-        {
-            return Some(PhpType::named(atom(bytes_to_str(identifier.value()))));
-        }
-        if let Expression::Literal(Literal::String(literal)) = concrete.value
-            && let Some(name) = literal.value.and_then(literal_bytes_to_str)
-        {
-            return Some(PhpType::named(atom(&format!(
-                "\\{}",
-                name.trim_start_matches('\\')
-            ))));
-        }
+    plain_properties(members, property)
+        .filter(|(plain, _)| plain.modifiers.iter().any(|modifier| modifier.is_static()))
+        .find_map(|(_, item)| class_named_by_default(item))
+}
+
+/// The class a property's default value names.
+///
+/// A `SomeModel::class` initializer follows PHP class-name resolution, so
+/// its written name is left for the normal name-resolution pass. A quoted
+/// class name is already a runtime string and is therefore marked absolute
+/// before that pass, preventing the declaring namespace from being prepended.
+fn class_named_by_default(item: &class_like::property::PropertyItem<'_>) -> Option<PhpType> {
+    let class_like::property::PropertyItem::Concrete(concrete) = item else {
+        return None;
+    };
+    if let Some(class) = crate::parser::class_fetch_identifier(concrete.value) {
+        return Some(PhpType::named(atom(bytes_to_str(class.value()))));
     }
-    None
+    let Expression::Literal(Literal::String(literal)) = concrete.value else {
+        return None;
+    };
+    let name = literal_bytes_to_str(literal.value?)?
+        .trim()
+        .trim_start_matches('\\');
+    (!name.is_empty()).then(|| PhpType::named(atom(&format!("\\{name}"))))
 }
 
 fn extract_class_return_from_body<'a>(
@@ -813,20 +771,9 @@ fn extract_facade_accessor<'a>(
     if let Some((text, _, _)) = super::helpers::extract_string_literal(value, content) {
         return Some(FacadeAccessor::Alias(atom(text)));
     }
-    let Expression::Access(Access::ClassConstant(access)) = value else {
-        return None;
-    };
-    let ClassLikeConstantSelector::Identifier(constant) = &access.constant else {
-        return None;
-    };
-    if !bytes_to_str(constant.value).eq_ignore_ascii_case("class") {
-        return None;
-    }
     // `self::class` / `static::class` name the facade itself, which is
     // never the class it forwards to.
-    let Expression::Identifier(identifier) = access.class else {
-        return None;
-    };
+    let identifier = crate::parser::class_fetch_identifier(value)?;
     let name = bytes_to_str(identifier.value());
     (!name.is_empty()).then(|| FacadeAccessor::Class(atom(name)))
 }

@@ -244,10 +244,10 @@ fn binding_concrete(
     let expr = expr?;
     match expr {
         Expression::Instantiation(inst) => match inst.class {
-            Expression::Identifier(id) => resolved_class_fqn(id, resolved),
+            Expression::Identifier(id) => resolved.class_fqn(id),
             _ => None,
         },
-        Expression::Access(Access::ClassConstant(_)) => class_string_fqn(expr, resolved),
+        Expression::Access(Access::ClassConstant(_)) => resolved.class_fetch_fqn(expr),
         Expression::ArrowFunction(arrow) => {
             declared_factory_return(arrow.return_type_hint.as_ref(), resolved)
                 .or_else(|| binding_concrete(Some(arrow.expression), resolved))
@@ -320,40 +320,7 @@ fn closure_binding_concrete(
 /// 'sentry')`) or by a contract's name (`alias('sentry',
 /// HubInterface::class)`), and both sides of the call accept both forms.
 fn alias_key(file: &ProviderFile<'_, '_>, expr: &Expression<'_>) -> Option<String> {
-    const_string(expr, file.content, file.scope).or_else(|| class_string_fqn(expr, file.resolved))
-}
-
-/// The FQN an `X::class` expression spells, or `None` for any other
-/// expression.
-pub(super) fn class_string_fqn(
-    expr: &Expression<'_>,
-    resolved: &OwnedResolvedNames,
-) -> Option<String> {
-    let Expression::Access(Access::ClassConstant(access)) = expr else {
-        return None;
-    };
-    if !matches!(
-        &access.constant,
-        ClassLikeConstantSelector::Identifier(constant)
-            if constant.value.eq_ignore_ascii_case(b"class")
-    ) {
-        return None;
-    }
-    match access.class {
-        Expression::Identifier(id) => resolved_class_fqn(id, resolved),
-        _ => None,
-    }
-}
-
-/// The FQN a class-name identifier resolves to, through the file's namespace
-/// and `use` statements, falling back to the written name when the resolver
-/// did not track the offset.
-fn resolved_class_fqn(ident: &Identifier<'_>, resolved: &OwnedResolvedNames) -> Option<String> {
-    if let Some(fqn) = resolved.get(ident.span().start.offset) {
-        return Some(fqn.trim_start_matches('\\').to_string());
-    }
-    let raw = bytes_to_str(ident.value()).trim_start_matches('\\');
-    (!raw.is_empty()).then(|| raw.to_string())
+    const_string(expr, file.content, file.scope).or_else(|| file.resolved.class_fetch_fqn(expr))
 }
 
 /// Whether a translation binding's factory builds Laravel's own file-based
@@ -395,19 +362,10 @@ fn builds_file_translator(factory: Option<&Expression<'_>>) -> bool {
 fn instantiated_or_class_string<'arena>(expr: &Expression<'arena>) -> Option<&'arena str> {
     let class = match expr {
         Expression::Instantiation(inst) => inst.class,
-        Expression::Access(Access::ClassConstant(access))
-            if matches!(
-                &access.constant,
-                ClassLikeConstantSelector::Identifier(constant)
-                    if constant.value.eq_ignore_ascii_case(b"class")
-            ) =>
-        {
-            access.class
-        }
-        _ => return None,
+        _ => crate::parser::class_fetch_target(expr)?,
     };
     match class {
-        Expression::Identifier(id) => Some(crate::atom::bytes_to_str(id.value())),
+        Expression::Identifier(id) => Some(bytes_to_str(id.value())),
         _ => Some(""),
     }
 }

@@ -419,10 +419,9 @@ fn body_block<'a>(program: &'a Program<'a>, name_offset: u32) -> Option<&'a Bloc
                 Statement::Function(func) if func.name.span.start.offset == name_offset => {
                     Some(&func.body)
                 }
-                Statement::Class(class) => in_members(class.members.iter(), name_offset),
-                Statement::Trait(tr) => in_members(tr.members.iter(), name_offset),
-                Statement::Enum(en) => in_members(en.members.iter(), name_offset),
-                Statement::Interface(itf) => in_members(itf.members.iter(), name_offset),
+                _ if let Some(body) = crate::parser::class_like_body(stmt) => {
+                    in_members(body.members.iter(), name_offset)
+                }
                 Statement::Namespace(ns) => in_statements(ns.statements().iter(), name_offset),
                 Statement::Block(block) => in_statements(block.statements.iter(), name_offset),
                 _ => None,

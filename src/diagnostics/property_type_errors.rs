@@ -68,23 +68,8 @@ struct PropertyCheckCtx<'a> {
 /// Walk a top-level statement collecting property assignments.
 fn collect_from_statement(stmt: &Statement<'_>, ctx: &mut PropertyCheckCtx<'_>) {
     match stmt {
-        Statement::Class(class) => {
-            for member in class.members.iter() {
-                collect_from_class_member(member, ctx);
-            }
-        }
-        Statement::Interface(iface) => {
-            for member in iface.members.iter() {
-                collect_from_class_member(member, ctx);
-            }
-        }
-        Statement::Trait(trait_def) => {
-            for member in trait_def.members.iter() {
-                collect_from_class_member(member, ctx);
-            }
-        }
-        Statement::Enum(enum_def) => {
-            for member in enum_def.members.iter() {
+        _ if let Some(body) = crate::parser::class_like_body(stmt) => {
+            for member in body.members {
                 collect_from_class_member(member, ctx);
             }
         }

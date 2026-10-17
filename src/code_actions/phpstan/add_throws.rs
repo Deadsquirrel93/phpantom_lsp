@@ -31,7 +31,9 @@ use crate::code_actions::phpstan::phpstan_identifier;
 use crate::code_actions::{
     CodeActionData, FunctionDocblock, function_docblock_at_line, make_code_action_data,
 };
-use crate::completion::use_edit::{analyze_use_block_in, build_use_edit, use_import_conflicts};
+use crate::completion::use_edit::{
+    analyze_use_block_in, build_use_edit, short_name_needs_import, use_import_conflicts,
+};
 use crate::parser::with_parsed_program;
 use crate::text_position::{line_start_byte_offset, offset_to_position};
 use crate::util::strip_fqn_prefix;
@@ -81,26 +83,10 @@ impl Backend {
             let file_use_map = &block.use_map;
             let file_namespace = &block.namespace;
 
-            // Determine what name to use in the @throws tag.  If the
-            // exception is already imported (or in the same namespace),
-            // use the short name.  Otherwise we'll still use the short
-            // name but also add a use import.
-            let already_imported = file_use_map.iter().any(|(alias, fqn)| {
-                alias.eq_ignore_ascii_case(short_name) && fqn.eq_ignore_ascii_case(&exception_fqn)
-            });
-
-            let same_namespace = match &file_namespace {
-                Some(ns) => {
-                    let ns_prefix = format!("{}\\", ns);
-                    let stripped = exception_fqn.strip_prefix(&ns_prefix);
-                    // Same namespace if after stripping the prefix there's
-                    // no further backslash (i.e. it's a direct child).
-                    stripped.is_some_and(|rest| !rest.contains('\\'))
-                }
-                None => !exception_fqn.contains('\\'),
-            };
-
-            let needs_import = !already_imported && !same_namespace;
+            // The @throws tag always uses the short name, adding a use
+            // import when it does not already name the exception.
+            let needs_import =
+                short_name_needs_import(&exception_fqn, file_use_map, file_namespace);
 
             if needs_import && use_import_conflicts(&exception_fqn, file_use_map) {
                 continue;
@@ -176,21 +162,7 @@ impl Backend {
         let file_use_map = &block.use_map;
         let file_namespace = &block.namespace;
 
-        // Determine if an import is needed.
-        let already_imported = file_use_map.iter().any(|(alias, fqn)| {
-            alias.eq_ignore_ascii_case(short_name) && fqn.eq_ignore_ascii_case(&exception_fqn)
-        });
-
-        let same_namespace = match &file_namespace {
-            Some(ns) => {
-                let ns_prefix = format!("{}\\", ns);
-                let stripped = exception_fqn.strip_prefix(&ns_prefix);
-                stripped.is_some_and(|rest| !rest.contains('\\'))
-            }
-            None => !exception_fqn.contains('\\'),
-        };
-
-        let needs_import = !already_imported && !same_namespace;
+        let needs_import = short_name_needs_import(&exception_fqn, file_use_map, file_namespace);
 
         let docblock_info =
             function_docblock_at_line(content, diagnostic_line, FunctionKinds::Named)?;

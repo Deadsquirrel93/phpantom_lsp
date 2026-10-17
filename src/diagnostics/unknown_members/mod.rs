@@ -278,7 +278,7 @@ impl Backend {
             let is_docblock_ref = docblock_ref.is_reference();
 
             // ── Skip the magic `::class` constant ───────────────────
-            if member_name == "class" && is_static {
+            if is_static && member_name.eq_ignore_ascii_case("class") {
                 continue;
             }
 
@@ -305,11 +305,7 @@ impl Backend {
                 }
             }
 
-            let access_kind = if is_static {
-                AccessKind::DoubleColon
-            } else {
-                AccessKind::Arrow
-            };
+            let access_kind = AccessKind::of_member_access(is_static);
 
             let current_class = find_class_at_offset(local_classes, span.start);
 

@@ -1136,55 +1136,16 @@ pub(crate) fn walk_top_level_statements<'a, 'b: 'a>(
                 };
                 walk_top_level_statements(ns.statements().iter(), &ns_class, &block_ctx);
             }
-            Statement::Class(class) => {
+            _ if let Some(body) = crate::parser::class_like_body(stmt) => {
                 if !diag_ctx.wants(stmt.span()) {
                     continue;
                 }
                 let enclosing = find_enclosing_class_for_offset(
                     diag_ctx.local_classes,
-                    class.left_brace.start.offset,
+                    body.left_brace.start.offset,
                 )
                 .unwrap_or(default_class);
-                for member in class.members.iter() {
-                    walk_class_member_body(member, enclosing, diag_ctx);
-                }
-            }
-            Statement::Interface(iface) => {
-                if !diag_ctx.wants(stmt.span()) {
-                    continue;
-                }
-                let enclosing = find_enclosing_class_for_offset(
-                    diag_ctx.local_classes,
-                    iface.left_brace.start.offset,
-                )
-                .unwrap_or(default_class);
-                for member in iface.members.iter() {
-                    walk_class_member_body(member, enclosing, diag_ctx);
-                }
-            }
-            Statement::Trait(trait_def) => {
-                if !diag_ctx.wants(stmt.span()) {
-                    continue;
-                }
-                let enclosing = find_enclosing_class_for_offset(
-                    diag_ctx.local_classes,
-                    trait_def.left_brace.start.offset,
-                )
-                .unwrap_or(default_class);
-                for member in trait_def.members.iter() {
-                    walk_class_member_body(member, enclosing, diag_ctx);
-                }
-            }
-            Statement::Enum(enum_def) => {
-                if !diag_ctx.wants(stmt.span()) {
-                    continue;
-                }
-                let enclosing = find_enclosing_class_for_offset(
-                    diag_ctx.local_classes,
-                    enum_def.left_brace.start.offset,
-                )
-                .unwrap_or(default_class);
-                for member in enum_def.members.iter() {
+                for member in body.members {
                     walk_class_member_body(member, enclosing, diag_ctx);
                 }
             }
@@ -1198,8 +1159,7 @@ pub(crate) fn walk_top_level_statements<'a, 'b: 'a>(
                     func.body.statements.iter(),
                     func.span().start.offset,
                     default_class,
-                    None,
-                    true, // standalone functions have no `$this`
+                    BodyOwner::FUNCTION,
                     diag_ctx,
                 );
             }
@@ -1261,8 +1221,7 @@ pub(crate) fn walk_functions_in_if<'b>(
             func.body.statements.iter(),
             func.span().start.offset,
             default_class,
-            None,
-            true,
+            BodyOwner::FUNCTION,
             diag_ctx,
         );
     });
@@ -1300,16 +1259,13 @@ pub(crate) fn walk_class_member_body<'b>(
             let MethodBody::Concrete(block) = &method.body else {
                 return;
             };
-            let method_name = bytes_to_str(method.name.value).to_string();
-            let is_static = method.modifiers.contains_static();
             diag_ctx.mark_walked(method.span());
             analyze_function_body(
                 method.parameter_list.parameters.iter(),
                 block.statements.iter(),
                 method.span().start.offset,
                 enclosing_class,
-                Some(&method_name),
-                is_static,
+                BodyOwner::method(method),
                 diag_ctx,
             );
         }
@@ -1445,30 +1401,16 @@ impl<'a> DiagnosticWalkCtx<'a> {
 
 /// Run the forward walker on a single function/method body and record
 /// scope snapshots for diagnostics.
-///
-/// `is_static` indicates whether this is a static method.  When `false`
-/// and `current_class` has a non-empty name, `$this` is seeded in the
-/// scope so that expressions like `$this->prop` and `foreach ($this->items as $item)`
-/// can resolve without remaining unresolved.
 pub(crate) fn analyze_function_body<'b>(
     parameters: impl Iterator<Item = &'b FunctionLikeParameter<'b>>,
     body_statements: impl Iterator<Item = &'b Statement<'b>>,
     fn_span_start: u32,
     current_class: &ClassInfo,
-    method_name: Option<&str>,
-    is_static: bool,
+    owner: BodyOwner<'_>,
     diag_ctx: &DiagnosticWalkCtx<'_>,
 ) {
     let ctx = diag_ctx.forward_walk_ctx(current_class);
-
-    seed_and_walk_function_body(
-        parameters,
-        body_statements,
-        fn_span_start,
-        method_name,
-        is_static,
-        &ctx,
-    );
+    seed_and_walk_function_body(parameters, body_statements, fn_span_start, owner, &ctx);
 }
 
 /// Seed a fresh scope for a function/method body and walk it for
@@ -1476,59 +1418,21 @@ pub(crate) fn analyze_function_body<'b>(
 ///
 /// Shared by [`analyze_function_body`] (top-level functions and class
 /// methods) and [`walk_anonymous_class_member_bodies`] (methods declared
-/// inside an anonymous class expression).  Both need the same seeding:
-/// `$this` for non-static methods, parameter types, and superglobals.
-/// The only difference is the `current_class` carried by `ctx`.
+/// inside an anonymous class expression), which differ only in the
+/// `current_class` carried by `ctx`.
 pub(crate) fn seed_and_walk_function_body<'b>(
     parameters: impl Iterator<Item = &'b FunctionLikeParameter<'b>>,
     body_statements: impl Iterator<Item = &'b Statement<'b>>,
     fn_span_start: u32,
-    method_name: Option<&str>,
-    is_static: bool,
+    owner: BodyOwner<'_>,
     ctx: &ForwardWalkCtx<'_>,
 ) {
     #[cfg(test)]
     TEST_BODY_WALKS.with(|count| count.set(count.get() + 1));
 
     let ctx = &ctx.for_declaration(fn_span_start);
-    let mut scope = ScopeState::new();
-
-    // Seed `$this` for non-static class methods so that expressions
-    // referencing `$this` (e.g. `$this->prop`, `foreach ($this->items …)`)
-    // resolve from the scope instead of falling through to the backward
-    // scanner.
-    if !is_static {
-        seed_this(&mut scope, ctx);
-        super::readonly_properties::seed_constructor_readonly_properties(
-            &mut scope,
-            method_name,
-            ctx,
-        );
-    }
-
-    // Seed scope with parameter types.
-    // Detect whether this method has a #[Scope] attribute by scanning
-    // the source text around the method span for `#[Scope]`.
-    let has_scope_attr = method_name
-        .map(|_| detect_scope_attribute_from_source(ctx.content, fn_span_start as usize))
-        .unwrap_or(false);
-    seed_params(
-        &mut scope,
-        parameters,
-        fn_span_start,
-        method_name,
-        has_scope_attr,
-        ctx,
-    );
-
-    // Seed superglobals so that accesses like `$_SERVER['key']` don't
-    // remain unresolved.
-    seed_superglobals(&mut scope);
-
-    // A `static $var;` local holds whatever an earlier call left in it,
-    // which the top-to-bottom walk below cannot see.
     let body: Vec<&Statement<'_>> = body_statements.collect();
-    super::static_locals::seed_static_locals(&mut scope, &body, ctx);
+    let mut scope = seed_body_scope(parameters, &body, fn_span_start, owner, ctx);
 
     // Record the scope right at the function body start so that
     // member accesses on parameters before any assignment are covered.
@@ -1572,14 +1476,11 @@ pub(crate) fn walk_anonymous_class_member_bodies<'b>(
         if let ClassLikeMember::Method(method) = member
             && let MethodBody::Concrete(block) = &method.body
         {
-            let method_name = bytes_to_str(method.name.value).to_string();
-            let is_static = method.modifiers.contains_static();
             seed_and_walk_function_body(
                 method.parameter_list.parameters.iter(),
                 block.statements.iter(),
                 method.span().start.offset,
-                Some(&method_name),
-                is_static,
+                BodyOwner::method(method),
                 &anon_ctx,
             );
         }

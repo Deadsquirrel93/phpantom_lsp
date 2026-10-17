@@ -21,6 +21,17 @@ pub enum AccessKind {
     Other,
 }
 
+impl AccessKind {
+    /// The operator of a member access: `::` when static, `->` otherwise.
+    pub fn of_member_access(is_static: bool) -> Self {
+        if is_static {
+            AccessKind::DoubleColon
+        } else {
+            AccessKind::Arrow
+        }
+    }
+}
+
 /// The result of analysing what is to the left of `->` or `::`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompletionTarget {

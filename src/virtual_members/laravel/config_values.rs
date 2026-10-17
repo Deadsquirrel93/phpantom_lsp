@@ -488,12 +488,9 @@ fn classify_class_constant(
     cca: &ClassConstantAccess<'_>,
     use_map: &HashMap<String, String>,
 ) -> ConfigValue {
-    let is_class = matches!(
-        &cca.constant,
-        ClassLikeConstantSelector::Identifier(ident)
-            if bytes_to_str(ident.value).eq_ignore_ascii_case("class")
-    );
-    if is_class && let Expression::Identifier(id) = cca.class {
+    if crate::parser::is_class_fetch(cca)
+        && let Expression::Identifier(id) = cca.class
+    {
         let name = bytes_to_str(id.value());
         if !name.is_empty() {
             return ConfigValue::ClassString(resolve_config_class_name(name, use_map));

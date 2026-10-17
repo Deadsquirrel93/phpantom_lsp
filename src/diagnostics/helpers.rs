@@ -268,9 +268,9 @@ fn find_enclosing_method_name_in_statements<'a>(
 
     for stmt in statements.iter() {
         let found = match stmt {
-            Statement::Class(class) => find_method_name_in_members(class.members.iter(), offset),
-            Statement::Trait(tr) => find_method_name_in_members(tr.members.iter(), offset),
-            Statement::Enum(en) => find_method_name_in_members(en.members.iter(), offset),
+            _ if let Some(body) = crate::parser::class_like_body(stmt) => {
+                find_method_name_in_members(body.members.iter(), offset)
+            }
             Statement::Namespace(ns) => {
                 return find_enclosing_method_name_in_statements(ns.statements(), offset);
             }

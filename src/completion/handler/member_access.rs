@@ -547,13 +547,8 @@ impl Backend {
                 ..
             } = &span.kind
         {
-            let access_kind = if *is_static {
-                crate::AccessKind::DoubleColon
-            } else {
-                crate::AccessKind::Arrow
-            };
             return Some(CompletionTarget {
-                access_kind,
+                access_kind: crate::AccessKind::of_member_access(*is_static),
                 subject: subject_text.as_str(source).to_string(),
             });
         }

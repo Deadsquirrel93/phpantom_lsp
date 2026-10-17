@@ -24,7 +24,9 @@ use crate::Backend;
 use crate::code_actions::phpstan::contains_php_attribute;
 use crate::code_actions::phpstan::phpstan_identifier;
 use crate::code_actions::{CodeActionData, make_code_action_data};
-use crate::completion::use_edit::{analyze_use_block_in, build_use_edit, use_import_conflicts};
+use crate::completion::use_edit::{
+    analyze_use_block_in, build_use_edit, short_name_needs_import, use_import_conflicts,
+};
 use crate::text_position::offset_to_position;
 
 /// The PHPStan identifier we match on.
@@ -131,13 +133,7 @@ impl Backend {
         // declares a namespace we need a `use Override;` import
         // (just like any other global class).  When the file has no
         // namespace, no import is needed.
-        let already_imported = file_use_map.iter().any(|(alias, fqn)| {
-            alias.eq_ignore_ascii_case("Override") && fqn.eq_ignore_ascii_case("Override")
-        });
-
-        let same_namespace = file_namespace.is_none();
-
-        let needs_import = !already_imported && !same_namespace;
+        let needs_import = short_name_needs_import("Override", file_use_map, file_namespace);
 
         // Check for import conflicts (e.g. a different class named
         // `Override` is already imported).

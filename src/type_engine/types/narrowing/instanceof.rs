@@ -653,16 +653,7 @@ pub(in crate::type_engine) fn class_identity_subject_key(expr: &Expression<'_>) 
                 Argument::Named(named) => named.value,
             })
         }
-        Expression::Access(Access::ClassConstant(cca)) => {
-            let ClassLikeConstantSelector::Identifier(ident) = &cca.constant else {
-                return None;
-            };
-            if ident.value != b"class" {
-                return None;
-            }
-            expr_to_subject_key(cca.class)
-        }
-        _ => None,
+        _ => expr_to_subject_key(crate::parser::class_fetch_target(expr)?),
     }
 }
 
@@ -680,16 +671,7 @@ pub(in crate::type_engine) fn match_class_subject_var<'b>(
         Expression::Parenthesized(inner) => inner.expression,
         other => other,
     };
-    let Expression::Access(Access::ClassConstant(cca)) = subject else {
-        return None;
-    };
-    let ClassLikeConstantSelector::Identifier(ident) = &cca.constant else {
-        return None;
-    };
-    if ident.value != b"class" {
-        return None;
-    }
-    match cca.class {
+    match crate::parser::class_fetch_target(subject)? {
         Expression::Variable(Variable::Direct(dv)) => Some(bytes_to_str(dv.name)),
         _ => None,
     }

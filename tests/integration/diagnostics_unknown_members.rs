@@ -411,6 +411,31 @@ $name = Foo::class;
     );
 }
 
+/// `class` is a keyword, so PHP accepts `Foo::CLASS` as the class name too.
+#[test]
+fn no_diagnostic_for_class_keyword_in_any_case() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Foo {
+    public function bar(): void {}
+}
+
+$name = Foo::CLASS;
+$foo = new $name();
+$foo->bar();
+$foo->missing();
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    let messages: Vec<&str> = diags.iter().map(|d| d.message.as_str()).collect();
+    assert_eq!(
+        messages.len(),
+        1,
+        "only the missing method should be flagged, got: {messages:?}"
+    );
+    assert!(messages[0].contains("missing"), "got: {messages:?}");
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Magic method suppression
 // ═══════════════════════════════════════════════════════════════════════════
@@ -16022,5 +16047,59 @@ namespace App {
             .iter()
             .any(|d| d.message.contains("missing") && d.message.contains(r"App\Node")),
         "`Node` is `App\\Node`, not the global class, got: {diags:?}"
+    );
+}
+
+/// Only the method that carries `#[Scope]` is a query scope.  A method
+/// written next to one takes its `Builder` parameter as declared, the same
+/// way hover reads it.
+#[test]
+fn scope_attribute_on_a_neighbouring_method_does_not_bind_the_builder() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+namespace Illuminate\Database\Eloquent\Attributes;
+
+#[\Attribute]
+class Scope {}
+
+namespace Illuminate\Database\Eloquent;
+
+class Model {}
+
+/** @template TModel of Model */
+class Builder {
+    /** @return TModel */
+    public function first() {}
+}
+
+namespace App;
+
+use Illuminate\Database\Eloquent\Attributes\Scope;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
+
+class Post extends Model {
+    #[Scope]
+    protected function published(Builder $query): void {
+        $query->first()->title();
+    }
+
+    public function helper(Builder $query): void {
+        $query->first()->title();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    let messages: Vec<String> = diags
+        .iter()
+        .map(|d| format!("{}: {}", d.range.start.line, d.message))
+        .collect();
+    assert_eq!(
+        messages,
+        [
+            "25: Method 'title' not found on class 'App\\Post'",
+            "29: Method 'title' not found on class 'Illuminate\\Database\\Eloquent\\Model'",
+        ],
     );
 }

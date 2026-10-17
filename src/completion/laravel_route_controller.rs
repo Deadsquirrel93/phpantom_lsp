@@ -219,20 +219,9 @@ fn find_chain_controller(expr: &Expression<'_>) -> Option<String> {
 /// Extract the class name from the first `X::class` argument.
 fn extract_class_arg(args: &ArgumentList<'_>) -> Option<String> {
     let first_arg = args.arguments.iter().next()?;
-    if let Expression::Access(Access::ClassConstant(cca)) = first_arg.value() {
-        let is_class = matches!(
-            &cca.constant,
-            ClassLikeConstantSelector::Identifier(ident)
-                if bytes_to_str(ident.value).eq_ignore_ascii_case("class")
-        );
-        if is_class && let Expression::Identifier(id) = cca.class {
-            let name = bytes_to_str(id.value()).to_string();
-            if !name.is_empty() {
-                return Some(name);
-            }
-        }
-    }
-    None
+    let class = crate::parser::class_fetch_identifier(first_arg.value())?;
+    let name = bytes_to_str(class.value());
+    (!name.is_empty()).then(|| name.to_string())
 }
 
 /// Return the byte range of a closure body (between braces).

@@ -253,69 +253,36 @@ pub(crate) fn find_inline_throws_annotations(body: &str) -> Vec<ThrowInfo> {
 /// Returns the short type name (last segment after `\`), or `None` if
 /// the method is not found or has no resolvable return type.
 pub(crate) fn find_method_return_type(file_content: &str, method_name: &str) -> Option<PhpType> {
-    let search = format!("function {}", method_name);
+    let (decl_start, after_name) = find_method_declaration(file_content, method_name)?;
 
-    let mut search_start = 0;
-    while let Some(func_pos) = file_content[search_start..].find(&search) {
-        let abs_pos = search_start + func_pos;
-        search_start = abs_pos + search.len();
-
-        let after_pos = abs_pos + search.len();
-        if after_pos < file_content.len() {
-            let next_byte = file_content.as_bytes()[after_pos];
-            if next_byte.is_ascii_alphanumeric() || next_byte == b'_' {
-                continue;
-            }
-        }
-
-        // Check the native return type: find matching `)` then `: Type`
-        let after = &file_content[after_pos..];
-        if let Some(paren_start) = after.find('(')
-            && let Some(close_offset) = find_matching_forward(after, paren_start, b'(', b')')
-        {
-            let after_close = after[close_offset + 1..].trim_start();
-            if let Some(rest) = after_close.strip_prefix(':') {
-                let rest = rest.trim_start();
-                let type_end = rest.find(['{', ';']).unwrap_or(rest.len());
-                let type_str = rest[..type_end].trim();
-                if !type_str.is_empty() {
-                    let parsed = PhpType::parse(type_str);
-                    let non_null = parsed.non_null_type().unwrap_or_else(|| parsed.clone());
-                    if let Some(name) = non_null.base_name() {
-                        return Some(PhpType::named(atom(name)));
-                    }
+    // Check the native return type: find matching `)` then `: Type`
+    let after = &file_content[after_name..];
+    if let Some(paren_start) = after.find('(')
+        && let Some(close_offset) = find_matching_forward(after, paren_start, b'(', b')')
+    {
+        let after_close = after[close_offset + 1..].trim_start();
+        if let Some(rest) = after_close.strip_prefix(':') {
+            let rest = rest.trim_start();
+            let type_end = rest.find(['{', ';']).unwrap_or(rest.len());
+            let type_str = rest[..type_end].trim();
+            if !type_str.is_empty() {
+                let parsed = PhpType::parse(type_str);
+                let non_null = parsed.non_null_type().unwrap_or_else(|| parsed.clone());
+                if let Some(name) = non_null.base_name() {
+                    return Some(PhpType::named(atom(name)));
                 }
             }
         }
-
-        // Check docblock @return, skipping visibility/modifier keywords
-        let before = skip_modifiers_backward(&file_content[..abs_pos]);
-        if before.ends_with("*/")
-            && let Some(doc_start) = before.rfind("/**")
-        {
-            let docblock = &before[doc_start..];
-            if let Some(info) = crate::docblock::parser::parse_docblock_for_tags(docblock) {
-                use crate::docblock::TagKind;
-                if let Some(tag) = info.first_tag_by_kind(TagKind::Return) {
-                    let rest = tag.description.trim();
-                    if let Some(type_str) = rest.split_whitespace().next() {
-                        let parsed = PhpType::parse(type_str);
-                        let non_null = parsed.non_null_type().unwrap_or_else(|| parsed.clone());
-                        if let Some(name) = non_null.base_name()
-                            && !parsed.is_void()
-                            && !parsed.is_mixed()
-                            && !parsed.is_self_like()
-                        {
-                            return Some(PhpType::named(atom(name)));
-                        }
-                    }
-                }
-            }
-        }
-        break;
     }
 
-    None
+    let docblock = docblock_before(file_content, decl_start)?;
+    let info = crate::docblock::parser::parse_docblock_for_tags(docblock)?;
+    let tag = info.first_tag_by_kind(crate::docblock::TagKind::Return)?;
+    let parsed = PhpType::parse(tag.description.split_whitespace().next()?);
+    let non_null = parsed.non_null_type().unwrap_or_else(|| parsed.clone());
+    let name = non_null.base_name()?;
+    (!parsed.is_void() && !parsed.is_mixed() && !parsed.is_self_like())
+        .then(|| PhpType::named(atom(name)))
 }
 
 /// Find `@throws` tags in a method's docblock by scanning the file
@@ -326,49 +293,55 @@ pub(crate) fn find_method_return_type(file_content: &str, method_name: &str) -> 
 ///
 /// Returns the short type names declared in `@throws` tags.
 pub(crate) fn find_method_throws_tags(file_content: &str, method_name: &str) -> Vec<PhpType> {
-    let mut throws = Vec::new();
-    let search = format!("function {}", method_name);
+    let Some(info) = find_method_declaration(file_content, method_name)
+        .and_then(|(decl_start, _)| docblock_before(file_content, decl_start))
+        .and_then(crate::docblock::parser::parse_docblock_for_tags)
+    else {
+        return Vec::new();
+    };
+    info.tags_by_kind(crate::docblock::TagKind::Throws)
+        .filter_map(|tag| {
+            let clean = tag
+                .description
+                .split_whitespace()
+                .next()?
+                .trim_end_matches('/')
+                .trim_end_matches('*')
+                .trim_start_matches('\\');
+            (!clean.is_empty()).then(|| PhpType::named(atom(clean)))
+        })
+        .collect()
+}
 
+/// Where the first `function <method_name>` declaration in `file_content`
+/// starts, and the offset just past the name.  The name must end there:
+/// `function foo` does not match `function foobar`.
+fn find_method_declaration(file_content: &str, method_name: &str) -> Option<(usize, usize)> {
+    let search = format!("function {method_name}");
     let mut search_start = 0;
-    while let Some(func_pos) = file_content[search_start..].find(&search) {
-        let abs_pos = search_start + func_pos;
-        search_start = abs_pos + search.len();
-
-        // Verify word boundary after
-        let after_pos = abs_pos + search.len();
-        if after_pos < file_content.len() {
-            let next_byte = file_content.as_bytes()[after_pos];
-            if next_byte.is_ascii_alphanumeric() || next_byte == b'_' {
-                continue;
-            }
-        }
-
-        // Look backward for a docblock, skipping visibility/modifier keywords
-        let before = skip_modifiers_backward(&file_content[..abs_pos]);
-        if before.ends_with("*/")
-            && let Some(doc_start) = before.rfind("/**")
+    while let Some(found) = file_content[search_start..].find(&search) {
+        let start = search_start + found;
+        let after_name = start + search.len();
+        if !file_content
+            .as_bytes()
+            .get(after_name)
+            .is_some_and(|&b| is_ident_byte(b))
         {
-            let docblock = &before[doc_start..];
-            if let Some(info) = crate::docblock::parser::parse_docblock_for_tags(docblock) {
-                use crate::docblock::TagKind;
-                for tag in info.tags_by_kind(TagKind::Throws) {
-                    let rest = tag.description.trim();
-                    if let Some(type_str) = rest.split_whitespace().next() {
-                        let clean = type_str
-                            .trim_end_matches('/')
-                            .trim_end_matches('*')
-                            .trim_start_matches('\\');
-                        if !clean.is_empty() {
-                            throws.push(PhpType::named(atom(clean)));
-                        }
-                    }
-                }
-            }
+            return Some((start, after_name));
         }
-        break;
+        search_start = after_name;
     }
+    None
+}
 
-    throws
+/// The docblock written directly above the declaration starting at
+/// `decl_start`, past any visibility and modifier keywords.
+fn docblock_before(file_content: &str, decl_start: usize) -> Option<&str> {
+    let before = skip_modifiers_backward(&file_content[..decl_start]);
+    if !before.ends_with("*/") {
+        return None;
+    }
+    before.rfind("/**").map(|doc_start| &before[doc_start..])
 }
 
 // ─── Internal Helpers ───────────────────────────────────────────────────────

@@ -397,47 +397,15 @@ impl Backend {
                         );
                     });
                 }
-                Statement::Class(class) => {
-                    for member in class.members.iter() {
-                        if let ClassLikeMember::Method(method) = member
-                            && let MethodBody::Concrete(body) = &method.body
-                        {
-                            Self::extract_defines_from_statements(
-                                body.statements.iter(),
-                                defines,
-                                content,
-                                namespace,
-                            );
-                        }
-                    }
-                }
-                Statement::Trait(trait_def) => {
-                    for member in trait_def.members.iter() {
-                        if let ClassLikeMember::Method(method) = member
-                            && let MethodBody::Concrete(body) = &method.body
-                        {
-                            Self::extract_defines_from_statements(
-                                body.statements.iter(),
-                                defines,
-                                content,
-                                namespace,
-                            );
-                        }
-                    }
-                }
-                Statement::Enum(enum_def) => {
-                    for member in enum_def.members.iter() {
-                        if let ClassLikeMember::Method(method) = member
-                            && let MethodBody::Concrete(body) = &method.body
-                        {
-                            Self::extract_defines_from_statements(
-                                body.statements.iter(),
-                                defines,
-                                content,
-                                namespace,
-                            );
-                        }
-                    }
+                _ if let Some(body) = crate::parser::class_like_body(statement) => {
+                    crate::parser::for_each_concrete_method(body.members, |_, block| {
+                        Self::extract_defines_from_statements(
+                            block.statements.iter(),
+                            defines,
+                            content,
+                            namespace,
+                        );
+                    });
                 }
                 Statement::Function(func) => {
                     Self::extract_defines_from_statements(

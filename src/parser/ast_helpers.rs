@@ -1,6 +1,47 @@
 //! Small helpers for walking the mago-syntax AST: seeing through
-//! parentheses and negation, reading array literals, and visiting class
-//! members, `if` branches and nested statement lists.
+//! parentheses and negation, recognising `X::class`, reading array
+//! literals, and visiting class members, `if` branches and nested
+//! statement lists.
+
+/// Whether `access` fetches a class name (`X::class`) rather than a named
+/// constant.  `class` is a keyword, so any casing counts.
+pub(crate) fn is_class_fetch(access: &mago_syntax::cst::access::ClassConstantAccess<'_>) -> bool {
+    matches!(
+        &access.constant,
+        mago_syntax::cst::class_like::member::ClassLikeConstantSelector::Identifier(constant)
+            if constant.value.eq_ignore_ascii_case(b"class")
+    )
+}
+
+/// The class expression `X` of an `X::class` fetch, or `None` for any
+/// other expression.
+///
+/// `self`, `static` and `parent` parse as expression kinds of their own, so
+/// a caller that only wants a class name as written matches
+/// `Expression::Identifier` on the result (see [`class_fetch_identifier`]).
+pub(crate) fn class_fetch_target<'ast>(
+    expr: &mago_syntax::cst::Expression<'ast>,
+) -> Option<&'ast mago_syntax::cst::Expression<'ast>> {
+    use mago_syntax::cst::{Access, Expression};
+    match expr {
+        Expression::Access(Access::ClassConstant(access)) if is_class_fetch(access) => {
+            Some(access.class)
+        }
+        _ => None,
+    }
+}
+
+/// The class name written before `::class` (`Foo` in `Foo::class`), or
+/// `None` for `self::class`, `static::class`, `parent::class`, `$x::class`
+/// and any other expression.
+pub(crate) fn class_fetch_identifier<'ast>(
+    expr: &mago_syntax::cst::Expression<'ast>,
+) -> Option<&'ast mago_syntax::cst::Identifier<'ast>> {
+    match class_fetch_target(expr)? {
+        mago_syntax::cst::Expression::Identifier(ident) => Some(ident),
+        _ => None,
+    }
+}
 
 /// Unwrap parenthesized expressions to their inner expression.
 pub(crate) fn unwrap_parens<'a>(
@@ -94,6 +135,41 @@ pub(crate) fn class_like_members<'ast>(
         Node::Enum(enum_) => Some(enum_.members.as_slice()),
         _ => None,
     }
+}
+
+/// The `{ … }` body of a class-like declaration statement.
+#[derive(Clone, Copy)]
+pub(crate) struct ClassLikeBody<'s, 'ast> {
+    pub left_brace: mago_span::Span,
+    pub members: &'s [mago_syntax::cst::class_like::member::ClassLikeMember<'ast>],
+    pub right_brace: mago_span::Span,
+}
+
+impl ClassLikeBody<'_, '_> {
+    /// Whether `offset` falls between the braces, both included.
+    pub(crate) fn contains(&self, offset: u32) -> bool {
+        self.left_brace.start.offset <= offset && offset <= self.right_brace.end.offset
+    }
+}
+
+/// The body of a class, interface, trait or enum declaration, or `None` for
+/// any other statement.
+pub(crate) fn class_like_body<'s, 'ast>(
+    stmt: &'s mago_syntax::cst::Statement<'ast>,
+) -> Option<ClassLikeBody<'s, 'ast>> {
+    use mago_syntax::cst::Statement;
+    let (left_brace, members, right_brace) = match stmt {
+        Statement::Class(class) => (class.left_brace, &class.members, class.right_brace),
+        Statement::Interface(iface) => (iface.left_brace, &iface.members, iface.right_brace),
+        Statement::Trait(trait_) => (trait_.left_brace, &trait_.members, trait_.right_brace),
+        Statement::Enum(enum_) => (enum_.left_brace, &enum_.members, enum_.right_brace),
+        _ => return None,
+    };
+    Some(ClassLikeBody {
+        left_brace,
+        members: members.as_slice(),
+        right_brace,
+    })
 }
 
 /// Call `visit` for each method of `members` that has a body, handing it

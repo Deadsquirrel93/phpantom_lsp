@@ -329,6 +329,14 @@ pub(crate) fn extract_wants_all_occurrences(data: &CodeActionData, all_kind: &st
         .unwrap_or(data.action_kind == all_kind)
 }
 
+/// The byte range `[start, end)` that `range` selects in `content`, or
+/// `None` for an empty selection or one that runs past the end.
+pub(crate) fn selected_byte_range(content: &str, range: Range) -> Option<(usize, usize)> {
+    let start = crate::text_position::position_to_byte_offset(content, range.start);
+    let end = crate::text_position::position_to_byte_offset(content, range.end);
+    (start < end && end <= content.len()).then_some((start, end))
+}
+
 /// The selection `[start, end)` and every textually identical expression
 /// within `[scope_start, scope_end)`, in source order.
 ///

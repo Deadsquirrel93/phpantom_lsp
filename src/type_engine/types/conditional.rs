@@ -1626,27 +1626,18 @@ fn class_named_by_quoted_string(
     class_named_by_string(&name, class_loader)
 }
 
-/// Extract the class name from an `X::class` expression.
-///
-/// Matches `Expression::Access(Access::ClassConstant(cca))` where the
-/// constant selector is the identifier `class`.
+/// Extract the class name from an `X::class` expression, as written
+/// (`self`, `static` and `parent` included).
 pub(crate) fn extract_class_string_from_expr(expr: &Expression<'_>) -> Option<String> {
-    if let Expression::Access(Access::ClassConstant(cca)) = expr
-        && let ClassLikeConstantSelector::Identifier(ident) = &cca.constant
-        && ident.value == b"class"
-    {
-        // Extract the class name from the LHS
-        return match cca.class {
-            Expression::Identifier(class_ident) => {
-                Some(crate::atom::bytes_to_str(class_ident.value()).to_string())
-            }
-            Expression::Self_(_) => Some("self".to_string()),
-            Expression::Static(_) => Some("static".to_string()),
-            Expression::Parent(_) => Some("parent".to_string()),
-            _ => None,
-        };
+    match crate::parser::class_fetch_target(expr)? {
+        Expression::Identifier(class_ident) => {
+            Some(crate::atom::bytes_to_str(class_ident.value()).to_string())
+        }
+        Expression::Self_(_) => Some("self".to_string()),
+        Expression::Static(_) => Some("static".to_string()),
+        Expression::Parent(_) => Some("parent".to_string()),
+        _ => None,
     }
-    None
 }
 
 #[cfg(test)]

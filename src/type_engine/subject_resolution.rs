@@ -115,11 +115,7 @@ pub(crate) fn resolve_subject_type(
                 is_in_static_method: false,
                 preserve_static: false,
             };
-            let access_kind = if is_static {
-                AccessKind::DoubleColon
-            } else {
-                AccessKind::Arrow
-            };
+            let access_kind = AccessKind::of_member_access(is_static);
             let resolved = crate::type_engine::resolver::resolve_target_classes_expr(
                 &expr,
                 access_kind,

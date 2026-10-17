@@ -33,7 +33,6 @@ use parking_lot::RwLock;
 use mago_allocator::LocalArena;
 use mago_database::file::FileId;
 use mago_names::resolver::NameResolver;
-use mago_span::HasSpan;
 use mago_syntax::cst::*;
 use mago_syntax::parser::parse_file_content;
 use tower_lsp::lsp_types::Url;
@@ -588,7 +587,7 @@ fn array_values_are_class_consts(array: &Array<'_>) -> bool {
     let mut any = false;
     for (_, value) in key_value_elements(array) {
         any = true;
-        if !is_class_const(value) {
+        if crate::parser::class_fetch_target(value).is_none() {
             return false;
         }
     }
@@ -599,11 +598,7 @@ fn array_values_are_class_consts(array: &Array<'_>) -> bool {
 fn first_array_element<'ast, 'arena>(
     expr: &'ast Expression<'arena>,
 ) -> Option<&'ast Expression<'arena>> {
-    let elements = match expr {
-        Expression::Array(arr) => &arr.elements,
-        Expression::LegacyArray(arr) => &arr.elements,
-        _ => return None,
-    };
+    let elements = crate::parser::array_literal_elements(expr)?;
     elements.iter().find_map(|element| match element {
         ArrayElement::Value(v) => Some(v.value),
         _ => None,
@@ -629,19 +624,6 @@ fn collect_string_class_pairs(
     out
 }
 
-/// Whether `expr` is a `Something::class` constant access.
-fn is_class_const(expr: &Expression<'_>) -> bool {
-    matches!(
-        expr,
-        Expression::Access(Access::ClassConstant(cca))
-            if matches!(
-                &cca.constant,
-                ClassLikeConstantSelector::Identifier(id)
-                    if bytes_to_str(id.value).eq_ignore_ascii_case("class")
-            )
-    )
-}
-
 /// Extract the fully-qualified name from a `Something::class` expression,
 /// resolving short names through the file's namespace and use statements.
 /// Returns `None` for non-`::class` expressions and for `parent::class` /
@@ -654,32 +636,17 @@ fn class_const_fqn(
     resolved: &OwnedResolvedNames,
     self_fqn: Option<&str>,
 ) -> Option<String> {
-    let Expression::Access(Access::ClassConstant(cca)) = expr else {
-        return None;
-    };
-    let ClassLikeConstantSelector::Identifier(constant) = &cca.constant else {
-        return None;
-    };
-    if !bytes_to_str(constant.value).eq_ignore_ascii_case("class") {
-        return None;
-    }
     // `self::class` / `static::class` are their own expression variants (not
     // `Expression::Identifier`); resolve them to `self_fqn` when the caller
     // knows which class's source is being parsed. `parent::class` is
     // relative and carries no useful concrete for an alias table.
-    if matches!(cca.class, Expression::Self_(_) | Expression::Static(_)) {
-        return self_fqn.map(|fqn| fqn.trim_start_matches('\\').to_string());
+    match crate::parser::class_fetch_target(expr)? {
+        Expression::Self_(_) | Expression::Static(_) => {
+            self_fqn.map(|fqn| fqn.trim_start_matches('\\').to_string())
+        }
+        Expression::Identifier(ident) => resolved.class_fqn(ident),
+        _ => None,
     }
-    let Expression::Identifier(ident) = cca.class else {
-        return None;
-    };
-    let raw = bytes_to_str(ident.value());
-    let offset = ident.span().start.offset;
-    if let Some(fqn) = resolved.get(offset) {
-        return Some(fqn.trim_start_matches('\\').to_string());
-    }
-    // Fall back to the written name when the resolver did not track it.
-    (!raw.is_empty()).then(|| raw.trim_start_matches('\\').to_string())
 }
 
 /// The value expression for a top-level `return [ 'key' => … ]` entry.

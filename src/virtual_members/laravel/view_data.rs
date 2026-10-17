@@ -371,19 +371,8 @@ fn composer_class_name(
     scope: &Scope,
     resolved: &OwnedResolvedNames,
 ) -> Option<String> {
-    if let Expression::Access(Access::ClassConstant(access)) = handler
-        && matches!(
-            &access.constant,
-            ClassLikeConstantSelector::Identifier(constant)
-                if constant.value.eq_ignore_ascii_case(b"class")
-        )
-        && let Expression::Identifier(ident) = access.class
-    {
-        if let Some(fqn) = resolved.get(ident.span().start.offset) {
-            return Some(fqn.trim_start_matches('\\').to_string());
-        }
-        let raw = bytes_to_str(ident.value()).trim_start_matches('\\');
-        return (!raw.is_empty()).then(|| raw.to_string());
+    if let Some(ident) = crate::parser::class_fetch_identifier(handler) {
+        return resolved.class_fqn(ident);
     }
 
     // A single-quoted class name keeps its doubled separators in source.

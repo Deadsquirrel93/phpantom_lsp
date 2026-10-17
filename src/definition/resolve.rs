@@ -290,11 +290,7 @@ impl Backend {
                 is_method_call,
                 ..
             } => {
-                let access_kind = if *is_static {
-                    AccessKind::DoubleColon
-                } else {
-                    AccessKind::Arrow
-                };
+                let access_kind = AccessKind::of_member_access(*is_static);
                 let access_hint = if *is_method_call {
                     MemberAccessHint::MethodCall
                 } else {

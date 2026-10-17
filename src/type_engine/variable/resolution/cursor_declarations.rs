@@ -71,53 +71,8 @@ pub(super) fn find_param_at_cursor(
                     return Some(t);
                 }
             }
-            Statement::Class(class) => {
-                for member in class.members.iter() {
-                    if let ClassLikeMember::Method(method) = member
-                        && let Some(t) = check_param_list(
-                            &method.parameter_list,
-                            var_name,
-                            cursor_offset,
-                            content,
-                            method.span().start.offset as usize,
-                        )
-                    {
-                        return Some(t);
-                    }
-                }
-            }
-            Statement::Trait(trait_def) => {
-                for member in trait_def.members.iter() {
-                    if let ClassLikeMember::Method(method) = member
-                        && let Some(t) = check_param_list(
-                            &method.parameter_list,
-                            var_name,
-                            cursor_offset,
-                            content,
-                            method.span().start.offset as usize,
-                        )
-                    {
-                        return Some(t);
-                    }
-                }
-            }
-            Statement::Enum(enum_def) => {
-                for member in enum_def.members.iter() {
-                    if let ClassLikeMember::Method(method) = member
-                        && let Some(t) = check_param_list(
-                            &method.parameter_list,
-                            var_name,
-                            cursor_offset,
-                            content,
-                            method.span().start.offset as usize,
-                        )
-                    {
-                        return Some(t);
-                    }
-                }
-            }
-            Statement::Interface(iface) => {
-                for member in iface.members.iter() {
+            _ if let Some(body) = crate::parser::class_like_body(stmt) => {
+                for member in body.members {
                     if let ClassLikeMember::Method(method) = member
                         && let Some(t) = check_param_list(
                             &method.parameter_list,

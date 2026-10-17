@@ -158,23 +158,8 @@ fn collect_include_links_from_statement(
                 collect_include_links_from_statement(s, content, file_dir, links);
             }
         }
-        Statement::Class(class) => {
-            for member in class.members.iter() {
-                collect_include_links_from_class_member(member, content, file_dir, links);
-            }
-        }
-        Statement::Interface(iface) => {
-            for member in iface.members.iter() {
-                collect_include_links_from_class_member(member, content, file_dir, links);
-            }
-        }
-        Statement::Trait(trait_def) => {
-            for member in trait_def.members.iter() {
-                collect_include_links_from_class_member(member, content, file_dir, links);
-            }
-        }
-        Statement::Enum(enum_def) => {
-            for member in enum_def.members.iter() {
+        _ if let Some(body) = crate::parser::class_like_body(stmt) => {
+            for member in body.members {
                 collect_include_links_from_class_member(member, content, file_dir, links);
             }
         }

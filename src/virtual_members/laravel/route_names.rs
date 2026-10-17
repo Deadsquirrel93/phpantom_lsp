@@ -698,23 +698,12 @@ pub(super) fn for_each_nested_statement(stmt: &Statement<'_>, f: &mut dyn FnMut(
         Statement::Function(func) => visit(func.body.statements.as_slice()),
         // A service provider is a route source in its own right: its
         // `map()`/`boot()` bodies are where `Route::group(…)` runs.
-        Statement::Class(c) => visit_class_member_bodies(c.members.as_slice(), &mut visit),
-        Statement::Trait(t) => visit_class_member_bodies(t.members.as_slice(), &mut visit),
-        Statement::Enum(e) => visit_class_member_bodies(e.members.as_slice(), &mut visit),
-        _ => {}
-    }
-}
-
-fn visit_class_member_bodies(
-    members: &[ClassLikeMember<'_>],
-    visit: &mut impl FnMut(&[Statement<'_>]),
-) {
-    for member in members {
-        if let ClassLikeMember::Method(method) = member
-            && let MethodBody::Concrete(body) = &method.body
-        {
-            visit(body.statements.as_slice());
+        _ if let Some(body) = crate::parser::class_like_body(stmt) => {
+            crate::parser::for_each_concrete_method(body.members, |_, block| {
+                visit(block.statements.as_slice())
+            });
         }
+        _ => {}
     }
 }
 

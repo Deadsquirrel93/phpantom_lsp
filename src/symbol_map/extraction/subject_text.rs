@@ -401,11 +401,8 @@ pub(super) fn format_arg_expr(expr: &Expression<'_>) -> String {
     match expr {
         // Foo::class
         Expression::Access(Access::ClassConstant(cca)) => {
-            if let ClassLikeConstantSelector::Identifier(ident) = &cca.constant
-                && ident.value == b"class"
-            {
-                let class_text = expr_to_subject_text(cca.class);
-                return format!("{}::class", class_text);
+            if crate::parser::is_class_fetch(cca) {
+                return format!("{}::class", expr_to_subject_text(cca.class));
             }
             "...".to_string()
         }

@@ -14,7 +14,7 @@ use std::sync::Arc;
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
-use crate::atom::{atom, bytes_to_str, last_segment};
+use crate::atom::{atom, bytes_to_str};
 use crate::docblock;
 use crate::parser::with_parsed_program;
 use crate::php_type::{PhpType, TypeKind};
@@ -397,10 +397,8 @@ pub(in crate::type_engine) fn resolve_variable_in_statements<'b>(
 
     for &stmt in &stmts {
         match stmt {
-            Statement::Class(class) => {
-                let start = class.left_brace.start.offset;
-                let end = class.right_brace.end.offset;
-                if ctx.cursor_offset < start || ctx.cursor_offset > end {
+            _ if let Some(body) = crate::parser::class_like_body(stmt) => {
+                if !body.contains(ctx.cursor_offset) {
                     continue;
                 }
                 // The cursor is inside this class body.  PHP method
@@ -409,31 +407,7 @@ pub(in crate::type_engine) fn resolve_variable_in_statements<'b>(
                 // the member scan found (even if empty, e.g. after
                 // `unset($var)`), and never fall through to the
                 // top-level walk.
-                return resolve_variable_in_members(class.members.iter(), ctx);
-            }
-            Statement::Interface(iface) => {
-                let start = iface.left_brace.start.offset;
-                let end = iface.right_brace.end.offset;
-                if ctx.cursor_offset < start || ctx.cursor_offset > end {
-                    continue;
-                }
-                return resolve_variable_in_members(iface.members.iter(), ctx);
-            }
-            Statement::Enum(enum_def) => {
-                let start = enum_def.left_brace.start.offset;
-                let end = enum_def.right_brace.end.offset;
-                if ctx.cursor_offset < start || ctx.cursor_offset > end {
-                    continue;
-                }
-                return resolve_variable_in_members(enum_def.members.iter(), ctx);
-            }
-            Statement::Trait(trait_def) => {
-                let start = trait_def.left_brace.start.offset;
-                let end = trait_def.right_brace.end.offset;
-                if ctx.cursor_offset < start || ctx.cursor_offset > end {
-                    continue;
-                }
-                return resolve_variable_in_members(trait_def.members.iter(), ctx);
+                return resolve_variable_in_members(body.members.iter(), ctx);
             }
             Statement::Namespace(ns) => {
                 // Only recurse into namespace blocks that contain the
@@ -844,12 +818,6 @@ fn resolve_variable_in_members<'b>(
                 let blk_start = block.left_brace.start.offset;
                 let blk_end = block.right_brace.end.offset;
                 if ctx.cursor_offset >= blk_start && ctx.cursor_offset <= blk_end {
-                    let has_scope_attr = method.attribute_lists.iter().any(|al| {
-                        al.attributes
-                            .iter()
-                            .any(|a| last_segment(a.name.value()) == b"Scope")
-                    });
-
                     // Extract the enclosing method's @return type for
                     // generator yield inference inside the body.
                     // Use blk_start + 1 (just past the opening `{`)
@@ -868,15 +836,12 @@ fn resolve_variable_in_members<'b>(
                         top_level_scope: ctx.top_level_scope.clone(),
                         ..super::forward_walk::ForwardWalkCtx::fresh_from_var_ctx(ctx)
                     };
-                    let method_name_str = bytes_to_str(method.name.value).to_string();
-                    let is_static = method.modifiers.contains_static();
                     return super::forward_walk::resolve_in_method_body(
                         ctx.var_name,
                         method.parameter_list.parameters.iter(),
                         block.statements.iter(),
                         method.span().start.offset,
-                        Some((&method_name_str, has_scope_attr)),
-                        is_static,
+                        super::forward_walk::BodyOwner::method(method),
                         &fw_ctx,
                     )
                     .unwrap_or_default();
@@ -953,13 +918,7 @@ fn resolve_abstract_method_param(
     method: &Method<'_>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Vec<ResolvedType> {
-    let has_scope_attr = method.attribute_lists.iter().any(|al| {
-        al.attributes
-            .iter()
-            .any(|a| last_segment(a.name.value()) == b"Scope")
-    });
-
-    let method_name_str = bytes_to_str(method.name.value).to_string();
+    let owner = super::forward_walk::BodyOwner::method(method);
 
     for param in method.parameter_list.parameters.iter() {
         let pname = bytes_to_str(param.variable.name);
@@ -973,15 +932,15 @@ fn resolve_abstract_method_param(
         };
 
         let trait_prototype =
-            super::forward_walk::trait_prototype_method(Some(&method_name_str), &fw_ctx);
+            super::forward_walk::trait_prototype_method(owner.method_name, &fw_ctx);
 
         return super::forward_walk::resolve_param_type(
             pname,
             param,
             &super::forward_walk::EnclosingMethod {
                 span_start: method.span().start.offset,
-                name: Some(&method_name_str),
-                has_scope_attr,
+                name: owner.method_name,
+                has_scope_attr: owner.has_scope_attr,
                 trait_prototype: trait_prototype.as_ref(),
             },
             &fw_ctx,

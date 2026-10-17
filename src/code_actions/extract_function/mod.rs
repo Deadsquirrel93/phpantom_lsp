@@ -29,7 +29,7 @@ pub(crate) use crate::code_actions::{
 pub(crate) use crate::completion::phpdoc::generation::enrichment_plain;
 pub(crate) use crate::php_type::PhpType;
 pub(crate) use crate::scope_collector::ScopeMap;
-use crate::text_position::{offset_to_position, position_to_byte_offset};
+use crate::text_position::offset_to_position;
 pub(crate) use crate::type_engine::resolver::Loaders;
 pub(crate) use crate::types::ClassInfo;
 
@@ -65,17 +65,10 @@ impl Backend {
         params: &CodeActionParams,
         out: &mut Vec<CodeActionOrCommand>,
     ) {
-        // Only activate when the selection is non-empty.
-        if params.range.start == params.range.end {
+        let Some((start, end)) = crate::code_actions::selected_byte_range(content, params.range)
+            .and_then(|(start, end)| trim_selection(content, start, end))
+        else {
             return;
-        }
-
-        let start_offset = position_to_byte_offset(content, params.range.start);
-        let end_offset = position_to_byte_offset(content, params.range.end);
-
-        let (start, end) = match trim_selection(content, start_offset, end_offset) {
-            Some(range) => range,
-            None => return,
         };
 
         if !selection_covers_complete_statements(content, start, end) {
@@ -169,10 +162,8 @@ impl Backend {
         let range = &data.range;
 
         // ── Re-validate the selection (content may have changed) ────
-        let start_offset = position_to_byte_offset(content, range.start);
-        let end_offset = position_to_byte_offset(content, range.end);
-
-        let (start, end) = trim_selection(content, start_offset, end_offset)?;
+        let (start, end) = crate::code_actions::selected_byte_range(content, *range)
+            .and_then(|(start, end)| trim_selection(content, start, end))?;
 
         if !selection_covers_complete_statements(content, start, end) {
             return None;

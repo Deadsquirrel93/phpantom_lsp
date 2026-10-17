@@ -249,10 +249,7 @@ fn static_class_of(expr: &Expression<'_>, ctx: &ForwardWalkCtx<'_>) -> Option<Ar
     match expr {
         Expression::Parenthesized(inner) => static_class_of(inner.expression, ctx),
         Expression::Access(Access::ClassConstant(access)) => {
-            let ClassLikeConstantSelector::Identifier(constant) = &access.constant else {
-                return None;
-            };
-            if !bytes_to_str(constant.value).eq_ignore_ascii_case("class") {
+            if !crate::parser::is_class_fetch(access) {
                 return None;
             }
             ctx.written_names()

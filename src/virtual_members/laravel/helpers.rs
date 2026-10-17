@@ -1292,23 +1292,8 @@ fn walk_stmt_exprs(
                 walk_stmt_exprs(s, f)?;
             }
         }
-        Statement::Class(class) => {
-            for member in class.members.iter() {
-                walk_class_member_exprs(member, f)?;
-            }
-        }
-        Statement::Interface(iface) => {
-            for member in iface.members.iter() {
-                walk_class_member_exprs(member, f)?;
-            }
-        }
-        Statement::Trait(t) => {
-            for member in t.members.iter() {
-                walk_class_member_exprs(member, f)?;
-            }
-        }
-        Statement::Enum(e) => {
-            for member in e.members.iter() {
+        _ if let Some(body) = crate::parser::class_like_body(stmt) => {
+            for member in body.members {
                 walk_class_member_exprs(member, f)?;
             }
         }

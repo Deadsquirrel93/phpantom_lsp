@@ -100,7 +100,7 @@ pub(super) fn resolve_rhs_property_access(
             }
             _ => None,
         };
-        let is_class_fetch = const_name.as_deref() == Some("class");
+        let is_class_fetch = crate::parser::is_class_fetch(cca);
 
         let target_classes = match crate::class_lookup::class_expression_name(
             cca.class,
@@ -698,27 +698,9 @@ pub(super) fn find_this_property_assignment_in_toplevel<'b>(
             continue;
         }
         match stmt {
-            Statement::Class(class) => {
+            _ if let Some(body) = crate::parser::class_like_body(stmt) => {
                 if let Some(found) = find_property_assignment_in_members(
-                    class.members.iter(),
-                    prop_name,
-                    cursor_offset,
-                ) {
-                    return Some(found);
-                }
-            }
-            Statement::Trait(trait_def) => {
-                if let Some(found) = find_property_assignment_in_members(
-                    trait_def.members.iter(),
-                    prop_name,
-                    cursor_offset,
-                ) {
-                    return Some(found);
-                }
-            }
-            Statement::Enum(enum_def) => {
-                if let Some(found) = find_property_assignment_in_members(
-                    enum_def.members.iter(),
+                    body.members.iter(),
                     prop_name,
                     cursor_offset,
                 ) {

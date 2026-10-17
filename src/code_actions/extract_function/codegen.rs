@@ -171,42 +171,25 @@ pub(crate) fn build_extracted_definition(info: &ExtractionInfo) -> String {
     let param_list = build_param_list(&info.params);
     let return_type = build_return_type(info);
 
-    match info.target {
-        ExtractionTarget::Method => {
-            out.push_str(&info.member_indent);
-            out.push_str("private ");
-            if info.is_static {
-                out.push_str("static ");
-            }
-            out.push_str("function ");
-            out.push_str(&info.name);
-            out.push('(');
-            out.push_str(&param_list);
-            out.push(')');
-            if !return_type.is_empty() {
-                out.push_str(": ");
-                out.push_str(&return_type);
-            }
-            out.push('\n');
-            out.push_str(&info.member_indent);
-            out.push_str("{\n");
-        }
-        ExtractionTarget::Function => {
-            out.push_str(&info.member_indent);
-            out.push_str("function ");
-            out.push_str(&info.name);
-            out.push('(');
-            out.push_str(&param_list);
-            out.push(')');
-            if !return_type.is_empty() {
-                out.push_str(": ");
-                out.push_str(&return_type);
-            }
-            out.push('\n');
-            out.push_str(&info.member_indent);
-            out.push_str("{\n");
+    out.push_str(&info.member_indent);
+    if info.target == ExtractionTarget::Method {
+        out.push_str("private ");
+        if info.is_static {
+            out.push_str("static ");
         }
     }
+    out.push_str("function ");
+    out.push_str(&info.name);
+    out.push('(');
+    out.push_str(&param_list);
+    out.push(')');
+    if !return_type.is_empty() {
+        out.push_str(": ");
+        out.push_str(&return_type);
+    }
+    out.push('\n');
+    out.push_str(&info.member_indent);
+    out.push_str("{\n");
 
     // Rewrite guard returns in the body if needed.
     let body_text = match &info.return_strategy {

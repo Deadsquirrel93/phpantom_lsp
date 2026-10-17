@@ -171,13 +171,7 @@ fn gate_model_subject(
 ) -> Option<(crate::symbol_map::SubjectText, bool)> {
     let span = expr.span();
     match expr {
-        Expression::Access(Access::ClassConstant(cca))
-            if matches!(
-                &cca.constant,
-                ClassLikeConstantSelector::Identifier(ident)
-                    if bytes_to_str(ident.value).eq_ignore_ascii_case("class")
-            ) =>
-        {
+        Expression::Access(Access::ClassConstant(cca)) if crate::parser::is_class_fetch(cca) => {
             let name = expr_to_subject_text(cca.class);
             let class_span = cca.class.span();
             (!name.is_empty()).then(|| {

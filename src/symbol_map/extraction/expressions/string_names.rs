@@ -50,12 +50,7 @@ pub(super) fn try_emit_array_callable_span(
     let (subject_text, subject_span, is_static) = match first {
         // `Class::class` — static-style access on the class name.
         Expression::Access(Access::ClassConstant(cca)) => {
-            let is_class_const = matches!(
-                &cca.constant,
-                ClassLikeConstantSelector::Identifier(ident)
-                    if bytes_to_str(ident.value).eq_ignore_ascii_case("class")
-            );
-            if !is_class_const {
+            if !crate::parser::is_class_fetch(cca) {
                 return;
             }
             (expr_to_subject_text(cca.class), cca.class.span(), true)

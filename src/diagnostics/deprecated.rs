@@ -201,11 +201,7 @@ impl Backend {
                         None if subject_str.starts_with('$') => {
                             let enclosing_class = find_class_at_offset(local_classes, span.start);
 
-                            let access_kind = if *is_static {
-                                AccessKind::DoubleColon
-                            } else {
-                                AccessKind::Arrow
-                            };
+                            let access_kind = AccessKind::of_member_access(*is_static);
 
                             let cache_key = SubjectCacheKey::build(
                                 symbol_map,
