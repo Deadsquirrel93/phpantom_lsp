@@ -256,7 +256,7 @@ pub(crate) fn resolve_arg_variable_raw_type(
 /// that don't resolve to loadable classes (e.g. `array<string, Config>`).
 ///
 /// Routes through the shared call-resolution pipeline
-/// (`resolve_call_return_types_expr_with_hint`) so class-level and
+/// (`resolve_call_return_type_hint`) so class-level and
 /// method-level template substitutions apply to the returned type.
 /// Returns `None` when the text is not a call expression or the callee
 /// has no declared return type.
@@ -279,9 +279,7 @@ pub(crate) fn resolve_arg_call_raw_type(
     else {
         return None;
     };
-    let mut hint: Option<PhpType> = None;
-    Backend::resolve_call_return_types_expr_with_hint(callee, args_text, rctx, Some(&mut hint));
-    hint
+    Backend::resolve_call_return_type_hint(callee, args_text, rctx)
 }
 
 /// Resolve an argument's raw iterable type for positional generic

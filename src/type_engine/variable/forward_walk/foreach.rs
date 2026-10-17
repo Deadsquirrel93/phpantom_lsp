@@ -80,7 +80,33 @@ pub(crate) fn narrow_iterated_collection<'b>(
     entry_value_types: Option<&[ResolvedType]>,
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
-) -> Option<()> {
+) {
+    let Some((collection_key, collection_type)) =
+        guarded_collection_type(foreach, body_stmts, iter_type, entry_value_types, ctx)
+    else {
+        return;
+    };
+    // Keep whatever class backs the container itself (a `Collection` object
+    // rather than a plain array); only its element type changed.
+    let mut entry = scope
+        .get(&collection_key)
+        .first()
+        .cloned()
+        .unwrap_or_else(|| ResolvedType::from_type_string(collection_type.clone()));
+    entry.type_string = collection_type;
+    scope.set(&collection_key, vec![entry]);
+}
+
+/// The subject key of the collection [`narrow_iterated_collection`]
+/// narrows and the type the loop's leading guards proved it has, or `None`
+/// when the loop proves nothing about its entries.
+fn guarded_collection_type<'b>(
+    foreach: &'b Foreach<'b>,
+    body_stmts: &[&'b Statement<'b>],
+    iter_type: Option<&PhpType>,
+    entry_value_types: Option<&[ResolvedType]>,
+    ctx: &ForwardWalkCtx<'_>,
+) -> Option<(String, PhpType)> {
     // A braced body arrives as a single `Block` statement, and the guards
     // are its children rather than the body's.  Checked before anything is
     // allocated: a loop that does not open with a guard is the common case
@@ -135,16 +161,7 @@ pub(crate) fn narrow_iterated_collection<'b>(
     let element = ResolvedType::types_joined(narrowed);
     let collection_type =
         crate::type_engine::variable::array_func_rules::with_element_type(iter_type, element)?;
-    // Keep whatever class backs the container itself (a `Collection` object
-    // rather than a plain array); only its element type changed.
-    let mut entry = scope
-        .get(&collection_key)
-        .first()
-        .cloned()
-        .unwrap_or_else(|| ResolvedType::from_type_string(collection_type.clone()));
-    entry.type_string = collection_type;
-    scope.set(&collection_key, vec![entry]);
-    Some(())
+    Some((collection_key, collection_type))
 }
 
 /// The unexpanded iterable type, tried source by source.
@@ -698,7 +715,7 @@ pub(crate) fn process_foreach<'b>(
         if body_always_runs && exits.breaks.is_empty() {
             mark_visited_keys_written(foreach, &body_stmts, iter_type.as_ref(), scope);
         }
-        let _ = narrow_iterated_collection(
+        narrow_iterated_collection(
             foreach,
             &body_stmts,
             iter_type.as_ref(),

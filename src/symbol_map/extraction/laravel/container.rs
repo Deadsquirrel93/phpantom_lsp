@@ -37,7 +37,9 @@ pub(crate) fn is_laravel_container_expr(object: &Expression<'_>) -> bool {
 /// to exist rather than introducing it.  `alias()` is the odd one out the
 /// other way: it names the key it introduces second, after the binding that
 /// key stands for.
-fn container_key_argument(member_name: &str) -> Option<(usize, bool)> {
+pub(in crate::symbol_map::extraction) fn container_key_argument(
+    member_name: &str,
+) -> Option<(usize, bool)> {
     match member_name.to_ascii_lowercase().as_str() {
         "make" | "makewith" | "resolve" | "bound" | "resolved" | "extend" => Some((0, false)),
         "bind" | "bindif" | "singleton" | "singletonif" | "scoped" | "scopedif" | "instance" => {

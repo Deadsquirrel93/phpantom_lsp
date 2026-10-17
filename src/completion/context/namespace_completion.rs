@@ -124,7 +124,7 @@ impl Backend {
         position: Position,
         uri: &str,
     ) -> (Vec<CompletionItem>, bool) {
-        let prefix_lower = prefix.to_lowercase();
+        let prefix_lower = prefix.to_ascii_lowercase();
         let mut namespaces: HashSet<String> = HashSet::new();
 
         // Collect the project's own PSR-4 prefixes (without trailing
@@ -266,7 +266,7 @@ impl Backend {
         // ── Filter and build items ──────────────────────────────────
         let mut items: Vec<CompletionItem> = namespaces
             .into_iter()
-            .filter(|ns| ns.to_lowercase().contains(&prefix_lower))
+            .filter(|ns| crate::ci_map::contains_folded(ns, &prefix_lower))
             .map(|ns| {
                 let sn = ns.rsplit('\\').next().unwrap_or(&ns);
 

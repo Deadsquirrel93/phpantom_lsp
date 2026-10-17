@@ -784,19 +784,18 @@ pub(crate) fn find_route_registration_references(
     let snapshot = backend.user_file_symbol_maps_for_reference_keys(&keys);
     let mut locations: Vec<Location> = Vec::new();
     for name in &names {
-        for location in super::find_laravel_string_key_references(
+        locations.extend(super::find_laravel_string_key_references(
             backend,
             &LaravelStringKind::Route,
             name,
             uri,
             &snapshot,
             include_declaration,
-        ) {
-            if !locations.contains(&location) {
-                locations.push(location);
-            }
-        }
+        ));
     }
+    // A file reached both on its own and under a named group registers
+    // the same call under two names.
+    crate::references::sort_locations_for_references(&mut locations);
     (!locations.is_empty()).then_some(locations)
 }
 

@@ -336,6 +336,48 @@ pub(crate) fn is_position_independent_call_expression(expr: &str) -> bool {
     !matches!(expr, "new self" | "new static" | "new parent")
 }
 
+/// The callable each call expression in a file resolves to, memoized by
+/// the expression's text for the expressions
+/// [`is_position_independent_call_expression`] accepts.
+///
+/// There is one cache per `namespace` block, since the same text can name a
+/// different target under another block's imports.
+pub(crate) struct CallTargetCache<'a> {
+    blocks: crate::types::PerBlock<
+        'a,
+        std::cell::RefCell<HashMap<String, Option<crate::types::ResolvedCallableTarget>>>,
+    >,
+}
+
+impl<'a> CallTargetCache<'a> {
+    pub(crate) fn new(file_ctx: &'a FileContext) -> Self {
+        Self {
+            blocks: file_ctx.per_block(|_, _| std::cell::RefCell::new(HashMap::new())),
+        }
+    }
+
+    /// The callable `expr` at `offset` resolves to, resolved once per
+    /// block.
+    pub(crate) fn target(
+        &self,
+        backend: &Backend,
+        expr: &str,
+        content: &str,
+        offset: u32,
+        file_ctx: &FileContext,
+    ) -> Option<crate::types::ResolvedCallableTarget> {
+        let cache = self.blocks.at(offset);
+        if let Some(cached) = cache.borrow().get(expr) {
+            return cached.clone();
+        }
+        let resolved = backend.resolve_callable_target_at_offset(expr, content, offset, file_ctx);
+        cache
+            .borrow_mut()
+            .insert(expr.to_string(), resolved.clone());
+        resolved
+    }
+}
+
 /// Build a standard diagnostic with the common fields pre-filled.
 ///
 /// Most diagnostic collectors build `Diagnostic` values with `source`

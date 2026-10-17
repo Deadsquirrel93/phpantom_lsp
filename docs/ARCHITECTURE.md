@@ -358,8 +358,11 @@ class context for resolution.
    (e.g. `$cls = Pen::class; $cls::make()`).
 4. **`functionName`** — resolves via `resolve_function_name` (use map,
    namespace, stubs). Falls back to first-class callable resolution:
-   if the expression is a `$variable`, scans backward for
-   `$var = target(...)` and recursively resolves the underlying target.
+   if the expression is a `$variable`, looks up the last
+   `$var = target(...)` assignment visible from the call among the
+   file's first-class callable assignments (collected by one AST walk
+   per parse, `collect_fcc_assignments`) and recursively resolves the
+   underlying target.
 
 ## Source Names and Resolved Names
 

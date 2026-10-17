@@ -491,7 +491,8 @@ fn parse_facade_default_aliases(content: &str) -> Option<HashMap<String, String>
 /// `'Alias' => Class::class` pair found anywhere inside the `aliases` value.
 fn parse_config_facade_aliases(content: &str) -> HashMap<String, String> {
     with_parsed(content, |program, resolved| {
-        let Some(aliases_value) = find_return_array_entry(program, "aliases") else {
+        let Some(aliases_value) = super::array_file::returned_array_entry(program, "aliases")
+        else {
             return HashMap::new();
         };
         let mut arrays = Vec::new();
@@ -649,33 +650,6 @@ fn class_const_fqn(
     }
 }
 
-/// The value expression for a top-level `return [ 'key' => … ]` entry.
-fn find_return_array_entry<'ast, 'arena>(
-    program: &'ast Program<'arena>,
-    key: &str,
-) -> Option<&'ast Expression<'arena>> {
-    for stmt in program.statements.iter() {
-        if let Statement::Return(ret) = stmt
-            && let Some(value) = ret.value
-        {
-            let elements = match value {
-                Expression::Array(arr) => &arr.elements,
-                Expression::LegacyArray(arr) => &arr.elements,
-                _ => continue,
-            };
-            for (k, v) in elements.iter().filter_map(|e| match e {
-                ArrayElement::KeyValue(kv) => Some((kv.key, kv.value)),
-                _ => None,
-            }) {
-                if string_literal_matches(k, key) {
-                    return Some(v);
-                }
-            }
-        }
-    }
-    None
-}
-
 /// The [`Node`] for an expression, so it can be fed to [`collect_arrays`].
 fn node_of_expression<'ast, 'arena>(expr: &'ast Expression<'arena>) -> Node<'ast, 'arena> {
     Node::Expression(expr)
@@ -684,17 +658,6 @@ fn node_of_expression<'ast, 'arena>(expr: &'ast Expression<'arena>) -> Node<'ast
 /// Extract a string-literal's content (without quotes) from an expression.
 fn string_literal(expr: &Expression<'_>, content: &str) -> Option<String> {
     super::helpers::extract_string_literal(expr, content).map(|(text, _, _)| text.to_string())
-}
-
-/// Whether `expr` is a string literal equal to `expected`.
-fn string_literal_matches(expr: &Expression<'_>, expected: &str) -> bool {
-    // Only the raw source text is available without content here, so match via
-    // the literal's own value.
-    matches!(
-        expr,
-        Expression::Literal(literal::Literal::String(s))
-            if s.value.is_some_and(|v| v == expected.as_bytes())
-    )
 }
 
 #[cfg(test)]

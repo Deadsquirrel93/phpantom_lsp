@@ -230,7 +230,7 @@ fn collect_variables_from_symbol_map(
             break;
         }
         // If this scope is an arrow function, walk up to the parent.
-        if map.arrow_fn_scopes.contains(&scope) {
+        if map.is_arrow_fn_scope(scope) {
             // Find the parent scope: the next-innermost scope that
             // contains `scope` but is not `scope` itself.
             let mut parent: u32 = 0;

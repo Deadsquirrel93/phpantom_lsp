@@ -357,13 +357,45 @@ pub(crate) fn resolve_param_type(
     enclosing: &EnclosingMethod<'_>,
     ctx: &ForwardWalkCtx<'_>,
 ) -> Vec<ResolvedType> {
+    let docblock = super::super::resolution::declared_param_docblock_type(
+        ctx.content,
+        enclosing.span_start as usize,
+        pname,
+    );
+    let mut param_results = declared_param_type(pname, param, docblock, enclosing, ctx).results;
+    if param.ellipsis.is_some() {
+        wrap_variadic(&mut param_results);
+    }
+    param_results
+}
+
+/// What a parameter's declaration says it holds: [`resolve_param_type`]
+/// before a variadic parameter is wrapped into the array it receives.
+pub(crate) struct DeclaredParam {
+    /// The native hint, refined by the `@param` type where that may stand
+    /// in for it, with the declaration's template bounds substituted.
+    pub(crate) effective: Option<PhpType>,
+    /// What the parameter holds.
+    pub(crate) results: Vec<ResolvedType>,
+}
+
+/// The type a parameter's declaration gives it, from its native hint and
+/// `docblock`, the `@param` type the declaration's docblock spells for it,
+/// as written.  The caller reads the docblock, since a closure's is the one
+/// attached to the closure rather than to a declaration.
+pub(crate) fn declared_param_type(
+    pname: &str,
+    param: &FunctionLikeParameter<'_>,
+    docblock: Option<PhpType>,
+    enclosing: &EnclosingMethod<'_>,
+    ctx: &ForwardWalkCtx<'_>,
+) -> DeclaredParam {
     let EnclosingMethod {
         span_start: method_span_start,
         name: method_name,
         has_scope_attr,
         trait_prototype,
     } = *enclosing;
-    let is_variadic = param.ellipsis.is_some();
     // The hint as written, which is what the declarations it is compared
     // against below record.
     let written_native = param.hint.as_ref().map(|h| extract_hint_type(h));
@@ -419,12 +451,7 @@ pub(crate) fn resolve_param_type(
     // templates are marked with their bounds before the docblock is
     // weighed against the native hint, so `@param T $foo` on `int $foo`
     // (`@template T of int`) is judged by what `T` is known to be.
-    let unmarked_docblock_type = super::super::resolution::declared_param_docblock_type(
-        ctx.content,
-        method_span_start as usize,
-        pname,
-    )
-    .map(|t| resolve_docblock_param_type(&t, ctx));
+    let unmarked_docblock_type = docblock.map(|t| resolve_docblock_param_type(&t, ctx));
     let raw_docblock_type = unmarked_docblock_type.clone().map(|t| {
         super::super::resolution::substitute_template_param_bounds(
             t,
@@ -564,7 +591,7 @@ pub(crate) fn resolve_param_type(
     let mut param_results = if !resolved_from_effective.is_empty() {
         ResolvedType::from_classes_with_hint(
             resolved_from_effective,
-            effective_type.unwrap_or_else(|| {
+            effective_type.clone().unwrap_or_else(|| {
                 type_for_resolution
                     .cloned()
                     .unwrap_or_else(PhpType::untyped)
@@ -631,11 +658,10 @@ pub(crate) fn resolve_param_type(
         }
     }
 
-    if is_variadic {
-        wrap_variadic(&mut param_results);
+    DeclaredParam {
+        effective: effective_type,
+        results: param_results,
     }
-
-    param_results
 }
 
 /// Turn a variadic parameter's element types into the array it receives.

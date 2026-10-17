@@ -34,7 +34,9 @@ use crate::types::ClassInfo;
 pub(crate) use ancestor_generics::{
     extract_generic_arg_from_ancestor, extract_generic_args_from_ancestor,
 };
-pub(crate) use ancestry::{ancestors, find_declaring_ancestor, find_declaring_trait};
+pub(crate) use ancestry::{
+    ancestors, find_declaring_ancestor, find_declaring_trait, supertypes, used_traits_deep,
+};
 pub(crate) use enrichment::enrich_method_arc_from_ancestor;
 pub(crate) use enrichment::enrich_property_arc_from_ancestor;
 pub(crate) use member_types::{resolve_method_return_type, resolve_property_type_hint};

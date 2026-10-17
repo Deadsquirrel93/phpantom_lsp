@@ -13,12 +13,15 @@ pub(in crate::symbol_map::extraction) fn is_morph_map_registration_method(
         || member_name.eq_ignore_ascii_case("enforceMorphMap")
 }
 
+/// The argument the `whereHasMorph()` family takes its morph types in.
+pub(crate) const MORPH_TYPES_ARG: usize = 1;
+
 /// Whether `member_name` is a query-builder method whose second argument is a
 /// list of morph types (`whereHasMorph($relation, ['post', 'video'], …)`).
 ///
 /// Laravel maps each entry through `Relation::getMorphedModel()`, so a plain
 /// string there is a morph alias.
-pub(in crate::symbol_map::extraction) fn is_morph_types_query_method(member_name: &str) -> bool {
+pub(crate) fn is_morph_types_query_method(member_name: &str) -> bool {
     matches!(
         member_name.to_ascii_lowercase().as_str(),
         "hasmorph"

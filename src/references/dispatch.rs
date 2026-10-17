@@ -378,12 +378,7 @@ impl Backend {
             SymbolKind::SelfStaticParent(ssp_kind) => {
                 // `$this` is a file-local variable, not a cross-file class search.
                 if *ssp_kind == SelfStaticParentKind::This {
-                    return self.find_this_references(
-                        uri,
-                        content,
-                        span_start,
-                        include_declaration,
-                    );
+                    return self.find_this_references(uri, content, span_start);
                 }
 
                 // For real self/static/parent keywords, resolve to the class FQN.

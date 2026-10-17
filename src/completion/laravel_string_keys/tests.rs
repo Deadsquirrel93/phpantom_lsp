@@ -136,10 +136,76 @@ fn detects_route_call() {
 
 #[test]
 fn detects_instance_route_call() {
-    let content = "<?php\n$redirect->route('user.');\n";
+    let content = "<?php\nredirect()->route('user.');\n";
     let ctx = detect_at_end(content, "user.").expect("should detect ->route() context");
     assert!(matches!(ctx.kind, LaravelStringKind::Route));
     assert_eq!(ctx.prefix, "user.");
+}
+
+/// `->route()` names a route only on the URL builders the symbol map
+/// recognises: on a request it reads a route parameter.
+#[test]
+fn rejects_route_on_an_unrelated_receiver() {
+    for call in ["$request->route('id", "$this->redirect()->route('id"] {
+        let content = format!("<?php\n{call}");
+        assert!(
+            detect_at_end(&content, "id").is_none(),
+            "`{call}` does not name a route"
+        );
+    }
+}
+
+/// A string past the first argument is classified by its position, the way
+/// the symbol map reads the finished call.
+#[test]
+fn later_arguments_complete_what_their_position_names() {
+    for (call, expected) in [
+        ("View::renderWhen($ok, 'emails.", LaravelStringKind::View),
+        ("View::renderEach('emails.", LaravelStringKind::View),
+        (
+            "view()->renderUnless($ok, 'emails.",
+            LaravelStringKind::View,
+        ),
+        ("Route::view('/about', 'emails.", LaravelStringKind::View),
+        (
+            "$this->authorizeForUser($user, 'emails.",
+            LaravelStringKind::GateAbility,
+        ),
+        (
+            "$query->whereHasMorph('commentable', ['emails.",
+            LaravelStringKind::MorphAlias,
+        ),
+        (
+            "Comment::whereHasMorph('commentable', 'emails.",
+            LaravelStringKind::MorphAlias,
+        ),
+        (
+            "$request->routeIs('admin.*', 'emails.",
+            LaravelStringKind::Route,
+        ),
+        (
+            "Gate::any(['update', 'emails.",
+            LaravelStringKind::GateAbility,
+        ),
+        ("config()->get('emails.", LaravelStringKind::Config),
+    ] {
+        let content = format!("<?php\n{call}");
+        let ctx =
+            detect_at_end(&content, "emails.").unwrap_or_else(|| panic!("should detect `{call}`"));
+        assert_eq!(ctx.kind, expected, "for `{call}`");
+        assert_eq!(ctx.prefix, "emails.", "for `{call}`");
+    }
+    for call in [
+        "View::make($view, 'emails.",
+        "Route::view('emails.",
+        "$this->authorize($user, 'emails.",
+        "Config::getMany(['app.name' => 'emails.",
+    ] {
+        assert!(
+            detect_at_end(&format!("<?php\n{call}"), "emails.").is_none(),
+            "`{call}` names nothing there"
+        );
+    }
 }
 
 #[test]
@@ -958,7 +1024,7 @@ fn storage_argument_scanners_handle_nested_and_malformed_php() {
     let before_named = r#"Storage::fake(config: ['message' => 'it\'s', 'factory' => wrap(fn () => new class {})], disk:"#;
     assert_eq!(
         callable_before_scalar_argument(before_named),
-        Some(("Storage::fake", Some("disk")))
+        Some(("Storage::fake", ArgumentSlot::Named("disk")))
     );
 
     let nested = r#"<?php
@@ -973,7 +1039,7 @@ Storage::forgetDisk([['nested'], wrap(fn () => new class {}), 'it\'s', 'archive'
     assert!(callable_before_scalar_argument("orphan name:").is_none());
     assert_eq!(
         callable_before_scalar_argument("foo(prénom:"),
-        Some(("foo", Some("prénom"))),
+        Some(("foo", ArgumentSlot::Named("prénom"))),
         "a non-ASCII argument name is read whole, not sliced mid-character"
     );
     assert!(enclosing_call_open_paren("completed(); orphan").is_none());

@@ -621,6 +621,60 @@ pub(crate) fn scan_top_level(
     None
 }
 
+/// [`scan_top_level`] backward: walk `bytes` from its end toward its start,
+/// calling `at_depth_zero` on every byte that is not inside a quote or a
+/// bracket pair whose closer the walk has already passed.
+///
+/// The opening brackets around the end of `bytes`, which nothing after them
+/// closes, are offered to the visitor too: they are what a scan for the
+/// call or array the end sits in is looking for. Quoting (`'…'` and `"…"`,
+/// with backslash escapes) is handled here, but comments are not, since
+/// reading backward a comment cannot be told from code; the text being
+/// scanned is the code before a cursor, which a caller has already placed
+/// outside any string.
+///
+/// `Skip(n)` moves on to the byte `n` before the visited one. Returns the
+/// offset the visitor stopped at, or `None` when it aborted or the scan ran
+/// out of text.
+pub(crate) fn scan_top_level_backward(
+    bytes: &[u8],
+    mut at_depth_zero: impl FnMut(&[u8], usize) -> ScanStep,
+) -> Option<usize> {
+    let mut depth: u32 = 0;
+    let mut i = bytes.len();
+    while i > 0 {
+        i -= 1;
+        match bytes[i] {
+            quote @ (b'\'' | b'"') => {
+                // Walk back to the quote that opens this literal.
+                while i > 0 {
+                    i -= 1;
+                    if bytes[i] == quote && !is_escaped(bytes, i) {
+                        break;
+                    }
+                }
+                continue;
+            }
+            b')' | b']' | b'}' => {
+                depth += 1;
+                continue;
+            }
+            b'(' | b'[' | b'{' if depth > 0 => {
+                depth -= 1;
+                continue;
+            }
+            _ if depth > 0 => continue,
+            _ => {}
+        }
+        match at_depth_zero(bytes, i) {
+            ScanStep::Skip(n) => i = i.saturating_sub(n.max(1) - 1),
+            ScanStep::Stop => return Some(i),
+            ScanStep::Abort => return None,
+        }
+    }
+    None
+}
+
 /// The byte offsets of the commas at the top level of `text`: the ones not
 /// inside a quote, a comment, or a bracket (see [`scan_top_level`]).
 pub(crate) fn top_level_commas(text: &str) -> impl Iterator<Item = usize> + '_ {

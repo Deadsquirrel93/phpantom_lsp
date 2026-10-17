@@ -149,6 +149,13 @@ const RENDER_EACH_VIEW_ARGS: [usize; 2] = [0, RENDER_EACH_EMPTY_ARG];
 /// to, which is the one that doubles as raw markup.
 const RENDER_EACH_EMPTY_ARG: usize = 3;
 
+/// Whether the view factory's `member_name` names a template in its
+/// positional argument `index`.
+pub(crate) fn view_factory_names_view_at(member_name: &str, index: usize) -> bool {
+    view_factory_method_name_index(member_name) == Some(index)
+        || (is_render_each_method(member_name) && RENDER_EACH_VIEW_ARGS.contains(&index))
+}
+
 /// Whether `member_name` is the view factory's `renderEach()`, the PHP
 /// spelling of Blade's `@each`.
 pub(crate) fn is_render_each_method(member_name: &str) -> bool {

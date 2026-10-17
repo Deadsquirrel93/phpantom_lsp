@@ -139,27 +139,14 @@ fn doc_property(
     type_hint: Option<&PhpType>,
     subs: &HashMap<String, PhpType>,
 ) -> PropertyInfo {
-    PropertyInfo {
-        name,
-        name_offset: 0,
-        type_hint: type_hint.map(|t| {
-            if subs.is_empty() {
-                t.clone()
-            } else {
-                t.substitute(subs)
-            }
-        }),
-        native_type_hint: None,
-        description: None,
-        is_static: false,
-        is_readonly: false,
-        visibility: Visibility::Public,
-        deprecation_message: None,
-        deprecated_replacement: None,
-        see_refs: Vec::new(),
-        is_virtual: true,
-        source: None,
-    }
+    let type_hint = type_hint.map(|t| {
+        if subs.is_empty() {
+            t.clone()
+        } else {
+            t.substitute(subs)
+        }
+    });
+    PropertyInfo::virtual_property_owned(name, type_hint)
 }
 
 /// Like [`doc_property`], but marked [`PropertySource::DocblockTag`].

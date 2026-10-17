@@ -68,13 +68,7 @@ pub(super) fn resolve_array_access_subject(
         // `$a->findChildrenOfType(Foo::class)[0]` → `Foo`).  The
         // un-substituted raw return type is kept as a fallback for
         // callees the hint path doesn't cover.
-        let mut hint: Option<PhpType> = None;
-        let _ = Backend::resolve_call_return_types_expr_with_hint(
-            callee,
-            args_text,
-            ctx,
-            Some(&mut hint),
-        );
+        let hint = Backend::resolve_call_return_type_hint(callee, args_text, ctx);
         let raw = resolve_call_raw_return_type(callee, args_text, ctx);
         let candidates = hint.into_iter().chain(raw);
         if let Some(resolved) =

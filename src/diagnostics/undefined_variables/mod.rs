@@ -607,13 +607,9 @@ fn is_in_nested_frame(
     frame: &crate::scope_collector::Frame,
     frames: &[crate::scope_collector::Frame],
 ) -> bool {
-    frames.iter().any(|f| {
-        f.start > frame.start
-            && f.end < frame.end
-            && offset >= f.start
-            && offset <= f.end
-            && f.kind != FrameKind::Catch
-    })
+    frame
+        .nested_frames_at(frames, offset)
+        .any(|f| f.kind != FrameKind::Catch)
 }
 
 /// Find the index of the parent frame for `frame_idx`.

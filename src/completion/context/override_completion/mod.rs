@@ -59,7 +59,7 @@ pub(crate) fn collect_overridable_methods(
 ) -> Vec<(MethodInfo, String, bool)> {
     let mut collector = OverrideCollector::<MethodInfo>::new(class, partial, class_loader);
 
-    collector.collect_from_parent_chain(&class.parent_class, 0);
+    collector.collect_from_parent_chain(class);
 
     for iface in &class.interfaces {
         if class.kind == ClassLikeKind::Enum {
@@ -69,11 +69,11 @@ pub(crate) fn collect_overridable_methods(
                 continue;
             }
         }
-        collector.collect_from_interface(iface, 0);
+        collector.collect_from_interface(iface);
     }
 
     collector.from_own_trait = true;
-    collector.collect_from_traits(&class.used_traits, 0);
+    collector.collect_from_traits(&class.used_traits);
 
     collector.results
 }
@@ -221,59 +221,46 @@ impl<'a, M: OverridableMember> OverrideCollector<'a, M> {
         }
     }
 
-    fn collect_from_parent_chain(&mut self, parent_name: &Option<crate::atom::Atom>, depth: usize) {
-        if depth > crate::types::MAX_INHERITANCE_DEPTH as usize {
-            return;
-        }
-        let Some(pname) = parent_name else {
-            return;
-        };
-        if !self.visited.insert(pname.to_string()) {
-            return;
-        }
-        let Some(parent) = (self.class_loader)(pname) else {
-            return;
-        };
-
-        self.push_from_class(&parent);
-        self.collect_from_traits(&parent.used_traits, depth + 1);
-
-        for iface in &parent.interfaces {
-            self.collect_from_interface(iface, depth + 1);
-        }
-
-        self.collect_from_parent_chain(&parent.parent_class, depth + 1);
-    }
-
-    fn collect_from_traits(&mut self, traits: &[crate::atom::Atom], depth: usize) {
-        if !self.walk_traits || depth > crate::types::MAX_INHERITANCE_DEPTH as usize {
-            return;
-        }
-        for tname in traits {
-            if !self.visited.insert(tname.to_string()) {
-                continue;
+    /// Each parent of `class`, nearest first, with the traits and
+    /// interfaces it brings.
+    fn collect_from_parent_chain(&mut self, class: &ClassInfo) {
+        for (name, parent) in crate::inheritance::ancestors(class, self.class_loader) {
+            if !self.visited.insert(name.to_string()) {
+                break;
             }
-            let Some(tr) = (self.class_loader)(tname) else {
-                continue;
-            };
-            self.push_from_class(&tr);
-            self.collect_from_traits(&tr.used_traits, depth + 1);
+            self.push_from_class(&parent);
+            self.collect_from_traits(&parent.used_traits);
+            for iface in &parent.interfaces {
+                self.collect_from_interface(iface);
+            }
         }
     }
 
-    fn collect_from_interface(&mut self, iface_name: &str, depth: usize) {
-        if !self.walk_interfaces || depth > crate::types::MAX_INHERITANCE_DEPTH as usize {
+    /// `traits` and every trait they use.
+    fn collect_from_traits(&mut self, traits: &[crate::atom::Atom]) {
+        if !self.walk_traits {
             return;
         }
-        if !self.visited.insert(iface_name.to_string()) {
+        for (name, used) in crate::inheritance::used_traits_deep(traits, self.class_loader) {
+            if self.visited.insert(name.to_string()) {
+                self.push_from_class(&used);
+            }
+        }
+    }
+
+    /// `iface_name` and every interface it extends.
+    fn collect_from_interface(&mut self, iface_name: &str) {
+        if !self.walk_interfaces || !self.visited.insert(iface_name.to_string()) {
             return;
         }
         let Some(iface) = (self.class_loader)(iface_name) else {
             return;
         };
         self.push_from_class(&iface);
-        for parent_iface in &iface.interfaces {
-            self.collect_from_interface(parent_iface, depth + 1);
+        for (name, parent) in crate::inheritance::supertypes(&iface, self.class_loader) {
+            if self.visited.insert(name.to_string()) {
+                self.push_from_class(&parent);
+            }
         }
     }
 
@@ -526,10 +513,10 @@ pub(crate) fn collect_overridable_properties(
     // Interfaces cannot declare properties.
     collector.walk_interfaces = false;
 
-    collector.collect_from_parent_chain(&class.parent_class, 0);
+    collector.collect_from_parent_chain(class);
 
     collector.from_own_trait = true;
-    collector.collect_from_traits(&class.used_traits, 0);
+    collector.collect_from_traits(&class.used_traits);
 
     collector.results
 }
@@ -550,12 +537,12 @@ pub(crate) fn collect_overridable_constants(
     collector.walk_traits = php_version >= TRAIT_CONST_MIN;
     collector.walk_interfaces = php_version >= INTERFACE_CONST_OVERRIDE_MIN;
 
-    collector.collect_from_parent_chain(&class.parent_class, 0);
+    collector.collect_from_parent_chain(class);
 
     for iface in &class.interfaces {
-        collector.collect_from_interface(iface, 0);
+        collector.collect_from_interface(iface);
     }
-    collector.collect_from_traits(&class.used_traits, 0);
+    collector.collect_from_traits(&class.used_traits);
 
     collector.results
 }

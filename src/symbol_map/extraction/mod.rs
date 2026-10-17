@@ -407,6 +407,7 @@ fn extract_symbol_map_inner(
     });
 
     ctx.assert_narrowing_offsets.sort();
+    ctx.arrow_fn_scopes.sort_unstable();
 
     // Sort template_defs by name_offset for binary search / reverse scan.
     ctx.template_defs.sort_by_key(|d| d.name_offset);

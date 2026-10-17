@@ -148,24 +148,7 @@ pub(crate) fn narrow_leaf_truthy<'b>(
     // `check() === true` proves what `check()` does.
     apply_bool_comparison_narrowing(condition, true, scope, ctx);
 
-    let mut var_names: Vec<String> = scope_keys_named_by(condition, scope)
-        .iter()
-        .map(|k| k.to_string())
-        .collect();
-    // Include variables from instanceof conditions that may not be in
-    // scope yet (e.g. undeclared variables used in instanceof checks).
-    for name in collect_condition_var_names(condition) {
-        if !var_names.contains(&name) {
-            var_names.push(name);
-        }
-    }
-    // Include property access keys from conditions (e.g. `$a->foo`
-    // from `$a->foo instanceof Foo`) so instanceof narrowing applies.
-    for key in collect_condition_property_keys(condition) {
-        if !var_names.contains(&key) {
-            var_names.push(key);
-        }
-    }
+    let mut var_names = condition_subject_keys(condition, scope);
     // Expand a bare boolean standing for a check (`$isHtml` from
     // `$isHtml = $raw instanceof HtmlString`) into the check itself, and
     // make sure its subject is narrowed below even when the condition
@@ -281,26 +264,10 @@ fn apply_condition_narrowing_inverse_single<'b>(
 
     let scope_resolver = scope.snapshot_resolver();
     let names = ctx.written_names();
-    // Include variables from instanceof conditions that may not be in
-    // scope yet (e.g. `if (!$foobar instanceof Foobar) { break; }`
-    // where `$foobar` was never assigned).  After the guard clause,
-    // `$foobar` must be `Foobar`.
-    let mut var_names: Vec<String> = scope_keys_named_by(condition, scope)
-        .iter()
-        .map(|k| k.to_string())
-        .collect();
-    for name in collect_condition_var_names(condition) {
-        if !var_names.contains(&name) {
-            var_names.push(name);
-        }
-    }
-    // Include property access keys from conditions (e.g. `$a->foo`
-    // from `$a->foo instanceof Foo`) so instanceof narrowing applies.
-    for key in collect_condition_property_keys(condition) {
-        if !var_names.contains(&key) {
-            var_names.push(key);
-        }
-    }
+    // A never-assigned subject counts too: after
+    // `if (!$foobar instanceof Foobar) { break; }`, `$foobar` must be
+    // `Foobar`.
+    let mut var_names = condition_subject_keys(condition, scope);
     // A bare boolean standing for a check inverts along with the rest of
     // the condition: `if (!$isHtml) { return; }` leaves `$raw` narrowed
     // to `HtmlString` after the guard.

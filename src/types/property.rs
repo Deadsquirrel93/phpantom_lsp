@@ -211,10 +211,15 @@ impl PropertyInfo {
     /// `PhpType → String → PhpType` round-trip when the caller already
     /// holds a `PhpType`.
     pub fn virtual_property_typed(name: &str, type_hint: Option<&PhpType>) -> Self {
+        Self::virtual_property_owned(crate::atom::atom(name), type_hint.cloned())
+    }
+
+    /// Create a virtual property from an interned name and an owned type.
+    pub fn virtual_property_owned(name: Atom, type_hint: Option<PhpType>) -> Self {
         Self {
-            name: crate::atom::atom(name),
+            name,
             name_offset: 0,
-            type_hint: type_hint.cloned(),
+            type_hint,
             native_type_hint: None,
             description: None,
             is_static: false,

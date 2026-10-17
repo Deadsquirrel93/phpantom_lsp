@@ -724,9 +724,9 @@ pub(crate) struct SymbolMap {
     /// methods, closures, and arrow functions.  Used by
     /// `find_enclosing_scope` to determine which scope the cursor is in.
     pub scopes: NestedRanges,
-    /// Scope start offsets of arrow functions.  Arrow functions inherit
-    /// the enclosing scope's variables (unlike closures which isolate
-    /// their scope).  Used by variable name completion to walk up
+    /// Scope start offsets of arrow functions, sorted.  Arrow functions
+    /// inherit the enclosing scope's variables (unlike closures which
+    /// isolate their scope).  Used by variable name completion to walk up
     /// through arrow function boundaries while stopping at closure
     /// and function boundaries.
     pub arrow_fn_scopes: Vec<u32>,
@@ -933,6 +933,11 @@ impl SymbolMap {
     /// the cursor is in top-level code.
     pub fn find_enclosing_scope(&self, offset: u32) -> u32 {
         self.scopes.innermost_start(offset)
+    }
+
+    /// Whether the scope starting at `scope_start` is an arrow function's.
+    pub fn is_arrow_fn_scope(&self, scope_start: u32) -> bool {
+        self.arrow_fn_scopes.binary_search(&scope_start).is_ok()
     }
 
     /// Determine the effective scope for a variable reference at `offset`.

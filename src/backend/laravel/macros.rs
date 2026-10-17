@@ -41,16 +41,12 @@ impl Backend {
         // The app's provider registration files are seeds too: adding a
         // provider there must trigger a rebuild.  Their reference
         // fingerprint is the provider class list itself.
-        if let Some(root) = self.workspace.workspace_root.read().clone() {
-            for rel in ["bootstrap/providers.php", "config/app.php"] {
-                let path = root.join(rel);
-                let uri = crate::util::path_to_uri(&path);
-                let refs = self
-                    .get_file_content(&uri)
-                    .map(|c| crate::virtual_members::laravel::parse_provider_class_list(&c))
-                    .unwrap_or_default();
-                seeds.insert(uri, refs);
-            }
+        for uri in self.laravel_provider_list_uris().into_iter().flatten() {
+            let refs = self
+                .get_file_content(&uri)
+                .map(|c| crate::virtual_members::laravel::parse_provider_class_list(&c))
+                .unwrap_or_default();
+            seeds.insert(uri, refs);
         }
 
         // Every mixin-class file the scan pulled macros from, so an edit to one

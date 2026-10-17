@@ -1447,3 +1447,34 @@ class Painter
         "only the default arm's closure passes a Shape, got: {messages:?}"
     );
 }
+
+/// A closure's `@param` stands in for the native hint only where it may,
+/// by the rule a function's parameters follow: one that names a class for
+/// an `int` parameter leaves the parameter an `int`.
+#[test]
+fn closure_param_docblock_does_not_replace_an_incompatible_hint() {
+    let backend = create_test_backend_with_full_stubs();
+    let php = r#"<?php
+class Foo {}
+
+function takesFoo(Foo $f): void {}
+
+function run(): void {
+    $closure = /** @param Foo $x */ function (int $x) {
+        takesFoo($x);
+    };
+    $arrow = /** @param Foo $y */ fn (int $y) => takesFoo($y);
+}
+"#;
+    let messages = slow_diagnostic_messages(
+        &backend,
+        "file:///closure_param_hint.php",
+        php,
+        "type_mismatch_argument",
+    );
+    assert_eq!(
+        messages.len(),
+        2,
+        "both parameters are ints, so both calls pass the wrong type, got: {messages:?}"
+    );
+}

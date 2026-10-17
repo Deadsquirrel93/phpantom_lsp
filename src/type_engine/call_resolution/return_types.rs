@@ -289,6 +289,20 @@ impl Backend {
         )
     }
 
+    /// The return type hint
+    /// [`Self::resolve_call_return_types_expr_with_hint`] captures for a
+    /// call, for a caller that wants the type itself (an array to index
+    /// into, a scalar) rather than the classes it names.
+    pub(crate) fn resolve_call_return_type_hint(
+        callee: &SubjectExpr,
+        text_args: &str,
+        ctx: &ResolutionCtx<'_>,
+    ) -> Option<PhpType> {
+        let mut hint = None;
+        Self::resolve_call_return_types_on_receiver(callee, text_args, None, ctx, Some(&mut hint));
+        hint
+    }
+
     /// [`resolve_call_return_types_expr_with_hint`] with the receiver of an
     /// instance method call optionally already resolved.
     ///

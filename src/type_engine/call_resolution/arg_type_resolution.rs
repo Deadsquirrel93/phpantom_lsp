@@ -315,13 +315,7 @@ impl Backend {
                 // function-level `@template` substitution all report
                 // through the hint.
                 callee @ SubjectExpr::FunctionCall(_) => {
-                    let mut hint: Option<PhpType> = None;
-                    let _ = Backend::resolve_call_return_types_expr_with_hint(
-                        callee,
-                        call_args,
-                        ctx,
-                        Some(&mut hint),
-                    );
+                    let hint = Backend::resolve_call_return_type_hint(callee, call_args, ctx);
                     if hint.is_some() {
                         return hint;
                     }

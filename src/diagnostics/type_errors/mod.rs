@@ -16,7 +16,6 @@ use compatibility::{
     first_rejected_callable_param, missing_required_shape_keys, shape_breaks_list_order,
 };
 
-use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 
 use mago_span::HasSpan;
@@ -34,9 +33,8 @@ use crate::atom::bytes_to_str;
 use crate::parser::{with_parse_cache, with_parsed_program};
 use crate::php_type::{PhpType, TypeKind, is_array_like_name};
 use crate::type_engine::variable::foreach_resolution::resolve_expression_type;
-use crate::types::ResolvedCallableTarget;
 
-use super::helpers::{is_position_independent_call_expression, make_diagnostic};
+use super::helpers::{CallTargetCache, is_position_independent_call_expression, make_diagnostic};
 
 /// Diagnostic code used for argument type mismatch diagnostics.
 pub(crate) const TYPE_MISMATCH_ARGUMENT_CODE: &str = "type_mismatch_argument";
@@ -456,9 +454,7 @@ impl Backend {
         // (`array_map`) are safe to cache.
         // One per `namespace` block: the same text can name a different
         // target under another block's imports.
-        let call_caches = file_ctx.per_block(|_, _| {
-            RefCell::new(HashMap::<String, Option<ResolvedCallableTarget>>::new())
-        });
+        let call_targets = CallTargetCache::new(&file_ctx);
 
         // ── Walk every call site ────────────────────────────────────
         for call_site in &symbol_map.call_sites {
@@ -517,19 +513,7 @@ impl Backend {
                     call_args_text,
                 )
             } else {
-                call_caches
-                    .at(call_site.args_start)
-                    .borrow_mut()
-                    .entry(expr.to_string())
-                    .or_insert_with(|| {
-                        self.resolve_callable_target_at_offset(
-                            expr,
-                            content,
-                            call_site.args_start,
-                            &file_ctx,
-                        )
-                    })
-                    .clone()
+                call_targets.target(self, expr, content, call_site.args_start, &file_ctx)
             };
 
             let resolved = match resolved {

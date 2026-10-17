@@ -198,6 +198,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Superglobals inside functions and methods.** Hover and completion now type `$_SERVER`, `$_GET` and the other superglobals as arrays inside a function or method body, as they already did in top-level code.
 - **Signature help for callables in enum methods.** After `$fn = makePen(...);` inside an enum method, `$fn(` now shows `makePen`'s signature, as it does in classes and traits.
 - **Docblock generation after an attribute on the same line.** Typing `/**` above `#[\Override] public function save(array $rows): void` now generates the method's docblock instead of skipping the line.
+- **Laravel name completion beyond the first argument.** Completion now offers a name wherever the finished call names one: the view in `View::renderWhen($ok, '…')` or `Route::view('/about', '…')`, the ability in `$this->authorizeForUser($user, '…')`, the morph types in `whereHasMorph('commentable', ['…'])`, and every entry of a list such as `Gate::any([…])`. View names are also offered in `view()->make('…')` and a mailable's `$this->view('…')`, and route names are no longer offered in `$request->route('…')`, which reads a route parameter.
+- **Abstract methods a parent gets from a trait.** A class extending an abstract class whose trait declares an abstract method is now reported when it does not implement it, and "Implement missing methods" adds a stub for it. The diagnostic also names the interface a method comes from when that interface extends another with the same short name.
+- **Closure parameters follow the rules of function parameters.** A closure's or arrow function's `@param` no longer replaces a native type it does not fit, so `/** @param Foo $x */ function (int $x)` reads `$x` as an `int`, the way a function's parameter is read.
+- **Service providers in a `config/app.php` written with `array()`.** Only the classes listed under `providers` are now read as service providers, as they already were for the `[…]` spelling.
 
 ## [0.11.1] - 2026-10-07
 

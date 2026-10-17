@@ -39,6 +39,20 @@ pub(crate) fn is_gate_check_method(member_name: &str) -> bool {
         .any(|name| member_name.eq_ignore_ascii_case(name))
 }
 
+/// What a `Gate` method does with the ability it is handed.
+///
+/// `has()` is the framework's own "is this ability registered?" predicate, so
+/// a name it does not find is the answer the call was written to get rather
+/// than a typo.  The span is still emitted — completion, hover, and
+/// go-to-definition all work inside it — but it is not judged.
+pub(in crate::symbol_map::extraction) fn gate_ability_role(member_name: &str) -> AbilityRole {
+    if member_name.eq_ignore_ascii_case("has") {
+        AbilityRole::Existence
+    } else {
+        AbilityRole::Check
+    }
+}
+
 /// Whether a static-call subject names Laravel's `Gate` facade.
 pub(in crate::symbol_map::extraction) fn is_gate_facade(clean_subject: &str) -> bool {
     matches_laravel_facade(clean_subject, "Gate")

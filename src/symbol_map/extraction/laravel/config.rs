@@ -199,17 +199,12 @@ pub(in crate::symbol_map::extraction) fn is_laravel_config_repository_call(
     object: &Expression<'_>,
     member_name: &str,
 ) -> bool {
-    if !is_config_repository_method(member_name) {
-        return false;
-    }
+    is_config_repository_method(member_name) && is_config_helper_call(object)
+}
 
-    match object {
-        Expression::Call(Call::Function(func_call)) => match func_call.function {
-            Expression::Identifier(ident) => {
-                strip_fqn_prefix(bytes_to_str(ident.value())).eq_ignore_ascii_case("config")
-            }
-            _ => false,
-        },
-        _ => false,
-    }
+/// Whether `object` is a call to the `config()` (or `\config()`) helper.
+pub(in crate::symbol_map::extraction) fn is_config_helper_call(object: &Expression<'_>) -> bool {
+    matches!(object, Expression::Call(Call::Function(func_call))
+        if matches!(func_call.function, Expression::Identifier(ident)
+            if strip_fqn_prefix(bytes_to_str(ident.value())).eq_ignore_ascii_case("config")))
 }

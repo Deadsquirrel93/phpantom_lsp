@@ -5,12 +5,13 @@
 //! implementations, this module offers a code action to generate stubs
 //! for all missing methods.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::atom::Atom;
 use crate::class_lookup::find_class_at_offset;
 use crate::signature_render::{detect_class_indent, format_params, format_return_type};
 use crate::text_position::offset_to_position;
@@ -112,341 +113,83 @@ pub(crate) fn collect_missing_methods(
     class: &ClassInfo,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Vec<MethodInfo> {
-    // Build the full set of concrete method names already available on
-    // this class: own methods + concrete methods from used traits +
-    // concrete methods inherited from the parent chain (including
-    // their traits).  This ensures that if a trait or parent implements
-    // an interface method, the child doesn't re-stub it.
-    let mut implemented_names: Vec<String> = class
+    use crate::inheritance::{ancestors, supertypes, used_traits_deep};
+
+    // The concrete methods already available on this class: its own, its
+    // traits', and those it inherits from the parent chain and the
+    // parents' traits.  A trait or parent that implements an interface
+    // method keeps the child from re-stubbing it.
+    let mut implemented: HashSet<String> = class
         .methods
         .iter()
         .map(|m| m.name.to_lowercase())
         .collect();
+    let mut add_concrete = |source: &ClassInfo| {
+        implemented.extend(
+            source
+                .methods
+                .iter()
+                .filter(|m| !m.is_abstract)
+                .map(|m| m.name.to_lowercase()),
+        );
+    };
+    for (_, used) in used_traits_deep(&class.used_traits, class_loader) {
+        add_concrete(&used);
+    }
+    for (_, parent) in ancestors(class, class_loader) {
+        add_concrete(&parent);
+        for (_, used) in used_traits_deep(&parent.used_traits, class_loader) {
+            add_concrete(&used);
+        }
+    }
 
-    collect_concrete_trait_methods_atoms(
-        &class.used_traits,
-        class_loader,
-        &mut implemented_names,
-        0,
-    );
-    collect_concrete_parent_methods_atom(
-        &class.parent_class,
-        class_loader,
-        &mut implemented_names,
-        0,
-    );
+    // PHP provides an enum's `from()`, `tryFrom()`, and `cases()` itself,
+    // so its implicit `BackedEnum`/`UnitEnum` contracts ask for nothing.
+    let is_enum = class.kind == ClassLikeKind::Enum;
+    let is_implicit_enum_contract =
+        |name: &str| is_enum && matches!(name.trim_start_matches('\\'), "BackedEnum" | "UnitEnum");
 
     let mut missing: Vec<MethodInfo> = Vec::new();
-    let mut seen: Vec<String> = Vec::new();
-
-    // ── Interfaces ──────────────────────────────────────────────────────
-    for iface_name in &class.interfaces {
-        // Skip implicit BackedEnum/UnitEnum interfaces on enums.
-        // PHP provides from(), tryFrom(), and cases() automatically
-        // at runtime — they don't need to be declared in the enum body.
-        if class.kind == crate::types::ClassLikeKind::Enum {
-            let iface_str: &str = iface_name;
-            let stripped = iface_str.strip_prefix('\\').unwrap_or(iface_str);
-            if stripped == "BackedEnum" || stripped == "UnitEnum" {
-                continue;
-            }
-        }
-        collect_from_interface(
-            iface_name,
-            class_loader,
-            &implemented_names,
-            &mut missing,
-            &mut seen,
-            0,
-        );
-    }
-
-    // ── Parent chain (abstract methods) ─────────────────────────────────
-    collect_from_parent_chain_atom(
-        &class.parent_class,
-        class_loader,
-        &implemented_names,
-        &mut missing,
-        &mut seen,
-        0,
-    );
-
-    // ── Used traits (abstract methods) ──────────────────────────────────
-    // For enums, filter out the implicit BackedEnum/UnitEnum traits
-    // whose abstract methods (from(), tryFrom(), cases()) are provided
-    // by PHP at runtime.
-    let trait_names: Vec<_> = if class.kind == crate::types::ClassLikeKind::Enum {
-        class
-            .used_traits
-            .iter()
-            .filter(|t| {
-                let stripped = t.strip_prefix('\\').unwrap_or(t);
-                stripped != "BackedEnum" && stripped != "UnitEnum"
-            })
-            .cloned()
-            .collect()
-    } else {
-        class.used_traits.to_vec()
-    };
-    collect_abstract_from_used_traits(
-        &trait_names,
-        class_loader,
-        &implemented_names,
-        &mut missing,
-        &mut seen,
-        0,
-    );
-
-    missing
-}
-
-/// Walk the parent chain and collect names of concrete (non-abstract)
-/// methods into `implemented`.  This lets us know which interface or
-/// abstract methods are already satisfied by a parent class.
-///
-/// Also collects concrete methods from traits used by each parent,
-/// since trait methods are effectively part of the class in PHP.
-fn collect_concrete_parent_methods_atom(
-    parent_name: &Option<crate::atom::Atom>,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    implemented: &mut Vec<String>,
-    depth: usize,
-) {
-    if depth > crate::types::MAX_INHERITANCE_DEPTH as usize {
-        return;
-    }
-
-    let parent_name = match parent_name {
-        Some(n) => n,
-        None => return,
-    };
-
-    let parent = match class_loader(parent_name) {
-        Some(c) => c,
-        None => return,
-    };
-
-    for method in &parent.methods {
-        if !method.is_abstract {
-            let lower = method.name.to_lowercase();
-            if !implemented.contains(&lower) {
-                implemented.push(lower);
-            }
-        }
-    }
-
-    // Traits used by the parent also provide concrete methods.
-    collect_concrete_trait_methods_atoms(&parent.used_traits, class_loader, implemented, depth + 1);
-
-    collect_concrete_parent_methods_atom(
-        &parent.parent_class,
-        class_loader,
-        implemented,
-        depth + 1,
-    );
-}
-
-/// Walk a list of used traits (and their sub-traits and parent classes)
-/// and collect names of concrete (non-abstract) methods into
-/// `implemented`.  In PHP, trait methods are effectively part of the
-/// class that uses them, so they satisfy interface and abstract-method
-/// requirements.
-fn collect_concrete_trait_methods_atoms(
-    trait_names: &[crate::atom::Atom],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    implemented: &mut Vec<String>,
-    depth: usize,
-) {
-    if depth > crate::types::MAX_INHERITANCE_DEPTH as usize {
-        return;
-    }
-
-    for trait_name in trait_names {
-        let trait_info = match class_loader(trait_name) {
-            Some(c) => c,
-            None => continue,
-        };
-
-        for method in &trait_info.methods {
-            if !method.is_abstract {
-                let lower = method.name.to_lowercase();
-                if !implemented.contains(&lower) {
-                    implemented.push(lower);
-                }
-            }
-        }
-
-        // Traits can use other traits — recurse into sub-traits.
-        if !trait_info.used_traits.is_empty() {
-            collect_concrete_trait_methods_atoms(
-                &trait_info.used_traits,
-                class_loader,
-                implemented,
-                depth + 1,
-            );
-        }
-
-        // Traits can also extend a parent class (rare but valid in
-        // the class model — e.g. stubs may model this).
-        collect_concrete_parent_methods_atom(
-            &trait_info.parent_class,
-            class_loader,
-            implemented,
-            depth + 1,
-        );
-    }
-}
-
-/// Recursively collect unimplemented methods from an interface and its
-/// parent interfaces.
-fn collect_from_interface(
-    iface_name: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    own_methods: &[String],
-    missing: &mut Vec<MethodInfo>,
-    seen: &mut Vec<String>,
-    depth: usize,
-) {
-    if depth > crate::types::MAX_INHERITANCE_DEPTH as usize {
-        return;
-    }
-
-    let iface = match class_loader(iface_name) {
-        Some(c) if c.kind == ClassLikeKind::Interface => c,
-        _ => return,
-    };
-
-    for method in &iface.methods {
-        let lower = method.name.to_lowercase();
-        if own_methods.contains(&lower) || seen.contains(&lower) {
-            continue;
-        }
-        seen.push(lower);
-        missing.push((**method).clone());
-    }
-
-    // Recurse into parent interfaces.
-    for parent_iface in &iface.interfaces {
-        collect_from_interface(
-            parent_iface,
-            class_loader,
-            own_methods,
-            missing,
-            seen,
-            depth + 1,
-        );
-    }
-
-    // Interfaces can also extend other interfaces via parent_class in
-    // some parser representations.
-    if let Some(parent) = iface.parent_class {
-        collect_from_interface(&parent, class_loader, own_methods, missing, seen, depth + 1);
-    }
-}
-
-/// Walk the parent class chain and collect abstract methods that need
-/// implementation.
-fn collect_from_parent_chain_atom(
-    parent_name: &Option<crate::atom::Atom>,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    own_methods: &[String],
-    missing: &mut Vec<MethodInfo>,
-    seen: &mut Vec<String>,
-    depth: usize,
-) {
-    if depth > crate::types::MAX_INHERITANCE_DEPTH as usize {
-        return;
-    }
-
-    let parent_name = match parent_name {
-        Some(n) => n,
-        None => return,
-    };
-
-    let parent = match class_loader(parent_name) {
-        Some(c) => c,
-        None => return,
-    };
-
-    // Collect interfaces from the parent that the child inherits
-    // transitively.
-    for iface_name in &parent.interfaces {
-        collect_from_interface(
-            iface_name,
-            class_loader,
-            own_methods,
-            missing,
-            seen,
-            depth + 1,
-        );
-    }
-
-    // Collect abstract methods from the parent itself.
-    for method in &parent.methods {
-        if !method.is_abstract {
-            continue;
-        }
-        let lower = method.name.to_lowercase();
-        if own_methods.contains(&lower) || seen.contains(&lower) {
-            continue;
-        }
-        seen.push(lower);
-        missing.push((**method).clone());
-    }
-
-    collect_from_parent_chain_atom(
-        &parent.parent_class,
-        class_loader,
-        own_methods,
-        missing,
-        seen,
-        depth + 1,
-    );
-}
-
-/// Walk used traits and collect their abstract methods that need
-/// implementation.  Recurses into sub-traits.
-fn collect_abstract_from_used_traits(
-    trait_names: &[crate::atom::Atom],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    own_methods: &[String],
-    missing: &mut Vec<MethodInfo>,
-    seen: &mut Vec<String>,
-    depth: usize,
-) {
-    if depth > crate::types::MAX_INHERITANCE_DEPTH as usize {
-        return;
-    }
-
-    for trait_name in trait_names {
-        let trait_info = match class_loader(trait_name) {
-            Some(c) => c,
-            None => continue,
-        };
-
-        for method in &trait_info.methods {
-            if !method.is_abstract {
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut require = |source: &ClassInfo, every_method: bool| {
+        for method in &source.methods {
+            if !every_method && !method.is_abstract {
                 continue;
             }
             let lower = method.name.to_lowercase();
-            if own_methods.contains(&lower) || seen.contains(&lower) {
+            if implemented.contains(&lower) || !seen.insert(lower) {
                 continue;
             }
-            seen.push(lower);
             missing.push((**method).clone());
         }
+    };
 
-        if !trait_info.used_traits.is_empty() {
-            collect_abstract_from_used_traits(
-                &trait_info.used_traits,
-                class_loader,
-                own_methods,
-                missing,
-                seen,
-                depth + 1,
-            );
+    // An interface the class or a parent implements requires all of its
+    // methods, and an abstract parent its abstract ones.
+    for (_, supertype) in supertypes(class, class_loader) {
+        if is_implicit_enum_contract(&supertype.fqn()) {
+            continue;
+        }
+        require(&supertype, supertype.kind == ClassLikeKind::Interface);
+    }
+
+    // So does an abstract method of a trait the class or a parent uses.
+    let own_traits: Vec<Atom> = class
+        .used_traits
+        .iter()
+        .filter(|name| !is_implicit_enum_contract(name))
+        .copied()
+        .collect();
+    for (_, used) in used_traits_deep(&own_traits, class_loader) {
+        require(&used, false);
+    }
+    for (_, parent) in ancestors(class, class_loader) {
+        for (_, used) in used_traits_deep(&parent.used_traits, class_loader) {
+            require(&used, false);
         }
     }
+
+    missing
 }
 
 /// Build the source text for all missing method stubs.

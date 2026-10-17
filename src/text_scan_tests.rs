@@ -2,8 +2,8 @@
 //! and the top-level scanners.
 
 use super::{
-    NamespaceDecls, find_semicolon_balanced, namespace_at_offset, split_top_level_commas,
-    top_level_commas,
+    NamespaceDecls, ScanStep, find_semicolon_balanced, namespace_at_offset,
+    scan_top_level_backward, split_top_level_commas, top_level_commas,
 };
 
 /// Return the namespace in force where `|` sits in `src` (the marker is
@@ -178,4 +178,28 @@ fn a_trailing_comma_and_blank_text_leave_no_empty_entry() {
     assert_eq!(split_top_level_commas("   "), Vec::<&str>::new());
     assert_eq!(split_top_level_commas(""), Vec::<&str>::new());
     assert_eq!(top_level_commas("$a, $b, ").count(), 2);
+}
+
+/// The opening bracket the end of `text` sits in, as the backward scan
+/// finds it.
+fn enclosing_open(text: &str) -> Option<usize> {
+    scan_top_level_backward(text.as_bytes(), |bytes, i| match bytes[i] {
+        b'(' | b'[' | b'{' => ScanStep::Stop,
+        b';' => ScanStep::Abort,
+        _ => ScanStep::Skip(1),
+    })
+}
+
+#[test]
+fn backward_scan_steps_over_closed_pairs_and_strings() {
+    assert_eq!(enclosing_open("f($a, [1, 2], g(3), "), Some(1));
+    assert_eq!(enclosing_open("f('(', \"[\", 'it\\'s ', "), Some(1));
+    assert_eq!(enclosing_open("$x = [fn () => h(1), "), Some(5));
+}
+
+#[test]
+fn backward_scan_stops_at_what_the_visitor_rules_out() {
+    assert_eq!(enclosing_open("done(); $x, "), None);
+    assert_eq!(enclosing_open("no bracket at all"), None);
+    assert_eq!(enclosing_open("f(';', "), Some(1));
 }

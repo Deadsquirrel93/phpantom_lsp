@@ -597,20 +597,10 @@ impl Backend {
                 format!("case {};", constant.name)
             }
         } else {
-            let visibility = format_visibility(constant.visibility);
-            let type_hint = constant
-                .type_hint
-                .as_ref()
-                .map(|t| format!(": {}", t))
-                .unwrap_or_default();
-            let value_suffix = constant
-                .value
-                .as_ref()
-                .map(|v| format!(" = {}", v))
-                .unwrap_or_default();
             format!(
-                "{}const {}{}{};",
-                visibility, constant.name, type_hint, value_suffix
+                "{}{}",
+                format_visibility(constant.visibility),
+                constant_declaration(constant)
             )
         };
 

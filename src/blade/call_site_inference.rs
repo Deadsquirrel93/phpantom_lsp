@@ -948,7 +948,10 @@ impl Backend {
     /// template joins it. A template that extends a template that extends
     /// the edited layout inherits from it too.
     fn refresh_blade_layout_children(&self, layout_uri: &str) {
-        let mut frontier = self.view_names_for_blade_uri(layout_uri);
+        let mut frontier: HashSet<String> = self
+            .view_names_for_blade_uri(layout_uri)
+            .into_iter()
+            .collect();
         if frontier.is_empty() {
             return;
         }
@@ -963,14 +966,11 @@ impl Backend {
             .collect();
 
         while !frontier.is_empty() && !pending.is_empty() {
-            let (children, rest): (Vec<_>, Vec<_>) =
-                pending.into_iter().partition(|(_, _, extends)| {
-                    extends
-                        .iter()
-                        .any(|extends| frontier.iter().any(|name| name == extends))
-                });
+            let (children, rest): (Vec<_>, Vec<_>) = pending
+                .into_iter()
+                .partition(|(_, _, extends)| extends.iter().any(|name| frontier.contains(name)));
             pending = rest;
-            frontier = Vec::new();
+            frontier.clear();
             for (uri, content, _) in children {
                 frontier.extend(self.view_names_for_blade_uri(&uri));
                 if self.reinfer_and_reparse_blade(&uri, &content) {

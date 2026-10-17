@@ -208,20 +208,7 @@ fn build_trait_summary_body(cls: &ClassInfo) -> String {
         if constant.visibility != Visibility::Public {
             continue;
         }
-        let type_hint = constant
-            .type_hint
-            .as_ref()
-            .map(|t| format!(": {}", t))
-            .unwrap_or_default();
-        let value_suffix = constant
-            .value
-            .as_ref()
-            .map(|v| format!(" = {}", v))
-            .unwrap_or_default();
-        member_lines.push(format!(
-            "    const {}{}{};",
-            constant.name, type_hint, value_suffix
-        ));
+        member_lines.push(format!("    {}", constant_declaration(constant)));
     }
 
     for prop in &cls.properties {

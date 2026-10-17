@@ -1086,7 +1086,7 @@ pub(crate) fn parse_provider_class_list(content: &str) -> Vec<String> {
     let owned = OwnedResolvedNames::from_resolved(&resolved);
 
     let mut out = Vec::new();
-    if let Some(providers_value) = find_return_array_entry(program, "providers") {
+    if let Some(providers_value) = super::array_file::returned_array_entry(program, "providers") {
         collect_class_consts(Node::Expression(providers_value), &owned, &mut out);
     } else {
         collect_class_consts(Node::Program(program), &owned, &mut out);
@@ -1109,32 +1109,6 @@ pub(crate) fn parse_provider_referenced_classes(content: &str) -> Vec<String> {
     let mut seen = HashSet::new();
     collect_provider_method_refs(Node::Program(program), &owned, &mut seen, &mut out);
     out
-}
-
-/// The value expression of a top-level `return [ 'key' => … ]` array entry.
-fn find_return_array_entry<'ast, 'arena>(
-    program: &'ast Program<'arena>,
-    key: &str,
-) -> Option<&'ast Expression<'arena>> {
-    for stmt in program.statements.iter() {
-        if let Statement::Return(ret) = stmt
-            && let Some(Expression::Array(arr)) = ret.value
-        {
-            for (k, v) in arr.elements.iter().filter_map(|e| match e {
-                ArrayElement::KeyValue(kv) => Some((kv.key, kv.value)),
-                _ => None,
-            }) {
-                if matches!(
-                    k,
-                    Expression::Literal(Literal::String(s))
-                        if s.value.is_some_and(|val| val == key.as_bytes())
-                ) {
-                    return Some(v);
-                }
-            }
-        }
-    }
-    None
 }
 
 fn collect_provider_method_refs(

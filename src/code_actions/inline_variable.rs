@@ -109,13 +109,9 @@ fn expression_has_side_effects(expr: &Expression<'_>) -> bool {
         Expression::Yield(_) => true,
         // Throw — side-effectful.
         Expression::Throw(_) => true,
-        // Assignment in the RHS is side-effectful.
-        Expression::Assignment(a) => {
-            // The assignment itself is a side effect; the RHS need not be
-            // inspected separately.
-            let _ = a;
-            true
-        }
+        // Assignment in the RHS is side-effectful; the RHS need not be
+        // inspected separately.
+        Expression::Assignment(_) => true,
         // Language constructs with side effects.
         Expression::Construct(construct) => matches!(
             construct,
