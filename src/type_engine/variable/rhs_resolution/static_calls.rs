@@ -8,7 +8,7 @@ use mago_syntax::cst::*;
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
-use crate::php_type::{PhpType, TypeKind};
+use crate::php_type::PhpType;
 use crate::types::{ClassInfo, ResolvedType};
 
 use crate::type_engine::call_resolution::MethodReturnCtx;
@@ -44,47 +44,27 @@ pub(super) fn resolve_rhs_static_call(
             ctx.source_class_loader,
             ctx.source_imports,
         ),
-        // ── `$var::method()` where `$var` holds a class-string ──
-        Expression::Variable(Variable::Direct(dv)) => {
-            let var_name = bytes_to_str(dv.name);
-            let targets =
-                crate::type_engine::variable::class_string_resolution::resolve_class_string_targets(
-                    var_name,
-                    ctx.cursor_offset,
-                    ctx,
-                );
-            // When there are multiple possible class targets (union class-string),
-            // resolve the method return type through each and union the results.
-            if targets.len() > 1 {
-                return static_call_on_class_strings(&targets, method_name, static_call, ctx);
-            }
-            if let Some(first) = targets.first() {
-                Some(first.fqn().to_string())
-            } else {
-                // Fallback: resolve the variable's type and extract the
-                // inner type from `class-string<T>`.  This handles
-                // parameters typed as `@param class-string<Foo> $var`
-                // where there is no `$var = Foo::class` assignment.
-                let resolved = resolve_var_types(var_name, ctx, ctx.cursor_offset);
-                let class_string = class_string_class_name(&resolved);
-                if class_string.is_none() && !resolved.is_empty() {
-                    return static_call_on_object(static_call, resolved, ctx);
+        // `$var::method()`, `$this->prop::method()`, `getFoo()::method()`:
+        // the classes the value names (a class-string, a string naming a
+        // class, or a union of them, whose results are unioned), or else
+        // the class of the object it holds.  A variable is read directly,
+        // since the RHS resolver's self-assignment guard would leave
+        // `$cls = $cls::next()` without a class.
+        class_expr => {
+            let resolved = match class_expr {
+                Expression::Variable(Variable::Direct(dv)) => {
+                    resolve_var_types(bytes_to_str(dv.name), ctx, ctx.cursor_offset)
                 }
-                class_string
-            }
-        }
-        // `$this->prop::method()`, `getFoo()::method()`: the class is the
-        // one a class-string names, or else the class of the object.
-        _ => {
-            let resolved = resolve_rhs_expression(static_call.class, ctx);
-            let class_string = resolved.iter().find_map(|rt| match rt.type_string.kind() {
-                TypeKind::ClassString(Some(inner)) => inner.base_name().map(|s| s.to_string()),
-                _ => None,
-            });
-            if class_string.is_none() && !resolved.is_empty() {
-                return static_call_on_object(static_call, resolved, ctx);
-            }
-            class_string
+                _ => resolve_rhs_expression(class_expr, ctx),
+            };
+            let targets = crate::type_engine::variable::class_string_resolution::classes_named_by(
+                &resolved, ctx,
+            );
+            return match targets.as_slice() {
+                [] => static_call_on_object(static_call, resolved, ctx),
+                [only] => static_call_on_class(only, method_name, static_call, ctx),
+                _ => static_call_on_class_strings(&targets, method_name, static_call, ctx),
+            };
         }
     };
     let Some(cls_name) = class_name else {
@@ -198,7 +178,7 @@ fn static_call_on_class(
 /// `$var::method()` where `$var` may hold any of several class-strings:
 /// the method resolved on each class, joined.
 fn static_call_on_class_strings(
-    targets: &[ClassInfo],
+    targets: &[Arc<ClassInfo>],
     method_name: &str,
     static_call: &StaticMethodCall<'_>,
     ctx: &VarResolutionCtx<'_>,
@@ -279,27 +259,6 @@ fn static_call_on_class_strings(
         return ResolvedType::from_classes_with_hint(resolved_classes, combined);
     }
     vec![ResolvedType::from_type_string(combined)]
-}
-
-/// The class a `class-string<Foo>` among `resolved` names, looking through
-/// a nullable and a union.
-fn class_string_class_name(resolved: &[ResolvedType]) -> Option<String> {
-    fn named(ty: &PhpType) -> Option<String> {
-        match ty.kind() {
-            TypeKind::ClassString(Some(inner)) => inner.base_name().map(|s| s.to_string()),
-            TypeKind::Nullable(inner) => match inner.kind() {
-                TypeKind::ClassString(Some(cs_inner)) => {
-                    cs_inner.base_name().map(|s| s.to_string())
-                }
-                _ => None,
-            },
-            _ => None,
-        }
-    }
-    resolved.iter().find_map(|rt| match rt.type_string.kind() {
-        TypeKind::Union(members) => members.iter().find_map(named),
-        _ => named(&rt.type_string),
-    })
 }
 
 /// `$obj::method()` where `$obj` holds an object rather than a class-string.

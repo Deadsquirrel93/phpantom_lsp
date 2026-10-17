@@ -127,31 +127,37 @@ pub(super) fn build_var_resolver<'a>(
     ctx: &'a ResolutionCtx<'a>,
 ) -> impl Fn(&str) -> Vec<String> + 'a {
     move |var_name: &str| -> Vec<String> {
-        if let Some(cc) = ctx.current_class {
-            let var_ctx = crate::type_engine::resolver::VarResolutionCtx {
-                source_imports: ctx.source_imports,
-                backend: ctx.backend,
-                ..crate::type_engine::resolver::VarResolutionCtx::new(
-                    var_name,
-                    cc,
-                    ctx.all_classes,
-                    ctx.content,
-                    ctx.cursor_offset,
-                    ctx.class_loader,
-                    ctx.source_class_loader,
-                )
-            };
-            crate::type_engine::variable::class_string_resolution::resolve_class_string_targets(
+        let placeholder;
+        let current_class = match ctx.current_class {
+            Some(cc) => cc,
+            None => {
+                placeholder =
+                    crate::class_lookup::class_context_placeholder(ctx.content, ctx.cursor_offset);
+                &placeholder
+            }
+        };
+        let var_ctx = crate::type_engine::resolver::VarResolutionCtx {
+            source_imports: ctx.source_imports,
+            backend: ctx.backend,
+            scope_var_resolver: ctx.scope_var_resolver,
+            ..crate::type_engine::resolver::VarResolutionCtx::new(
                 var_name,
+                current_class,
+                ctx.all_classes,
+                ctx.content,
                 ctx.cursor_offset,
-                &var_ctx,
+                ctx.class_loader,
+                ctx.source_class_loader,
             )
-            .iter()
-            .map(|c| c.fqn().to_string())
-            .collect()
-        } else {
-            vec![]
-        }
+        };
+        crate::type_engine::variable::class_string_resolution::resolve_class_string_targets(
+            var_name,
+            ctx.cursor_offset,
+            &var_ctx,
+        )
+        .iter()
+        .map(|c| c.fqn().to_string())
+        .collect()
     }
 }
 

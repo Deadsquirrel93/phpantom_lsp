@@ -8,8 +8,7 @@ use crate::type_engine::types::narrowing;
 use crate::types::{ClassInfo, ResolvedType};
 
 use super::super::rhs_resolution::{
-    ArithmeticOpKind, coalesce_assign_value, infer_addition_result_type,
-    infer_arithmetic_result_type, infer_modulo_result_type,
+    assignment_value, coalesce_assign_value, compound_assignment_result,
 };
 
 // ─── Statement processing ───────────────────────────────────────────────────
@@ -1054,52 +1053,6 @@ pub(crate) fn process_compound_assignment<'b>(
     scope.set(&var_name, vec![ResolvedType::from_type_string(result_type)]);
 }
 
-/// The type a compound assignment (`.=`, `+=`, `<<=`, …) leaves in its
-/// target, given the types the target held and the types the right-hand
-/// side produces.
-///
-/// The operand closures are only called for the operators that need them,
-/// so a `.=` never pays for resolving its right-hand side.
-///
-/// `??=` and plain `=` return `None`: neither is decided by the operator
-/// alone, so each caller settles them for itself.
-fn compound_assignment_result(
-    operator: &AssignmentOperator,
-    lhs_types: impl FnOnce() -> Vec<ResolvedType>,
-    rhs_types: impl FnOnce() -> Vec<ResolvedType>,
-) -> Option<PhpType> {
-    match operator {
-        AssignmentOperator::Concat(_) => Some(PhpType::string()),
-        AssignmentOperator::Modulo(_) => Some(infer_modulo_result_type(&lhs_types(), &rhs_types())),
-        AssignmentOperator::LeftShift(_)
-        | AssignmentOperator::RightShift(_)
-        | AssignmentOperator::BitwiseAnd(_)
-        | AssignmentOperator::BitwiseOr(_)
-        | AssignmentOperator::BitwiseXor(_) => Some(PhpType::int()),
-        AssignmentOperator::Addition(_) => {
-            Some(infer_addition_result_type(&lhs_types(), &rhs_types()))
-        }
-        AssignmentOperator::Subtraction(_)
-        | AssignmentOperator::Multiplication(_)
-        | AssignmentOperator::Division(_)
-        | AssignmentOperator::Exponentiation(_) => {
-            let op_kind = match operator {
-                AssignmentOperator::Subtraction(_) => ArithmeticOpKind::Subtraction,
-                AssignmentOperator::Multiplication(_) => ArithmeticOpKind::Multiplication,
-                AssignmentOperator::Division(_) => ArithmeticOpKind::Division,
-                AssignmentOperator::Exponentiation(_) => ArithmeticOpKind::Exponentiation,
-                _ => unreachable!("outer match already narrowed to arithmetic operators"),
-            };
-            Some(infer_arithmetic_result_type(
-                &lhs_types(),
-                &rhs_types(),
-                op_kind,
-            ))
-        }
-        AssignmentOperator::Coalesce(_) | AssignmentOperator::Assign(_) => None,
-    }
-}
-
 /// Rewrite a `void` call result to `null` before it is stored as a
 /// variable's type.
 ///
@@ -1153,48 +1106,18 @@ pub(crate) fn resolve_rhs_with_types<'b>(
         return recorded.to_vec();
     }
 
-    // Chain assignment: `$a = $b = expr` — the value of an assignment
-    // expression is the value of its RHS.  Recurse into the inner RHS
-    // so that `$a` resolves to the same type as `$b`.  The RHS may be
-    // parenthesized (`$a = ($b = expr)`), so unwrap before matching.
-    if let Expression::Assignment(assignment) = crate::parser::unwrap_parens(rhs)
-        && assignment.operator.is_assign()
-    {
-        return resolve_rhs_with_types(assignment.rhs, scope, ctx, expr_types);
-    }
-
-    // Compound assignment as RHS: `$a = ($x /= 2)` — the value of the
-    // compound assignment is the result after the operation.  Infer the
-    // type from the operator kind.
-    if let Expression::Assignment(assignment) = crate::parser::unwrap_parens(rhs)
-        && !assignment.operator.is_assign()
-    {
-        use mago_syntax::cst::assignment::AssignmentOperator;
-        // `$x = $cache[$k] ??= expensive();` — the value is whichever side
-        // survives: the target's non-null half, or the fallback that
-        // replaced it.
-        if matches!(assignment.operator, AssignmentOperator::Coalesce(_)) {
-            let lhs_types = resolve_rhs_with_types(assignment.lhs, scope, ctx, expr_types);
-            let rhs_types = resolve_rhs_with_types(assignment.rhs, scope, ctx, expr_types);
-            let combined = coalesce_assign_value(lhs_types, rhs_types);
-            if combined.is_empty() {
-                return vec![ResolvedType::from_type_string(PhpType::mixed())];
-            }
-            return combined;
-        }
-        let result_type = compound_assignment_result(
+    // An assignment used as a value (`$a = $b = expr`, `$a = ($x /= 2)`,
+    // `$x = $cache[$k] ??= expensive()`) evaluates to what it leaves in
+    // its target.  Its operands are resolved through here rather than the
+    // RHS pipeline, so `$a = $b = Foo::class` keeps the class-string this
+    // function gives `Foo::class`.  The assignment may be parenthesized
+    // (`$a = ($b = expr)`), so unwrap before matching.
+    if let Expression::Assignment(assignment) = crate::parser::unwrap_parens(rhs) {
+        return assignment_value(
             &assignment.operator,
-            || match assignment.lhs {
-                Expression::Variable(Variable::Direct(dv)) => {
-                    scope.get(bytes_to_str(dv.name)).to_vec()
-                }
-                _ => Vec::new(),
-            },
+            || resolve_rhs_with_types(assignment.lhs, scope, ctx, expr_types),
             || resolve_rhs_with_types(assignment.rhs, scope, ctx, expr_types),
         );
-        if let Some(ty) = result_type {
-            return vec![ResolvedType::from_type_string(ty)];
-        }
     }
 
     // For bare variable references, read directly from scope.
@@ -1256,9 +1179,7 @@ pub(crate) fn resolve_rhs_with_types<'b>(
     // common patterns where the result type depends only on the
     // expression kind, not on the operand types.
 
-    // Type casts (`(int) $x`), `!`, and `~`.  `-`/`+` are left to the
-    // unified resolver below, which preserves signed numeric literals and
-    // falls back to `int|float` for non-literal operands.
+    // Type casts (`(int) $x`), `!`, `~`, and the signs `-`/`+`.
     if let Expression::UnaryPrefix(prefix) = rhs
         && let Some(ty) = super::super::rhs_resolution::unary_prefix_result_type(
             &prefix.operator,
@@ -1314,70 +1235,7 @@ pub(crate) fn resolve_rhs_with_types<'b>(
         return vec![ResolvedType::from_type_string(PhpType::string())];
     }
 
-    // ── Subject pipeline fallback ───────────────────────────────
-    // When resolve_rhs_expression and the structural fallbacks both
-    // return empty, try the full subject resolution pipeline
-    // (resolve_target_classes).  This handles method calls and
-    // static calls that resolve_rhs_expression cannot resolve
-    // because the receiver or intermediate types are only reachable
-    // through the subject pipeline's broader strategies (e.g.
-    // docblock @return types, merged inheritance, virtual members).
-    //
-    // Property access (Expression::Access) is intentionally excluded
-    // because resolve_target_classes resolves the *subject* (what
-    // you'd complete after `->`) rather than the property's value
-    // type.  For Eloquent relations like `$this->model->orderProducts`,
-    // the subject pipeline returns the element type instead of the
-    // collection, which breaks foreach value binding.  Property
-    // access RHS resolution is handled by resolve_rhs_expression's
-    // own property resolution path.
-    if matches!(rhs, Expression::Call(_) | Expression::Instantiation(_)) {
-        let rhs_span = rhs.span();
-        let rhs_start = rhs_span.start.offset as usize;
-        let rhs_end = rhs_span.end.offset as usize;
-        if let Some(rhs_text) = ctx.content.get(rhs_start..rhs_end) {
-            let rhs_text = rhs_text.trim();
-            if !rhs_text.is_empty() {
-                let subject_result = resolve_rhs_via_subject(rhs_text, scope, ctx);
-                if !subject_result.is_empty() {
-                    return subject_result;
-                }
-            }
-        }
-    }
-
     result
-}
-
-/// Resolve an RHS expression through the full subject pipeline.
-///
-/// This is a last-resort fallback for expressions that
-/// `resolve_rhs_expression` can't handle.  It extracts the
-/// expression text and passes it to `resolve_target_classes`, which
-/// goes through SubjectExpr parsing, property/method chain
-/// resolution, and the full type resolution infrastructure.
-///
-/// Only called for method calls, property access, static calls, and
-/// instantiation — expression kinds that typically produce
-/// object-typed results resolvable through the subject pipeline.
-pub(crate) fn resolve_rhs_via_subject(
-    rhs_text: &str,
-    scope: &ScopeState,
-    ctx: &ForwardWalkCtx<'_>,
-) -> Vec<ResolvedType> {
-    let scope_resolver = scope.snapshot_resolver();
-    let var_ctx =
-        ctx.var_ctx_for_with_scope("$__rhs_subject", 0, &scope_resolver, Some(scope.proofs()));
-    let rctx = var_ctx.as_resolution_ctx();
-
-    // Determine the access kind from the expression text.
-    let access_kind = if rhs_text.contains("::") {
-        crate::types::AccessKind::DoubleColon
-    } else {
-        crate::types::AccessKind::Arrow
-    };
-
-    crate::type_engine::resolver::resolve_target_classes(rhs_text, access_kind, &rctx)
 }
 
 /// Seed PHP superglobals (`$_SERVER`, `$_GET`, `$_POST`, etc.) into the

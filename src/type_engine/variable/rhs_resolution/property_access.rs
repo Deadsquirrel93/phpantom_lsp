@@ -18,10 +18,8 @@ use crate::types::{ClassInfo, ResolvedType};
 
 use crate::type_engine::resolver::VarResolutionCtx;
 
-use super::{
-    ReceiverNullability, apply_nullsafe_short_circuit, resolve_rhs_expression,
-    resolved_type_with_lookup,
-};
+use super::nullsafe::{ReceiverNullability, apply_nullsafe_short_circuit};
+use super::{resolve_rhs_expression, resolved_type_with_lookup};
 
 /// Resolve property access: `$this->prop`, `$obj->prop`, `$obj?->prop`.
 pub(super) fn resolve_rhs_property_access(
@@ -170,11 +168,11 @@ pub(super) fn resolve_rhs_property_access(
                         classes.push(Arc::clone(cls));
                     }
                 }
-                if classes.is_empty()
-                    && let Some(name) = super::instantiation::extract_class_string_inner(&held)
-                    && let Some(cls) = class_loader(&name)
-                {
-                    classes.push(cls);
+                if classes.is_empty() {
+                    classes =
+                        crate::type_engine::variable::class_string_resolution::classes_named_by(
+                            &held, ctx,
+                        );
                 }
                 classes
             }

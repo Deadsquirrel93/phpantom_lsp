@@ -48,111 +48,6 @@ struct ResolvedReturn {
     declared_type: PhpType,
 }
 
-// ── AST walkers ─────────────────────────────────────────────────────────────
-
-/// Check whether a statement list contains any `yield` expression
-/// (indicating a generator function whose return type semantics differ).
-fn body_contains_yield(stmts: &mago_syntax::cst::sequence::Sequence<'_, Statement<'_>>) -> bool {
-    for stmt in stmts.iter() {
-        if stmt_contains_yield(stmt) {
-            return true;
-        }
-    }
-    false
-}
-
-fn stmt_contains_yield(stmt: &Statement<'_>) -> bool {
-    match stmt {
-        Statement::Expression(expr_stmt) => expr_contains_yield(expr_stmt.expression),
-        Statement::Return(ret) => ret.value.is_some_and(|v| expr_contains_yield(v)),
-        Statement::Echo(echo) => echo.values.iter().any(|e| expr_contains_yield(e)),
-        Statement::If(if_stmt) => {
-            expr_contains_yield(if_stmt.condition) || if_body_contains_yield(&if_stmt.body)
-        }
-        Statement::While(w) => {
-            expr_contains_yield(w.condition)
-                || w.body.statements().iter().any(|s| stmt_contains_yield(s))
-        }
-        Statement::DoWhile(dw) => {
-            stmt_contains_yield(dw.statement) || expr_contains_yield(dw.condition)
-        }
-        Statement::For(f) => {
-            f.initializations.iter().any(|e| expr_contains_yield(e))
-                || f.conditions.iter().any(|e| expr_contains_yield(e))
-                || f.increments.iter().any(|e| expr_contains_yield(e))
-                || f.body.statements().iter().any(|s| stmt_contains_yield(s))
-        }
-        Statement::Foreach(fe) => {
-            expr_contains_yield(fe.expression)
-                || fe.body.statements().iter().any(|s| stmt_contains_yield(s))
-        }
-        Statement::Switch(sw) => {
-            expr_contains_yield(sw.expression) || switch_body_contains_yield(&sw.body)
-        }
-        Statement::Try(t) => {
-            t.block.statements.iter().any(|s| stmt_contains_yield(s))
-                || t.catch_clauses
-                    .iter()
-                    .any(|c| c.block.statements.iter().any(|s| stmt_contains_yield(s)))
-                || t.finally_clause
-                    .as_ref()
-                    .is_some_and(|f| f.block.statements.iter().any(|s| stmt_contains_yield(s)))
-        }
-        Statement::Block(b) => b.statements.iter().any(|s| stmt_contains_yield(s)),
-        // Don't recurse into nested functions/closures — their yields
-        // don't make the *enclosing* function a generator.
-        _ => false,
-    }
-}
-
-fn if_body_contains_yield(body: &mago_syntax::cst::control_flow::r#if::IfBody<'_>) -> bool {
-    use mago_syntax::cst::control_flow::r#if::IfBody;
-    match body {
-        IfBody::Statement(inner) => {
-            stmt_contains_yield(inner.statement)
-                || inner
-                    .else_if_clauses
-                    .iter()
-                    .any(|c| stmt_contains_yield(c.statement))
-                || inner
-                    .else_clause
-                    .as_ref()
-                    .is_some_and(|c| stmt_contains_yield(c.statement))
-        }
-        IfBody::ColonDelimited(body) => {
-            body.statements.iter().any(|s| stmt_contains_yield(s))
-                || body
-                    .else_if_clauses
-                    .iter()
-                    .any(|c| c.statements.iter().any(|s| stmt_contains_yield(s)))
-                || body
-                    .else_clause
-                    .as_ref()
-                    .is_some_and(|c| c.statements.iter().any(|s| stmt_contains_yield(s)))
-        }
-    }
-}
-
-fn switch_body_contains_yield(
-    body: &mago_syntax::cst::control_flow::switch::SwitchBody<'_>,
-) -> bool {
-    use mago_syntax::cst::control_flow::switch::SwitchBody;
-    match body {
-        SwitchBody::BraceDelimited(b) => b
-            .cases
-            .iter()
-            .any(|c| c.statements().iter().any(|s| stmt_contains_yield(s))),
-        SwitchBody::ColonDelimited(b) => b
-            .cases
-            .iter()
-            .any(|c| c.statements().iter().any(|s| stmt_contains_yield(s))),
-    }
-}
-
-fn expr_contains_yield(expr: &Expression<'_>) -> bool {
-    matches!(expr, Expression::Yield(_))
-}
-
 // ── Main diagnostic collection ──────────────────────────────────────────────
 
 impl Backend {
@@ -514,7 +409,7 @@ fn process_top_level_statement(
             };
 
             // Skip generators.
-            if body_contains_yield(&func.body.statements) {
+            if crate::parser::contains_own_yield(func.body.statements.iter()) {
                 return;
             }
 
@@ -671,7 +566,7 @@ fn process_class_member(
     };
 
     // Skip generators.
-    if body_contains_yield(body) {
+    if crate::parser::contains_own_yield(body.iter()) {
         return;
     }
 

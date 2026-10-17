@@ -19,7 +19,9 @@ pub(in crate::symbol_map::extraction) fn try_emit_blade_block_span(
     content: &str,
     spans: &mut Vec<SymbolSpan>,
 ) {
-    use crate::blade::blocks::{PUSH_IF_MARKER, SECTION_MARKER, STACK_MARKER};
+    use crate::blade::markers::{
+        PUSH_IF as PUSH_IF_MARKER, SECTION as SECTION_MARKER, STACK as STACK_MARKER,
+    };
     use crate::symbol_map::LaravelStringKind;
 
     let (kind, index) = if name.eq_ignore_ascii_case(SECTION_MARKER) {

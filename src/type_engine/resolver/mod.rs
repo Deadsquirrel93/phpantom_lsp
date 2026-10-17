@@ -61,11 +61,10 @@ use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::subject_expr::SubjectExpr;
 use crate::types::*;
 
+use crate::type_engine::variable::class_string_resolution::classes_named_by_type;
 use chain_keys::{SpineKeys, lookup_chain_cache, lookup_scope_for_subject};
 use context::{CHAIN_CACHE, ChainKey, resolved_to_arcs};
-use variable_subjects::{
-    resolve_class_string_inner_classes, resolve_this_subject, resolve_variable_fallback,
-};
+use variable_subjects::{resolve_this_subject, resolve_variable_fallback};
 
 /// Resolve a completion subject to all candidate types, preserving
 /// both class info and type strings.
@@ -526,12 +525,8 @@ fn resolve_property_chain_subject(
     if arc_results.is_empty() && access_kind == AccessKind::DoubleColon {
         for cls in &base_arcs {
             if let Some(raw_type) = resolve_property_type_hint(cls, property, class_loader) {
-                let classes = resolve_class_string_inner_classes(
-                    &raw_type,
-                    &cls.fqn(),
-                    all_classes,
-                    class_loader,
-                );
+                let classes =
+                    classes_named_by_type(&raw_type, &cls.fqn(), all_classes, class_loader);
                 ClassInfo::extend_unique_arc(&mut arc_results, classes);
             }
         }

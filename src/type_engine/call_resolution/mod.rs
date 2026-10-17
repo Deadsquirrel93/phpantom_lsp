@@ -51,6 +51,8 @@
 //!   constructor's `@template` parameters from call-site argument texts.
 //! - [`template_subs`]: building a method-level `@template` substitution
 //!   map, and the helpers binding and finishing one relies on.
+//! - [`if_this_is`]: binding a method's templates from its
+//!   `@psalm-if-this-is` pattern and the receiver's type.
 //! - [`arg_type_resolution`]: resolving inline argument expressions to
 //!   their raw `PhpType`.
 //! - [`facade_owner`]: picking the concrete container class that types a
@@ -64,6 +66,7 @@ mod arg_type_resolution;
 mod callable_target;
 mod constant_operands;
 mod facade_owner;
+mod if_this_is;
 mod out_param;
 mod reflection;
 mod return_types;

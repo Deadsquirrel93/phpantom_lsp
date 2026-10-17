@@ -17,7 +17,7 @@ use crate::types::ResolvedType;
 
 use crate::type_engine::resolver::VarResolutionCtx;
 
-use super::function_calls::resolve_rhs_function_call;
+use super::function_calls::{first_class_function_return_type, resolve_rhs_function_call};
 use super::method_calls::resolve_rhs_method_call_inner;
 use super::static_calls::resolve_rhs_static_call;
 use super::{resolve_rhs_expression, resolve_var_types, resolved_type_with_lookup};
@@ -485,20 +485,16 @@ pub(crate) fn infer_closure_literal_type(
         }
     }
 
-    let explicit_or_yield = {
+    // The declared `: ReturnType`, else the `Generator` the body's yields
+    // make the closure return.  Both name their classes in full already.
+    let explicit_or_yield = extract_closure_or_arrow_return_type(expr, ctx).or_else(|| {
         let span = expr.span();
         let start = (span.start.offset as usize).min(ctx.content.len());
         let end = (span.end.offset as usize).min(ctx.content.len());
-        ctx.content.get(start..end).and_then(|text| {
-            crate::completion::source::helpers::extract_closure_return_type_from_text(text).or_else(
-                || {
-                    crate::completion::source::helpers::infer_generator_type_from_closure_yields(
-                        text,
-                    )
-                },
-            )
-        })
-    };
+        ctx.content
+            .get(start..end)
+            .and_then(crate::completion::source::helpers::infer_generator_type_from_closure_yields)
+    });
 
     // What the body actually produces, independent of any declared
     // return type: an arrow function's expression, or a full closure
@@ -563,16 +559,22 @@ pub(crate) fn infer_closure_literal_type(
         // `: Closure` on a closure whose body returns a closure with a
         // known signature).
         Some(declared) => {
-            let declared = ctx.written_names().resolve_type(&declared);
             let narrowed = body_return().filter(|body| {
                 crate::class_lookup::is_subtype_of_typed(body, &declared, ctx.class_loader)
             });
             Some(narrowed.unwrap_or(declared))
         }
         None => body_return().or_else(|| match expr {
-            // First-class callable syntax: `strlen(...)`, `$this->method(...)`,
-            // `ClassName::method(...)`.  Resolve the underlying function/method's
-            // return type from the callable's own source text.
+            // First-class callable syntax: `strlen(...)` returns what the
+            // function it names does.
+            Expression::PartialApplication(PartialApplication::Function(fpa))
+                if matches!(fpa.function, Expression::Identifier(_)) =>
+            {
+                first_class_function_return_type(fpa, ctx)
+            }
+            // `$this->method(...)`, `ClassName::method(...)`, `$invokable(...)`:
+            // the method's return type, resolved from the callable's own
+            // source text.
             Expression::PartialApplication(_) => {
                 let span = expr.span();
                 let start = (span.start.offset as usize).min(ctx.content.len());
@@ -649,6 +651,25 @@ fn declared_closure_params(
             variadic: param.ellipsis.is_some(),
         })
         .collect()
+}
+
+/// The return type a closure or arrow function literal declares, e.g.
+/// `Foo` for `fn (): Foo => …`, qualified against the file's imports.
+///
+/// `None` for any other expression, or a literal with no return type.
+pub(super) fn extract_closure_or_arrow_return_type(
+    expr: &Expression<'_>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<PhpType> {
+    let hint = match expr {
+        Expression::ArrowFunction(arrow) => arrow.return_type_hint.as_ref()?,
+        Expression::Closure(closure) => closure.return_type_hint.as_ref()?,
+        _ => return None,
+    };
+    Some(
+        ctx.written_names()
+            .resolve_hint(&crate::parser::extract_hint_type(&hint.hint)),
+    )
 }
 
 /// Answer a call argument's type from the AST expression it was written

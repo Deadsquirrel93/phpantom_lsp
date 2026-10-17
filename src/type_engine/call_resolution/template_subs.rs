@@ -853,14 +853,12 @@ pub(crate) fn build_call_template_subs(
         .and_then(|m| m.if_this_is())
         .and_then(|pattern| {
             let method = owner.get_method_ci(method_name)?;
-            Some(
-                crate::type_engine::variable::rhs_resolution::infer_if_this_is_subs(
-                    pattern,
-                    receiver_type?,
-                    method.template_params(),
-                    method.template_param_bounds(),
-                ),
-            )
+            Some(super::if_this_is::infer_if_this_is_subs(
+                pattern,
+                receiver_type?,
+                method.template_params(),
+                method.template_param_bounds(),
+            ))
         })
         .unwrap_or_default();
 

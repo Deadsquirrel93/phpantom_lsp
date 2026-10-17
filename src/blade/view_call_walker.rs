@@ -46,7 +46,7 @@ impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, BladeDirectiveColle
         let Expression::Identifier(ident) = node.function else {
             return;
         };
-        if bytes_to_str(ident.value()) != "blade_bound_attr_directive" {
+        if bytes_to_str(ident.value()) != super::markers::BOUND_ATTR {
             return;
         }
         if let Some(arg) = node.argument_list.arguments.iter().next() {
@@ -545,8 +545,8 @@ fn arrayable_shape_entries(
 /// not describe a data array.
 fn is_view_render_function(name: &str) -> bool {
     name.eq_ignore_ascii_case("view")
-        || name.eq_ignore_ascii_case("blade_view_directive")
-        || name.eq_ignore_ascii_case("blade_component_directive")
+        || name.eq_ignore_ascii_case(super::markers::VIEW)
+        || name.eq_ignore_ascii_case(super::markers::COMPONENT)
         || is_each_render_function(name)
 }
 
@@ -556,12 +556,12 @@ fn is_view_render_function(name: &str) -> bool {
 /// The `@include` family compiles to a render with `get_defined_vars()`;
 /// `@component` and `@each` render from their arguments alone.
 fn forwards_scope(name: &str) -> bool {
-    !is_each_render_function(name) && !name.eq_ignore_ascii_case("blade_component_directive")
+    !is_each_render_function(name) && !name.eq_ignore_ascii_case(super::markers::COMPONENT)
 }
 
 /// Whether the call is the preprocessor's compilation of `@each`.
 fn is_each_render_function(name: &str) -> bool {
-    name.eq_ignore_ascii_case("blade_each_directive")
+    name.eq_ignore_ascii_case(super::markers::EACH)
 }
 
 /// Whether a static call renders a view: the `View` facade's factory

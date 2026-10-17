@@ -16,16 +16,13 @@ use crate::type_engine::variable::raw_type_inference::extract_arg_texts_from_ast
 use crate::type_engine::variable::resolution::build_var_resolver_from_ctx;
 
 use super::calls::{
-    build_function_template_subs, resolve_return_type, substitute_function_templates,
-    walker_arg_types,
+    build_function_template_subs, extract_closure_or_arrow_return_type, resolve_return_type,
+    substitute_function_templates, walker_arg_types,
 };
 use super::laravel_calls::laravel_helper_call;
 use super::method_calls::resolve_rhs_method_call_inner;
 use super::static_calls::resolve_rhs_static_call;
-use super::{
-    extract_closure_or_arrow_return_type, resolve_rhs_expression, resolve_var_types,
-    resolved_type_with_lookup,
-};
+use super::{resolve_rhs_expression, resolve_var_types, resolved_type_with_lookup};
 
 /// Resolve a plain function call: `someFunc()`, array functions, variable
 /// invocations (`$fn()`), and conditional return types.
@@ -57,15 +54,30 @@ pub(super) fn resolve_rhs_function_call<'b>(
         }
     }
 
+    callable_invocation(func_call.function, expr, ctx)
+}
+
+/// What calling the callable value `callee` returns, whatever form it is
+/// written in: `$fn`, `($fn)`, `$this->handler`, a closure literal, or a
+/// first-class callable such as `trim(...)`.
+///
+/// `at` is the expression making the call, above which an `@var` naming
+/// the callable's type is looked for.  A call (`$fn()`) and a pipe
+/// (`$x |> $fn`) both read their callee through here.
+pub(super) fn callable_invocation<'b>(
+    callee: &'b Expression<'b>,
+    at: &Expression<'_>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Vec<ResolvedType> {
     // `($fn)()` calls the same value `$fn()` does.
-    let callee_expr = match func_call.function {
+    let callee = match callee {
         Expression::Parenthesized(p) => p.expression,
         other => other,
     };
-    if let Expression::Variable(Variable::Direct(dv)) = callee_expr {
-        return variable_invocation(bytes_to_str(dv.name), expr, ctx);
+    if let Expression::Variable(Variable::Direct(dv)) = callee {
+        return variable_invocation(bytes_to_str(dv.name), at, ctx);
     }
-    expression_invocation(callee_expr, ctx)
+    expression_invocation(callee, ctx)
 }
 
 /// What invoking a first-class callable on the spot returns:
@@ -96,17 +108,28 @@ fn first_class_callable_invocation<'b>(
             argument_list,
             ctx,
         )),
-        PartialApplication::Function(fa) => {
-            let Expression::Identifier(ident) = fa.function else {
-                return None;
-            };
-            let function_loader = ctx.function_loader()?;
-            let func_info =
-                function_loader(bytes_to_str(ident.value()), ident.span().start.offset)?;
-            let ret = func_info.return_type?;
-            Some(resolve_return_type(ret, ctx))
-        }
+        PartialApplication::Function(fa) => Some(resolve_return_type(
+            first_class_function_return_type(fa, ctx)?,
+            ctx,
+        )),
     }
+}
+
+/// The declared return type of the function a `name(...)` first-class
+/// callable names, looked up where the name is written so a namespaced
+/// call finds the function PHP would.
+///
+/// `None` when the callable wraps a value (`$fn(...)`) rather than naming
+/// a function, or the function is not found or declares no return type.
+pub(super) fn first_class_function_return_type(
+    fa: &FunctionPartialApplication<'_>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<PhpType> {
+    let Expression::Identifier(ident) = fa.function else {
+        return None;
+    };
+    let function_loader = ctx.function_loader()?;
+    function_loader(bytes_to_str(ident.value()), ident.span().start.offset)?.return_type
 }
 
 /// What a builtin returns when its arguments decide more than its stub

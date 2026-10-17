@@ -10,6 +10,7 @@
 //! which calls name what.
 
 use super::*;
+use crate::blade::markers;
 use crate::symbol_map::LaravelStringKind;
 
 /// Whether a static call's class, as written, is `Illuminate\Support\Env`.
@@ -106,11 +107,7 @@ pub(crate) fn facade_static_call_first_arg_kind(
 
 /// The marker functions the Blade preprocessor lowers the `@include` and
 /// `@extends` families, `@component`/`@componentFirst` and `@each` to.
-const BLADE_VIEW_MARKERS: [&str; 3] = [
-    "blade_view_directive",
-    "blade_component_directive",
-    "blade_each_directive",
-];
+const BLADE_VIEW_MARKERS: [&str; 3] = [markers::VIEW, markers::COMPONENT, markers::EACH];
 
 /// The kind of name a Laravel helper function takes in its first argument,
 /// by the function's name as written (without a leading `\`).
@@ -131,7 +128,7 @@ pub(crate) fn helper_function_first_arg_kind(name: &str) -> Option<LaravelString
         Some(LaravelStringKind::Env)
     } else if is_one_of(&["app", "resolve"]) {
         Some(LaravelStringKind::ContainerBinding)
-    } else if name.eq_ignore_ascii_case(BLADE_CAN_DIRECTIVE) {
+    } else if name.eq_ignore_ascii_case(markers::CAN) {
         Some(LaravelStringKind::GateAbility)
     } else {
         None
@@ -143,11 +140,7 @@ pub(crate) fn helper_function_first_arg_kind(name: &str) -> Option<LaravelString
 /// lower to their directive's marker with an array of candidate templates,
 /// and `@canany` to the `@can` marker with an array of abilities.
 pub(crate) fn helper_function_accepts_name_list(name: &str) -> bool {
-    [
-        "blade_view_directive",
-        "blade_component_directive",
-        BLADE_CAN_DIRECTIVE,
-    ]
-    .iter()
-    .any(|n| name.eq_ignore_ascii_case(n))
+    [markers::VIEW, markers::COMPONENT, markers::CAN]
+        .iter()
+        .any(|n| name.eq_ignore_ascii_case(n))
 }

@@ -21,6 +21,7 @@ use super::laravel_calls::{
     try_resolve_request_accessor_type, try_resolve_trans_method_type, try_resolve_validated_shape,
 };
 use super::owner_method_call::resolve_owner_method_call;
+use super::scope_reads::narrowed_subject_from_scope;
 use super::{resolve_rhs_expression, resolve_var_types};
 
 /// A method call's receiver, already resolved: the candidate owner classes
@@ -33,10 +34,10 @@ pub(super) type MethodReceiver = (Vec<Arc<ClassInfo>>, Vec<ResolvedType>);
 
 /// Resolve a method call's object expression to its receiver.
 ///
-/// `$this` resolves to the enclosing class, a bare variable through the
-/// variable pipeline (honouring `match(true)` arm narrowing), and anything
-/// else — `(new Factory())`, `getService()`, a chain link — by resolving the
-/// expression.
+/// `$this` resolves to what the scope says it is, else the enclosing class;
+/// a bare variable through the variable pipeline (honouring `match(true)`
+/// arm narrowing); and anything else — `(new Factory())`, `getService()`, a
+/// chain link — by resolving the expression.
 pub(super) fn resolve_method_receiver<'b>(
     object: &'b Expression<'b>,
     ctx: &VarResolutionCtx<'_>,
@@ -44,39 +45,30 @@ pub(super) fn resolve_method_receiver<'b>(
     if let Expression::Variable(Variable::Direct(dv)) = object
         && dv.name == b"$this"
     {
-        let classes: Vec<Arc<ClassInfo>> = ctx
-            .all_classes
-            .iter()
-            .find(|c| c.name == ctx.current_class.name)
-            .map(Arc::clone)
-            .into_iter()
-            .collect();
+        // The walker seeds `$this` for every body and narrows it like any
+        // other variable: a closure bound to a test case, an
+        // `assert($this instanceof X)` in a top-level closure, a check
+        // naming a subclass, the users a trait's `$this` stands for.  The
+        // receiver's own types stay empty so `static` is still bound late,
+        // to the class the call runs on.
+        let classes = match narrowed_subject_from_scope("$this", object, ctx) {
+            Some(narrowed) => ResolvedType::into_arced_classes(narrowed),
+            None => {
+                crate::class_lookup::find_class_by_fqn(ctx.all_classes, &ctx.current_class.fqn())
+                    .map(Arc::clone)
+                    .into_iter()
+                    .collect()
+            }
+        };
         return (classes, vec![]);
     }
+    // Read directly rather than through `resolve_rhs_expression`, whose
+    // self-assignment guard would leave `$node = $node->next()` without a
+    // receiver.
     if let Expression::Variable(Variable::Direct(dv)) = object {
-        let var = bytes_to_str(dv.name).to_string();
-        // Check match-arm narrowing override first — when inside
-        // a match(true) arm, the variable may be narrowed to a
-        // specific class by the arm's instanceof condition.
-        let resolved = match ctx.match_arm_narrowing.get(&var).cloned() {
-            Some(overridden) => overridden,
-            None => resolve_var_types(&var, ctx, object.span().end.offset),
-        };
-        if !resolved.is_empty() {
-            let classes = ResolvedType::into_arced_classes(resolved.clone());
-            return (classes, resolved);
-        }
-        // Fall back to resolve_target_classes when the variable
-        // resolution pipeline returns nothing (e.g. for parameters
-        // that are resolved through the completion pipeline's subject
-        // resolution).
-        let classes: Vec<Arc<ClassInfo>> =
-            ResolvedType::into_arced_classes(crate::type_engine::resolver::resolve_target_classes(
-                &var,
-                crate::types::AccessKind::Arrow,
-                &ctx.as_resolution_ctx(),
-            ));
-        return (classes, vec![]);
+        let resolved = resolve_var_types(bytes_to_str(dv.name), ctx, object.span().end.offset);
+        let classes = ResolvedType::into_arced_classes(resolved.clone());
+        return (classes, resolved);
     }
     let resolved = resolve_rhs_expression(object, ctx);
     let classes = ResolvedType::into_arced_classes(resolved.clone());
@@ -596,12 +588,15 @@ pub(super) fn receiver_intersection_for_owner(
 /// A receiver that is *itself* still bounded keeps the chain open, so
 /// `$this->self()->self()` stays bound to the class the chain started from
 /// rather than collapsing at the second hop.
+///
+/// A `$this` outside any class (a closure bound to a test case) forwards
+/// from no class of its own, so the class it was resolved to fixes it.
 fn lsb_class_for_call(
     receiver_is_this: bool,
     receiver_resolved: &[ResolvedType],
     ctx: &VarResolutionCtx<'_>,
 ) -> Option<crate::atom::Atom> {
-    if receiver_is_this {
+    if receiver_is_this && !ctx.current_class.name.is_empty() {
         return Some(ctx.current_class.fqn());
     }
     receiver_resolved

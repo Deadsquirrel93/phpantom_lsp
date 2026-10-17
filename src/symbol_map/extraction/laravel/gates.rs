@@ -5,11 +5,6 @@
 use super::*;
 use crate::virtual_members::laravel::helpers::string_literal_at_range;
 
-/// The synthetic function the Blade preprocessor lowers `@can`, `@cannot`,
-/// and `@canany` to, so their ability strings reach the same extraction as
-/// the PHP forms.
-pub(in crate::symbol_map::extraction) const BLADE_CAN_DIRECTIVE: &str = "blade_can_directive";
-
 /// What a recognised ability span is doing with the name it holds.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(in crate::symbol_map::extraction) enum AbilityRole {

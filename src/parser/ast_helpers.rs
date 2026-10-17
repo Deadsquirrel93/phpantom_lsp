@@ -1,7 +1,7 @@
 //! Small helpers for walking the mago-syntax AST: seeing through
 //! parentheses and negation, recognising `X::class`, reading array
-//! literals, and visiting class members, `if` branches and nested
-//! statement lists.
+//! literals, and visiting class members, `if` branches, nested
+//! statement lists and the yields a function body owns.
 
 /// Whether `access` fetches a class name (`X::class`) rather than a named
 /// constant.  `class` is a keyword, so any casing counts.
@@ -343,4 +343,49 @@ pub(crate) fn for_each_nested_function<'s, 'ast>(
             }
         }
     });
+}
+
+/// Call `visit` with each `yield` the function body `statements` owns,
+/// wherever it sits in an expression (`$sent = yield $value;`,
+/// `log(yield)`).
+///
+/// The yields of the closures, arrow functions, functions and classes
+/// nested in the body are skipped: they make *those* generators.
+pub(crate) fn for_each_own_yield<'ast, 'arena: 'ast>(
+    statements: impl IntoIterator<Item = &'ast mago_syntax::cst::Statement<'arena>>,
+    mut visit: impl FnMut(&'ast mago_syntax::cst::Yield<'arena>),
+) {
+    use mago_syntax::cst::*;
+    use mago_syntax::walker::Walker;
+
+    struct OwnYields;
+
+    impl<'ast, 'arena: 'ast, F: FnMut(&'ast Yield<'arena>)> Walker<'ast, 'arena, F> for OwnYields {
+        fn walk_closure(&self, _: &'ast Closure<'arena>, _: &mut F) {}
+        fn walk_arrow_function(&self, _: &'ast ArrowFunction<'arena>, _: &mut F) {}
+        fn walk_function(&self, _: &'ast Function<'arena>, _: &mut F) {}
+        fn walk_anonymous_class(&self, _: &'ast AnonymousClass<'arena>, _: &mut F) {}
+        fn walk_class(&self, _: &'ast Class<'arena>, _: &mut F) {}
+        fn walk_interface(&self, _: &'ast Interface<'arena>, _: &mut F) {}
+        fn walk_trait(&self, _: &'ast Trait<'arena>, _: &mut F) {}
+        fn walk_enum(&self, _: &'ast Enum<'arena>, _: &mut F) {}
+
+        fn walk_in_yield(&self, yield_expr: &'ast Yield<'arena>, visit: &mut F) {
+            visit(yield_expr);
+        }
+    }
+
+    for stmt in statements {
+        OwnYields.walk_statement(stmt, &mut visit);
+    }
+}
+
+/// Whether the function body `statements` makes its function a generator:
+/// it holds a `yield` of its own, in the sense of [`for_each_own_yield`].
+pub(crate) fn contains_own_yield<'ast, 'arena: 'ast>(
+    statements: impl IntoIterator<Item = &'ast mago_syntax::cst::Statement<'arena>>,
+) -> bool {
+    let mut found = false;
+    for_each_own_yield(statements, |_| found = true);
+    found
 }

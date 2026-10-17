@@ -798,45 +798,19 @@ fn template_argument_at_call(
         return Some(PhpType::named(atom(&fqn)));
     }
 
+    // A variable holding a class name, read like any other variable: from
+    // the walker's scope while the walker drives this narrowing, else
+    // walked to at the argument itself, so a later reassignment of the
+    // variable does not fold back into the assertion.
     if let Expression::Variable(Variable::Direct(dv)) = arg_expr {
-        let var_name = bytes_to_str(dv.name).to_string();
-
-        // Prefer the shared forward walker's tracked type for the variable.
-        // When the walker is driving this narrowing it has already processed
-        // the statements leading up to the assert, so a variable holding a
-        // `class-string<Wanted>` value (whether assigned directly, via
-        // null-coalesce, or list-destructured out of a foreach source array)
-        // is in scope with that type.  Reusing it keeps class-string-value
-        // resolution on the single shared pipeline instead of a parallel
-        // special-purpose walk that only recognizes direct assignments.
-        if let Some(scope_resolver) = ctx.scope_var_resolver {
-            for resolved in scope_resolver(&var_name) {
-                if let Some(TypeKind::Named(name)) = resolved
-                    .type_string
-                    .unwrap_class_string_inner()
-                    .map(PhpType::kind)
-                {
-                    return Some(PhpType::named(*name));
-                }
-            }
-        }
-
-        // Fall back to the class-string resolver for consumers without a live
-        // forward-walk scope (e.g. a completion request resolving the subject
-        // directly).  Resolve it at the argument's own offset rather than
-        // `ctx.cursor_offset`: the latter is `u32::MAX` during whole-method
-        // diagnostics walks, which defeats the class-body detection in
-        // `resolve_class_string_targets` (its `cursor <= class_end` bound never
-        // holds), and using the call site is more precise anyway (a later
-        // reassignment of the variable must not fold back into the assertion).
         let targets =
             crate::type_engine::variable::class_string_resolution::resolve_class_string_targets(
-                &var_name,
+                bytes_to_str(dv.name),
                 arg_expr.span().start.offset,
                 ctx,
             );
-        if let Some(first) = targets.into_iter().next() {
-            return Some(PhpType::named(atom(first.name.as_ref())));
+        if let Some(first) = targets.first() {
+            return Some(PhpType::named(first.fqn()));
         }
     }
 

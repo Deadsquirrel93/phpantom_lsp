@@ -1,6 +1,6 @@
 //! Expressions whose value comes from one of several branches: the
 //! ternary and the chains of them nested in each other's `else`, `??`
-//! chains and the value a `??=` leaves, and `match`.
+//! chains, and `match`.
 //!
 //! Each branch is resolved with the narrowing its condition establishes, as
 //! an `if` body is, and the branches that can be reached are unioned.
@@ -49,46 +49,6 @@ fn static_condition_truthiness(expr: &Expression) -> Option<bool> {
         }),
         _ => None,
     }
-}
-
-/// What a `??=` leaves behind, given what its target and its fallback
-/// resolve to.
-///
-/// `??=` keeps the target when it is not null and assigns the fallback
-/// otherwise, so the value is the target's non-null half unioned with the
-/// fallback. The resolved types are combined as they are, rather than
-/// joined into one union *type string*, so the `class_info` already
-/// attached to each operand survives: a rebuilt string carries none, and
-/// a member access on the result would have nothing to resolve against.
-///
-/// Where both sides name the same type (commonly the target's declared
-/// element type, which resolved no class, alongside an argument that did)
-/// the class-backed entry speaks for the pair.
-///
-/// Shared by the `??=` used as a value here and the forward walker's
-/// statement-level `??=`.
-pub(crate) fn coalesce_assign_value(
-    lhs_types: Vec<ResolvedType>,
-    rhs_types: Vec<ResolvedType>,
-) -> Vec<ResolvedType> {
-    let mut combined: Vec<ResolvedType> = lhs_types
-        .into_iter()
-        .filter(|rt| !rt.type_string.is_null())
-        .map(|mut rt| {
-            if let Some(non_null) = rt.type_string.non_null_type() {
-                rt.type_string = non_null;
-            }
-            rt
-        })
-        .collect();
-    ResolvedType::extend_unique(&mut combined, rhs_types);
-    let class_backed: Vec<PhpType> = combined
-        .iter()
-        .filter(|rt| rt.class_info.is_some())
-        .map(|rt| rt.type_string.clone())
-        .collect();
-    combined.retain(|rt| rt.class_info.is_some() || !class_backed.contains(&rt.type_string));
-    combined
 }
 
 /// Resolve a `??` chain, unioning every operand that can still be

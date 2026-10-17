@@ -413,41 +413,15 @@ fn try_generator_yield_inference(
 /// Whether `body` yields the variable `var_name` as a value, outside the
 /// closures and declarations nested in it, which yield for themselves.
 fn body_yields_variable(body: &[&Statement<'_>], var_name: &str) -> bool {
-    use mago_syntax::walker::Walker;
-
-    struct YieldedVariable<'n>(&'n str);
-
-    impl<'ast, 'arena> Walker<'ast, 'arena, bool> for YieldedVariable<'_> {
-        fn walk_closure(&self, _: &'ast Closure<'arena>, _: &mut bool) {}
-        fn walk_arrow_function(&self, _: &'ast ArrowFunction<'arena>, _: &mut bool) {}
-        fn walk_function(&self, _: &'ast Function<'arena>, _: &mut bool) {}
-        fn walk_anonymous_class(&self, _: &'ast AnonymousClass<'arena>, _: &mut bool) {}
-        fn walk_class(&self, _: &'ast Class<'arena>, _: &mut bool) {}
-        fn walk_interface(&self, _: &'ast Interface<'arena>, _: &mut bool) {}
-        fn walk_trait(&self, _: &'ast Trait<'arena>, _: &mut bool) {}
-        fn walk_enum(&self, _: &'ast Enum<'arena>, _: &mut bool) {}
-
-        fn walk_in_yield(&self, yield_expr: &'ast Yield<'arena>, found: &mut bool) {
-            let value = match yield_expr {
-                Yield::Value(value) => value.value,
-                Yield::Pair(pair) => Some(pair.value),
-                Yield::From(_) => None,
-            };
-            if let Some(Expression::Variable(Variable::Direct(variable))) = value
-                && crate::atom::bytes_to_str(variable.name) == self.0
-            {
-                *found = true;
-            }
-        }
-    }
-
-    let walker = YieldedVariable(var_name);
     let mut found = false;
-    for stmt in body {
-        walker.walk_statement(stmt, &mut found);
-        if found {
-            return true;
-        }
-    }
-    false
+    crate::parser::for_each_own_yield(body.iter().copied(), |yield_expr| {
+        let value = match yield_expr {
+            Yield::Value(value) => value.value,
+            Yield::Pair(pair) => Some(pair.value),
+            Yield::From(_) => None,
+        };
+        found |= matches!(value, Some(Expression::Variable(Variable::Direct(variable)))
+            if crate::atom::bytes_to_str(variable.name) == var_name);
+    });
+    found
 }

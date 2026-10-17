@@ -290,8 +290,15 @@ pub(super) fn resolve_owner_method_call(
         (Some(ret), Some(native)) => ret.equivalent(native),
         (ret, native) => ret == native,
     };
+    // A conditional return type inherited the same way (an override with
+    // no docblock of its own) likewise decides the call.
     let method_ref = match (owner_method, merged_method) {
-        (Some(om), Some(mm)) if echoes_native(om) && !echoes_native(mm) => Some(mm),
+        (Some(om), Some(mm))
+            if (echoes_native(om) && !echoes_native(mm))
+                || (om.conditional_return().is_none() && mm.conditional_return().is_some()) =>
+        {
+            Some(mm)
+        }
         (Some(om), _) => Some(om),
         (None, Some(mm)) => Some(mm),
         // Method not found — fall back to the magic method's return type.

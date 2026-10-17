@@ -1,27 +1,27 @@
-//! The types unary prefix operators produce: casts, `!`, `~`, and the
-//! numeric step of `++`/`--`.
+//! The types unary prefix operators produce: casts, `!`, `~`, the signs
+//! `-`/`+`, and the numeric step of `++`/`--`.
 
 use mago_syntax::cst::{Expression, unary};
 
 use crate::atom::atom;
-use crate::php_type::{PhpType, ShapeEntry, TypeKind, keyword_lowercase};
+use crate::php_type::{LiteralValue, PhpType, ShapeEntry, TypeKind, keyword_lowercase};
 use crate::types::ResolvedType;
 
 use super::scalar_fold;
 
 /// The type a unary prefix expression produces, for the operators whose
-/// result is determined by the operator plus (for `(object)` and `~`) the
-/// operand type.
+/// result is determined by the operator plus (for `(object)`, `~` and the
+/// signs) the operand type.
 ///
-/// A cast or `~` of an operand that holds one known scalar folds to the
-/// value PHP computes (`(int) '1'` is `1`, `~1` is `-2`). `resolve_operand`
-/// is always called for `(object)`, `(array)` and `~`, and for the other casts only
-/// when `operand` is cheap to resolve (a literal, variable, or constant), so
-/// a cast of a call pays nothing for it.
+/// A cast, sign or `~` of an operand that holds one known scalar folds to
+/// the value PHP computes (`(int) '1'` is `1`, `~1` is `-2`, `-(1)` is
+/// `-1`). `resolve_operand` is always called for `(object)`, `(array)`,
+/// `~`, `-` and `+`, and for the other casts only when `operand` is cheap
+/// to resolve (a literal, variable, or constant), so a cast of a call pays
+/// nothing for it.
 ///
-/// Returns `None` for operators the caller must resolve itself: `-`/`+`
-/// need the full expression resolver to keep signed numeric literals
-/// exact, and `@`/`&`/`++`/`--` take the type of their operand.
+/// Returns `None` for `@`, `&`, `++` and `--`, whose result is the
+/// operand's own type or its numeric step, which the caller works out.
 pub(crate) fn unary_prefix_result_type(
     operator: &unary::UnaryPrefixOperator<'_>,
     operand: &Expression<'_>,
@@ -30,6 +30,10 @@ pub(crate) fn unary_prefix_result_type(
     use unary::UnaryPrefixOperator;
 
     let base = match operator {
+        UnaryPrefixOperator::Negation(_) | UnaryPrefixOperator::Plus(_) => {
+            let negated = matches!(operator, UnaryPrefixOperator::Negation(_));
+            return Some(signed_numeric_type(&resolve_operand(), negated));
+        }
         UnaryPrefixOperator::ObjectCast(..) => return Some(object_cast_type(resolve_operand())),
         UnaryPrefixOperator::BitwiseNot(_) => {
             let resolved = resolve_operand();
@@ -58,6 +62,81 @@ pub(crate) fn unary_prefix_result_type(
         return Some(folded);
     }
     Some(base)
+}
+
+/// The type unary `-` (`negated`) or `+` produces: the operand's numeric
+/// type with the sign applied, or `int|float` when the operand is not
+/// known to be numeric.
+fn signed_numeric_type(operand: &[ResolvedType], negated: bool) -> PhpType {
+    (!operand.is_empty())
+        .then(|| ResolvedType::types_joined(operand))
+        .and_then(|ty| apply_numeric_sign(&ty, negated))
+        .unwrap_or_else(|| PhpType::union(vec![PhpType::int(), PhpType::float()]))
+}
+
+/// Apply unary `+` or `-` to an already-resolved numeric type.
+///
+/// Exact literal members remain exact; negating a literal `PHP_INT_MIN`
+/// overflows and gives up rather than reporting a wrong value. A broad
+/// integer stays an integer, matching PHPStan: modelling the one input that
+/// overflows to a float would cost precision on every other negation.
+/// Any non-numeric branch makes the result unknown.
+fn apply_numeric_sign(ty: &PhpType, negated: bool) -> Option<PhpType> {
+    match ty.kind() {
+        TypeKind::Literal(value) => match &**value {
+            LiteralValue::Int(_) => {
+                let value = value.parse_i64()?;
+                let value = if negated { value.checked_neg()? } else { value };
+                Some(PhpType::literal_int(value.to_string()))
+            }
+            LiteralValue::Float(raw) => {
+                let raw = raw.trim();
+                let signed = if negated {
+                    if let Some(rest) = raw.strip_prefix('-') {
+                        rest.to_string()
+                    } else if let Some(rest) = raw.strip_prefix('+') {
+                        format!("-{rest}")
+                    } else {
+                        format!("-{raw}")
+                    }
+                } else {
+                    raw.strip_prefix('+').unwrap_or(raw).to_string()
+                };
+                Some(PhpType::literal_float(signed))
+            }
+            // A numeric string reads as the number it spells (`-'1'` is
+            // `-1`); any other string warns or throws.
+            LiteralValue::String(_) => value
+                .numeric_string_value()
+                .and_then(|number| apply_numeric_sign(&PhpType::literal(number), negated)),
+        },
+        TypeKind::Union(members) => {
+            let mut signed = Vec::with_capacity(members.len());
+            for member in members {
+                let member = apply_numeric_sign(member, negated)?;
+                for alternative in member.union_members() {
+                    if !signed.iter().any(|existing| existing == alternative) {
+                        signed.push(alternative.clone());
+                    }
+                }
+            }
+            match signed.len() {
+                0 => None,
+                1 => signed.into_iter().next(),
+                _ => Some(PhpType::union(signed)),
+            }
+        }
+        // PHP coerces null here, but the exact result depends on runtime
+        // version and diagnostics policy; keep the established conservative
+        // fallback instead of silently discarding nullability.
+        TypeKind::Nullable(_) => None,
+        _ if ty.is_int_subtype() => Some(PhpType::int()),
+        _ if ty.is_float_subtype() => Some(PhpType::float()),
+        _ if ty.is_named_ci("numeric") || ty.is_named("number") => {
+            Some(PhpType::union(vec![PhpType::int(), PhpType::float()]))
+        }
+        _ => None,
+    }
 }
 
 /// `~` yields a string for string operands and an int otherwise.
@@ -226,5 +305,22 @@ fn is_object_cast_scalar_type(ty: &PhpType) -> bool {
             !members.is_empty() && members.iter().all(is_object_cast_scalar_type)
         }
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn numeric_sign_distinguishes_number_pseudo_type_from_number_class() {
+        assert_eq!(
+            apply_numeric_sign(&PhpType::named(atom("number")), true),
+            Some(PhpType::union(vec![PhpType::int(), PhpType::float()]))
+        );
+        assert_eq!(
+            apply_numeric_sign(&PhpType::named(atom("Number")), true),
+            None
+        );
     }
 }

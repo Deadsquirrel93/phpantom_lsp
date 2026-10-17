@@ -173,18 +173,6 @@ pub(crate) const NAMED_BLOCK_DIRECTIVES: &[NamedBlockDirective] = &[
     },
 ];
 
-/// The call the preprocessor lowers a section-naming directive to.
-///
-/// A marker of its own rather than the generic `blade_directive`: symbol
-/// extraction recognises a Laravel string key by the callee it is passed
-/// to, and `@class(['a' => $b])` shares that generic one.
-pub(crate) const SECTION_MARKER: &str = "blade_section_directive";
-/// The same for a stack-naming directive.
-pub(crate) const STACK_MARKER: &str = "blade_stack_directive";
-/// The same for `@pushIf`, whose stack name is its *last* argument rather
-/// than its first.
-pub(crate) const PUSH_IF_MARKER: &str = "blade_push_if_directive";
-
 impl NamedBlockDirective {
     /// Whether the directive compiles to a condition rather than a
     /// statement, as `@hasSection` and its cousins do.
@@ -195,9 +183,9 @@ impl NamedBlockDirective {
     /// The marker call the preprocessor lowers this directive to.
     pub(crate) fn marker(&self) -> &'static str {
         match (self.kind, self.argument) {
-            (_, NameArgument::Last) => PUSH_IF_MARKER,
-            (BlockKind::Section, _) => SECTION_MARKER,
-            (BlockKind::Stack, _) => STACK_MARKER,
+            (_, NameArgument::Last) => super::markers::PUSH_IF,
+            (BlockKind::Section, _) => super::markers::SECTION,
+            (BlockKind::Stack, _) => super::markers::STACK,
         }
     }
 }

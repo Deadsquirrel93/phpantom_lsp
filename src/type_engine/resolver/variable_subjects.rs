@@ -2,12 +2,10 @@
 //! `$variable` (`$obj->$name()`), each read through the forward walker's
 //! scope so narrowing applies to them.
 
-use std::sync::Arc;
-
-use crate::php_type::{PhpType, TypeKind};
+use crate::php_type::TypeKind;
 use crate::types::*;
 
-use super::{Loaders, ResolutionCtx, VarResolutionCtx, is_bare_variable};
+use super::{Loaders, ResolutionCtx, is_bare_variable};
 
 /// Resolve `$this`: the enclosing class, unless a closure binds it to
 /// something else or the forward walker narrowed it.
@@ -139,73 +137,6 @@ fn resolve_this_from_scope(ctx: &ResolutionCtx<'_>) -> Option<Vec<ResolvedType>>
     (!resolved.is_empty()).then_some(resolved)
 }
 
-/// Resolve the classes named by `class-string<T>` (or `?class-string<T>`,
-/// or a union containing it) inside `ty`.
-///
-/// A subject typed `class-string<T>` holds a class name at runtime, not
-/// an instance of `T` — but a `::` access on it (`$class::method()`)
-/// resolves against `T`'s static members.  Used by both bare-variable
-/// and property-chain subjects so `$var::` and `$obj->prop::` share the
-/// same unwrapping behaviour.
-pub(super) fn resolve_class_string_inner_classes(
-    ty: &PhpType,
-    owning_class_name: &str,
-    all_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> Vec<Arc<ClassInfo>> {
-    fn inner_types(ty: &PhpType) -> Vec<&PhpType> {
-        match ty.kind() {
-            TypeKind::ClassString(Some(inner)) => vec![inner],
-            TypeKind::Nullable(inner) => inner_types(inner),
-            TypeKind::Union(members) => members.iter().flat_map(inner_types).collect(),
-            _ => vec![],
-        }
-    }
-
-    // A literal string that names a class is as usable for `::` access as
-    // `class-string<T>` is: PHP resolves the static call through whatever
-    // class name the string holds at runtime, whether or not the analyser
-    // wrapped it in `class-string`. This is what lets a foreach variable
-    // bound to a `Foo::class` array element (a literal `'Foo'`, not a
-    // `class-string<Foo>`, per PHPStan's own reading of such a constant)
-    // still dispatch `$item::method()`.
-    fn literal_string_class_names(ty: &PhpType) -> Vec<String> {
-        match ty.kind() {
-            TypeKind::Literal(literal) => match &**literal {
-                crate::php_type::LiteralValue::String(raw) => {
-                    crate::util::unescape_php_string_literal(raw)
-                        .into_iter()
-                        .collect()
-                }
-                _ => vec![],
-            },
-            TypeKind::Nullable(inner) => literal_string_class_names(inner),
-            TypeKind::Union(members) => members
-                .iter()
-                .flat_map(literal_string_class_names)
-                .collect(),
-            _ => vec![],
-        }
-    }
-
-    let mut results = Vec::new();
-    for inner in inner_types(ty) {
-        let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
-            inner,
-            owning_class_name,
-            all_classes,
-            class_loader,
-        );
-        ClassInfo::extend_unique_arc(&mut results, resolved);
-    }
-    for name in literal_string_class_names(ty) {
-        if let Some(cls) = class_loader(&name) {
-            ClassInfo::extend_unique_arc(&mut results, vec![cls]);
-        }
-    }
-    results
-}
-
 /// A member name written as `$variable` — a dynamic method/property
 /// access such as `$obj->$name()`, `Class::$name()`, or their first-class
 /// callable forms — resolves through whatever literal string that
@@ -263,35 +194,6 @@ pub(super) fn resolve_variable_fallback(
             &dummy_class
         }
     };
-
-    // ── `$var::` where `$var` holds a class-string ──
-    if access_kind == AccessKind::DoubleColon {
-        let var_ctx = VarResolutionCtx {
-            source_imports: ctx.source_imports,
-            backend: ctx.backend,
-            ..VarResolutionCtx::new(
-                var_name,
-                effective_class,
-                all_classes,
-                ctx.content,
-                ctx.cursor_offset,
-                class_loader,
-                ctx.source_class_loader,
-            )
-        };
-        let class_string_targets =
-            crate::type_engine::variable::class_string_resolution::resolve_class_string_targets(
-                var_name,
-                ctx.cursor_offset,
-                &var_ctx,
-            );
-        if !class_string_targets.is_empty() {
-            return class_string_targets
-                .into_iter()
-                .map(ResolvedType::from_class)
-                .collect();
-        }
-    }
 
     // Guard: resolve_variable_types is designed for bare `$variable`
     // names.  SubjectExpr::Variable can carry complex expressions
@@ -362,19 +264,20 @@ pub(super) fn resolve_variable_fallback(
     };
 
     // ── `class-string<T>` unwrapping for `$var::` access ────────
-    // When the variable's type is `class-string<T>` (e.g. from a
-    // `@param class-string<BackedEnum> $class` annotation) and the
-    // access kind is `::`, unwrap the inner type `T` and resolve it
-    // to classes so that static members are offered against `T`.
+    // When the variable holds a class name (`$cls = Foo::class`, a
+    // `@param class-string<BackedEnum> $class` annotation, a string
+    // naming a class) and the access kind is `::`, resolve the classes
+    // it names so that static members are offered against them.
     if access_kind == AccessKind::DoubleColon {
         let mut class_string_results: Vec<ResolvedType> = Vec::new();
         for rt in &resolved_types {
-            let classes = resolve_class_string_inner_classes(
-                &rt.type_string,
-                &effective_class.name,
-                all_classes,
-                class_loader,
-            );
+            let classes =
+                crate::type_engine::variable::class_string_resolution::classes_named_by_type(
+                    &rt.type_string,
+                    &effective_class.fqn(),
+                    all_classes,
+                    class_loader,
+                );
             for cls in classes {
                 ResolvedType::push_unique(&mut class_string_results, ResolvedType::from_arc(cls));
             }
