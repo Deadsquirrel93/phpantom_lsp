@@ -11,6 +11,7 @@
 //!   - Look up a method's `@throws` tags from its docblock
 
 use crate::atom::atom;
+use crate::parser::preceding_docblock_text;
 use crate::php_type::PhpType;
 use crate::text_scan::{CodeOffsets, find_matching_forward, is_ident_byte, keyword_starts_at};
 
@@ -243,7 +244,7 @@ pub(crate) fn find_method_return_type(file_content: &str, method_name: &str) -> 
         }
     }
 
-    let docblock = docblock_before(file_content, decl_start)?;
+    let docblock = preceding_docblock_text(file_content, decl_start)?;
     let info = crate::docblock::parser::parse_docblock_for_tags(docblock)?;
     let tag = info.first_tag_by_kind(crate::docblock::TagKind::Return)?;
     let parsed = PhpType::parse(tag.description.split_whitespace().next()?);
@@ -262,7 +263,7 @@ pub(crate) fn find_method_return_type(file_content: &str, method_name: &str) -> 
 /// Returns the short type names declared in `@throws` tags.
 pub(crate) fn find_method_throws_tags(file_content: &str, method_name: &str) -> Vec<PhpType> {
     let Some(info) = find_method_declaration(file_content, method_name)
-        .and_then(|(decl_start, _)| docblock_before(file_content, decl_start))
+        .and_then(|(decl_start, _)| preceding_docblock_text(file_content, decl_start))
         .and_then(crate::docblock::parser::parse_docblock_for_tags)
     else {
         return Vec::new();
@@ -282,74 +283,26 @@ pub(crate) fn find_method_throws_tags(file_content: &str, method_name: &str) -> 
 }
 
 /// Where the first `function <method_name>` declaration in `file_content`
-/// starts, and the offset just past the name.  The name must end there:
-/// `function foo` does not match `function foobar`.
+/// starts, and the offset just past the name.  Only code counts, so a
+/// comment or a string naming the method is not taken for it, and the name
+/// must end there: `function foo` does not match `function foobar`.
 fn find_method_declaration(file_content: &str, method_name: &str) -> Option<(usize, usize)> {
-    let search = format!("function {method_name}");
-    let mut search_start = 0;
-    while let Some(found) = file_content[search_start..].find(&search) {
-        let start = search_start + found;
-        let after_name = start + search.len();
-        if !file_content
-            .as_bytes()
-            .get(after_name)
-            .is_some_and(|&b| is_ident_byte(b))
-        {
-            return Some((start, after_name));
+    let bytes = file_content.as_bytes();
+    CodeOffsets::new(bytes).find_map(|start| {
+        if !keyword_starts_at(bytes, start, b"function") {
+            return None;
         }
-        search_start = after_name;
-    }
-    None
-}
-
-/// The docblock written directly above the declaration starting at
-/// `decl_start`, past any visibility and modifier keywords.
-fn docblock_before(file_content: &str, decl_start: usize) -> Option<&str> {
-    let before = skip_modifiers_backward(&file_content[..decl_start]);
-    if !before.ends_with("*/") {
-        return None;
-    }
-    before.rfind("/**").map(|doc_start| &before[doc_start..])
-}
-
-// ─── Internal Helpers ───────────────────────────────────────────────────────
-
-/// Skip backward past PHP visibility and modifier keywords
-/// (`public`, `protected`, `private`, `static`, `abstract`, `final`,
-/// `readonly`) to locate the docblock that precedes a method
-/// declaration.
-///
-/// Returns the trimmed prefix of `text` with modifiers stripped.
-pub(crate) fn skip_modifiers_backward(text: &str) -> &str {
-    const MODIFIERS: &[&str] = &[
-        "private",
-        "protected",
-        "public",
-        "static",
-        "abstract",
-        "final",
-        "readonly",
-    ];
-
-    let mut s = text.trim_end();
-    loop {
-        let mut found = false;
-        for modifier in MODIFIERS {
-            if s.ends_with(modifier) {
-                let start = s.len() - modifier.len();
-                if start == 0
-                    || (!s.as_bytes()[start - 1].is_ascii_alphanumeric()
-                        && s.as_bytes()[start - 1] != b'_')
-                {
-                    s = s[..start].trim_end();
-                    found = true;
-                    break;
-                }
-            }
-        }
-        if !found {
-            break;
-        }
-    }
-    s
+        // A method that returns by reference is declared `function &name`.
+        let after_keyword = file_content[start + "function".len()..].trim_start();
+        let name = after_keyword
+            .strip_prefix('&')
+            .map_or(after_keyword, str::trim_start);
+        let name_start = file_content.len() - name.len();
+        let name_end = name_start + method_name.len();
+        let declares = name
+            .get(..method_name.len())
+            .is_some_and(|written| written.eq_ignore_ascii_case(method_name))
+            && !bytes.get(name_end).is_some_and(|&b| is_ident_byte(b));
+        declares.then_some((start, name_end))
+    })
 }

@@ -19,7 +19,7 @@
 //! find variables, call expressions, balanced parentheses, `new`
 //! expressions, etc.) live in [`crate::type_engine::subject_extraction`].
 use std::panic::{self, AssertUnwindSafe, UnwindSafe};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use tower_lsp::lsp_types::*;
 
@@ -135,49 +135,6 @@ pub(crate) fn canonical_path_for_comparison(path: &Path) -> std::path::PathBuf {
 /// e.g. `phar:///path/to/phpstan.phar/src/Type/Type.php`.
 pub(crate) fn phar_entry_uri(phar_path: &Path, internal_path: &str) -> String {
     format!("phar://{}/{}", phar_path.display(), internal_path)
-}
-
-/// Recursively collect all `.php` files under a directory, respecting
-/// `.gitignore` rules and skipping hidden directories (`.git`,
-/// `.idea`, etc.).
-///
-/// Uses the `ignore` crate's `WalkBuilder` for gitignore-aware
-/// traversal.  This is consistent with the other workspace walkers
-/// (`scan_workspace_fallback_full`, `crate::classmap_scanner::collect_php_files_gitignore`).
-///
-/// Used by Go-to-implementation (Phase 5) which walks PSR-4 source
-/// directories.
-///
-/// `vendor_dir_paths` contains absolute paths of all known vendor
-/// directories (one per subproject in monorepo mode).  Any directory
-/// whose absolute path matches one of these is skipped regardless of
-/// `.gitignore` content.
-///
-/// Silently skips directories and files that cannot be read (e.g.
-/// permission errors, broken symlinks).
-pub(crate) fn collect_php_files(
-    dir: &Path,
-    vendor_dir_paths: &[PathBuf],
-    filters: &std::sync::Arc<crate::classmap_scanner::IndexFilters>,
-) -> Vec<PathBuf> {
-    let mut result = Vec::new();
-    let walker = crate::classmap_scanner::workspace_walk_builder(
-        dir,
-        std::sync::Arc::new(vendor_dir_paths.to_vec()),
-        std::sync::Arc::clone(filters),
-        false,
-        crate::classmap_scanner::LinkClaims::new([dir.to_path_buf()], None),
-    )
-    .build();
-
-    for entry in walker.flatten() {
-        let path = entry.path();
-        if path.is_file() && filters.is_php_file(path) {
-            result.push(path.to_path_buf());
-        }
-    }
-
-    result
 }
 
 /// Drop the entries `keep` marks `false`, in place.
@@ -331,60 +288,5 @@ mod tests {
     fn unescape_string_literal_rejects_unquoted_input() {
         assert_eq!(unescape_php_string_literal("bare"), None);
         assert_eq!(unescape_php_string_literal("'unterminated"), None);
-    }
-
-    #[test]
-    fn collect_php_files_follows_interior_symlink() {
-        // Go-to-implementation's walker keeps the same symlink contract
-        // as the other workspace walkers (issue #383).
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path().join("ws");
-        let real = dir.path().join("real");
-        std::fs::create_dir_all(&root).unwrap();
-        std::fs::create_dir_all(&real).unwrap();
-        std::fs::write(real.join("Hidden.php"), "<?php\n").unwrap();
-
-        let link = root.join("link");
-        #[cfg(unix)]
-        std::os::unix::fs::symlink(&real, &link).unwrap();
-        #[cfg(windows)]
-        std::os::windows::fs::symlink_dir(&real, &link).unwrap();
-
-        let files = collect_php_files(&root, &[], &crate::classmap_scanner::IndexFilters::empty());
-        let linked = files
-            .iter()
-            .find(|p| p.ends_with("Hidden.php"))
-            .unwrap_or_else(|| panic!("linked file must be indexed: {files:?}"));
-        assert!(
-            linked.starts_with(&link),
-            "paths must keep the symlink spelling: {linked:?} vs {link:?}"
-        );
-    }
-
-    #[test]
-    fn collect_php_files_walks_a_link_target_once() {
-        // Two links to one tree must not make go-to-implementation offer
-        // the same class twice under two spellings.
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path().join("ws");
-        let real = dir.path().join("real");
-        std::fs::create_dir_all(&root).unwrap();
-        std::fs::create_dir_all(&real).unwrap();
-        std::fs::write(real.join("Hidden.php"), "<?php\n").unwrap();
-
-        for name in ["a", "b"] {
-            let link = root.join(name);
-            #[cfg(unix)]
-            std::os::unix::fs::symlink(&real, &link).unwrap();
-            #[cfg(windows)]
-            std::os::windows::fs::symlink_dir(&real, &link).unwrap();
-        }
-
-        let files = collect_php_files(&root, &[], &crate::classmap_scanner::IndexFilters::empty());
-        assert_eq!(
-            files.len(),
-            1,
-            "the linked tree must be reported once, not once per link: {files:?}"
-        );
     }
 }

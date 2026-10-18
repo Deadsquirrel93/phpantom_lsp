@@ -880,6 +880,51 @@ fn unresolvable_parent_trait_does_not_hide_its_siblings() {
     assert_eq!(property_type(&result, "badge"), "string");
 }
 
+/// A `@property` tag on a trait the parent uses is a declaration about the
+/// class like any other tag the class inherits, so it is marked as one: it
+/// then wins over a column type merely inferred from the schema.
+#[test]
+fn parent_trait_property_tags_are_marked_as_docblock_tags() {
+    let provider = PHPDocProvider;
+
+    let mut child = make_class("Child");
+    child.parent_class = Some(atom("Base"));
+
+    let mut base = make_class("Base");
+    base.used_traits = vec![atom("Publishes")];
+    base.set_class_docblock(Some("/** @property int $views */".to_string()));
+    let base = Arc::new(base);
+
+    let publishes = Arc::new(make_trait(
+        "Publishes",
+        "/** @property \\Carbon\\Carbon $published_at */",
+        &[],
+    ));
+
+    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+        match name {
+            "Base" => Some(Arc::clone(&base)),
+            "Publishes" => Some(Arc::clone(&publishes)),
+            _ => None,
+        }
+    };
+
+    let result = provider.provide(&child, &class_loader, None);
+
+    for name in ["views", "published_at"] {
+        let property = result
+            .properties
+            .iter()
+            .find(|p| p.name == name)
+            .unwrap_or_else(|| panic!("no property `{name}`"));
+        assert!(
+            matches!(property.source, Some(PropertySource::DocblockTag)),
+            "`{name}` should be marked as a docblock tag, got {:?}",
+            property.source
+        );
+    }
+}
+
 /// A parameterised trait whose consumer declared no `@use` arguments has
 /// nothing to substitute from, so its tags keep the template parameter's
 /// name rather than being resolved against an unrelated type.

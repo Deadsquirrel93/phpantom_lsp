@@ -3,14 +3,11 @@
 //! parameters with a primitive type (`array &$matches`), including the
 //! shape `preg_match()` and its relatives fill `$matches` with.
 
-use mago_span::HasSpan;
 use mago_syntax::cst::argument::Argument;
 
 use crate::atom::{atom, bytes_to_str};
 use crate::php_type::{PhpType, ShapeEntry, TypeKind};
-use crate::type_engine::call_resolution::{
-    OutParamCallee, effective_out_type, resolve_out_type_for_call,
-};
+use crate::type_engine::call_resolution::{effective_out_type, resolve_out_type_for_call};
 use crate::types::ResolvedType;
 
 use super::*;
@@ -282,94 +279,34 @@ fn arg_is_unpacked<'b>(arg_list: &ArgumentList<'b>, value_expr: &Expression<'b>)
     })
 }
 
-/// For each variable argument in a call expression that is passed to a
+/// For each variable argument of `call` that is passed to a
 /// pass-by-reference parameter with a primitive type hint (e.g.
 /// `array &$matches`), seed or refresh the variable in scope. Existing exact
 /// values must be invalidated because the callee may assign any value allowed
-/// by the parameter type. This complements [`process_pass_by_ref`] which
-/// handles class-typed parameters via `try_apply_pass_by_reference_type`.
-pub(crate) fn seed_pass_by_ref_primitives<'b>(
+/// by the parameter type. Class-typed parameters are handled by the other
+/// pass [`process_pass_by_ref`] runs on the same call.
+pub(super) fn seed_pass_by_ref_primitives<'b>(
     expr: &'b Expression<'b>,
+    call: &ByRefCall<'b>,
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
-    // `preg_match`'s `$matches` has no other by-reference parameter beside
-    // it, so nothing below is left to do once the pattern has typed it.
-    if seed_preg_matches(expr, scope, ctx) {
-        return;
-    }
     // Moving the internal pointer leaves the array's value as it was, so
     // the `array|object` hint describes nothing the call wrote.
     if super::array_assignment::is_array_pointer_call(expr) {
         return;
     }
 
-    // Resolve the called function/method's parameters.
-    let (arg_list, parameters, template_owner) = match expr {
-        Expression::Call(Call::Function(func_call)) => {
-            let func_name = match func_call.function {
-                Expression::Identifier(ident) => bytes_to_str(ident.value()).to_string(),
-                _ => return,
-            };
-            let func_name_offset = func_call.function.span().start.offset;
-            let fl = match ctx.loaders.function_loader {
-                Some(fl) => fl,
-                None => return,
-            };
-            let func_info = match fl(&func_name, func_name_offset) {
-                Some(fi) => fi,
-                None => return,
-            };
-            let parameters = func_info.parameters.clone();
-            (
-                &func_call.argument_list,
-                parameters,
-                OutParamCallee::Function(Box::new(func_info)),
-            )
-        }
-        Expression::Call(Call::Method(mc)) => {
-            let Some((parameters, callee)) =
-                instance_method_callee(mc.object, &mc.method, scope, ctx)
-            else {
-                return;
-            };
-            (&mc.argument_list, parameters, callee)
-        }
-        Expression::Call(Call::NullSafeMethod(mc)) => {
-            let Some((parameters, callee)) =
-                instance_method_callee(mc.object, &mc.method, scope, ctx)
-            else {
-                return;
-            };
-            (&mc.argument_list, parameters, callee)
-        }
-        Expression::Call(Call::StaticMethod(sc)) => {
-            let method_name = match &sc.method {
-                ClassLikeMemberSelector::Identifier(ident) => bytes_to_str(ident.value).to_string(),
-                _ => return,
-            };
-            let Some(class_name) = crate::class_lookup::class_expression_name(
-                sc.class,
-                ctx.current_class,
-                ctx.all_classes,
-                ctx.source_class_loader,
-                ctx.source_imports,
-            ) else {
-                return;
-            };
-            let Some((parameters, callee)) = resolved_method_callee(&class_name, &method_name, ctx)
-            else {
-                return;
-            };
-            (&sc.argument_list, parameters, callee)
-        }
-        _ => return,
-    };
+    let ByRefCall {
+        arguments: arg_list,
+        parameters,
+        callee: template_owner,
+    } = call;
 
     // Bind arguments to parameters following PHP's rules so a named argument
     // seeds the parameter it actually targets, not the one at its ordinal
     // position in the call.
-    let bound = crate::call_args::bind_args_to_params(&parameters, arg_list);
+    let bound = crate::call_args::bind_args_to_params(parameters, arg_list);
 
     // An out type written in the callee's own `@template` params
     // (`usort`'s `array<TKey, TValue> &$array`) describes the caller's
@@ -404,7 +341,7 @@ pub(crate) fn seed_pass_by_ref_primitives<'b>(
 
         let already_in_scope = !scope.get(&var_name).is_empty();
         let mut seeded = false;
-        if let Some(out_hint) = effective_out_type(param, param_index, &template_owner, ctx.backend)
+        if let Some(out_hint) = effective_out_type(param, param_index, template_owner, ctx.backend)
         {
             if out_hint.references_any_name(callee_templates) {
                 continue;
@@ -428,8 +365,8 @@ pub(crate) fn seed_pass_by_ref_primitives<'b>(
                     super::super::resolution::build_var_resolver_from_ctx(&var_ctx);
                 resolve_out_type_for_call(
                     out_hint,
-                    &parameters,
-                    &template_owner,
+                    parameters,
+                    template_owner,
                     arg_list,
                     ctx.content,
                     &var_ctx.as_resolution_ctx(),
@@ -542,7 +479,7 @@ pub(crate) fn seed_pass_by_ref_primitives<'b>(
 /// Returns whether the variable was typed. A pattern the group walk refuses,
 /// or a `$flags` argument that does not resolve to a constant, leaves the
 /// call to the generic path.
-fn seed_preg_matches<'b>(
+pub(super) fn seed_preg_matches<'b>(
     expr: &'b Expression<'b>,
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,

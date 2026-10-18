@@ -47,7 +47,7 @@ fn test_find_throw_statements_skips_comments() {
 
 #[test]
 fn test_find_method_throws_tags_basic() {
-    let content = r#"
+    let content = r#"<?php
 /**
  * @throws InvalidArgumentException
  * @throws \RuntimeException
@@ -67,7 +67,7 @@ public function doSomething(): void {
 
 #[test]
 fn test_find_method_throws_tags_with_modifiers() {
-    let content = r#"
+    let content = r#"<?php
 /**
  * @throws InvalidArgumentException
  */
@@ -90,7 +90,7 @@ public function createException(): RuntimeException {
 
 #[test]
 fn test_find_method_return_type_docblock() {
-    let content = r#"
+    let content = r#"<?php
 /**
  * @return RuntimeException
  */
@@ -103,7 +103,7 @@ public function createException() {
 
 #[test]
 fn test_find_method_return_type_skips_void() {
-    let content = r#"
+    let content = r#"<?php
 /**
  * @return void
  */
@@ -129,7 +129,7 @@ fn test_find_inline_throws_annotations() {
 
 #[test]
 fn test_find_propagated_throws() {
-    let file_content = r#"
+    let file_content = r#"<?php
 /**
  * @throws IOException
  * @throws NetworkException
@@ -166,16 +166,41 @@ public function caller(): void {
     assert_eq!(types[0], PhpType::named(atom("RuntimeException")));
 }
 
+/// A plain comment above an undocumented method is not its docblock, and
+/// neither is the docblock of the method before it.
 #[test]
-fn test_skip_modifiers_backward() {
-    assert_eq!(skip_modifiers_backward("    public static "), "");
+fn test_find_method_throws_tags_skips_a_plain_comment() {
+    let content = r#"<?php
+class Foo {
+    /** @throws IOException */
+    public function read(): void {}
+
+    /* Writes the buffer. */
+    public function write(): void {}
+}
+"#;
+    assert!(find_method_throws_tags(content, "write").is_empty());
     assert_eq!(
-        skip_modifiers_backward("/** @return void */ private "),
-        "/** @return void */"
+        find_method_throws_tags(content, "read"),
+        vec![PhpType::named(atom("IOException"))]
     );
+}
+
+/// A comment or a string that names the method is not its declaration.
+#[test]
+fn test_find_method_throws_tags_skips_comments_and_strings_naming_it() {
+    let content = r#"<?php
+class Foo {
+    // Call function write() before closing.
+    private string $doc = 'function write()';
+
+    /** @throws IOException */
+    public function &write(): array {}
+}
+"#;
     assert_eq!(
-        skip_modifiers_backward("no modifiers here"),
-        "no modifiers here"
+        find_method_throws_tags(content, "write"),
+        vec![PhpType::named(atom("IOException"))]
     );
 }
 

@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use crate::atom::{Atom, AtomSet};
 use crate::inheritance;
-use crate::inheritance::bind_template_args;
+use crate::inheritance::{ClassRef, bind_template_args};
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::{
     ClassInfo, ConstantInfo, MAX_INHERITANCE_DEPTH, MAX_MIXIN_DEPTH, MethodInfo, PropertyInfo,
@@ -91,6 +91,107 @@ pub(super) fn uses_trait_with_mixins(
     false
 }
 
+/// Collect the members of every `@mixin` `class` answers to: its own and
+/// its traits', then each ancestor's and that ancestor's traits'.
+///
+/// No substitution applies to the class's own mixins: the class's generic
+/// arguments are applied later by `apply_generic_args`, and a mixin named
+/// by one of its template parameters (`@mixin TWraps`) is resolved during
+/// the ancestor walk of a child that binds it through `@extends`.  The walk
+/// up the parent chain accumulates those bindings, so that when
+/// `BelongsTo extends Relation<Product>` and `Relation` declares
+/// `@mixin Builder<TRelatedModel>`, the mixin comes out as
+/// `Builder<Product>`.
+pub(super) fn collect_class_mixin_members(
+    class: &ClassInfo,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    collector: &mut MixinCollector,
+    cache: Option<&super::super::ResolvedClassCache>,
+) {
+    let decorated_forward = uses_forwards_calls(class, class_loader);
+    collect_mixin_members(
+        &class.mixins,
+        &class.mixin_generics,
+        class_loader,
+        collector,
+        &MixinSubs {
+            subs: &HashMap::new(),
+            bounds: &class.template_param_bounds,
+            decorated_forward,
+        },
+        0,
+        cache,
+    );
+    collect_trait_mixin_members(
+        class,
+        &HashMap::new(),
+        class_loader,
+        collector,
+        decorated_forward,
+        cache,
+    );
+
+    let mut current_ancestor: ClassRef<'_> = ClassRef::Borrowed(class);
+    let mut active_subs: HashMap<String, PhpType> = HashMap::new();
+    let mut depth = 0u32;
+    while let Some(ref parent_name) = current_ancestor.parent_class {
+        depth += 1;
+        if depth > MAX_INHERITANCE_DEPTH {
+            break;
+        }
+        let Some(parent) = class_loader(parent_name) else {
+            break;
+        };
+        let level_subs = build_mixin_substitution_map(
+            &current_ancestor,
+            &parent,
+            &active_subs,
+            &class.template_param_bounds,
+        );
+        if !parent.mixins.is_empty() {
+            collect_mixin_members(
+                &parent.mixins,
+                &substituted_mixin_generics(&parent, &level_subs),
+                class_loader,
+                collector,
+                &MixinSubs {
+                    subs: &level_subs,
+                    bounds: &parent.template_param_bounds,
+                    decorated_forward,
+                },
+                0,
+                cache,
+            );
+        }
+        collect_trait_mixin_members(
+            &parent,
+            &level_subs,
+            class_loader,
+            collector,
+            decorated_forward,
+            cache,
+        );
+        active_subs = level_subs;
+        current_ancestor = ClassRef::Owned(parent);
+    }
+}
+
+/// The generic arguments of `owner`'s `@mixin` declarations, with `subs`
+/// replacing the template parameters they name.
+fn substituted_mixin_generics(
+    owner: &ClassInfo,
+    subs: &HashMap<String, PhpType>,
+) -> Vec<(Atom, Vec<PhpType>)> {
+    if subs.is_empty() {
+        return owner.mixin_generics.clone();
+    }
+    owner
+        .mixin_generics
+        .iter()
+        .map(|(name, args)| (*name, args.iter().map(|arg| arg.substitute(subs)).collect()))
+        .collect()
+}
+
 /// Collect the members of the `@mixin` classes declared on the traits
 /// `owner` uses, and on the traits those traits use.
 ///
@@ -131,23 +232,9 @@ pub(super) fn collect_trait_mixin_members(
     queue.reverse();
     while let Some((trait_info, trait_subs)) = queue.pop() {
         if !trait_info.mixins.is_empty() {
-            let mixin_generics: Vec<(Atom, Vec<PhpType>)> = if trait_subs.is_empty() {
-                trait_info.mixin_generics.clone()
-            } else {
-                trait_info
-                    .mixin_generics
-                    .iter()
-                    .map(|(name, args)| {
-                        (
-                            *name,
-                            args.iter().map(|a| a.substitute(&trait_subs)).collect(),
-                        )
-                    })
-                    .collect()
-            };
             collect_mixin_members(
                 &trait_info.mixins,
-                &mixin_generics,
+                &substituted_mixin_generics(&trait_info, &trait_subs),
                 class_loader,
                 collector,
                 &MixinSubs {

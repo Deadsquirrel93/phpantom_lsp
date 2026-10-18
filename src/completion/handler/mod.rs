@@ -188,6 +188,9 @@ impl Backend {
             let _cache_guard = crate::virtual_members::with_active_resolved_class_cache(
                 &self.resolved_class_cache,
             );
+            // Parse the document at most once per request, as every request
+            // that goes through `with_file_content` does.
+            let _parse_guard = crate::parser::with_parse_cache_arc(std::sync::Arc::clone(&content));
 
             let cursor_offset = crate::text_position::position_to_offset(&content, position);
             let site = CompletionSite {

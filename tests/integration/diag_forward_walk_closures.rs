@@ -1,6 +1,6 @@
 use crate::common::{
     create_psr4_workspace, create_test_backend, create_test_backend_with_full_stubs,
-    slow_diagnostic_messages, unknown_member_diagnostics_with_scope_cache,
+    slow_diagnostic_messages, type_at_marker, unknown_member_diagnostics_with_scope_cache,
 };
 use tower_lsp::lsp_types::*;
 
@@ -302,6 +302,89 @@ class Endpoint {
         diags.is_empty(),
         "Expected no unknown_member diagnostics, got: {diags:?}"
     );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Pass-by-ref out types reach the variable whatever shape the call has
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn pass_by_ref_class_type_reaches_the_variable_through_any_receiver() {
+    let backend = create_test_backend();
+    let uri = "file:///test_by_ref_receivers.php";
+    let text = r#"<?php
+class Foo {}
+class Filler {
+    public function fill(?Foo &$out): void { $out = new Foo(); }
+    public static function fillStatic(?Foo &$out): void { $out = new Foo(); }
+    public function viaThis(): void {
+        $out = null;
+        $this->fill($out);
+        /*THIS*/$out;
+    }
+}
+class Holder {
+    public Filler $filler;
+    public function run(Filler $filler, ?Filler $maybe): void {
+        $viaVariable = null;
+        $filler->fill($viaVariable);
+        /*VARIABLE*/$viaVariable;
+        $viaNullsafe = null;
+        $maybe?->fill($viaNullsafe);
+        /*NULLSAFE*/$viaNullsafe;
+        $viaProperty = null;
+        $this->filler->fill($viaProperty);
+        /*PROPERTY*/$viaProperty;
+        $viaStatic = null;
+        Filler::fillStatic($viaStatic);
+        /*STATIC*/$viaStatic;
+    }
+}
+"#;
+    backend.update_ast(uri, text);
+    let through_this = type_at_marker(&backend, uri, text, "THIS");
+    assert_ne!(through_this, "null", "the call writes `$out`");
+    for marker in ["VARIABLE", "NULLSAFE", "PROPERTY", "STATIC"] {
+        assert_eq!(
+            type_at_marker(&backend, uri, text, marker),
+            through_this,
+            "the call through {marker} writes the variable like one through `$this`"
+        );
+    }
+}
+
+#[test]
+fn pass_by_ref_reaches_the_variable_through_a_constructor() {
+    let backend = create_test_backend();
+    let uri = "file:///test_by_ref_constructor.php";
+    let text = r#"<?php
+class Parser {
+    public function __construct(string $source, ?array &$errors) { $errors = []; }
+    public function parseInto(string $source, ?array &$errors): void { $errors = []; }
+}
+class StrictParser extends Parser {}
+function run(Parser $parser): void {
+    $fromMethod = null;
+    $parser->parseInto('x', $fromMethod);
+    /*METHOD*/$fromMethod;
+    $fromConstructor = null;
+    new Parser('x', $fromConstructor);
+    /*CONSTRUCTOR*/$fromConstructor;
+    $fromInherited = null;
+    new StrictParser('x', $fromInherited);
+    /*INHERITED*/$fromInherited;
+}
+"#;
+    backend.update_ast(uri, text);
+    let through_method = type_at_marker(&backend, uri, text, "METHOD");
+    assert_ne!(through_method, "null", "the call writes `$errors`");
+    for marker in ["CONSTRUCTOR", "INHERITED"] {
+        assert_eq!(
+            type_at_marker(&backend, uri, text, marker),
+            through_method,
+            "a constructor writes through {marker} like a method does"
+        );
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

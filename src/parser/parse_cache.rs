@@ -269,28 +269,9 @@ pub(crate) fn with_parsed_program<T: Default>(
     let cached = PARSE_CACHE.with(|cell| cell.borrow().as_ref().and_then(|c| c.find(content)));
 
     if let Some(file) = cached {
-        // The fast path runs both the lazy mago parse and the extraction
-        // closure `f`.  Wrap them in `catch_unwind` — like the slow path
-        // below — so a parser or extraction panic doesn't escape and
-        // violate this function's "a parser panic doesn't crash the LSP
-        // server" contract.  On panic the poisoned entry is evicted so the
-        // next call re-parses from scratch.
-        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        return with_cached_file(file, method_name, |file| {
             f(file.program(), file.content.as_str())
-        }));
-
-        return match outcome {
-            Ok(value) => value,
-            Err(_) => {
-                PARSE_CACHE.with(|cell| {
-                    if let Some(cache) = cell.borrow_mut().as_mut() {
-                        cache.evict(&file);
-                    }
-                });
-                tracing::error!("PHPantom: parser panicked in {}", method_name);
-                T::default()
-            }
-        };
+        });
     }
 
     // ── Slow path: parse from scratch ───────────────────────────
@@ -306,6 +287,32 @@ pub(crate) fn with_parsed_program<T: Default>(
     match result {
         Ok(value) => value,
         Err(_) => {
+            tracing::error!("PHPantom: parser panicked in {}", method_name);
+            T::default()
+        }
+    }
+}
+
+/// Run `f` on a file of the active cache.
+///
+/// `f` may parse the file lazily and then read the program, and either can
+/// panic. Like a fresh parse, a panic is logged (with `method_name`) and
+/// answered with `T::default()` instead of taking the LSP server down, and
+/// the file is evicted so the next call re-parses it rather than reading a
+/// half-built entry.
+fn with_cached_file<T: Default>(
+    file: Rc<CachedFile>,
+    method_name: &str,
+    f: impl FnOnce(&CachedFile) -> T,
+) -> T {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(&file))) {
+        Ok(value) => value,
+        Err(_) => {
+            PARSE_CACHE.with(|cell| {
+                if let Some(cache) = cell.borrow_mut().as_mut() {
+                    cache.evict(&file);
+                }
+            });
             tracing::error!("PHPantom: parser panicked in {}", method_name);
             T::default()
         }
@@ -377,30 +384,15 @@ pub(crate) fn with_fcc_assignments<T: Default>(
 ) -> T {
     let cached = PARSE_CACHE.with(|cell| cell.borrow().as_ref().and_then(|c| c.find(content)));
     match cached {
-        Some(file) => {
-            let collected = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                file.fcc_assignments
-                    .get_or_init(|| {
-                        crate::signature_help::collect_fcc_assignments(
-                            file.program().statements.as_slice(),
-                            &file.content,
-                        )
-                    })
-                    .as_slice()
-            }));
-            match collected {
-                Ok(assignments) => f(assignments),
-                Err(_) => {
-                    PARSE_CACHE.with(|cell| {
-                        if let Some(cache) = cell.borrow_mut().as_mut() {
-                            cache.evict(&file);
-                        }
-                    });
-                    tracing::error!("PHPantom: parser panicked in with_fcc_assignments");
-                    T::default()
-                }
-            }
-        }
+        Some(file) => with_cached_file(file, "with_fcc_assignments", |file| {
+            let assignments = file.fcc_assignments.get_or_init(|| {
+                crate::signature_help::collect_fcc_assignments(
+                    file.program().statements.as_slice(),
+                    &file.content,
+                )
+            });
+            f(assignments.as_slice())
+        }),
         None => with_parsed_program(content, "with_fcc_assignments", |program, content| {
             f(&crate::signature_help::collect_fcc_assignments(
                 program.statements.as_slice(),
@@ -458,29 +450,44 @@ fn collect_comments(program: &Program<'_>) -> Vec<CommentSpan> {
 pub(crate) fn with_comments<T: Default>(content: &str, f: impl FnOnce(&[CommentSpan]) -> T) -> T {
     let cached = PARSE_CACHE.with(|cell| cell.borrow().as_ref().and_then(|c| c.find(content)));
     match cached {
-        Some(file) => {
-            let collected = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                file.comments
-                    .get_or_init(|| collect_comments(file.program()))
-                    .as_slice()
-            }));
-            match collected {
-                Ok(comments) => f(comments),
-                Err(_) => {
-                    PARSE_CACHE.with(|cell| {
-                        if let Some(cache) = cell.borrow_mut().as_mut() {
-                            cache.evict(&file);
-                        }
-                    });
-                    tracing::error!("PHPantom: parser panicked in with_comments");
-                    T::default()
-                }
-            }
-        }
+        Some(file) => with_cached_file(file, "with_comments", |file| {
+            f(file
+                .comments
+                .get_or_init(|| collect_comments(file.program()))
+                .as_slice())
+        }),
         None => with_parsed_program(content, "with_comments", |program, _| {
             f(&collect_comments(program))
         }),
     }
+}
+
+/// The docblock above the declaration starting at `node_start`, which may
+/// be separated from it by anything but a statement or a block boundary
+/// (modifiers, attributes, other comments).
+///
+/// Comments are lexed whether or not the code around them parses, so this
+/// also answers in a file that is mid-edit.
+pub(crate) fn preceding_docblock_text(content: &str, node_start: usize) -> Option<&str> {
+    let mut found = None;
+    with_comments(content, |comments| {
+        let mut covered_from = node_start.min(content.len());
+        let above = comments.partition_point(|c| c.end as usize <= covered_from);
+        for comment in comments[..above].iter().rev() {
+            let gap = content
+                .get(comment.end as usize..covered_from)
+                .unwrap_or("");
+            if gap.contains([';', '{', '}']) {
+                return;
+            }
+            if comment.kind == CommentKind::Doc {
+                found = content.get(comment.start as usize..comment.end as usize);
+                return;
+            }
+            covered_from = comment.start as usize;
+        }
+    });
+    found
 }
 
 #[cfg(test)]

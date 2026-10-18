@@ -954,7 +954,7 @@ Phase 5 walks PSR-4 roots from `composer.json` (`autoload` and `autoload-dev`). 
 
 Phase 5 exists to catch newly-created or not-yet-indexed user classes that are missing from fqn_uri_index.
 
-Note: `collect_php_files` still receives the vendor dir name because a fallback mapping like `"" => "."` resolves to the workspace root, where the walk must skip the vendor directory (and hidden directories like `.git`).
+Note: the walk (`collect_php_files_gitignore`) still receives the vendor dir paths because a fallback mapping like `"" => "."` resolves to the workspace root, where the walk must skip the vendor directory (and hidden directories like `.git`).
 
 ### String Pre-Filter
 

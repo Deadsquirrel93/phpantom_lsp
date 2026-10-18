@@ -20,12 +20,14 @@ use crate::atom::{Atom, AtomSet};
 use crate::inheritance;
 use crate::inheritance::{ClassRef, bind_template_args};
 use crate::php_type::PhpType;
-use crate::types::{ClassInfo, MAX_INHERITANCE_DEPTH, MethodInfo, PropertyInfo, PropertySource};
+use crate::types::{
+    ClassInfo, DocblockMembers, MAX_INHERITANCE_DEPTH, MethodInfo, PropertyInfo, PropertySource,
+};
 
 use super::{VirtualMemberProvider, VirtualMembers};
 use mixins::{
-    MixinCollector, MixinDedup, MixinSubs, build_mixin_substitution_map, collect_mixin_members,
-    collect_trait_mixin_members, uses_trait_with_mixins,
+    MixinCollector, MixinDedup, build_mixin_substitution_map, collect_class_mixin_members,
+    uses_trait_with_mixins,
 };
 
 pub use mixins::resolve_template_param_mixins;
@@ -205,350 +207,179 @@ impl VirtualMemberProvider for PHPDocProvider {
         class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
         cache: Option<&super::ResolvedClassCache>,
     ) -> VirtualMembers {
-        let mut methods = Vec::new();
-        let mut properties = Vec::new();
-        let constants = Vec::new();
-
-        // Dedup sets for O(1) membership checks.  Seeded from the
-        // base-resolved class members (real + inherited) and updated
-        // as virtual members are collected.
-        //
-        // `seen_props` is NOT seeded from existing class properties.
-        // Phase 1 (`@property` tags) always emits its properties so
-        // that `merge_virtual_members` can compare type specificity
-        // and keep the most specific type (e.g. `array<string>` from
-        // `@property` beats bare `array` from `$casts`).  After
-        // phase 1 emits, names are added to `seen_props` to prevent
-        // lower-priority sources (trait tags, parent tags, `@mixin`
-        // members) from overriding them.
-        let mut seen_methods: AtomSet = class.methods.iter().map(|m| m.name).collect();
-        let mut seen_props: AtomSet = AtomSet::default();
-        let seen_consts: AtomSet = class.constants.iter().map(|c| c.name).collect();
-
-        // No generic substitution applies to the class's own tags.
-        let no_subs: HashMap<String, PhpType> = HashMap::new();
-
-        // ── Phase 1: @method and @property tags (higher precedence) ─────
-
-        if let Some(doc) = class.doc_members.as_deref() {
-            for m in &doc.methods {
-                seen_methods.insert(m.name);
-                methods.push(Arc::clone(m));
-            }
-
-            for (name, type_hint) in &doc.properties {
-                seen_props.insert(*name);
-                properties.push(doc_tag_property(*name, type_hint.as_ref(), &no_subs));
-            }
-        }
-
-        // ── Phase 1b: @method and @property tags from used traits ───────
-        //
-        // When a class uses a trait that declares `@method` or `@property`
-        // tags in its docblock, those virtual members should propagate to
-        // the consuming class.  Real trait methods are already merged by
-        // `merge_traits_into`, but virtual members from docblock tags are
-        // not — they only exist as text in the trait's `class_docblock`.
-        for trait_name in &class.used_traits {
-            let trait_info = if let Some(t) = class_loader(trait_name) {
-                t
-            } else {
-                continue;
-            };
-
-            if let Some(doc) = trait_info.doc_members.as_deref() {
-                // The trait's tags are written against its own template
-                // parameters, which the class's `@use Trait<…>` binds.
-                let trait_subs = build_trait_substitution_map(class, &trait_info, &no_subs);
-                for m in &doc.methods {
-                    if seen_methods.insert(m.name) {
-                        methods.push(substituted_doc_method(m, &trait_subs));
-                    }
-                }
-
-                for (name, type_hint) in &doc.properties {
-                    if seen_props.insert(*name) {
-                        properties.push(doc_tag_property(*name, type_hint.as_ref(), &trait_subs));
-                    }
-                }
-            }
-        }
-
-        // ── Phase 1c: @method and @property tags from parent classes ────
-        //
-        // When a parent class declares `@method` or `@property` tags in
-        // its docblock, those virtual members should be visible on child
-        // classes.  Real inherited methods are already merged by
-        // `resolve_class_with_inheritance`, but virtual members from
-        // docblock tags are not — they only exist as text in the parent's
-        // `class_docblock`.  Walk the parent chain and collect them.
-        //
-        // Template substitutions from `@extends` annotations are applied
-        // so that `@method T get()` on a parent with `@template T` is
-        // resolved to the concrete type when the child declares
-        // `@extends Parent<ConcreteType>`.
-        {
-            let mut current: ClassRef<'_> = ClassRef::Borrowed(class);
-            let mut active_subs: HashMap<String, PhpType> = HashMap::new();
-            let mut depth = 0u32;
-
-            while let Some(ref parent_name) = current.parent_class {
-                depth += 1;
-                if depth > MAX_INHERITANCE_DEPTH {
-                    break;
-                }
-                let parent = if let Some(p) = class_loader(parent_name) {
-                    p
-                } else {
-                    break;
-                };
-
-                // Build a substitution map for this parent level from
-                // the child's `@extends` generics.
-                let level_subs = build_mixin_substitution_map(
-                    &current,
-                    &parent,
-                    &active_subs,
-                    &class.template_param_bounds,
-                );
-
-                if let Some(doc) = parent.doc_members.as_deref() {
-                    for m in &doc.methods {
-                        if seen_methods.insert(m.name) {
-                            methods.push(substituted_doc_method(m, &level_subs));
-                        }
-                    }
-
-                    for (name, type_hint) in &doc.properties {
-                        if seen_props.insert(*name) {
-                            properties.push(doc_tag_property(
-                                *name,
-                                type_hint.as_ref(),
-                                &level_subs,
-                            ));
-                        }
-                    }
-                }
-
-                // Tags on a trait the *parent* uses are inherited too: the
-                // parent merges the trait's members, so a child sees them
-                // just like the parent's own tags.  Laravel's collections
-                // depend on this — the higher-order proxy properties are
-                // declared on the `EnumeratesValues` trait that
-                // `Support\Collection` uses, and every collection subclass
-                // must see them.
-                for trait_name in &parent.used_traits {
-                    let Some(trait_info) = class_loader(trait_name) else {
-                        continue;
-                    };
-                    let Some(doc) = trait_info.doc_members.as_deref() else {
-                        continue;
-                    };
-                    let trait_subs =
-                        build_trait_substitution_map(&parent, &trait_info, &level_subs);
-                    for m in &doc.methods {
-                        if seen_methods.insert(m.name) {
-                            methods.push(substituted_doc_method(m, &trait_subs));
-                        }
-                    }
-                    for (name, type_hint) in &doc.properties {
-                        if seen_props.insert(*name) {
-                            properties.push(doc_property(*name, type_hint.as_ref(), &trait_subs));
-                        }
-                    }
-                }
-
-                active_subs = level_subs;
-                current = ClassRef::Owned(parent);
-            }
-        }
-
-        // ── Phase 1d: @method and @property tags from implemented interfaces ─
-        //
-        // When a class implements an interface that declares `@method` or
-        // `@property` tags, those virtual members should be visible on the
-        // implementing class.  Template substitutions from `@implements`
-        // annotations are applied so that `@method E get()` on an interface
-        // with `@template E` is resolved to the concrete type when the class
-        // declares `@implements I<ConcreteType>`.
-        //
-        // We also walk each interface's parent interfaces (via `interfaces`
-        // field, which stores `extends` for interfaces).
-        {
-            let mut iface_queue: Vec<(Atom, HashMap<String, PhpType>)> = Vec::new();
-
-            // Seed with the class's own interfaces, building substitution
-            // maps from `@implements` generics.
-            for iface_name in &class.interfaces {
-                if let Some(iface) = class_loader(iface_name) {
-                    let subs = build_interface_substitution_map(class, &iface);
-                    iface_queue.push((*iface_name, subs));
-                }
-            }
-
-            let mut visited: HashSet<Atom> = HashSet::new();
-            while let Some((iface_name, subs)) = iface_queue.pop() {
-                if !visited.insert(iface_name) {
-                    continue;
-                }
-                let iface = if let Some(i) = class_loader(&iface_name) {
-                    i
-                } else {
-                    continue;
-                };
-
-                if let Some(doc) = iface.doc_members.as_deref() {
-                    for m in &doc.methods {
-                        if seen_methods.insert(m.name) {
-                            methods.push(substituted_doc_method(m, &subs));
-                        }
-                    }
-
-                    for (name, type_hint) in &doc.properties {
-                        if seen_props.insert(*name) {
-                            properties.push(doc_tag_property(*name, type_hint.as_ref(), &subs));
-                        }
-                    }
-                }
-
-                // Walk parent interfaces (interface extends).
-                for parent_iface_name in &iface.interfaces {
-                    if let Some(parent_iface) = class_loader(parent_iface_name) {
-                        let parent_subs =
-                            build_interface_extends_substitution_map(&iface, &parent_iface, &subs);
-                        iface_queue.push((*parent_iface_name, parent_subs));
-                    }
-                }
-            }
-        }
-
-        // ── Phase 2: @mixin members (lower precedence) ─────────────────
-
-        let mixin_dedup = MixinDedup {
-            methods: seen_methods,
-            properties: seen_props,
-            constants: seen_consts,
-        };
-
+        let tags = DocTags::of(class, class_loader);
         let mut collector = MixinCollector {
-            methods,
-            properties,
-            constants,
-            dedup: mixin_dedup,
-        };
-
-        // Collect from the class's own mixins.
-        //
-        // No template substitutions are available at this stage because
-        // the concrete generic arguments for the class itself are applied
-        // later by `apply_generic_args`.  Template-param mixin names
-        // (e.g. `@mixin TWraps`) on the own class are resolved during
-        // the ancestor walk when a child class provides concrete types
-        // via `@extends`.
-        let decorated_forward = uses_forwards_calls(class, class_loader);
-        collect_mixin_members(
-            &class.mixins,
-            &class.mixin_generics,
-            class_loader,
-            &mut collector,
-            &MixinSubs {
-                subs: &HashMap::new(),
-                bounds: &class.template_param_bounds,
-                decorated_forward,
+            methods: tags.methods,
+            properties: tags.properties,
+            constants: Vec::new(),
+            dedup: MixinDedup {
+                methods: tags.seen_methods,
+                properties: tags.seen_props,
+                constants: class.constants.iter().map(|c| c.name).collect(),
             },
-            0,
-            cache,
-        );
-        collect_trait_mixin_members(
-            class,
-            &HashMap::new(),
-            class_loader,
-            &mut collector,
-            decorated_forward,
-            cache,
-        );
-
-        // Collect from ancestor mixins.
-        //
-        // As we walk the parent chain we accumulate a substitution map
-        // (template-param → concrete-type) so that mixin generic
-        // arguments that reference a parent's template params are
-        // resolved to concrete types.  For example, when
-        // `BelongsTo extends Relation<Product>` and `Relation` has
-        // `@mixin Builder<TRelatedModel>`, the walk builds
-        // `{TRelatedModel → Product}` from the child's `@extends`
-        // generics and applies it to the mixin's generic args, turning
-        // `Builder<TRelatedModel>` into `Builder<Product>`.
-        let mut current_ancestor: ClassRef<'_> = ClassRef::Borrowed(class);
-        let mut active_subs: HashMap<String, PhpType> = HashMap::new();
-        let mut depth = 0u32;
-        while let Some(ref parent_name) = current_ancestor.parent_class {
-            depth += 1;
-            if depth > MAX_INHERITANCE_DEPTH {
-                break;
-            }
-            let parent = if let Some(p) = class_loader(parent_name) {
-                p
-            } else {
-                break;
-            };
-
-            // Build the substitution map for this parent level.
-            let level_subs = build_mixin_substitution_map(
-                &current_ancestor,
-                &parent,
-                &active_subs,
-                &class.template_param_bounds,
-            );
-
-            if !parent.mixins.is_empty() {
-                // Apply the accumulated substitution map to the
-                // parent's mixin generic arguments so that template
-                // param names are replaced with concrete types.
-                let resolved_mixin_generics: Vec<(Atom, Vec<PhpType>)> = if level_subs.is_empty() {
-                    parent.mixin_generics.clone()
-                } else {
-                    parent
-                        .mixin_generics
-                        .iter()
-                        .map(|(name, args)| {
-                            let resolved_args: Vec<PhpType> =
-                                args.iter().map(|arg| arg.substitute(&level_subs)).collect();
-                            (*name, resolved_args)
-                        })
-                        .collect()
-                };
-
-                collect_mixin_members(
-                    &parent.mixins,
-                    &resolved_mixin_generics,
-                    class_loader,
-                    &mut collector,
-                    &MixinSubs {
-                        subs: &level_subs,
-                        bounds: &parent.template_param_bounds,
-                        decorated_forward,
-                    },
-                    0,
-                    cache,
-                );
-            }
-            collect_trait_mixin_members(
-                &parent,
-                &level_subs,
-                class_loader,
-                &mut collector,
-                decorated_forward,
-                cache,
-            );
-            active_subs = level_subs;
-            current_ancestor = ClassRef::Owned(parent);
-        }
+        };
+        collect_class_mixin_members(class, class_loader, &mut collector, cache);
 
         VirtualMembers {
             methods: collector.methods,
             properties: collector.properties,
             constants: collector.constants,
+        }
+    }
+}
+
+/// The `@method` and `@property` tags a class answers to, each name once.
+///
+/// Collected before the `@mixin` members, whose dedup sets these names
+/// seed, so that a tag always beats a mixin member of the same name.
+struct DocTags {
+    methods: Vec<Arc<MethodInfo>>,
+    properties: Vec<PropertyInfo>,
+    /// Seeded from the base-resolved class's methods (real and inherited).
+    seen_methods: AtomSet,
+    /// Not seeded from the class's properties: the class's own
+    /// `@property` tags are always emitted, so that
+    /// `merge_virtual_members` can compare type specificity and keep the
+    /// most specific type (`array<string>` from `@property` beats a bare
+    /// `array` from `$casts`).  Their names then keep the lower-priority
+    /// sources (trait and parent tags, `@mixin` members) from overriding
+    /// them.
+    seen_props: AtomSet,
+}
+
+impl DocTags {
+    /// The tags of `class` itself, then of its traits, of each parent and
+    /// the traits that parent uses, and of its interfaces and the
+    /// interfaces they extend, with each source's template parameters
+    /// bound the way `class` binds them.
+    ///
+    /// Inherited tags are read here rather than by the inheritance merge:
+    /// real trait and parent members are merged by then, but a tag exists
+    /// only on the docblock that declares it.
+    fn of(class: &ClassInfo, class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>) -> Self {
+        let mut tags = DocTags {
+            methods: Vec::new(),
+            properties: Vec::new(),
+            seen_methods: class.methods.iter().map(|m| m.name).collect(),
+            seen_props: AtomSet::default(),
+        };
+
+        if let Some(doc) = class.doc_members.as_deref() {
+            tags.add_own(doc);
+        }
+        tags.add_trait_tags(class, &HashMap::new(), class_loader);
+
+        // `@extends Parent<…>` binds the parent's template parameters, so
+        // `@method T get()` on a parent comes out as the concrete type.  A
+        // trait the parent uses is merged into the parent, so its tags
+        // reach the child just like the parent's own: Laravel's
+        // higher-order collection proxies are declared on the
+        // `EnumeratesValues` trait that `Support\Collection` uses.
+        let mut current: ClassRef<'_> = ClassRef::Borrowed(class);
+        let mut active_subs: HashMap<String, PhpType> = HashMap::new();
+        let mut depth = 0u32;
+        while let Some(ref parent_name) = current.parent_class {
+            depth += 1;
+            if depth > MAX_INHERITANCE_DEPTH {
+                break;
+            }
+            let Some(parent) = class_loader(parent_name) else {
+                break;
+            };
+            let level_subs = build_mixin_substitution_map(
+                &current,
+                &parent,
+                &active_subs,
+                &class.template_param_bounds,
+            );
+            if let Some(doc) = parent.doc_members.as_deref() {
+                tags.add(doc, &level_subs);
+            }
+            tags.add_trait_tags(&parent, &level_subs, class_loader);
+            active_subs = level_subs;
+            current = ClassRef::Owned(parent);
+        }
+
+        // `@implements I<…>` binds an interface's template parameters, and
+        // the interfaces it extends (its `interfaces`) are walked with those
+        // bindings carried along.
+        let mut iface_queue: Vec<(Atom, HashMap<String, PhpType>)> = class
+            .interfaces
+            .iter()
+            .filter_map(|iface_name| {
+                let iface = class_loader(iface_name)?;
+                Some((*iface_name, build_interface_substitution_map(class, &iface)))
+            })
+            .collect();
+        let mut visited: HashSet<Atom> = HashSet::new();
+        while let Some((iface_name, subs)) = iface_queue.pop() {
+            if !visited.insert(iface_name) {
+                continue;
+            }
+            let Some(iface) = class_loader(&iface_name) else {
+                continue;
+            };
+            if let Some(doc) = iface.doc_members.as_deref() {
+                tags.add(doc, &subs);
+            }
+            for parent_iface_name in &iface.interfaces {
+                if let Some(parent_iface) = class_loader(parent_iface_name) {
+                    let parent_subs =
+                        build_interface_extends_substitution_map(&iface, &parent_iface, &subs);
+                    iface_queue.push((*parent_iface_name, parent_subs));
+                }
+            }
+        }
+
+        tags
+    }
+
+    /// Add every tag of the class's own docblock, whatever came before.
+    fn add_own(&mut self, doc: &DocblockMembers) {
+        for m in &doc.methods {
+            self.seen_methods.insert(m.name);
+            self.methods.push(Arc::clone(m));
+        }
+        for (name, type_hint) in &doc.properties {
+            self.seen_props.insert(*name);
+            self.properties
+                .push(doc_tag_property(*name, type_hint.as_ref(), &HashMap::new()));
+        }
+    }
+
+    /// Add the tags of `doc` that no nearer source declared, with `subs`
+    /// binding the template parameters they are written against.
+    fn add(&mut self, doc: &DocblockMembers, subs: &HashMap<String, PhpType>) {
+        for m in &doc.methods {
+            if self.seen_methods.insert(m.name) {
+                self.methods.push(substituted_doc_method(m, subs));
+            }
+        }
+        for (name, type_hint) in &doc.properties {
+            if self.seen_props.insert(*name) {
+                self.properties
+                    .push(doc_tag_property(*name, type_hint.as_ref(), subs));
+            }
+        }
+    }
+
+    /// Add the tags of the traits `owner` uses, which are written against
+    /// each trait's template parameters, bound by `owner`'s `@use Trait<…>`
+    /// on top of `owner_subs`.
+    fn add_trait_tags(
+        &mut self,
+        owner: &ClassInfo,
+        owner_subs: &HashMap<String, PhpType>,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    ) {
+        for trait_name in &owner.used_traits {
+            let Some(trait_info) = class_loader(trait_name) else {
+                continue;
+            };
+            if let Some(doc) = trait_info.doc_members.as_deref() {
+                let trait_subs = build_trait_substitution_map(owner, &trait_info, owner_subs);
+                self.add(doc, &trait_subs);
+            }
         }
     }
 }

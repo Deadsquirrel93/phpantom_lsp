@@ -45,7 +45,7 @@ use crate::config::IndexingStrategy;
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind};
 use crate::text_position::position_to_offset;
 use crate::types::{ClassInfo, ClassLikeKind, FileContext, MAX_INHERITANCE_DEPTH, ResolvedType};
-use crate::util::{collect_php_files, short_name};
+use crate::util::short_name;
 
 impl Backend {
     /// Entry point for `textDocument/implementation`.
@@ -668,8 +668,8 @@ impl Backend {
 
         let workspace_root = self.workspace.workspace_root.read().clone();
         if let Some(workspace_root) = workspace_root {
-            // The vendor dir paths are needed by collect_php_files even
-            // though we only walk user PSR-4 roots.  A fallback mapping
+            // The vendor dir paths are needed by the walk even though we
+            // only walk user PSR-4 roots.  A fallback mapping
             // like `"" => "."` resolves to the workspace root, so the
             // walk must still skip vendor directories (and hidden
             // directories like .git).
@@ -685,7 +685,12 @@ impl Backend {
             let filters = self.index_filters();
             let mut walked: HashSet<PathBuf> = HashSet::new();
             for dir in &psr4_dirs {
-                for php_file in collect_php_files(dir, &vendor_dir_paths, &filters) {
+                for php_file in crate::classmap_scanner::collect_php_files_gitignore(
+                    dir,
+                    &vendor_dir_paths,
+                    &filters,
+                    None,
+                ) {
                     if index_paths.contains(&php_file)
                         || loaded_uris.contains(&crate::util::path_to_uri(&php_file))
                         || !walked.insert(php_file.clone())

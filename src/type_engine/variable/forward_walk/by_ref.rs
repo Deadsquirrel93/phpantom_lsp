@@ -501,30 +501,42 @@ pub(crate) fn process_pass_by_ref<'b>(
     }
 }
 
+/// A call that can write through by-reference parameters: the arguments it
+/// passes, the parameters they bind to, and the callee those belong to,
+/// which an out type read from the callee's body or `@param-out` needs.
+pub(super) struct ByRefCall<'b> {
+    pub(super) arguments: &'b ArgumentList<'b>,
+    pub(super) parameters: crate::types::SharedVec<ParameterInfo>,
+    pub(super) callee: OutParamCallee,
+}
+
 /// Give the variables a call passes by reference the types its parameters
 /// declare for them.
+///
+/// The callee is looked up once for both passes: the one for class-typed
+/// parameters (`Type &$param`), and the one for primitive and untyped
+/// parameters (`array &$matches`, `&$result`), which the first leaves
+/// alone.
 fn apply_by_ref_parameter_types<'b>(
     expr: &'b Expression<'b>,
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
-    // When a function call passes a variable to a parameter declared
-    // as `Type &$param`, the variable acquires that type after the call.
-    //
-    // We need to check both variables already in scope AND variables
-    // that appear as arguments but don't exist in scope yet (e.g.
-    // `$matches` in `preg_match($pattern, $subject, $matches)`).
-    //
-    // Phase 1: use the existing `try_apply_pass_by_reference_type`
-    // infrastructure for variables already in scope (works for class
-    // types like `Type &$param`).
-    let scope_resolver = scope.snapshot_resolver();
+    // `preg_match`'s `$matches` is typed from the pattern, which needs no
+    // callee, and it has no other by-reference parameter beside it, so
+    // nothing below is left to do once the pattern has typed it.
+    if seed_preg_matches(expr, scope, ctx) {
+        return;
+    }
+    let Some(call) = by_ref_call(expr, scope, ctx) else {
+        return;
+    };
 
     // Only a variable passed directly as an argument of this call can be
     // written through a by-reference parameter, so those are the only
     // candidates, whether or not they are in scope yet.  Visiting every
-    // local instead would redo the callee lookup once per variable and
-    // make a long body cost statements × locals.
+    // local instead would make a long body cost statements × locals.
+    let scope_resolver = scope.snapshot_resolver();
     let mut arg_var_names: Vec<String> = Vec::new();
     for arg_var in extract_call_arg_variables(expr) {
         if !arg_var_names.contains(&arg_var) {
@@ -541,67 +553,142 @@ fn apply_by_ref_parameter_types<'b>(
         );
         let before = scope.get(&var_name).to_vec();
         let mut results = before.clone();
-        super::super::resolution::try_apply_pass_by_reference_type(
-            expr,
+        super::super::resolution::apply_pass_by_reference_type(
+            call.arguments,
+            &call.parameters,
+            &call.callee,
             &var_ctx,
             &mut results,
-            false,
         );
         if resolved_types_differ(&results, &before) {
             scope.set(&var_name, results);
         }
     }
 
-    // Phase 2: for variables NOT yet in scope that are passed to
-    // pass-by-reference parameters with primitive type hints (e.g.
-    // `array &$matches` in `preg_match`), store the type hint
-    // directly.  `try_apply_pass_by_reference_type` only produces
-    // results for class-based type hints; primitive types like
-    // `array`, `int`, `string` return empty from
-    // `type_hint_to_classes_typed` and are missed.
-    seed_pass_by_ref_primitives(expr, scope, ctx);
+    seed_pass_by_ref_primitives(expr, &call, scope, ctx);
 }
 
-/// The callee an instance method call names, with the parameters the
-/// out-param pass binds its arguments to.
-///
-/// The receiver has to be a variable whose class is already known: `$this`
-/// names the enclosing class, and any other variable names whatever class
-/// the scope recorded for it. A scalar is not a receiver, so a variable
-/// holding one yields `None` rather than a class named `string`.
-pub(super) fn instance_method_callee<'b>(
-    object: &'b Expression<'b>,
-    selector: &ClassLikeMemberSelector<'b>,
+/// The call `expr` makes, for the by-reference passes: a function, a
+/// method on any receiver the walk can type, a static method, or a
+/// constructor.
+fn by_ref_call<'b>(
+    expr: &'b Expression<'b>,
     scope: &ScopeState,
     ctx: &ForwardWalkCtx<'_>,
-) -> Option<(
-    crate::types::SharedVec<crate::types::ParameterInfo>,
-    OutParamCallee,
-)> {
-    let ClassLikeMemberSelector::Identifier(ident) = selector else {
-        return None;
-    };
-    let method_name = bytes_to_str(ident.value).to_string();
+) -> Option<ByRefCall<'b>> {
+    match expr {
+        Expression::Call(Call::Function(call)) => {
+            let Expression::Identifier(ident) = call.function else {
+                return None;
+            };
+            let function_loader = ctx.loaders.function_loader?;
+            let function = function_loader(
+                bytes_to_str(ident.value()),
+                call.function.span().start.offset,
+            )?;
+            Some(ByRefCall {
+                arguments: &call.argument_list,
+                parameters: function.parameters.clone(),
+                callee: OutParamCallee::Function(Box::new(function)),
+            })
+        }
+        Expression::Call(Call::Method(call)) => {
+            let class_name = receiver_class_name(call.object, scope, ctx)?;
+            named_method_call(&call.argument_list, &call.method, &class_name, ctx)
+        }
+        Expression::Call(Call::NullSafeMethod(call)) => {
+            let class_name = receiver_class_name(call.object, scope, ctx)?;
+            named_method_call(&call.argument_list, &call.method, &class_name, ctx)
+        }
+        Expression::Call(Call::StaticMethod(call)) => {
+            let class_name = crate::class_lookup::class_expression_name(
+                call.class,
+                ctx.current_class,
+                ctx.all_classes,
+                ctx.source_class_loader,
+                ctx.source_imports,
+            )?;
+            named_method_call(&call.argument_list, &call.method, &class_name, ctx)
+        }
+        Expression::Instantiation(new) => {
+            let class_name = crate::class_lookup::class_expression_name(
+                new.class,
+                ctx.current_class,
+                ctx.all_classes,
+                ctx.source_class_loader,
+                ctx.source_imports,
+            )?;
+            let (parameters, callee) = resolved_method_callee(&class_name, "__construct", ctx)?;
+            Some(ByRefCall {
+                arguments: new.argument_list.as_ref()?,
+                parameters,
+                callee,
+            })
+        }
+        _ => None,
+    }
+}
 
-    let class_name = match object {
+/// The class an instance call's receiver holds (the first one, when it may
+/// hold several).
+///
+/// `$this` names the enclosing class and a variable the class the scope
+/// recorded for it, both without resolving anything; any other receiver
+/// (`$this->filler`, `$repo->query()`) is typed the way the walk types any
+/// expression.  A scalar is not a receiver, so a variable holding one
+/// yields `None` rather than a class named `string`.
+fn receiver_class_name(
+    object: &Expression<'_>,
+    scope: &ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> Option<String> {
+    match object {
         Expression::Variable(Variable::Direct(dv)) if dv.name == b"$this" => {
-            ctx.current_class.fqn().to_string()
+            Some(ctx.current_class.fqn().to_string())
         }
         Expression::Variable(Variable::Direct(dv)) => {
             scope.get(bytes_to_str(dv.name)).iter().find_map(|rt| {
                 let name = rt.type_string.base_name()?;
                 (!crate::php_type::is_primitive_scalar_name(name)).then(|| name.to_string())
-            })?
+            })
         }
-        _ => return None,
-    };
+        _ => {
+            let scope_resolver = |name: &str| scope.get(name).to_vec();
+            let var_ctx = ctx.var_ctx_for_with_scope(
+                "",
+                object.span().start.offset,
+                &scope_resolver,
+                Some(scope.proofs()),
+            );
+            super::super::rhs_resolution::resolve_rhs_expression(object, &var_ctx)
+                .into_iter()
+                .find_map(|rt| Some(rt.class_info?.fqn().to_string()))
+        }
+    }
+}
 
-    resolved_method_callee(&class_name, &method_name, ctx)
+/// The method a call's `selector` names on `class_name`, with the
+/// arguments the call passes it.
+fn named_method_call<'b>(
+    arguments: &'b ArgumentList<'b>,
+    selector: &ClassLikeMemberSelector<'_>,
+    class_name: &str,
+    ctx: &ForwardWalkCtx<'_>,
+) -> Option<ByRefCall<'b>> {
+    let ClassLikeMemberSelector::Identifier(ident) = selector else {
+        return None;
+    };
+    let (parameters, callee) = resolved_method_callee(class_name, bytes_to_str(ident.value), ctx)?;
+    Some(ByRefCall {
+        arguments,
+        parameters,
+        callee,
+    })
 }
 
 /// Load `class_name`, merge everything it inherits, and look `method_name`
 /// up on the result.
-pub(super) fn resolved_method_callee(
+fn resolved_method_callee(
     class_name: &str,
     method_name: &str,
     ctx: &ForwardWalkCtx<'_>,

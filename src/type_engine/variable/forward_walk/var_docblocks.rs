@@ -116,31 +116,6 @@ pub(crate) fn docblock_ending_at(content: &str, end: usize) -> Option<&str> {
     content.get(start..end)
 }
 
-/// The docblock above the declaration starting at `node_start`, which may
-/// be separated from it by anything but a statement or a block boundary
-/// (modifiers, attributes, other comments).
-pub(crate) fn preceding_docblock_text(content: &str, node_start: usize) -> Option<&str> {
-    let mut found = None;
-    with_comments(content, |comments| {
-        let mut covered_from = node_start.min(content.len());
-        let above = comments.partition_point(|c| c.end as usize <= covered_from);
-        for comment in comments[..above].iter().rev() {
-            let gap = content
-                .get(comment.end as usize..covered_from)
-                .unwrap_or("");
-            if gap.contains([';', '{', '}']) {
-                return;
-            }
-            if comment.kind == CommentKind::Doc {
-                found = content.get(comment.start as usize..comment.end as usize);
-                return;
-            }
-            covered_from = comment.start as usize;
-        }
-    });
-    found
-}
-
 /// Try to process an inline `/** @var Type $x */` docblock override.
 pub(crate) fn try_process_inline_var_override<'b>(
     expr: &'b Expression<'b>,

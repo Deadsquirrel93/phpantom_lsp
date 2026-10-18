@@ -4,9 +4,10 @@
 use std::sync::Arc;
 
 use crate::docblock;
+use crate::parser::preceding_docblock_text;
 use crate::php_type::{PhpType, TypeKind, is_keyword_type};
 use crate::type_engine::resolver::WrittenNames;
-use crate::type_engine::variable::forward_walk::{docblock_above, preceding_docblock_text};
+use crate::type_engine::variable::forward_walk::docblock_above;
 use crate::types::ClassInfo;
 
 /// Mark the method/function-level template parameters a type names with

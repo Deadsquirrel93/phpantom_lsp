@@ -5,8 +5,6 @@
 
 use super::*;
 
-use std::sync::Arc;
-
 use mago_span::HasSpan;
 
 use crate::atom::{atom, bytes_to_str};
@@ -213,75 +211,23 @@ pub(in crate::type_engine) fn resolve_arg_raw_type<'b>(
     super::super::foreach_resolution::resolve_expression_type(arg_expr, ctx)
 }
 
-/// Check whether a call expression passes the target variable to a
-/// pass-by-reference parameter with a type hint, and if so, push the
-/// resolved type into `results`.
+/// If `ctx`'s variable is passed to a by-reference parameter of the call
+/// (`arguments`, binding to `parameters` of `callee`) whose out type names a
+/// class, replace `results` with that class.
 ///
 /// For example, given `function foo(Baz &$bar): void {}` and the call
-/// `foo($bar)`, this function detects that `$bar` is passed to a `&`
-/// parameter typed as `Baz` and resolves `$bar` to `Baz`.
-///
-/// Handles standalone function calls, instance method calls, static
-/// method calls, and constructor calls.
-pub(in crate::type_engine::variable) fn try_apply_pass_by_reference_type(
-    expr: &Expression<'_>,
+/// `foo($bar)`, `$bar` resolves to `Baz` after the call.
+pub(in crate::type_engine::variable) fn apply_pass_by_reference_type(
+    arguments: &ArgumentList<'_>,
+    parameters: &[ParameterInfo],
+    callee: &OutParamCallee,
     ctx: &VarResolutionCtx<'_>,
     results: &mut Vec<ResolvedType>,
-    conditional: bool,
 ) {
-    let (argument_list, parameters, callee) = match expr {
-        Expression::Call(Call::Function(func_call)) => {
-            let func_name = match func_call.function {
-                Expression::Identifier(ident) => bytes_to_str(ident.value()).to_string(),
-                _ => return,
-            };
-            let func_name_offset = func_call.function.span().start.offset;
-            let fl = match ctx.function_loader() {
-                Some(fl) => fl,
-                None => return,
-            };
-            let func_info = match fl(&func_name, func_name_offset) {
-                Some(fi) => fi,
-                None => return,
-            };
-            // Borrow the argument list and clone the parameters so we
-            // can iterate them together.
-            let parameters = func_info.parameters.clone();
-            (
-                &func_call.argument_list,
-                parameters,
-                OutParamCallee::Function(Box::new(func_info)),
-            )
-        }
-        Expression::Call(Call::Method(method_call)) => {
-            match try_resolve_method_params(method_call.object, &method_call.method, ctx) {
-                Some((params, callee)) => (&method_call.argument_list, params, callee),
-                None => return,
-            }
-        }
-        Expression::Call(Call::NullSafeMethod(method_call)) => {
-            match try_resolve_method_params(method_call.object, &method_call.method, ctx) {
-                Some((params, callee)) => (&method_call.argument_list, params, callee),
-                None => return,
-            }
-        }
-        Expression::Call(Call::StaticMethod(static_call)) => {
-            match try_resolve_static_method_params(static_call, ctx) {
-                Some((params, arg_list, callee)) => (arg_list, params, callee),
-                None => return,
-            }
-        }
-        Expression::Instantiation(inst) => match try_resolve_constructor_params(inst, ctx) {
-            Some((params, arg_list, callee)) => (arg_list, params, callee),
-            None => return,
-        },
-        _ => return,
-    };
-
     // Bind arguments to parameters following PHP's rules so that named
     // arguments consult the parameter they actually target, not the one at
     // their ordinal position in the call.
-    let bound = crate::call_args::bind_args_to_params(&parameters, argument_list);
+    let bound = crate::call_args::bind_args_to_params(parameters, arguments);
 
     for (param_index, (param, arg_expr)) in parameters.iter().zip(bound.iter()).enumerate() {
         let arg_expr = match arg_expr {
@@ -304,7 +250,7 @@ pub(in crate::type_engine::variable) fn try_apply_pass_by_reference_type(
             && let Some(out_hint) = crate::type_engine::call_resolution::effective_out_type(
                 param,
                 param_index,
-                &callee,
+                callee,
                 ctx.backend,
             )
         {
@@ -314,9 +260,9 @@ pub(in crate::type_engine::variable) fn try_apply_pass_by_reference_type(
             let var_resolver = build_var_resolver_from_ctx(ctx);
             let out_hint = crate::type_engine::call_resolution::resolve_out_type_for_call(
                 out_hint,
-                &parameters,
-                &callee,
-                argument_list,
+                parameters,
+                callee,
+                arguments,
                 ctx.content,
                 &ctx.as_resolution_ctx(),
                 Some(&var_resolver),
@@ -328,9 +274,7 @@ pub(in crate::type_engine::variable) fn try_apply_pass_by_reference_type(
                 ctx.class_loader,
             );
             if !resolved.is_empty() {
-                if !conditional {
-                    results.clear();
-                }
+                results.clear();
                 ResolvedType::extend_unique(
                     results,
                     ResolvedType::from_classes_with_hint(resolved, out_hint),
@@ -338,102 +282,4 @@ pub(in crate::type_engine::variable) fn try_apply_pass_by_reference_type(
             }
         }
     }
-}
-
-/// Resolve parameters for an instance method call.
-///
-/// Currently only handles `$this->method()` where the current class
-/// is known.  General variable receiver resolution is deferred to the
-/// forward-walking scope model to avoid re-entrant variable resolution.
-fn try_resolve_method_params(
-    object: &Expression<'_>,
-    method: &ClassLikeMemberSelector<'_>,
-    ctx: &VarResolutionCtx<'_>,
-) -> Option<(crate::types::SharedVec<ParameterInfo>, OutParamCallee)> {
-    let method_name = match method {
-        ClassLikeMemberSelector::Identifier(ident) => bytes_to_str(ident.value),
-        _ => return None,
-    };
-
-    // Only handle `$this->method()` — we know the current class.
-    match object {
-        Expression::Variable(Variable::Direct(dv)) if dv.name == b"$this" => {}
-        _ => return None,
-    }
-
-    let method_info = ctx.current_class.get_method(method_name)?;
-    // The callee wants the class shared, and the file's own classes and
-    // the resolved-class cache already hold it that way; copying the whole
-    // `ClassInfo` here would repeat for every local in scope on every call
-    // statement (see `forward_walk/by_ref.rs`).
-    let current_fqn = ctx.current_class.fqn();
-    let owner = ctx
-        .all_classes
-        .iter()
-        .find(|c| c.fqn() == current_fqn)
-        .cloned()
-        .or_else(|| (ctx.class_loader)(&current_fqn))
-        .unwrap_or_else(|| Arc::new(ctx.current_class.clone()));
-    Some((
-        method_info.parameters.clone(),
-        OutParamCallee::Method(owner, atom(method_name)),
-    ))
-}
-
-/// Resolve parameters for a static method call.
-fn try_resolve_static_method_params<'a>(
-    static_call: &'a StaticMethodCall<'a>,
-    ctx: &VarResolutionCtx<'_>,
-) -> Option<(
-    crate::types::SharedVec<ParameterInfo>,
-    &'a ArgumentList<'a>,
-    OutParamCallee,
-)> {
-    let method_name = match &static_call.method {
-        ClassLikeMemberSelector::Identifier(ident) => bytes_to_str(ident.value),
-        _ => return None,
-    };
-
-    let class_name = crate::class_lookup::class_expression_name(
-        static_call.class,
-        ctx.current_class,
-        ctx.all_classes,
-        ctx.source_class_loader,
-        ctx.source_imports,
-    )?;
-
-    let cls = (ctx.class_loader)(&class_name)?;
-    let method_info = cls.get_method(method_name)?;
-    Some((
-        method_info.parameters.clone(),
-        &static_call.argument_list,
-        OutParamCallee::Method(cls, atom(method_name)),
-    ))
-}
-
-/// Resolve parameters for a constructor call (`new Cls(...)`).
-fn try_resolve_constructor_params<'a>(
-    inst: &'a Instantiation<'a>,
-    ctx: &VarResolutionCtx<'_>,
-) -> Option<(
-    crate::types::SharedVec<ParameterInfo>,
-    &'a ArgumentList<'a>,
-    OutParamCallee,
-)> {
-    let class_name = crate::class_lookup::class_expression_name(
-        inst.class,
-        ctx.current_class,
-        ctx.all_classes,
-        ctx.source_class_loader,
-        ctx.source_imports,
-    )?;
-
-    let args = inst.argument_list.as_ref()?;
-    let cls = (ctx.class_loader)(&class_name)?;
-    let ctor = cls.get_method("__construct")?;
-    Some((
-        ctor.parameters.clone(),
-        args,
-        OutParamCallee::Method(cls, atom("__construct")),
-    ))
 }
