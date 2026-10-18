@@ -130,6 +130,7 @@ pub(crate) fn is_stale_phpstan_diagnostic(diag: &Diagnostic, content: &str) -> b
             content,
             diag.range.start.line as usize,
             identifier,
+            &diag.message,
         );
     }
 

@@ -7,15 +7,14 @@
 
 use std::sync::Arc;
 
-use mago_span::Span;
-use mago_syntax::cst::Block;
-use mago_syntax::cst::Statement;
+use mago_span::HasSpan;
 use mago_syntax::cst::expression::Expression;
 use mago_syntax::cst::variable::Variable;
 use tower_lsp::lsp_types::Position;
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
+use crate::code_actions::cursor_context::{FunctionKinds, FunctionLike, find_enclosing_function};
 use crate::parser::with_parsed_program;
 use crate::php_type::PhpType;
 use crate::return_collection::collect_returns;
@@ -23,8 +22,6 @@ use crate::text_position::line_start_byte_offset;
 use crate::type_engine::resolver::{Loaders, SourceImports, VarResolutionCtx};
 use crate::type_engine::variable::foreach_resolution::resolve_expression_type;
 use crate::types::{ClassInfo, FunctionLoader};
-
-use super::edits::find_open_brace_from_declaration;
 
 // ── Return type inference result ────────────────────────────────────────────
 
@@ -56,8 +53,9 @@ pub(crate) struct InferredReturnType {
 // ── Backend methods ─────────────────────────────────────────────────────────
 
 impl Backend {
-    /// Infer the return type of the function at `func_line` by scanning
-    /// all return statements in the body.
+    /// Infer the return type of the innermost function, method, closure or
+    /// arrow function whose declaration contains `offset` (a method's
+    /// `name_offset` will do) from what its body returns.
     ///
     /// Returns an [`InferredReturnType`] that separates the native PHP
     /// type hint from the richer effective type.  When they differ (e.g.
@@ -66,20 +64,6 @@ impl Backend {
     /// When `self_as_marker` is `true`, `return $this;` yields the self-like
     /// marker `$this` so the type engine can map it to the receiver class
     /// rather than the (possibly trait) class that declares the method.
-    pub(crate) fn infer_return_type_for_function(
-        &self,
-        uri: &str,
-        content: &str,
-        func_line: usize,
-        self_as_marker: bool,
-    ) -> Option<InferredReturnType> {
-        let offset = body_brace_offset(content, func_line)?;
-        self.infer_return_type_at(uri, content, offset, self_as_marker)
-    }
-
-    /// [`infer_return_type_for_function`](Self::infer_return_type_for_function)
-    /// for the function or method whose declaration, from its name to its
-    /// closing brace, contains `offset` (its `name_offset` will do).
     pub(crate) fn infer_return_type_at(
         &self,
         uri: &str,
@@ -126,14 +110,17 @@ fn body_brace_offset(content: &str, func_line: usize) -> Option<u32> {
     if func_line >= lines.len() {
         return None;
     }
-    let brace_line = find_open_brace_from_declaration(&lines, func_line)?;
+    // The brace is on the declaration line or one of the five after it.
+    let end = (func_line + 6).min(lines.len());
+    let brace_line = (func_line..end).find(|&i| lines[i].contains('{'))?;
     let brace_col = lines[brace_line].find('{')?;
     Some((line_start_byte_offset(content, brace_line) + brace_col) as u32)
 }
 
 /// Infer the return type of a function by walking all `return`
 /// statements reachable from its body (not crossing into nested
-/// closures/arrow functions, which have their own return types).
+/// closures/arrow functions, which have their own return types).  An
+/// arrow function returns its expression.
 ///
 /// Every returned expression is resolved through
 /// [`resolve_expression_type`] — the same RHS resolution pipeline used
@@ -157,8 +144,8 @@ fn body_brace_offset(content: &str, func_line: usize) -> Option<u32> {
 /// - `Backend::infer_return_type_at` (PHPStan code actions)
 /// - `enrichment_return_type` (Generate / Update PHPDoc)
 ///
-/// The function or method inferred is the one whose declaration, from its
-/// name to its closing brace, contains `offset`.
+/// The function inferred is the innermost function, method, closure or
+/// arrow function whose declaration contains `offset`.
 #[allow(clippy::too_many_arguments)]
 fn infer_return_type_at(
     content: &str,
@@ -188,10 +175,16 @@ fn infer_return_type_at(
 
     let (mut return_types, has_bare_return, has_return_with_value) =
         with_parsed_program(content, "fix_return_type_infer", |program, _content| {
-            let body = declared_body(program.statements.iter(), offset)?;
+            let function = find_enclosing_function(program, offset, FunctionKinds::All)?;
 
             let mut returns: Vec<(Option<&Expression<'_>>, usize, usize, usize)> = Vec::new();
-            collect_returns(body.statements.iter(), &mut returns);
+            if let FunctionLike::ArrowFunction(arrow) = function {
+                let span = arrow.expression.span();
+                let (start, end) = (span.start.offset as usize, span.end.offset as usize);
+                returns.push((Some(arrow.expression), start, end, start));
+            } else {
+                collect_returns(function.body()?.statements.iter(), &mut returns);
+            }
 
             let mut return_types: Vec<PhpType> = Vec::new();
             let mut has_bare_return = false;
@@ -315,42 +308,6 @@ fn infer_return_type_at(
         },
         returns_agree,
     })
-}
-
-/// The body of the function or method among `statements` whose
-/// declaration, from its name to its closing brace, contains `offset`.
-fn declared_body<'a>(
-    statements: impl Iterator<Item = &'a Statement<'a>>,
-    offset: u32,
-) -> Option<&'a Block<'a>> {
-    let declares = |name: &Span, body: &Block<'_>| {
-        name.start.offset <= offset && offset <= body.right_brace.end.offset
-    };
-    for stmt in statements {
-        let members = match stmt {
-            Statement::Function(func) if declares(&func.name.span, &func.body) => {
-                return Some(&func.body);
-            }
-            Statement::Namespace(ns) => {
-                if let Some(body) = declared_body(ns.statements().iter(), offset) {
-                    return Some(body);
-                }
-                continue;
-            }
-            _ if let Some(body) = crate::parser::class_like_body(stmt) => body.members,
-            _ => continue,
-        };
-        let mut found = None;
-        crate::parser::for_each_concrete_method(members, |method, body| {
-            if found.is_none() && declares(&method.name.span, body) {
-                found = Some(body);
-            }
-        });
-        if found.is_some() {
-            return found;
-        }
-    }
-    None
 }
 
 /// Whether `expr` is the bare `$this` variable.

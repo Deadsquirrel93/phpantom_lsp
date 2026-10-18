@@ -268,8 +268,7 @@ pub(crate) fn find_enclosing_function_line_range(
         content,
         "find_enclosing_function_line_range",
         |program, _| {
-            find_enclosing_function(&program.statements, cursor_offset, FunctionKinds::Named)?
-                .body_braces
+            find_enclosing_function(program, cursor_offset, FunctionKinds::Named)?.body_braces()
         },
     )?;
     if cursor_offset < open || cursor_offset > close {

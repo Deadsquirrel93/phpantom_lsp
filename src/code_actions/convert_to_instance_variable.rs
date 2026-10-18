@@ -189,11 +189,11 @@ fn plan_conversion(content: &str, cursor_offset: u32) -> Option<Conversion> {
             // the method assigns a variable of that function, not of the
             // method.
             let owner = find_enclosing_function(
-                &program.statements,
+                program,
                 assignment.variable.span().start.offset,
                 FunctionKinds::All,
             )?;
-            if owner.span != method.span() {
+            if owner.span() != method.span() {
                 return None;
             }
             let var_name = bytes_to_str(assignment.variable.name).to_string();

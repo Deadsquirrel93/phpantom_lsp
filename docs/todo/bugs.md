@@ -61,35 +61,6 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B618. "Update return type" on a closure writes the enclosing method's type
-
-**Impact: Medium · Complexity: Medium-High**
-
-```php
-public function run(): array {
-    $f = function (): string {
-        return 42;   // PHPStan: Anonymous function should return string but returns int.
-    };
-    return [];
-}
-```
-
-The quick fix rewrites the closure to `function (): array` and adds a
-`@return array{}` docblock above the statement: the type it writes is the
-method's, not the closure's. The return-type quick fixes
-(`code_actions/phpstan/fix_return_type/`, `remove_unused_return_type.rs`,
-`add_iterable_type.rs`) find their function by scanning text (braces back
-from the diagnostic line, the `)` before the `{`, the line holding
-`function`), and the inference behind them (`declared_body` in
-`fix_return_type/inference.rs`) then looks for a named function or method
-around the body brace, so a closure resolves to the method it sits in. An
-arrow function has no brace at all, and the text scan lands on the
-method's. Locate the function through the parsed AST instead
-(`find_enclosing_function` in `code_actions/cursor_context.rs`, with
-`FunctionKinds::All`) and read the native return type, the body to infer
-from and the docblock (already `paren_function_docblock`) from that one
-node.
-
 ### B630. An unclosed call inside a braced `namespace` block drops the block
 
 **Impact: Low · Complexity: Medium**
@@ -165,3 +136,56 @@ template's `@use` writer (`blade/use_block.rs`) build their line without
 the file's content, so `analyze_use_block_in` and
 `analyze_template_use_block` would record it in the `UseBlockInfo`, and
 `drop_repeated_separator` would strip that terminator instead of `\n`.
+
+### B635. "Remove return statement" moves the `return` out of a braceless `if`
+
+**Impact: Low · Complexity: Low**
+
+```php
+public function run(): void {
+    if ($this->ready())
+        return $this->save();   // PHPStan: ... returns bool but should not return anything.
+    $this->log();
+}
+```
+
+The quick fix keeps the value as a statement and adds a `return;` on the
+line after it, so the method still stops there. When the `return` is the
+only statement of an `if`, `else`, `elseif` or a loop written without
+braces, that `return;` lands after the construct instead of inside it: the
+method above now returns before `$this->log()` every time. On one line,
+`if ($x) return $v;` becomes `if ($x) $v;` and `if ($x) return;`, which
+evaluates the condition twice. `build_strip_return_expr_edit`
+(`code_actions/phpstan/fix_return_type/edits.rs`) writes the two
+statements without looking at what holds the `return`; when that is a
+braceless body, they need braces around them. `find_target`
+(`fix_return_type/target.rs`) already walks down to the statement and can
+report what holds it.
+
+### B636. A docblock that mentions "function" loses its inferred `@return`
+
+**Impact: Low · Complexity: Low**
+
+```php
+class Foo {
+    /**
+     * Builds the function map. {@see Bar}
+     */
+    public function ids(): array {
+        return [1, 2];
+    }
+}
+```
+
+"Update docblock" adds no `@return array{1, 2}` here, as it would under
+another summary. `enrichment_return_type`
+(`code_actions/phpstan/fix_return_type/inference.rs`) finds the function
+from the docblock's position by text: the first line holding `function `
+within ten lines, then the first `{` within six lines of that. The summary
+line matches both, so the inference reads from an offset inside the
+docblock, where no function is declared. Both callers know the declaration
+they are documenting: `analyse_body` (`update_docblock/changes.rs`) built
+its `FunctionWithDocblock` from the method's node, and `build_docblock`
+(`completion/phpdoc/generation/build.rs`) has the declaration text right
+after the trigger. Pass the declaration's offset in and let
+`infer_return_type_at` find the function there.

@@ -357,6 +357,15 @@ pub(crate) struct FunctionDocblock {
 }
 
 impl FunctionDocblock {
+    /// The docblock of the function-like declaration spanning `decl`, read
+    /// from the `program` parsed from `content`.
+    pub(crate) fn of(program: &Program<'_>, content: &str, decl: mago_span::Span) -> Self {
+        Self {
+            docblock: docblock_of(program, content, &decl),
+            placement: DocblockPlacement::above(content, decl.start.offset as usize),
+        }
+    }
+
     /// The line of the `@return` tag: the byte offset it starts at and its
     /// text.
     pub(crate) fn return_tag(&self) -> Option<(usize, &str)> {
@@ -439,17 +448,14 @@ fn insert_edit(content: &str, offset: usize, new_text: String) -> TextEdit {
 
 /// The docblock of the innermost function-like declaration of `kinds`
 /// whose span contains `offset`, as [`docblock_of`] reads it.
-pub(crate) fn function_docblock_at(
+fn function_docblock_at(
     content: &str,
     offset: usize,
     kinds: FunctionKinds,
 ) -> Option<FunctionDocblock> {
     crate::parser::with_parsed_program(content, "function_docblock_at", |program, content| {
-        let decl = find_enclosing_function(&program.statements, offset as u32, kinds)?.span;
-        Some(FunctionDocblock {
-            docblock: docblock_of(program, content, &decl),
-            placement: DocblockPlacement::above(content, decl.start.offset as usize),
-        })
+        let decl = find_enclosing_function(program, offset as u32, kinds)?.span();
+        Some(FunctionDocblock::of(program, content, decl))
     })
 }
 
@@ -465,12 +471,4 @@ pub(crate) fn function_docblock_at_line(
     let text = content.get(line_start..)?.lines().next()?;
     let first = text.find(|c: char| !c.is_whitespace())?;
     function_docblock_at(content, line_start + first, kinds)
-}
-
-/// Find the line containing the `function` keyword by walking backward
-/// from a given line.
-pub(crate) fn find_function_keyword_line(lines: &[&str], from_line: usize) -> Option<usize> {
-    (0..=from_line)
-        .rev()
-        .find(|&i| lines[i].contains("function ") || lines[i].contains("function("))
 }
