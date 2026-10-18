@@ -300,7 +300,7 @@ fn finish_constant_operands(ty: &PhpType, ctx: &ForwardWalkCtx<'_>) -> Option<Ph
 /// actually has, and the declaration is judged a refinement of the native
 /// `string` hint rather than an operator nothing can compare.
 pub(crate) fn resolve_docblock_param_type(raw: &PhpType, ctx: &ForwardWalkCtx<'_>) -> PhpType {
-    let expanded = crate::type_engine::type_resolution::expand_nested_type_aliases(
+    let expanded = crate::type_engine::types::aliases::expand_nested_type_aliases(
         raw,
         &ctx.current_class.fqn(),
         ctx.all_classes,
@@ -824,7 +824,7 @@ pub(crate) fn try_resolve_from_merged_class(
     let declared = merged_param.type_hint.as_ref()?;
     // The merged declaration is as much a place a `key-of<CONSTANT>` is read
     // as the source docblock is, and for a method it is the one that wins.
-    let expanded = crate::type_engine::type_resolution::expand_nested_type_aliases(
+    let expanded = crate::type_engine::types::aliases::expand_nested_type_aliases(
         declared,
         &ctx.current_class.fqn(),
         ctx.all_classes,

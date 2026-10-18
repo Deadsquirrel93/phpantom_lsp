@@ -221,6 +221,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **By-reference captures follow the callee's invocation tags across files.** After a closure with `use (&$x)` is passed to a function or method declared anywhere, whatever the method is called on, `$x` reflects whether the callee's `@param-immediately-invoked-callable` or `@param-later-invoked-callable` tag, or one it inherits, says the closure has already run, and what a closure that has run changed on `$this` is no longer taken as known. Without a tag, only a function parameter typed as a callable is taken to run the closure before returning, as in PHPStan.
 - **Functions called through an imported namespace.** With `use Lib\Helpers;`, a call such as `Helpers\greet()` now reaches `Lib\Helpers\greet()` in signature help and the other features that look the function up, instead of being looked for in the current namespace.
 - **`use function` and `use const` stay in their own `namespace` block.** In a file with several `namespace { }` blocks, an import in one block no longer changes which function or constant the same name means in another.
+- **Traits used by enums.** An enum's `use Greets { hello as greet; }` now gives the enum a `greet()` method, `insteadof` picks the right trait, and `/** @use Holds<Stamp> */` binds the trait's templates, as they already did in classes.
 
 ## [0.11.1] - 2026-10-07
 

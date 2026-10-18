@@ -117,6 +117,7 @@ pub(crate) mod config_values;
 mod const_eval;
 pub(crate) mod database_schema;
 mod env_vars;
+mod expr_walker;
 mod facade;
 mod factory;
 pub(crate) mod factory_count;
@@ -125,9 +126,11 @@ mod folio;
 pub(crate) mod gates;
 pub(crate) mod helpers;
 mod higher_order_proxy;
+mod inflector;
 mod macros;
 mod magic_uses;
 mod model_extraction;
+mod model_provider;
 mod model_type;
 mod morph_columns;
 pub(crate) mod morph_map;
@@ -138,6 +141,7 @@ mod provider_resources;
 mod relationships;
 mod request_fields;
 pub(crate) mod request_input;
+mod route_groups;
 mod route_names;
 mod scopes;
 mod storage;
@@ -156,7 +160,6 @@ pub(crate) mod where_property;
 
 pub(crate) use aliases::{LaravelAliasSlot, new_alias_slot};
 pub(crate) use auth::{GUARD_FQN, REQUEST_FQN, patch_auth_user_class, resolve_auth_user_type};
-use collections::custom_collection_for_model;
 pub(crate) use collections::{
     mentions_eloquent_collection, replace_eloquent_collections_in_param_type,
     replace_eloquent_collections_in_type, try_swap_custom_collection,
@@ -209,7 +212,6 @@ pub(crate) use storage::{
     FILESYSTEM_MANAGER_FQN, LaravelStorageDriverIndex, StorageDriverRegistration,
     extract_storage_driver_registrations, patch_storage_disk_type,
 };
-use table_names::model_schema_table;
 pub(crate) use table_names::model_table_name;
 pub(crate) use trans_catalog::TranslationCatalog;
 pub(crate) use trans_json::find_json_trans_references;
@@ -224,16 +226,13 @@ pub(crate) use higher_order_proxy::{
 };
 pub(crate) use string_keys::{find_laravel_string_key_references, resolve_laravel_string_key};
 
+pub(crate) use expr_walker::walk_all_php_expressions;
 pub use helpers::extends_eloquent_model;
-pub(crate) use helpers::walk_all_php_expressions;
 pub(crate) use helpers::{accessor_method_candidates, camel_to_snake};
+pub use model_provider::LaravelModelProvider;
+pub(crate) use model_provider::soft_delete_column;
 
-use crate::atom::atom;
 pub(crate) use accessors::is_accessor_or_mutator_method;
-use accessors::{
-    extract_modern_accessor_type, is_legacy_accessor, is_legacy_mutator, is_modern_accessor,
-    legacy_accessor_property_name, legacy_mutator_property_name,
-};
 pub(crate) use magic_uses::{MagicMemberKind, declaring_method_names};
 pub(crate) use where_property::where_property_method_to_column;
 
@@ -246,25 +245,16 @@ pub(crate) use relationships::{
     RELATION_QUERY_METHODS, related_model_type, relation_query_method, resolve_relation_chain,
     resolve_relation_chain_details, resolve_relation_type,
 };
-use relationships::{
-    RelationshipKind, build_property_type, count_property_name, extract_pivot_accessor_typed,
-    extract_related_type_typed,
-};
 pub(crate) use relationships::{
     class_declares_pivot_relationship, extract_pivot_accessor, extract_pivot_using,
     extract_with_pivot_columns, source_may_declare_pivot_relationship,
 };
 
 pub use scopes::build_scope_methods_for_builder;
-use scopes::{build_scope_methods, is_scope_method};
-use where_property::{build_where_property_methods_for_class, lowercase_method_names};
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
-use builder::build_builder_forwarded_methods;
 pub(crate) use builder::{custom_builder_fqn, model_builder_type};
-use casts::cast_type_to_php_type;
 pub(crate) use casts::qualify_cast_type;
 pub use facade::LaravelFacadeProvider;
 pub(crate) use facade::facade_concrete_class;
@@ -277,16 +267,7 @@ pub(crate) use factory_count::{
     resolve_factory_count_return_ast, tag_static_factory_call,
 };
 
-use crate::atom::{AtomSet, ascii_lowercase_atom};
 use crate::php_type::PhpType;
-use crate::types::{
-    AttributeDefaultSource, ClassInfo, DatabaseColumnSource, PivotAccessor, PropertyInfo,
-    PropertySource,
-};
-
-use super::resolve::resolve_class_base_cached;
-use super::{ResolvedClassCache, VirtualMemberProvider, VirtualMembers};
-use database_schema::SchemaTable;
 
 /// The fully-qualified name of the Eloquent base model.
 pub(crate) const ELOQUENT_MODEL_FQN: &str = "Illuminate\\Database\\Eloquent\\Model";
@@ -354,510 +335,6 @@ pub(super) fn self_ref_subs(ty: PhpType) -> HashMap<String, PhpType> {
         ("$this".to_owned(), ty.clone()),
         ("self".to_owned(), ty),
     ])
-}
-
-/// Virtual member provider for Laravel Eloquent models.
-///
-/// When a class extends `Illuminate\Database\Eloquent\Model` (directly
-/// or through an intermediate parent), this provider synthesizes the
-/// full set of virtual members described in the module documentation
-/// above: relationship properties, scope methods, builder-forwarded
-/// methods, cast/attribute/column properties, and `where{Property}()`
-/// dynamic methods.
-///
-/// For example, a method `posts()` returning `HasMany<Post, $this>`
-/// produces a virtual property `$posts` with type
-/// `\Illuminate\Database\Eloquent\Collection<Post>`.
-pub struct LaravelModelProvider;
-
-/// Laravel date type used for date-related virtual properties.
-fn carbon_type() -> PhpType {
-    PhpType::named(atom(CONFIGURED_DATE_CLASS_FQN))
-}
-
-/// The column `SoftDeletes` casts to a date, when the model uses the trait:
-/// `DELETED_AT`, defaulting to `deleted_at`.
-pub(crate) fn soft_delete_column(laravel: &crate::types::LaravelMetadata) -> Option<&str> {
-    laravel
-        .soft_deletes
-        .then(|| laravel.deleted_at_name.as_deref().unwrap_or("deleted_at"))
-}
-
-fn timestamp_columns(laravel: &crate::types::LaravelMetadata) -> Vec<String> {
-    if !laravel.timestamps.unwrap_or(true) {
-        return Vec::new();
-    }
-    let mut columns = Vec::new();
-    if let Some(col) = match &laravel.created_at_name {
-        Some(Some(name)) => Some(name.clone()),
-        Some(None) => None,
-        None => Some("created_at".to_string()),
-    } {
-        columns.push(col);
-    }
-    if let Some(col) = match &laravel.updated_at_name {
-        Some(Some(name)) => Some(name.clone()),
-        Some(None) => None,
-        None => Some("updated_at".to_string()),
-    } {
-        columns.push(col);
-    }
-    columns
-}
-
-fn schema_column_source(table: Option<&SchemaTable>, column: &str) -> Option<DatabaseColumnSource> {
-    table?.column_source(column)
-}
-
-fn attribute_default_source(class: &ClassInfo, column: &str) -> Option<AttributeDefaultSource> {
-    class
-        .laravel()?
-        .attribute_defaults
-        .iter()
-        .find(|(name, _)| name == column)
-        .map(|(_, value)| AttributeDefaultSource {
-            value: value.clone(),
-        })
-}
-
-fn relationship_kind_name(kind: RelationshipKind) -> &'static str {
-    match kind {
-        RelationshipKind::Singular => "singular",
-        RelationshipKind::Collection => "collection",
-        RelationshipKind::MorphTo => "morphTo",
-    }
-}
-
-fn mutator_methods_by_property(class: &ClassInfo) -> HashMap<String, String> {
-    let mut mutators = HashMap::new();
-    for method in &class.methods {
-        if is_legacy_mutator(method) {
-            mutators.insert(
-                legacy_mutator_property_name(&method.name),
-                method.name.to_string(),
-            );
-        }
-    }
-    mutators
-}
-
-fn push_or_replace_property(properties: &mut Vec<PropertyInfo>, property: PropertyInfo) {
-    if let Some(existing) = properties.iter_mut().find(|p| p.name == property.name) {
-        *existing = property;
-    } else {
-        properties.push(property);
-    }
-}
-
-/// The virtual property accessor `method` synthesizes as `prop_name`,
-/// backed by the schema column of that name when the table has one.
-fn accessor_property(
-    method: &crate::types::MethodInfo,
-    prop_name: &str,
-    property_type: Option<&PhpType>,
-    schema_table: Option<&SchemaTable>,
-    mutator_methods: &HashMap<String, String>,
-) -> PropertyInfo {
-    let method_name = method.name.to_string();
-    let mutator = mutator_methods.get(prop_name).cloned();
-    let column = schema_column_source(schema_table, prop_name);
-    let source = if column.is_some() {
-        PropertySource::Accessor {
-            method: method_name,
-            mutator,
-            column,
-        }
-    } else {
-        PropertySource::ComputedProperty {
-            method: method_name,
-            mutator,
-        }
-    };
-    PropertyInfo {
-        deprecation_message: method.deprecation_message().map(str::to_owned),
-        description: method.description.clone(),
-        source: Some(source),
-        ..PropertyInfo::virtual_property_typed(prop_name, property_type)
-    }
-}
-
-impl VirtualMemberProvider for LaravelModelProvider {
-    /// Returns `true` if the class extends `Illuminate\Database\Eloquent\Model`.
-    fn applies_to(
-        &self,
-        class: &ClassInfo,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    ) -> bool {
-        extends_eloquent_model(class, class_loader)
-    }
-
-    /// Scan the class's methods for Eloquent relationship return types,
-    /// scope methods, Builder-as-static forwarded methods, `$casts`
-    /// definitions, `$attributes` defaults, and `$fillable`/`$guarded`/
-    /// `$hidden`/`$appends` column names.
-    fn provide(
-        &self,
-        class: &ClassInfo,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-        cache: Option<&ResolvedClassCache>,
-    ) -> VirtualMembers {
-        let mut properties = Vec::new();
-        let mut methods = Vec::new();
-        let mut seen_props: std::collections::HashSet<String> = std::collections::HashSet::new();
-        let schema_table = model_schema_table(class, cache);
-
-        // Method names declared by the base Eloquent Model, resolved with
-        // inheritance (own + traits + parent chain) but without virtual
-        // members.  Anything the framework's own Model declares is an
-        // internal — the relationship builder API (`hasMany`, `belongsTo`)
-        // and its protected helpers (`newHasOne`, `morphEagerTo`) all
-        // return relationship types — and must not be mistaken for a
-        // user-defined member.
-        //
-        // Collected into a set rather than probed with `has_method`: the
-        // base-resolved Model carries no valid method index, so each probe
-        // would be a linear scan over ~500 framework methods, once per
-        // method of every model.  Keys are lowercased because PHP method
-        // names are case-insensitive.
-        let base_model_methods: AtomSet = class_loader(ELOQUENT_MODEL_FQN)
-            .map(|base| {
-                resolve_class_base_cached(&base, class_loader)
-                    .methods
-                    .iter()
-                    .map(|m| ascii_lowercase_atom(&m.name))
-                    .collect()
-            })
-            .unwrap_or_default();
-        let mutator_methods = mutator_methods_by_property(class);
-
-        // ── Cast properties ─────────────────────────────────────────
-        if let Some(laravel) = class.laravel() {
-            for (column, cast_type) in &laravel.casts_definitions {
-                let php_type = cast_type_to_php_type(cast_type, class_loader);
-                seen_props.insert(column.clone());
-                properties.push(PropertyInfo {
-                    source: Some(PropertySource::Cast {
-                        cast: cast_type.clone(),
-                        column: schema_column_source(schema_table.as_ref(), column),
-                        attribute_default: attribute_default_source(class, column),
-                        mutator: mutator_methods.get(column).cloned(),
-                    }),
-                    ..PropertyInfo::virtual_property_typed(column, Some(&php_type))
-                });
-            }
-
-            // ── $dates properties (deprecated, lower priority than $casts) ──
-            // Columns in `$dates` are typed as Carbon\Carbon unless already
-            // covered by an explicit `$casts` entry.
-            for column in &laravel.dates_definitions {
-                if !seen_props.insert(column.clone()) {
-                    continue;
-                }
-                properties.push(PropertyInfo {
-                    source: Some(PropertySource::Cast {
-                        cast: "date".to_string(),
-                        column: schema_column_source(schema_table.as_ref(), column),
-                        attribute_default: attribute_default_source(class, column),
-                        mutator: mutator_methods.get(column).cloned(),
-                    }),
-                    ..PropertyInfo::virtual_property_typed(column, Some(&carbon_type()))
-                });
-            }
-
-            // ── Attribute default properties (fallback) ─────────────
-            // Only add properties for columns not already covered by $casts
-            // or $dates.
-            for (column, php_type) in &laravel.attributes_definitions {
-                if !seen_props.insert(column.clone()) {
-                    continue;
-                }
-                properties.push(PropertyInfo {
-                    source: attribute_default_source(class, column).map(|default| {
-                        PropertySource::AttributeDefault {
-                            default,
-                            column: schema_column_source(schema_table.as_ref(), column),
-                            mutator: mutator_methods.get(column).cloned(),
-                        }
-                    }),
-                    ..PropertyInfo::virtual_property_typed(column, Some(php_type))
-                });
-            }
-
-            let timestamp_columns = timestamp_columns(laravel);
-            let soft_delete_column = soft_delete_column(laravel);
-
-            if let Some(schema_table) = &schema_table {
-                for column in &schema_table.columns {
-                    if !seen_props.insert(column.name.clone()) {
-                        continue;
-                    }
-                    let php_type = if timestamp_columns.contains(&column.name) {
-                        carbon_type()
-                    } else if soft_delete_column == Some(column.name.as_str()) {
-                        PhpType::nullable(carbon_type())
-                    } else {
-                        column.php_type.clone()
-                    };
-                    properties.push(PropertyInfo {
-                        source: Some(PropertySource::DatabaseColumn {
-                            column: DatabaseColumnSource {
-                                connection: schema_table.connection.clone(),
-                                table: schema_table.name.clone(),
-                                column: column.name.clone(),
-                                database_type: column.database_type.clone(),
-                                nullable: column.nullable,
-                                default: column.default.clone(),
-                                generated_expression: column.generated_expression.clone(),
-                                generated_mode: column.generated_mode.clone(),
-                            },
-                            attribute_default: attribute_default_source(class, &column.name),
-                            mutator: mutator_methods.get(&column.name).cloned(),
-                        }),
-                        ..PropertyInfo::virtual_property_typed(&column.name, Some(&php_type))
-                    });
-                }
-            }
-
-            // ── Implicit primary key ────────────────────────────────
-            // Every Eloquent model exposes a primary key column (default
-            // `id`) even when no migration or schema dump describes the
-            // table. Synthesize it when schema/casts/attributes have not
-            // already provided it, respecting `$primaryKey` and `$keyType`
-            // overrides. Skip when `getKeyName()` is declared, since the key
-            // name is then computed at runtime and cannot be resolved here.
-            if !laravel.has_get_key_name_method {
-                let primary_key = laravel.primary_key.as_deref().unwrap_or("id");
-                if seen_props.insert(primary_key.to_string()) {
-                    let php_type = if laravel.key_type.as_deref() == Some("string")
-                        || (unique_ids::uses_unique_string_ids(class, class_loader)
-                            && unique_ids::unique_ids_include(class, primary_key, class_loader))
-                    {
-                        PhpType::string()
-                    } else {
-                        PhpType::int()
-                    };
-                    properties.push(PropertyInfo::virtual_property_typed(
-                        primary_key,
-                        Some(&php_type),
-                    ));
-                }
-            }
-
-            // ── Timestamp properties ────────────────────────────────
-            // Add timestamp properties only when schema/casts/attributes did
-            // not already provide the column. Schema-backed timestamp columns
-            // keep their database source and use the configured Laravel date
-            // class above.
-            for column in timestamp_columns {
-                if seen_props.insert(column.clone()) {
-                    properties.push(PropertyInfo::virtual_property_typed(
-                        &column,
-                        Some(&carbon_type()),
-                    ));
-                }
-            }
-
-            // ── Soft-delete column ──────────────────────────────────
-            // `SoftDeletes` casts its column to a date, which is null
-            // until the model is trashed.
-            if let Some(column) = soft_delete_column
-                && seen_props.insert(column.to_string())
-            {
-                properties.push(PropertyInfo::virtual_property_typed(
-                    column,
-                    Some(&PhpType::nullable(carbon_type())),
-                ));
-            }
-
-            // ── Column name properties (last-resort fallback) ───────
-            // $fillable, $guarded, $hidden, and $appends provide column
-            // names without type info.  Only add those not already covered.
-            for column in &laravel.column_names {
-                if !seen_props.insert(column.clone()) {
-                    continue;
-                }
-                properties.push(PropertyInfo::virtual_property_typed(
-                    column,
-                    Some(&PhpType::mixed()),
-                ));
-            }
-        }
-
-        for method in &class.methods {
-            // Framework internals inherited from the base Model never
-            // describe a member of the user's model.
-            if base_model_methods.contains(&ascii_lowercase_atom(&method.name)) {
-                continue;
-            }
-
-            // ── Scope methods ───────────────────────────────────────
-            if is_scope_method(method) {
-                // A method that is both `#[Scope]`-attributed and named
-                // `scopeX` keeps the attribute's name as-is; the prefix
-                // is only stripped for convention-based scope methods.
-                let [instance_method, static_method] = build_scope_methods(method);
-                methods.push(Arc::new(instance_method));
-                methods.push(Arc::new(static_method));
-                continue;
-            }
-
-            // ── Legacy accessors (getXAttribute) ────────────────────
-            if is_legacy_accessor(method) {
-                let prop_name = legacy_accessor_property_name(&method.name);
-                push_or_replace_property(
-                    &mut properties,
-                    accessor_property(
-                        method,
-                        &prop_name,
-                        method.return_type.as_ref(),
-                        schema_table.as_ref(),
-                        &mutator_methods,
-                    ),
-                );
-                continue;
-            }
-
-            // ── Modern accessors (Laravel 9+ Attribute casts) ───────
-            if is_modern_accessor(method) {
-                let prop_name = camel_to_snake(&method.name);
-                let accessor_type = extract_modern_accessor_type(method);
-                push_or_replace_property(
-                    &mut properties,
-                    accessor_property(
-                        method,
-                        &prop_name,
-                        Some(&accessor_type),
-                        schema_table.as_ref(),
-                        &mutator_methods,
-                    ),
-                );
-                continue;
-            }
-
-            // ── Relationship properties ─────────────────────────────
-            let return_type = match method.return_type.as_ref() {
-                Some(rt) => rt,
-                None => continue,
-            };
-
-            let kind = match classify_relationship_typed(return_type) {
-                Some(k) => k,
-                None => continue,
-            };
-
-            let related_type = extract_related_type_typed(return_type);
-
-            // For collection relationships, use the *related* model's
-            // custom_collection, not the owning model's.  For example,
-            // if Product has `#[CollectedBy(ProductCollection)]` and
-            // Review has `#[CollectedBy(ReviewCollection)]`, then
-            // `Product::reviews()` returning `HasMany<Review, $this>`
-            // should produce `ReviewCollection<Review>`, not
-            // `ProductCollection<Review>`.
-            let custom_collection = if kind == RelationshipKind::Collection {
-                related_type.and_then(|t| {
-                    // A self-referential relation (`HasMany<self, $this>`)
-                    // names the owning model, so the keyword has to be
-                    // resolved before the model can be looked up.
-                    let model = if t.is_self_ref() {
-                        class.fqn().to_string()
-                    } else {
-                        t.base_name()?.to_string()
-                    };
-                    custom_collection_for_model(&model, class_loader)
-                })
-            } else {
-                None
-            };
-
-            let type_hint = build_property_type(kind, related_type, custom_collection.as_deref());
-
-            if let Some(ref th) = type_hint {
-                // Attach any pivot configuration recovered from the
-                // relationship body (`->as(...)` / `->using(...)` /
-                // `->withPivot(...)`) so hover can surface the custom
-                // accessor, pivot class, and extra columns.
-                let generic_pivot_accessor = extract_pivot_accessor_typed(return_type);
-                let (body_pivot_accessor, pivot_using, pivot_columns) = class
-                    .laravel()
-                    .and_then(|l| {
-                        l.belongs_to_many_pivots
-                            .iter()
-                            .find(|p| p.method == method.name.as_str())
-                    })
-                    .map(|p| {
-                        let accessor = match p.accessor {
-                            PivotAccessor::Custom(name) => Some(name),
-                            PivotAccessor::Default | PivotAccessor::Unknown => None,
-                        };
-                        (accessor, p.using.clone(), p.columns.clone())
-                    })
-                    .unwrap_or_default();
-                let pivot_accessor = generic_pivot_accessor.or(body_pivot_accessor);
-                properties.push(PropertyInfo {
-                    source: Some(PropertySource::Relationship {
-                        method: method.name.to_string(),
-                        kind: relationship_kind_name(kind).to_string(),
-                        pivot_accessor,
-                        pivot_using,
-                        pivot_columns,
-                    }),
-                    description: method.description.clone(),
-                    ..PropertyInfo::virtual_property_typed(&method.name, Some(th))
-                });
-            }
-        }
-
-        // ── Relationship count properties (`*_count`) ───────────────
-        // `withCount`/`loadCount` is one of the most common Eloquent
-        // patterns.  For each relationship method, synthesize a
-        // `{snake_name}_count` property typed as `int`.  Skip if a
-        // property with that name already exists (e.g. from an explicit
-        // `@property` tag).
-        for method in &class.methods {
-            if base_model_methods.contains(&ascii_lowercase_atom(&method.name)) {
-                continue;
-            }
-            let return_type = match method.return_type.as_ref() {
-                Some(rt) => rt,
-                None => continue,
-            };
-            if classify_relationship_typed(return_type).is_none() {
-                continue;
-            }
-            let count_name = count_property_name(&method.name);
-            if !seen_props.insert(count_name.clone()) {
-                continue;
-            }
-            properties.push(PropertyInfo {
-                source: Some(PropertySource::RelationshipCount {
-                    relationship: method.name.to_string(),
-                }),
-                ..PropertyInfo::virtual_property_typed(&count_name, Some(&PhpType::int()))
-            });
-        }
-
-        // ── Builder-as-static forwarding ────────────────────────────
-        let forwarded = build_builder_forwarded_methods(class, class_loader, cache);
-        methods.extend(forwarded);
-
-        // ── where{PropertyName}() static forwarding ─────────────────
-        // Laravel's Model::__callStatic() delegates to Builder, which
-        // handles where{Column}() calls.  Synthesize these as static
-        // methods on the model so that User::whereName('Alice') resolves.
-        let existing = lowercase_method_names(&methods);
-        let where_static = build_where_property_methods_for_class(class, &existing);
-        for mut m in where_static {
-            m.is_static = true;
-            methods.push(Arc::new(m));
-        }
-
-        VirtualMembers {
-            methods,
-            properties,
-            constants: Vec::new(),
-        }
-    }
 }
 
 #[cfg(test)]

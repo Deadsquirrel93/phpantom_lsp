@@ -10,7 +10,8 @@ use mago_names::resolver::NameResolver;
 use mago_syntax::cst::*;
 
 use super::super::const_eval::{ClassContext, Scope};
-use super::super::helpers::{extract_string_literal, walk_program_expressions};
+use super::super::expr_walker::walk_program_expressions;
+use super::super::helpers::extract_string_literal;
 use super::bindings::{record_container_call, scan_property_bindings};
 use super::package_tools::record_package_call;
 use super::views::{

@@ -680,7 +680,7 @@ fn walk_array_segments(
     // `array{name: string, pen: Pen}`.  Without expansion the
     // segment walk would fail to extract shape values.
     let mut current = if let TypeKind::Named(_) = base_type.kind() {
-        if let Some(expanded) = crate::type_engine::type_resolution::resolve_type_alias_typed(
+        if let Some(expanded) = crate::type_engine::types::aliases::resolve_type_alias_typed(
             base_type,
             current_class_name,
             all_classes,
@@ -741,7 +741,7 @@ fn walk_array_segments(
 
         // After each segment, the resulting type might itself be an
         // alias (e.g. a shape value defined as another alias).
-        if let Some(expanded) = crate::type_engine::type_resolution::resolve_type_alias_typed(
+        if let Some(expanded) = crate::type_engine::types::aliases::resolve_type_alias_typed(
             &current,
             current_class_name,
             all_classes,

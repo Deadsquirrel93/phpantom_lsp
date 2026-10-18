@@ -135,10 +135,8 @@ pub(crate) fn infer_callable_params_from_receiver_fw(
     );
     // Replace `$this`/`static` tokens with the receiver's full type.
     let params = if let Some(receiver) = receiver_classes.first() {
-        let receiver_type = super::super::closure_resolution::build_receiver_self_type_pub(
-            receiver,
-            ctx.class_loader,
-        );
+        let receiver_type =
+            super::super::closure_resolution::build_receiver_self_type(receiver, ctx.class_loader);
         // Late static binding only carries across a forwarding call
         // (`$this->`, or a receiver that is itself still bound); any other
         // receiver pins `static` to the class it was declared as, just as
@@ -302,7 +300,7 @@ pub(crate) fn build_receiver_template_subs(
             _ => continue,
         };
         let reconstructed =
-            super::super::closure_resolution::build_receiver_self_type_pub(cls, ctx.class_loader);
+            super::super::closure_resolution::build_receiver_self_type(cls, ctx.class_loader);
         if let TypeKind::Generic(g) = reconstructed.kind()
             && !g.args.is_empty()
         {
@@ -424,7 +422,7 @@ pub(crate) fn infer_callable_params_from_static_receiver_fw(
         // params like `Closure(Collection<int, TModel>)` become
         // `Closure(Collection<int, Customer>)`.
         let receiver_type =
-            super::super::closure_resolution::build_receiver_self_type_pub(cls, ctx.class_loader);
+            super::super::closure_resolution::build_receiver_self_type(cls, ctx.class_loader);
         let template_subs = if let TypeKind::Generic(g) = receiver_type.kind()
             && !g.args.is_empty()
             && !cls.template_params.is_empty()
@@ -537,7 +535,7 @@ pub(crate) fn find_callable_params_on_method_fw(
     if let Some(params) = callable_param_hints(hint) {
         return params;
     }
-    crate::type_engine::type_resolution::expand_member_type_aliases(
+    crate::type_engine::types::aliases::expand_member_type_aliases(
         hint,
         class,
         ctx.all_classes,

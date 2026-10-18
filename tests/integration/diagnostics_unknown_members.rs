@@ -805,6 +805,55 @@ class Consumer {
     );
 }
 
+/// An enum's trait `use` keeps its `as` aliases and `@use` generics, the
+/// way a class's does.
+#[test]
+fn enum_trait_use_keeps_aliases_and_generics() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+trait Greets {
+    public function hello(): string { return 'hi'; }
+}
+
+/** @template T */
+trait Holds {
+    /** @return T */
+    public function held(): mixed { throw new \Exception(); }
+}
+
+class Stamp {
+    public function format(): string { return ''; }
+}
+
+enum Suit {
+    use Greets {
+        hello as greet;
+    }
+
+    /** @use Holds<Stamp> */
+    use Holds;
+
+    case Hearts;
+}
+
+class Consumer {
+    public function run(): void {
+        Suit::Hearts->greet();
+        Suit::Hearts->held()->format();
+        Suit::Hearts->held()->nope();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    let messages: Vec<&str> = diags.iter().map(|d| d.message.as_str()).collect();
+    assert_eq!(
+        messages,
+        vec!["Method 'nope' not found on class 'Stamp'"],
+        "only the call missing from the `@use` binding should be flagged",
+    );
+}
+
 #[test]
 fn no_diagnostic_for_trait_property() {
     let backend = create_test_backend();

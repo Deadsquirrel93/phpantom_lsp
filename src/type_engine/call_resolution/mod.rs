@@ -51,6 +51,9 @@
 //!   constructor's `@template` parameters from call-site argument texts.
 //! - [`template_subs`]: building a method-level `@template` substitution
 //!   map, and the helpers binding and finishing one relies on.
+//! - [`closure_returns`]: what a closure argument returns, for binding the
+//!   templates of the callable parameter it is passed to.
+//! - [`arg_text_types`]: typing a call argument from its source text.
 //! - [`if_this_is`]: binding a method's templates from its
 //!   `@psalm-if-this-is` pattern and the receiver's type.
 //! - [`arg_type_resolution`]: resolving inline argument expressions to
@@ -62,8 +65,10 @@
 //!   body assigns.
 //! - [`reflection`]: typing a property read through the Reflection API,
 //!   whose result depends on the property name passed at the call site.
+mod arg_text_types;
 mod arg_type_resolution;
 mod callable_target;
+mod closure_returns;
 mod constant_operands;
 mod facade_owner;
 mod if_this_is;
@@ -76,6 +81,7 @@ mod template_subs;
 
 pub(crate) use out_param::{OutParamCallee, effective_out_type, resolve_out_type_for_call};
 
+pub(crate) use arg_text_types::array_literal_shape_type_with;
 pub(crate) use callable_target::invoked_value_types;
 pub(crate) use constant_operands::evaluate_constant_operands;
 pub(crate) use facade_owner::facade_concrete_owner;
@@ -95,6 +101,5 @@ pub(crate) use target_cache::{
 };
 pub(crate) use template_binding::{TemplateCallee, bind_template_args, instantiate_class};
 pub(crate) use template_subs::{
-    array_literal_shape_type_with, build_call_template_subs, finish_template_subs,
-    generalize_object_template_arg,
+    build_call_template_subs, finish_template_subs, generalize_object_template_arg,
 };

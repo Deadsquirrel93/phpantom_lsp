@@ -1130,7 +1130,7 @@ pub(crate) fn resolve_foreach_iterable_type<'b>(
 ) -> Option<PhpType> {
     let raw = resolve_foreach_iterable_type_raw(foreach, scope, ctx)?;
     Some(
-        crate::type_engine::type_resolution::resolve_type_alias_typed(
+        crate::type_engine::types::aliases::resolve_type_alias_typed(
             &raw,
             &ctx.current_class.fqn(),
             ctx.all_classes,

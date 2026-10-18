@@ -3,6 +3,8 @@
 //! Each function here is one arm of that method's `match callee`, which
 //! dispatches to them and does nothing else.
 
+use super::laravel::laravel_helper_call_class;
+use super::literals::resolve_hint_keywords;
 use super::*;
 use crate::type_engine::call_resolution::{
     facade_concrete_owner, is_reflected_property_call, is_reflected_property_class,
@@ -436,52 +438,7 @@ impl Backend {
         mut return_type_hint_out: Option<&mut Option<PhpType>>,
     ) -> Vec<Arc<ClassInfo>> {
         let written = |name: &str| ctx.written_names().resolve_class(name);
-        // ── Laravel container string binding ────────────────
-        // `app('blade.compiler')` / `resolve('cache')` bind a plain
-        // string to a concrete class.  The class-string form
-        // (`app(User::class)`) is handled by the conditional return
-        // type below; only a literal string binding is intercepted
-        // here, resolved via the framework's own alias table.
-        let normalized_func = func_name.trim_start_matches('\\');
-        if matches!(normalized_func, "app" | "resolve")
-            && let Some(binding) = Self::extract_first_arg_text(text_args)
-            && let Some(name) = crate::util::unescape_php_string_literal(binding.trim())
-            && let Some(cls) = (ctx.class_loader)(&name)
-        {
-            return vec![cls];
-        }
-
-        // ── now() / today() → configured Laravel date class ──
-        // The global `now()`/`today()` helpers are declared to
-        // return `CarbonInterface`, but they actually instantiate the
-        // concrete class selected by Laravel's date factory. Resolving
-        // to the interface loses the
-        // concrete type and produces spurious mismatches when a
-        // chained call is assigned to a `DateTime`/`DateTimeImmutable`
-        // declaration.  Map both to the concrete class.  Only applies
-        // when the class is loadable (i.e. inside a Laravel project).
-        //
-        // Not strictly sound (the declared type is the interface),
-        // but it is what the Laravel PHPStan extensions infer too, and
-        // the ecosystem is written against it.  See the matching note in
-        // `rhs_resolution.rs`.
-        if matches!(
-            normalized_func,
-            "now" | "today" | "Illuminate\\Support\\now" | "Illuminate\\Support\\today"
-        ) && let Some(cls) =
-            (ctx.class_loader)(crate::virtual_members::laravel::CONFIGURED_DATE_CLASS_FQN)
-        {
-            return vec![cls];
-        }
-
-        // ── view('name') → concrete Illuminate\View\View ─────
-        if crate::virtual_members::laravel::view_helper_returns_view(
-            normalized_func,
-            Self::extract_first_arg_text(text_args)
-                .as_deref()
-                .unwrap_or(""),
-        ) && let Some(cls) = (ctx.class_loader)(crate::virtual_members::laravel::VIEW_FQN)
-        {
+        if let Some(cls) = laravel_helper_call_class(func_name, text_args, ctx) {
             return vec![cls];
         }
 

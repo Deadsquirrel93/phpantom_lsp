@@ -336,7 +336,7 @@ fn builds_file_translator(factory: Option<&Expression<'_>>) -> bool {
 
     let mut named_any = false;
     let mut all_file_based = true;
-    super::super::helpers::walk_expression_tree(factory, &mut |expr| {
+    super::super::expr_walker::walk_expression_tree(factory, &mut |expr| {
         if let Some(name) = instantiated_or_class_string(expr) {
             named_any = true;
             if !FILE_TRANSLATION_CLASSES

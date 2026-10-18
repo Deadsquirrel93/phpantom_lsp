@@ -5,10 +5,10 @@ use std::path::{Path, PathBuf};
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
-use super::super::helpers::{
-    beats_best, enclosing_body, extract_string_literal, walk_before_cursor,
-    walk_file_scope_before_cursor,
+use super::super::expr_walker::{
+    beats_best, enclosing_body, walk_before_cursor, walk_file_scope_before_cursor,
 };
+use super::super::helpers::extract_string_literal;
 use super::super::path_helpers::path_helper_base;
 use crate::atom::bytes_to_str;
 use crate::util::short_name;

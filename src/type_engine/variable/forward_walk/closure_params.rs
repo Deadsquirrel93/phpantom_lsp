@@ -134,7 +134,7 @@ fn refine_by_inferred(
     let Some(effective) = &declared.effective else {
         return inferred_param_results(inferred, ctx);
     };
-    if super::super::closure_resolution::inferred_type_is_more_specific_pub(
+    if super::super::closure_resolution::inferred_type_is_more_specific(
         effective,
         inferred,
         ctx.class_loader,

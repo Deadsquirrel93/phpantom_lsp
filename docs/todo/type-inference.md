@@ -129,7 +129,7 @@ untyped.
 **Where to change:** `class_expression_name` (`src/class_lookup.rs`) maps
 `Expression::Static` to the current class exactly like `Expression::Self_`,
 and `$this::` lands in the same place through the expression branch.
-`class_constant_type` (`type_engine/call_resolution/return_types.rs`) then
+`class_constant_type` (`type_engine/call_resolution/return_types/class_constants.rs`) then
 always prefers the initializer's value and never asks whether the class or
 the constant is final.
 
@@ -348,7 +348,7 @@ once, for whichever of the two lands first.
 `rhs_resolution/instantiation.rs`, `call_resolution/template_binding.rs`,
 `forward_walk/mod.rs` (`resolve_in_method_body`, next to the existing
 whole-body pre-passes `seed_static_locals` and
-`try_generator_yield_inference`), `forward_walk/assignment.rs`
+`try_generator_yield_inference`), `forward_walk/statements.rs`
 (`process_expression_statement`, where receiver calls are already visited).
 
 ---

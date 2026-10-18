@@ -258,8 +258,8 @@ and `is_balanced` (`types/const_fold.rs`), the `find('(')`/`rfind(')')`
 pair in `call_resolution/template_binding.rs:545-547` (wrong for
 `new W($a)->m()`), the paren and bracket scanners in `subject_expr.rs`
 (680-701, 760-825, 901, 959, 985-1053), and `resolve_literal_type`
-(`call_resolution/return_types.rs:1420-1476`), which types `'a' === 'b'`
-as `string` from its first and last character. Move them onto
+(`call_resolution/return_types/literals.rs:169-225`), which types
+`'a' === 'b'` as `string` from its first and last character. Move them onto
 `text_scan` (`scan_top_level`, `find_matching_forward`,
 `split_top_level_commas`).
 
@@ -302,90 +302,8 @@ spans, and delete the line scanners (`is_modifier_line`,
 out. They are a `VarResolutionCtx`'s inputs. Take the context (or a
 `FileLoaders` plus name and offset) and drop the three allows.
 
-## 23. Split the parser's class extraction
+## 26. Split the large Blade call-site inference file
 
-- `src/parser/classes.rs` (1,717 production lines) is two functions:
-  `extract_classes_from_statements` (300-909, 610 lines) and
-  `extract_class_like_members` (920-1683, 764 lines). Make it a directory
-  and give each member kind (methods, properties, constants, enum cases,
-  trait uses and adaptations) and each class-like kind its own function.
-- `src/parser/mod.rs` (725 lines): move parameter and property extraction
-  (`extract_hint_type` through `extract_property_info`, 89-420) into
-  `parser/params.rs`, leaving the `parse_php*` entry points.
-
-## 24. Split the call-resolution and conditional-type files
-
-- `src/type_engine/call_resolution/template_subs.rs` (1,698): move the
-  closure-body return inference (`try_closure_return_type_for_template`,
-  `infer_closure_return_type*`, `resolve_closure_body_type`,
-  `walk_closure_body_locals`; 109-187, 422-784) into `closure_returns.rs`
-  and the argument-text typing (`resolve_arg_text_to_type`,
-  `array_literal_element_type`, `array_literal_shape_type*`; 205-412,
-  977-1123) into `arg_text_types.rs`.
-- `src/type_engine/types/conditional.rs` (1,642): move the `TextArgs`
-  impl (218-729; `resolve` is 285 lines, `class_string_condition` 218)
-  into `conditional/text_args.rs` and the no-argument path
-  (`resolve_conditional_without_args*`, `try_resolve_with_template_default`,
-  `ThisContext`; 1316-1595) into `conditional/without_args.rs`.
-- `src/type_engine/call_resolution/return_types.rs` (1,477): move
-  class-constant and static-access typing (1019-1270) into
-  `return_types/class_constants.rs` and keyword, literal and operator
-  typing (1275-1476) into `return_types/literals.rs`. In `call_arms.rs`,
-  move the Laravel special cases at the top of
-  `return_types_of_function_call` (432-487: the container string binding,
-  `now()`/`today()`, `view()`) into `return_types/laravel.rs`.
-- `src/type_engine/types/resolution.rs` (951): move type-alias expansion
-  (`resolve_type_alias_typed` through `expand_aliases_in_source`, 645-950)
-  into `types/type_aliases.rs`.
-- `src/class_lookup.rs` (1,025) does two jobs, as its own doc says: lookup
-  (27-329) and subtyping (339-1024, with the 383-line
-  `is_subtype_of_typed`). Move the subtype checks and the constant
-  shape-key evaluation into a module of their own.
-
-## 25. Split the narrowing and forward-walk files
-
-- `src/type_engine/types/narrowing/guards.rs` (1,385): move
-  statement-exit analysis (`statements_unconditionally_exit`,
-  `statement_leaves_block`, `contains_entry_label`, `ExitCtx`,
-  `ReceiverGuard`, the never-call detection; 181-540) into
-  `narrowing/exits.rs`.
-- `src/type_engine/types/narrowing/assertions.rs` (1,220): move
-  conditional-return narrowing (`CallReturnInfo` through
-  `can_hold_a_bool`, 967-1219) into `narrowing/conditional_returns.rs`.
-- `src/type_engine/variable/forward_walk/by_ref.rs` (1,268): move
-  `extract()` handling (529-785) and the built-in by-reference seeding
-  (the 237-line `seed_pass_by_ref_primitives` and the `preg_*` helpers;
-  922-1238) into `by_ref_builtins.rs`.
-- `src/type_engine/variable/forward_walk/assignment.rs` (1,253): the
-  walker's statement dispatcher (`process_statement`,
-  `process_echoed_expression`, `process_expression_statement`,
-  `flatten_namespaced_statements`; 18-344) lives in the assignment file.
-  Move it to `forward_walk/statements.rs`.
-- `src/type_engine/variable/closure_resolution.rs` (1,117): move the
-  Eloquent relation-callback typing (`try_relation_query_override`
-  through `extract_model_from_builder`, 742-1085) next to the other
-  relation code, and replace the three `*_pub` wrappers (1093-1116) with
-  `pub(crate)` on the functions they forward to.
-- `src/type_engine/variable/rhs_resolution/property_access.rs`:
-  `resolve_rhs_property_access` (25-576) is one 552-line function. Split
-  it into its receiver, declared-type and narrowing phases.
-
-## 26. Split the large Laravel and Blade files
-
-- `src/virtual_members/laravel/helpers.rs` (1,476) is a grab-bag, as its
-  doc lists. Move the English inflector (`UNINFLECTED_WORDS`,
-  `IRREGULAR_SINGULARS`, `singularize_english_word` and helpers; 307-840)
-  into `inflector.rs`, the expression walker (`walk_*`, `enclosing_body`,
-  `covers`; 981-1135, 1192-1475) into `expr_walker.rs`, and the route
-  group prefix helpers (214-301, 843-965) next to `route_names.rs`.
-- `src/virtual_members/laravel/mod.rs` (860): move `LaravelModelProvider`
-  (370-860, whose `provide` is 363 lines) into `model_provider.rs` and
-  split `provide` by the kind of member it adds.
-- `src/virtual_members/phpdoc.rs` (1,449): move `@mixin` collection (the
-  mixin cache 38-88, `MixinCollector`/`MixinDedup`/`MixinSubs`,
-  `collect_trait_mixin_members`, the 311-line `collect_mixin_members`,
-  forwards-calls, template-parameter mixins and the substitution maps;
-  658-1443) into `phpdoc/mixins.rs`.
 - `src/blade/call_site_inference.rs` (1,294): move the refresh and
   invalidation orchestration (`refresh_blade_injected_vars` through
   `view_names_for_blade_uri`, 516-1054) into `call_site_refresh.rs`.

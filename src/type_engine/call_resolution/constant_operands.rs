@@ -14,7 +14,7 @@ use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::resolver::ResolutionCtx;
 use crate::types::ClassInfo;
 
-use super::template_subs::array_literal_shape_type;
+use super::arg_text_types::array_literal_shape_type;
 
 /// The literal an argument binds a template to when the template's own bound
 /// is a type operator — `@template K of key-of<TABLE>`, `@template V of

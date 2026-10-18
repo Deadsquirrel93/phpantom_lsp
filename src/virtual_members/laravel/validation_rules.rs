@@ -31,7 +31,8 @@ use crate::atom::bytes_to_str;
 use crate::types::{ClassInfo, MAX_INHERITANCE_DEPTH};
 use crate::util::short_name;
 
-use super::helpers::{beats_best, enclosing_body, extract_string_literal, walk_before_cursor};
+use super::expr_walker::{beats_best, enclosing_body, walk_before_cursor};
+use super::helpers::extract_string_literal;
 
 /// The FQN of Laravel's base form-request class.
 pub(crate) const FORM_REQUEST_FQN: &str = "Illuminate\\Foundation\\Http\\FormRequest";

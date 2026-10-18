@@ -4,6 +4,7 @@
 use super::*;
 
 /// Members extracted from a class-like body by `Backend::extract_class_like_members`.
+#[derive(Default)]
 pub struct ExtractedMembers {
     /// Methods declared directly in the class body.
     pub methods: Vec<MethodInfo>,

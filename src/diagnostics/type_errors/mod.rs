@@ -411,7 +411,7 @@ impl Backend {
                         // Expand @phpstan-type / @psalm-type aliases so
                         // that e.g. `Payload` becomes `array{name: string,
                         // phone: string}` before the compatibility check.
-                        let ty = crate::type_engine::types::resolution::resolve_type_alias_typed(
+                        let ty = crate::type_engine::types::aliases::resolve_type_alias_typed(
                             &ty,
                             &current_class_info.fqn(),
                             &file_ctx.classes,

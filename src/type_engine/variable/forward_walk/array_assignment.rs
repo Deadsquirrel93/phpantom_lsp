@@ -60,7 +60,7 @@ pub(crate) fn destructuring_rhs_type(
         })?;
 
     Some(
-        crate::type_engine::type_resolution::resolve_type_alias_typed(
+        crate::type_engine::types::aliases::resolve_type_alias_typed(
             &raw_type,
             &var_ctx.current_class.fqn(),
             var_ctx.all_classes,

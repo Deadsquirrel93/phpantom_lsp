@@ -25,12 +25,12 @@ use crate::type_engine::variable::rhs_resolution::{
 };
 use crate::types::{ClassInfo, MethodInfo, ParameterInfo};
 
+use super::arg_text_types::{array_literal_element_type, array_literal_shape_type};
 use super::constant_operands::type_operator_bound_literal;
 use super::return_types::literal_arg_type;
 use super::template_subs::{
-    array_literal_element_type, array_literal_shape_type, bind_callable_param_template,
-    bind_callable_return_template, callable_bindings_last, generalize_object_template_arg,
-    names_template_directly, unify_template, wrapper_arity,
+    bind_callable_param_template, bind_callable_return_template, callable_bindings_last,
+    generalize_object_template_arg, names_template_directly, unify_template, wrapper_arity,
 };
 
 /// The parts of a callee's signature its templates bind through.

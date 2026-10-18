@@ -137,7 +137,7 @@ pub(crate) fn composer_class_vars(content: &str, file_path: &Path) -> Vec<Shared
                 return;
             };
             let view = parameter.variable.name;
-            super::helpers::walk_block_expressions(body, &mut |expr| {
+            super::expr_walker::walk_block_expressions(body, &mut |expr| {
                 record_with_call(expr, view, content, &scope, file_path, &mut vars);
                 ControlFlow::Continue(())
             });
@@ -297,7 +297,7 @@ fn composer_for_handler(
 
     if let Some(view) = handler_parameter(handler) {
         let mut inline = Vec::new();
-        super::helpers::walk_expression_tree(handler, &mut |expr| {
+        super::expr_walker::walk_expression_tree(handler, &mut |expr| {
             record_with_call(expr, view, content, scope, file, &mut inline);
             ControlFlow::Continue(())
         });

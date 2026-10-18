@@ -2,7 +2,7 @@ use super::*;
 use crate::atom::atom;
 use crate::php_type::PhpType;
 use crate::test_fixtures::{make_class, make_constant, make_method, make_property, no_loader};
-use crate::types::ClassLikeKind;
+use crate::types::{ClassLikeKind, Visibility};
 use std::sync::Arc;
 
 // ── applies_to ──────────────────────────────────────────────────────

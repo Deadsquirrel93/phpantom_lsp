@@ -41,10 +41,9 @@ use crate::atom::bytes_to_str;
 use crate::names::OwnedResolvedNames;
 use crate::text_position::offset_to_position;
 
-use super::helpers::{
-    chain_name_prefix, chain_uri_modifier, extract_string_literal, join_uri_segments,
-};
+use super::helpers::extract_string_literal;
 use super::provider_resources::{PathContext, resolve_path_arg};
+use super::route_groups::{chain_name_prefix, chain_uri_modifier, join_uri_segments};
 use super::route_names::{RouteEntry, for_each_nested_statement, route_name_matches};
 
 /// The FQN of Folio's page-naming helper, as `mago-names` resolves it.
@@ -144,7 +143,7 @@ pub(crate) fn scan_folio_mounts_in_program(
     for stmt in paths.program.statements.iter() {
         collect_folio_path_mounts(stmt, content, paths, &mut mounts);
     }
-    super::helpers::walk_program_expressions(paths.program, &mut |expr| {
+    super::expr_walker::walk_program_expressions(paths.program, &mut |expr| {
         if let Some(mount) = with_routing_pages_mount(expr, content, paths) {
             mounts.push(mount);
         }
@@ -435,7 +434,7 @@ fn extract_page_route_name(content: &str) -> Option<(String, usize)> {
     let resolved = OwnedResolvedNames::from_resolved(&NameResolver::new(&arena).resolve(program));
 
     let mut found = None;
-    super::helpers::walk_program_expressions(program, &mut |expr| {
+    super::expr_walker::walk_program_expressions(program, &mut |expr| {
         let Expression::Call(Call::Function(fc)) = expr else {
             return ControlFlow::Continue(());
         };
