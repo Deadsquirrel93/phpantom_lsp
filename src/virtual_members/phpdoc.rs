@@ -18,15 +18,13 @@ use std::sync::Arc;
 
 use crate::atom::{Atom, AtomSet};
 use crate::inheritance;
-use crate::inheritance::{ClassRef, bind_template_args};
+use crate::inheritance::bind_template_args;
 use crate::php_type::PhpType;
-use crate::types::{
-    ClassInfo, DocblockMembers, MAX_INHERITANCE_DEPTH, MethodInfo, PropertyInfo, PropertySource,
-};
+use crate::types::{ClassInfo, DocblockMembers, MethodInfo, PropertyInfo, PropertySource};
 
 use super::{VirtualMemberProvider, VirtualMembers};
 use mixins::{
-    MixinCollector, MixinDedup, build_mixin_substitution_map, collect_class_mixin_members,
+    MixinCollector, MixinDedup, collect_class_mixin_members, template_bound_ancestors,
     uses_trait_with_mixins,
 };
 
@@ -143,18 +141,7 @@ impl VirtualMemberProvider for PHPDocProvider {
         }
 
         // Walk the parent chain to check for ancestor mixins or tags.
-        let mut current_parent = class.parent_class;
-        let mut depth = 0u32;
-        while let Some(ref parent_name) = current_parent {
-            depth += 1;
-            if depth > MAX_INHERITANCE_DEPTH {
-                break;
-            }
-            let parent = if let Some(p) = class_loader(parent_name) {
-                p
-            } else {
-                break;
-            };
+        for (_, parent) in inheritance::ancestors(class, class_loader) {
             if !parent.mixins.is_empty()
                 || parent.doc_members.is_some()
                 || uses_trait_with_mixins(&parent, class_loader)
@@ -169,7 +156,6 @@ impl VirtualMemberProvider for PHPDocProvider {
                     return true;
                 }
             }
-            current_parent = parent.parent_class;
         }
 
         // Walk implemented interfaces (and the interfaces they extend),
@@ -207,7 +193,8 @@ impl VirtualMemberProvider for PHPDocProvider {
         class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
         cache: Option<&super::ResolvedClassCache>,
     ) -> VirtualMembers {
-        let tags = DocTags::of(class, class_loader);
+        let ancestors = template_bound_ancestors(class, class_loader);
+        let tags = DocTags::of(class, &ancestors, class_loader);
         let mut collector = MixinCollector {
             methods: tags.methods,
             properties: tags.properties,
@@ -218,7 +205,7 @@ impl VirtualMemberProvider for PHPDocProvider {
                 constants: class.constants.iter().map(|c| c.name).collect(),
             },
         };
-        collect_class_mixin_members(class, class_loader, &mut collector, cache);
+        collect_class_mixin_members(class, &ancestors, class_loader, &mut collector, cache);
 
         VirtualMembers {
             methods: collector.methods,
@@ -248,15 +235,19 @@ struct DocTags {
 }
 
 impl DocTags {
-    /// The tags of `class` itself, then of its traits, of each parent and
-    /// the traits that parent uses, and of its interfaces and the
-    /// interfaces they extend, with each source's template parameters
-    /// bound the way `class` binds them.
+    /// The tags of `class` itself, then of its traits, of each parent (the
+    /// `ancestors`, with their bindings) and the traits that parent uses,
+    /// and of its interfaces and the interfaces they extend, with each
+    /// source's template parameters bound the way `class` binds them.
     ///
     /// Inherited tags are read here rather than by the inheritance merge:
     /// real trait and parent members are merged by then, but a tag exists
     /// only on the docblock that declares it.
-    fn of(class: &ClassInfo, class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>) -> Self {
+    fn of(
+        class: &ClassInfo,
+        ancestors: &[(Arc<ClassInfo>, HashMap<String, PhpType>)],
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    ) -> Self {
         let mut tags = DocTags {
             methods: Vec::new(),
             properties: Vec::new(),
@@ -275,29 +266,11 @@ impl DocTags {
         // reach the child just like the parent's own: Laravel's
         // higher-order collection proxies are declared on the
         // `EnumeratesValues` trait that `Support\Collection` uses.
-        let mut current: ClassRef<'_> = ClassRef::Borrowed(class);
-        let mut active_subs: HashMap<String, PhpType> = HashMap::new();
-        let mut depth = 0u32;
-        while let Some(ref parent_name) = current.parent_class {
-            depth += 1;
-            if depth > MAX_INHERITANCE_DEPTH {
-                break;
-            }
-            let Some(parent) = class_loader(parent_name) else {
-                break;
-            };
-            let level_subs = build_mixin_substitution_map(
-                &current,
-                &parent,
-                &active_subs,
-                &class.template_param_bounds,
-            );
+        for (parent, level_subs) in ancestors {
             if let Some(doc) = parent.doc_members.as_deref() {
-                tags.add(doc, &level_subs);
+                tags.add(doc, level_subs);
             }
-            tags.add_trait_tags(&parent, &level_subs, class_loader);
-            active_subs = level_subs;
-            current = ClassRef::Owned(parent);
+            tags.add_trait_tags(parent, level_subs, class_loader);
         }
 
         // `@implements I<…>` binds an interface's template parameters, and

@@ -14,7 +14,7 @@ use crate::types::{ClassInfo, ResolvedType};
 // from a call's target method/function, reusing the receiver and static-
 // receiver resolution shared with `closure_resolution.rs`'s
 // `@param-closure-this` lookup (`resolve_receiver_types`,
-// `WrittenNames::static_receiver_class_name`, `find_owner_by_name`).  They operate with
+// `resolve_static_receiver_classes`).  They operate with
 // a `ForwardWalkCtx` + `ScopeState` instead of a `VarResolutionCtx`,
 // building a temporary `VarResolutionCtx` with a scope-based variable
 // resolver injected so that variable lookups during receiver resolution
@@ -382,81 +382,96 @@ pub(crate) fn infer_callable_params_from_static_receiver_fw(
     scope: &ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) -> Vec<PhpType> {
-    let owner = ctx
-        .written_names()
-        .static_receiver_class_name(class_expr)
-        .and_then(|name| {
-            super::super::closure_resolution::find_owner_by_name(
-                &name,
-                ctx.all_classes,
-                ctx.class_loader,
-            )
-        });
-    if let Some(ref cls) = owner {
-        // For relation-query methods, override with Builder<RelatedModel>.
-        if crate::virtual_members::laravel::relation_query_method(method_name).is_some()
-            && let Some(override_params) = infer_relation_callback_params(
-                &[ResolvedType::from_arc(Arc::clone(cls))],
+    let scope_resolver = scope_variable_resolver(scope);
+    let var_ctx = ctx.var_ctx_for_with_scope(
+        "$__infer",
+        ctx.cursor_offset,
+        &scope_resolver,
+        Some(scope.proofs()),
+    );
+    let rctx = var_ctx.as_resolution_ctx();
+    super::super::closure_resolution::resolve_static_receiver_classes(class_expr, &rctx)
+        .iter()
+        .map(|owner| {
+            callable_params_on_static_owner(
+                owner,
                 method_name,
                 arg_idx,
                 argument_list,
                 scope,
+                &rctx,
                 ctx,
             )
-        {
-            return override_params;
-        }
+        })
+        .find(|params| !params.is_empty())
+        .unwrap_or_default()
+}
 
-        let resolved = crate::virtual_members::resolve_class_fully_maybe_cached(
-            cls,
-            ctx.class_loader,
-            ctx.resolved_class_cache,
-        );
-        let params =
-            find_callable_params_on_method_fw(&resolved, method_name, arg_idx, argument_list, ctx);
-
-        // Build a template substitution map from the owner class.
-        // When the owner is a generic class (e.g. `Builder<Customer>`
-        // via `@extends`), reconstruct its full generic type and pair
-        // the args with the class's @template params so that callable
-        // params like `Closure(Collection<int, TModel>)` become
-        // `Closure(Collection<int, Customer>)`.
-        let receiver_type =
-            super::super::closure_resolution::build_receiver_self_type(cls, ctx.class_loader);
-        let template_subs = if let TypeKind::Generic(g) = receiver_type.kind()
-            && !g.args.is_empty()
-            && !cls.template_params.is_empty()
-        {
-            crate::inheritance::build_generic_subs(cls, &g.args)
-        } else {
-            HashMap::new()
-        };
-
-        let scope_resolver = scope_variable_resolver(scope);
-        let var_ctx = ctx.var_ctx_for_with_scope(
-            "$__infer",
-            ctx.cursor_offset,
-            &scope_resolver,
-            Some(scope.proofs()),
-        );
-        let params = substitute_call_templates(
-            params,
-            template_subs,
-            Some(cls),
+/// [`infer_callable_params_from_static_receiver_fw`] for `owner`, one of
+/// the classes the static call's receiver names.
+fn callable_params_on_static_owner(
+    owner: &Arc<ClassInfo>,
+    method_name: &str,
+    arg_idx: usize,
+    argument_list: &ArgumentList<'_>,
+    scope: &ScopeState,
+    rctx: &crate::type_engine::resolver::ResolutionCtx<'_>,
+    ctx: &ForwardWalkCtx<'_>,
+) -> Vec<PhpType> {
+    // For relation-query methods, override with Builder<RelatedModel>.
+    if crate::virtual_members::laravel::relation_query_method(method_name).is_some()
+        && let Some(override_params) = infer_relation_callback_params(
+            &[ResolvedType::from_arc(Arc::clone(owner))],
             method_name,
+            arg_idx,
             argument_list,
-            &var_ctx.as_resolution_ctx(),
+            scope,
             ctx,
-        );
-
-        let params = params
-            .into_iter()
-            .map(|p| p.replace_self_with_type(&receiver_type))
-            .collect();
-        handed_to_callback(params, ctx)
-    } else {
-        vec![]
+        )
+    {
+        return override_params;
     }
+
+    let resolved = crate::virtual_members::resolve_class_fully_maybe_cached(
+        owner,
+        ctx.class_loader,
+        ctx.resolved_class_cache,
+    );
+    let params =
+        find_callable_params_on_method_fw(&resolved, method_name, arg_idx, argument_list, ctx);
+
+    // Build a template substitution map from the owner class.
+    // When the owner is a generic class (e.g. `Builder<Customer>`
+    // via `@extends`), reconstruct its full generic type and pair
+    // the args with the class's @template params so that callable
+    // params like `Closure(Collection<int, TModel>)` become
+    // `Closure(Collection<int, Customer>)`.
+    let receiver_type =
+        super::super::closure_resolution::build_receiver_self_type(owner, ctx.class_loader);
+    let template_subs = if let TypeKind::Generic(g) = receiver_type.kind()
+        && !g.args.is_empty()
+        && !owner.template_params.is_empty()
+    {
+        crate::inheritance::build_generic_subs(owner, &g.args)
+    } else {
+        HashMap::new()
+    };
+
+    let params = substitute_call_templates(
+        params,
+        template_subs,
+        Some(owner),
+        method_name,
+        argument_list,
+        rctx,
+        ctx,
+    );
+
+    let params = params
+        .into_iter()
+        .map(|p| p.replace_self_with_type(&receiver_type))
+        .collect();
+    handed_to_callback(params, ctx)
 }
 
 /// Search for method `method_name` on each of `classes` and extract

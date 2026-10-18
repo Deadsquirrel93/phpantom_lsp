@@ -8,11 +8,10 @@ use std::sync::Arc;
 
 use crate::atom::{Atom, AtomSet};
 use crate::inheritance;
-use crate::inheritance::{ClassRef, bind_template_args};
+use crate::inheritance::bind_template_args;
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::{
-    ClassInfo, ConstantInfo, MAX_INHERITANCE_DEPTH, MAX_MIXIN_DEPTH, MethodInfo, PropertyInfo,
-    Visibility,
+    ClassInfo, ConstantInfo, MAX_MIXIN_DEPTH, MethodInfo, PropertyInfo, Visibility,
 };
 use crate::util::short_name;
 
@@ -97,13 +96,14 @@ pub(super) fn uses_trait_with_mixins(
 /// No substitution applies to the class's own mixins: the class's generic
 /// arguments are applied later by `apply_generic_args`, and a mixin named
 /// by one of its template parameters (`@mixin TWraps`) is resolved during
-/// the ancestor walk of a child that binds it through `@extends`.  The walk
-/// up the parent chain accumulates those bindings, so that when
-/// `BelongsTo extends Relation<Product>` and `Relation` declares
+/// the ancestor walk of a child that binds it through `@extends`.  The
+/// `ancestors` (see [`template_bound_ancestors`]) carry those bindings, so
+/// that when `BelongsTo extends Relation<Product>` and `Relation` declares
 /// `@mixin Builder<TRelatedModel>`, the mixin comes out as
 /// `Builder<Product>`.
 pub(super) fn collect_class_mixin_members(
     class: &ClassInfo,
+    ancestors: &[(Arc<ClassInfo>, HashMap<String, PhpType>)],
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     collector: &mut MixinCollector,
     cache: Option<&super::super::ResolvedClassCache>,
@@ -131,31 +131,15 @@ pub(super) fn collect_class_mixin_members(
         cache,
     );
 
-    let mut current_ancestor: ClassRef<'_> = ClassRef::Borrowed(class);
-    let mut active_subs: HashMap<String, PhpType> = HashMap::new();
-    let mut depth = 0u32;
-    while let Some(ref parent_name) = current_ancestor.parent_class {
-        depth += 1;
-        if depth > MAX_INHERITANCE_DEPTH {
-            break;
-        }
-        let Some(parent) = class_loader(parent_name) else {
-            break;
-        };
-        let level_subs = build_mixin_substitution_map(
-            &current_ancestor,
-            &parent,
-            &active_subs,
-            &class.template_param_bounds,
-        );
+    for (parent, level_subs) in ancestors {
         if !parent.mixins.is_empty() {
             collect_mixin_members(
                 &parent.mixins,
-                &substituted_mixin_generics(&parent, &level_subs),
+                &substituted_mixin_generics(parent, level_subs),
                 class_loader,
                 collector,
                 &MixinSubs {
-                    subs: &level_subs,
+                    subs: level_subs,
                     bounds: &parent.template_param_bounds,
                     decorated_forward,
                 },
@@ -164,16 +148,35 @@ pub(super) fn collect_class_mixin_members(
             );
         }
         collect_trait_mixin_members(
-            &parent,
-            &level_subs,
+            parent,
+            level_subs,
             class_loader,
             collector,
             decorated_forward,
             cache,
         );
-        active_subs = level_subs;
-        current_ancestor = ClassRef::Owned(parent);
     }
+}
+
+/// Each parent of `class`, nearest first, with the bindings its template
+/// parameters get from the `@extends` (and `@implements`) arguments of the
+/// classes between it and `class`, accumulated level by level.
+pub(super) fn template_bound_ancestors(
+    class: &ClassInfo,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Vec<(Arc<ClassInfo>, HashMap<String, PhpType>)> {
+    let unbound = HashMap::new();
+    let mut levels: Vec<(Arc<ClassInfo>, HashMap<String, PhpType>)> = Vec::new();
+    for (_, parent) in inheritance::ancestors(class, class_loader) {
+        let (child, child_subs) = match levels.last() {
+            Some((child, child_subs)) => (&**child, child_subs),
+            None => (class, &unbound),
+        };
+        let level_subs =
+            build_mixin_substitution_map(child, &parent, child_subs, &class.template_param_bounds);
+        levels.push((parent, level_subs));
+    }
+    levels
 }
 
 /// The generic arguments of `owner`'s `@mixin` declarations, with `subs`
@@ -577,33 +580,14 @@ pub(in crate::virtual_members) fn uses_forwards_calls(
     class: &ClassInfo,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> bool {
-    if class
-        .used_traits
-        .iter()
-        .any(|t| is_forwards_calls_trait(t.as_str()))
-    {
-        return true;
-    }
-    let mut parent_name = class.parent_class;
-    let mut depth = 0u32;
-    while let Some(ref p) = parent_name {
-        depth += 1;
-        if depth > MAX_INHERITANCE_DEPTH {
-            break;
-        }
-        let Some(parent) = class_loader(p) else {
-            break;
-        };
-        if parent
+    let uses_it = |owner: &ClassInfo| {
+        owner
             .used_traits
             .iter()
             .any(|t| is_forwards_calls_trait(t.as_str()))
-        {
-            return true;
-        }
-        parent_name = parent.parent_class;
-    }
-    false
+    };
+    uses_it(class)
+        || inheritance::ancestors(class, class_loader).any(|(_, parent)| uses_it(&parent))
 }
 
 fn is_forwards_calls_trait(name: &str) -> bool {
@@ -826,7 +810,7 @@ pub fn resolve_template_param_mixins(
 /// This is [`crate::inheritance::build_substitution_map`] with an extra
 /// fallback to template bounds when a `@mixin` names a template parameter
 /// (see the comment on `parent_has_template_param_mixin` below).
-pub(super) fn build_mixin_substitution_map(
+fn build_mixin_substitution_map(
     current: &ClassInfo,
     parent: &ClassInfo,
     active_subs: &HashMap<String, PhpType>,

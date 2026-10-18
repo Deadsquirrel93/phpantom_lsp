@@ -372,6 +372,7 @@ fn read_out_type(
             resolved_class_cache: crate::virtual_members::active_resolved_class_cache(),
             var_types: None,
             receiver_resolver: None,
+            static_receiver_resolver: None,
         };
         // The walker reads a position no path reaches as the state before
         // the statement that left, so a body whose every path returns

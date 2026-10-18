@@ -387,6 +387,126 @@ function run(Parser $parser): void {
     }
 }
 
+#[test]
+fn pass_by_ref_reaches_the_variable_through_a_class_named_by_a_value() {
+    let backend = create_test_backend();
+    let uri = "file:///test_by_ref_class_values.php";
+    let text = r#"<?php
+class Foo {}
+class Filler {
+    public static function fillStatic(?Foo &$out): void { $out = new Foo(); }
+    public function __construct(?Foo &$made = null) { $made = new Foo(); }
+}
+function run(Filler $filler): void {
+    $named = null;
+    Filler::fillStatic($named);
+    /*NAMED*/$named;
+    $class = Filler::class;
+    $viaClassString = null;
+    $class::fillStatic($viaClassString);
+    /*CLASS_STRING*/$viaClassString;
+    $viaObject = null;
+    $filler::fillStatic($viaObject);
+    /*OBJECT*/$viaObject;
+    $namedNew = null;
+    new Filler($namedNew);
+    /*NAMED_NEW*/$namedNew;
+    $made = null;
+    new $class($made);
+    /*NEW*/$made;
+}
+"#;
+    backend.update_ast(uri, text);
+    for (named, through_value) in [
+        ("NAMED", ["CLASS_STRING", "OBJECT"].as_slice()),
+        ("NAMED_NEW", ["NEW"].as_slice()),
+    ] {
+        let through_name = type_at_marker(&backend, uri, text, named);
+        assert_ne!(
+            through_name, "null",
+            "the call at {named} writes the variable"
+        );
+        for marker in through_value {
+            assert_eq!(
+                type_at_marker(&backend, uri, text, marker),
+                through_name,
+                "the call at {marker} writes the variable like the one at {named}"
+            );
+        }
+    }
+}
+
+/// Unpacking an array into a variadic by-reference parameter writes through
+/// its elements, so the array holds the parameter's class afterwards rather
+/// than becoming one.
+#[test]
+fn pass_by_ref_class_variadic_writes_through_unpacked_elements() {
+    let backend = create_test_backend();
+    let uri = "file:///test_by_ref_class_variadic.php";
+    let text = r#"<?php
+class Foo {}
+function fillAll(Foo &...$items): void {}
+function run(): void {
+    $one = null;
+    fillAll($one);
+    /*ONE*/$one;
+    $many = [null];
+    fillAll(...$many);
+    /*MANY*/$many;
+}
+"#;
+    backend.update_ast(uri, text);
+    assert_eq!(type_at_marker(&backend, uri, text, "ONE"), "Foo");
+    assert_eq!(
+        type_at_marker(&backend, uri, text, "MANY"),
+        "array<int, Foo>"
+    );
+}
+
+/// A closure the callee binds to another object (`@param-closure-this`,
+/// `Closure::call()`) holds that object as `$this`, so a call on `$this`
+/// inside it writes through that object's by-reference parameters.
+#[test]
+fn pass_by_ref_through_a_rebound_this_reaches_the_variable() {
+    let backend = create_test_backend();
+    let php = r#"<?php
+class Foo {
+    public function fooOnly(): void {}
+}
+class Filler {
+    public function fill(?Foo &$out): void { $out = new Foo(); }
+}
+class Runner {
+    /** @param-closure-this Filler $callback */
+    public static function with(\Closure $callback): void {}
+}
+class Outer {
+    public function run(): void {
+        Runner::with(function () {
+            $tagged = null;
+            $this->fill($tagged);
+            $tagged->fooOnly();
+        });
+        (function () {
+            $called = null;
+            $this->fill($called);
+            $called->fooOnly();
+        })->call(new Filler());
+    }
+}
+"#;
+    let messages = slow_diagnostic_messages(
+        &backend,
+        "file:///by_ref_rebound_this.php",
+        php,
+        "scalar_member_access",
+    );
+    assert!(
+        messages.is_empty(),
+        "`$this->fill()` writes `Foo` into the variable, got: {messages:?}"
+    );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Pass-by-ref preg_match in if-condition seeds $matches
 // ═══════════════════════════════════════════════════════════════════════════

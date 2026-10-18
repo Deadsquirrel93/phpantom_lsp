@@ -513,6 +513,12 @@ pub(crate) fn branch_exits_stmts<'s>(
 ) -> bool {
     let var_types = |var_name: &str| scope.get(var_name).to_vec();
     let receiver_resolver = |expr: &Expression<'_>| resolved_receiver_class_names(expr, scope, ctx);
+    let static_receiver_resolver = |class_expr: &Expression<'_>| {
+        super::by_ref::static_receiver_classes(class_expr, scope, ctx)
+            .iter()
+            .map(|class| class.fqn().to_string())
+            .collect()
+    };
     let exit_ctx = narrowing::ExitCtx {
         current_class: ctx.current_class,
         all_classes: ctx.all_classes,
@@ -523,6 +529,7 @@ pub(crate) fn branch_exits_stmts<'s>(
         resolved_class_cache: ctx.resolved_class_cache,
         var_types: Some(&var_types),
         receiver_resolver: Some(&receiver_resolver),
+        static_receiver_resolver: Some(&static_receiver_resolver),
     };
     narrowing::statements_unconditionally_exit(stmts, &exit_ctx)
 }

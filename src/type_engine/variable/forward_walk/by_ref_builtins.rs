@@ -1,7 +1,7 @@
-//! The by-reference writes that no class type describes: `extract()`,
-//! which defines a local for each key of its array, and by-reference
-//! parameters with a primitive type (`array &$matches`), including the
-//! shape `preg_match()` and its relatives fill `$matches` with.
+//! What a call writes into the variables it passes by reference, once its
+//! callee is known: the type each by-reference parameter leaves behind,
+//! the shape `preg_match()` and its relatives fill `$matches` with, and
+//! the locals `extract()` defines for the keys of its array.
 
 use mago_syntax::cst::argument::Argument;
 
@@ -279,21 +279,24 @@ fn arg_is_unpacked<'b>(arg_list: &ArgumentList<'b>, value_expr: &Expression<'b>)
     })
 }
 
-/// For each variable argument of `call` that is passed to a
-/// pass-by-reference parameter with a primitive type hint (e.g.
-/// `array &$matches`), seed or refresh the variable in scope. Existing exact
-/// values must be invalidated because the callee may assign any value allowed
-/// by the parameter type. Class-typed parameters are handled by the other
-/// pass [`process_pass_by_ref`] runs on the same call.
-pub(super) fn seed_pass_by_ref_primitives<'b>(
+/// Give each variable `call` passes to a by-reference parameter the type
+/// the call leaves in it: the classes the parameter's out type names, or
+/// else the out type itself where it is a primitive one (`array &$matches`),
+/// or `array` for a new variable handed to an untyped parameter. Existing
+/// exact values must be invalidated because the callee may assign any value
+/// allowed by the parameter type.
+pub(super) fn seed_by_ref_parameters<'b>(
     expr: &'b Expression<'b>,
     call: &ByRefCall<'b>,
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
+    // Most callees take nothing by reference, and so write nothing back.
     // Moving the internal pointer leaves the array's value as it was, so
     // the `array|object` hint describes nothing the call wrote.
-    if super::array_assignment::is_array_pointer_call(expr) {
+    if !call.parameters.iter().any(|param| param.is_reference)
+        || super::array_assignment::is_array_pointer_call(expr)
+    {
         return;
     }
 
@@ -307,6 +310,10 @@ pub(super) fn seed_pass_by_ref_primitives<'b>(
     // seeds the parameter it actually targets, not the one at its ordinal
     // position in the call.
     let bound = crate::call_args::bind_args_to_params(parameters, arg_list);
+
+    // A conditional out type is decided by the arguments as the call
+    // receives them, before it writes any of them.
+    let pre_call = scope.snapshot_resolver();
 
     // An out type written in the callee's own `@template` params
     // (`usort`'s `array<TKey, TValue> &$array`) describes the caller's
@@ -349,16 +356,13 @@ pub(super) fn seed_pass_by_ref_primitives<'b>(
             // A PHPStan conditional out type (`@param-out ($arg is null ?
             // A&I : A) $arg`) is call-site-agnostic up to this point; only
             // this call's own arguments say which branch it actually takes.
-            // Snapshotting clones the scope, so it is only paid for a
-            // hint that actually has a condition to decide.
             let out_hint = if !matches!(out_hint.kind(), TypeKind::Conditional(_)) {
                 out_hint
             } else {
-                let scope_resolver = scope.snapshot_resolver();
                 let var_ctx = ctx.var_ctx_for_with_scope(
                     "",
                     ctx.cursor_offset,
-                    &scope_resolver,
+                    &pre_call,
                     Some(scope.proofs()),
                 );
                 let call_var_resolver =
@@ -391,7 +395,17 @@ pub(super) fn seed_pass_by_ref_primitives<'b>(
                 }
                 _ => effective_hint.is_scalar(),
             };
-            if primitive_hint && is_spread {
+            let classes = if primitive_hint {
+                Vec::new()
+            } else {
+                crate::type_engine::type_resolution::type_hint_to_classes_typed(
+                    &effective_hint,
+                    &ctx.current_class.fqn(),
+                    ctx.all_classes,
+                    ctx.class_loader,
+                )
+            };
+            if is_spread && (primitive_hint || !classes.is_empty()) {
                 // The existing array's own element type plays the same role
                 // here that the whole variable's type plays below: kept
                 // when it already agrees with the hint (minus literal
@@ -417,6 +431,14 @@ pub(super) fn seed_pass_by_ref_primitives<'b>(
                         key_type, value_type,
                     ))],
                 );
+                seeded = true;
+            } else if !classes.is_empty() {
+                // `function fill(Foo &$out)`: the variable holds a `Foo`
+                // after the call, whatever it held before.
+                let written = ResolvedType::from_classes_with_hint(classes, effective_hint);
+                if resolved_types_differ(&written, scope.get(&var_name)) {
+                    scope.set(&var_name, written);
+                }
                 seeded = true;
             } else if primitive_hint {
                 // The callee may assign any value the parameter type allows,

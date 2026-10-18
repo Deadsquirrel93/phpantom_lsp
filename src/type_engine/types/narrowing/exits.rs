@@ -183,6 +183,11 @@ pub(in crate::type_engine) struct ExitCtx<'a> {
     /// `app()->abort()` and `$this->aborter->fail()` terminate a branch
     /// the same way `$app->abort()` does.  See [`ReceiverResolverFn`].
     pub receiver_resolver: ReceiverResolverFn<'a>,
+    /// Resolves the class expression of a static call that is not a class
+    /// name (`$class::fail()`, `$this->model::fail()`) to the classes it
+    /// names, so the call terminates a branch the same way
+    /// `Aborter::fail()` does.
+    pub static_receiver_resolver: ReceiverResolverFn<'a>,
 }
 
 /// Resolves a method-call receiver that is not a plain variable (a call
@@ -297,7 +302,19 @@ fn expression_is_never_call(expr: &Expression<'_>, ctx: &ExitCtx<'_>) -> bool {
                     Some(parent) => parent.to_string(),
                     None => return false,
                 },
-                _ => return false,
+                class_expr => {
+                    let Some(static_receiver_resolver) = ctx.static_receiver_resolver else {
+                        return false;
+                    };
+                    let Some(_guard) = try_acquire_receiver_guard(class_expr.span()) else {
+                        return false;
+                    };
+                    let class_names = static_receiver_resolver(class_expr);
+                    return !class_names.is_empty()
+                        && class_names.iter().all(|class_name| {
+                            class_has_never_method(class_name, method_name, ctx)
+                        });
+                }
             };
             class_has_never_method(&class_name, method_name, ctx)
         }
@@ -316,21 +333,22 @@ fn member_selector_name<'s>(selector: &ClassLikeMemberSelector<'s>) -> Option<&'
 
 /// Resolve the class names a method-call receiver can hold.
 ///
-/// `$this` comes from the enclosing class; any other variable is read
-/// from the caller's scope when one was supplied.  Anything else (a
-/// property chain, a call result, a `new` expression) goes through the
+/// A variable is read from the caller's scope when one was supplied.
+/// `$this` is the enclosing class unless the scope holds the object a
+/// closure was bound to instead (see [`this_is_rebound`]).  Anything else
+/// (a property chain, a call result, a `new` expression) goes through the
 /// caller's [`ReceiverResolverFn`], guarded against the cycle that
 /// resolving an expression from a control-flow predicate can form.
 fn receiver_class_names(object: &Expression<'_>, ctx: &ExitCtx<'_>) -> Vec<String> {
     if let Expression::Variable(Variable::Direct(dv)) = object {
-        let var_name = bytes_to_str(dv.name);
-        if var_name == "$this" {
+        let held = ctx
+            .var_types
+            .map(|var_types| var_types(bytes_to_str(dv.name)))
+            .unwrap_or_default();
+        if dv.name == b"$this" && !this_is_rebound(&held, ctx.current_class) {
             return vec![ctx.current_class.fqn().to_string()];
         }
-        let Some(var_types) = ctx.var_types else {
-            return Vec::new();
-        };
-        return class_names_of(&var_types(var_name));
+        return class_names_of(&held);
     }
     let Some(receiver_resolver) = ctx.receiver_resolver else {
         return Vec::new();
@@ -339,6 +357,24 @@ fn receiver_class_names(object: &Expression<'_>, ctx: &ExitCtx<'_>) -> Vec<Strin
         return Vec::new();
     };
     receiver_resolver(object)
+}
+
+/// Whether the scope's `$this` (`held`) is an object a closure was bound to
+/// (`Closure::call()`, `@param-closure-this`) rather than the enclosing
+/// class.
+///
+/// Inside a class the scope's `$this` lists the class, followed by the
+/// classes its traits require of it.  Those all describe the one object, so
+/// the class alone is asked whether the method is `never`, rather than each
+/// of them as if `$this` might be any one of them.
+fn this_is_rebound(held: &[ResolvedType], current_class: &ClassInfo) -> bool {
+    let enclosing = current_class.fqn();
+    !held.is_empty()
+        && !held.iter().any(|rt| {
+            rt.class_info
+                .as_ref()
+                .is_some_and(|class| class.fqn() == enclosing)
+        })
 }
 
 fn class_has_never_method(class_name: &str, method_name: &str, ctx: &ExitCtx<'_>) -> bool {

@@ -260,13 +260,13 @@ pub(crate) fn eager_callback_arguments<'a>(
         Some(scope.proofs()),
     );
     let receivers = if is_static {
-        let name = ctx.written_names().static_receiver_class_name(receiver)?;
-        let owner = super::super::closure_resolution::find_owner_by_name(
-            &name,
-            ctx.all_classes,
-            ctx.class_loader,
-        )?;
-        vec![ResolvedType::from_arc(owner)]
+        super::super::closure_resolution::resolve_static_receiver_classes(
+            receiver,
+            &var_ctx.as_resolution_ctx(),
+        )
+        .into_iter()
+        .map(ResolvedType::from_arc)
+        .collect()
     } else {
         super::super::rhs_resolution::resolve_rhs_expression(receiver, &var_ctx)
     };

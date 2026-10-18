@@ -467,11 +467,11 @@ fn closure_this_from_function_params(
 //
 // These helpers resolve "the receiver/owner class of a call's method"
 // from the AST, independent of what the caller extracts from the target
-// method once found.  Both the `@param-closure-this` resolution above
-// and the callable-parameter inference in
-// `forward_walk/callable_inference.rs` need this same receiver
-// resolution; they differ only in what they pull out of the matched
-// method (`closure_this_type` vs. `callable(...)` parameter types).
+// method once found.  The `@param-closure-this` resolution above and the
+// forward walker's passes over a call's arguments (callable-parameter
+// inference, relation callbacks, by-reference parameters and captures)
+// all need this same receiver resolution; they differ only in what they
+// pull out of the matched method.
 
 /// Resolve the receiver of an instance/nullsafe method call, `object`.
 ///
@@ -525,6 +525,44 @@ pub(in crate::type_engine) fn find_owner_by_name(
         .or_else(|| class_loader(fqn))
 }
 
+/// Every class the class expression of a static call or `new` names.
+///
+/// A name, `self`, `static` or `parent` names one class.  Any other
+/// expression (`$class::make()`, `new $class`, `$this->model::query()`) is
+/// evaluated, and names the classes its value names as a class name (a
+/// `class-string<T>`, or a string spelling a class), or else the class of
+/// the object it holds, which PHP dispatches a static call on just the
+/// same.
+pub(in crate::type_engine) fn resolve_static_receiver_classes(
+    class_expr: &Expression<'_>,
+    ctx: &ResolutionCtx<'_>,
+) -> Vec<Arc<ClassInfo>> {
+    if let Some(name) = ctx.written_names().static_receiver_class_name(class_expr) {
+        return find_owner_by_name(&name, ctx.all_classes, ctx.class_loader)
+            .into_iter()
+            .collect();
+    }
+    let held = resolve_receiver_types(class_expr, ctx);
+    let owning_class = ctx.current_class.map(ClassInfo::fqn).unwrap_or_default();
+    let mut named: Vec<Arc<ClassInfo>> = Vec::new();
+    for rt in &held {
+        ClassInfo::extend_unique_arc(
+            &mut named,
+            super::class_string_resolution::classes_named_by_type(
+                &rt.type_string,
+                &owning_class,
+                ctx.all_classes,
+                ctx.class_loader,
+            ),
+        );
+    }
+    if named.is_empty() {
+        ResolvedType::into_arced_classes(held)
+    } else {
+        named
+    }
+}
+
 /// Look up `closure_this_type` on an instance method's parameter at
 /// `arg_idx`, resolving the receiver `object`.
 fn closure_this_from_receiver(
@@ -558,31 +596,30 @@ fn closure_this_from_static_receiver(
     arg_idx: usize,
     ctx: &ResolutionCtx<'_>,
 ) -> Option<Vec<ResolvedType>> {
-    let class_name = ctx.written_names().static_receiver_class_name(class_expr)?;
-
-    if method_name.eq_ignore_ascii_case("macro")
-        && arg_idx == 1
-        && let Some(resolve_macro_this) = ctx.laravel_macro_this_resolver
-        && let Some(owner) = resolve_macro_this(&class_name)
-    {
-        return Some(vec![ResolvedType::from_arc(
-            crate::virtual_members::resolve_class_fully_maybe_cached(
-                &owner,
+    resolve_static_receiver_classes(class_expr, ctx)
+        .iter()
+        .find_map(|owner| {
+            if method_name.eq_ignore_ascii_case("macro")
+                && arg_idx == 1
+                && let Some(resolve_macro_this) = ctx.laravel_macro_this_resolver
+                && let Some(bound) = resolve_macro_this(&owner.fqn())
+            {
+                return Some(vec![ResolvedType::from_arc(
+                    crate::virtual_members::resolve_class_fully_maybe_cached(
+                        &bound,
+                        ctx.class_loader,
+                        ctx.resolved_class_cache,
+                    ),
+                )]);
+            }
+            let resolved = crate::virtual_members::resolve_class_fully_maybe_cached(
+                owner,
                 ctx.class_loader,
                 ctx.resolved_class_cache,
-            ),
-        )]);
-    }
-
-    let owner = find_owner_by_name(&class_name, ctx.all_classes, ctx.class_loader)?;
-
-    let resolved = crate::virtual_members::resolve_class_fully_maybe_cached(
-        &owner,
-        ctx.class_loader,
-        ctx.resolved_class_cache,
-    );
-    let method = resolved.get_method(method_name)?;
-    closure_this_from_method_params(method, arg_idx, Some(&resolved), ctx)
+            );
+            let method = resolved.get_method(method_name)?;
+            closure_this_from_method_params(method, arg_idx, Some(&resolved), ctx)
+        })
 }
 
 /// Extract `closure_this_type` from a method's parameter at `arg_idx`

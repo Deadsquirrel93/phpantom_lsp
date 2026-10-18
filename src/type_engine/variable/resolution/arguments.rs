@@ -1,7 +1,6 @@
 //! What a call does with its arguments: the nth positional argument, an
-//! argument's raw type, the native type a call on an assignment's
-//! right-hand side returns, and the type a by-reference parameter leaves
-//! in the variable passed to it.
+//! argument's raw type, and the native type a call on an assignment's
+//! right-hand side returns.
 
 use super::*;
 
@@ -9,9 +8,8 @@ use mago_span::HasSpan;
 
 use crate::atom::{atom, bytes_to_str};
 use crate::php_type::PhpType;
-use crate::type_engine::call_resolution::OutParamCallee;
 use crate::type_engine::resolver::VarResolutionCtx;
-use crate::types::{ParameterInfo, ResolvedType};
+use crate::types::ResolvedType;
 
 /// Extract the "native" return-type string from the RHS of an assignment
 /// expression, without resolving it to `ClassInfo`.
@@ -209,77 +207,4 @@ pub(in crate::type_engine) fn resolve_arg_raw_type<'b>(
     }
     // Fall back to the unified pipeline (method calls, etc.)
     super::super::foreach_resolution::resolve_expression_type(arg_expr, ctx)
-}
-
-/// If `ctx`'s variable is passed to a by-reference parameter of the call
-/// (`arguments`, binding to `parameters` of `callee`) whose out type names a
-/// class, replace `results` with that class.
-///
-/// For example, given `function foo(Baz &$bar): void {}` and the call
-/// `foo($bar)`, `$bar` resolves to `Baz` after the call.
-pub(in crate::type_engine::variable) fn apply_pass_by_reference_type(
-    arguments: &ArgumentList<'_>,
-    parameters: &[ParameterInfo],
-    callee: &OutParamCallee,
-    ctx: &VarResolutionCtx<'_>,
-    results: &mut Vec<ResolvedType>,
-) {
-    // Bind arguments to parameters following PHP's rules so that named
-    // arguments consult the parameter they actually target, not the one at
-    // their ordinal position in the call.
-    let bound = crate::call_args::bind_args_to_params(parameters, arguments);
-
-    for (param_index, (param, arg_expr)) in parameters.iter().zip(bound.iter()).enumerate() {
-        let arg_expr = match arg_expr {
-            Some(expr) => *expr,
-            None => continue,
-        };
-
-        // Check if this argument is our target variable.
-        let is_our_var = match arg_expr {
-            Expression::Variable(Variable::Direct(dv)) => bytes_to_str(dv.name) == ctx.var_name,
-            _ => false,
-        };
-        if !is_our_var {
-            continue;
-        }
-
-        // Check if the corresponding parameter is pass-by-reference
-        // with a type hint.
-        if param.is_reference
-            && let Some(out_hint) = crate::type_engine::call_resolution::effective_out_type(
-                param,
-                param_index,
-                callee,
-                ctx.backend,
-            )
-        {
-            // A PHPStan conditional out type (`@param-out ($arg is null ?
-            // A&I : A) $arg`) is call-site-agnostic up to this point; only
-            // this call's own arguments say which branch it actually takes.
-            let var_resolver = build_var_resolver_from_ctx(ctx);
-            let out_hint = crate::type_engine::call_resolution::resolve_out_type_for_call(
-                out_hint,
-                parameters,
-                callee,
-                arguments,
-                ctx.content,
-                &ctx.as_resolution_ctx(),
-                Some(&var_resolver),
-            );
-            let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
-                &out_hint,
-                &ctx.current_class.fqn(),
-                ctx.all_classes,
-                ctx.class_loader,
-            );
-            if !resolved.is_empty() {
-                results.clear();
-                ResolvedType::extend_unique(
-                    results,
-                    ResolvedType::from_classes_with_hint(resolved, out_hint),
-                );
-            }
-        }
-    }
 }

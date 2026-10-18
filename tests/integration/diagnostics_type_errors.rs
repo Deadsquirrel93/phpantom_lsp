@@ -2344,6 +2344,58 @@ function test(): void {
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
+/// A guard ending in a `never` call narrows what follows it wherever the
+/// call's receiver comes from: a variable holding the class name, or the
+/// `$this` a closure is bound to, inside a class or at the top level the
+/// way a Pest test closure is.
+#[test]
+fn a_never_call_through_a_class_value_or_a_bound_this_ends_the_branch() {
+    let php = r#"<?php
+class Foo {}
+class Aborter {
+    public static function fail(): never { throw new \Exception(); }
+    public function stop(): never { throw new \Exception(); }
+}
+class Runner {
+    /** @param-closure-this Aborter $callback */
+    public static function with(\Closure $callback): void {}
+}
+/** @param-closure-this Aborter $closure */
+function test(string $description, \Closure $closure): void {}
+function maybe_foo(): ?Foo { return null; }
+function takes_foo(Foo $foo): void {}
+
+function via_class_string(?Foo $x): void {
+    $class = Aborter::class;
+    if ($x === null) {
+        $class::fail();
+    }
+    takes_foo($x);
+}
+
+class Outer {
+    public function viaBoundThis(?Foo $x): void {
+        Runner::with(function () use ($x) {
+            if ($x === null) {
+                $this->stop();
+            }
+            takes_foo($x);
+        });
+    }
+}
+
+test('a top-level closure', function () {
+    $x = maybe_foo();
+    if ($x === null) {
+        $this->stop();
+    }
+    takes_foo($x);
+});
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
 /// Nothing produces a value of type `void`, so a parameter annotated with
 /// it is the annotation being wrong, not the argument.
 #[test]

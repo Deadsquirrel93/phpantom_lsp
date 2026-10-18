@@ -135,27 +135,11 @@ pub(crate) fn call_invokes_arg_immediately(
             let ClassLikeMemberSelector::Identifier(ident) = method else {
                 return false;
             };
-            let method_name = bytes_to_str(ident.value);
-            let object = crate::parser::unwrap_parens(object);
-            if let Expression::Variable(Variable::Direct(dv)) = object
-                && dv.name == b"$this"
-                && scope.get("$this").is_empty()
-            {
-                return !ctx.current_class.name.is_empty()
-                    && method_runs_callable_immediately(
-                        ctx.current_class,
-                        method_name,
-                        selector,
-                        ctx,
-                    );
-            }
-            // A variable is read from the scope, and any other receiver (a
-            // property, a chained call, a new object) is resolved against
-            // it the way the call's own type is.
-            let receivers = super::assignment::resolve_rhs_with_scope(object, scope, ctx);
             every_class_runs_callable_immediately(
-                receivers.iter().filter_map(|rt| rt.class_info.as_deref()),
-                method_name,
+                receiver_classes(object, scope, ctx)
+                    .iter()
+                    .map(|class| &**class),
+                bytes_to_str(ident.value),
                 selector,
                 ctx,
             )
@@ -164,17 +148,11 @@ pub(crate) fn call_invokes_arg_immediately(
             let ClassLikeMemberSelector::Identifier(ident) = &sc.method else {
                 return false;
             };
-            let method_name = bytes_to_str(ident.value);
-            if let Some(name) = ctx.written_names().static_receiver_class_name(sc.class) {
-                return (ctx.class_loader)(&name).is_some_and(|class| {
-                    method_runs_callable_immediately(&class, method_name, selector, ctx)
-                });
-            }
             every_class_runs_callable_immediately(
-                static_call_value_classes(sc.class, scope, ctx)
+                static_receiver_classes(sc.class, scope, ctx)
                     .iter()
                     .map(|class| &**class),
-                method_name,
+                bytes_to_str(ident.value),
                 selector,
                 ctx,
             )
@@ -182,32 +160,58 @@ pub(crate) fn call_invokes_arg_immediately(
     }
 }
 
-/// The classes a static call on a value (`$db::locked()`,
-/// `$class::locked()`) dispatches on: the classes the value names, or else
-/// the class of the object it holds.
-fn static_call_value_classes(
-    value: &Expression<'_>,
+/// The classes an instance call's receiver may hold.
+///
+/// `$this` is read from the scope like any variable, since a closure the
+/// callee binds (`Closure::call()`, `@param-closure-this`) holds a `$this`
+/// of another class; only where the scope holds none is it the enclosing
+/// class.  Any other receiver (a property, a chained call, a new object)
+/// is resolved against the scope the way the call's own type is.
+fn receiver_classes(
+    object: &Expression<'_>,
     scope: &ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) -> Vec<Arc<ClassInfo>> {
-    let held = super::assignment::resolve_rhs_with_scope(value, scope, ctx);
-    let owning_class = ctx.current_class.fqn();
-    let named: Vec<Arc<ClassInfo>> = held
-        .iter()
-        .flat_map(|rt| {
-            crate::type_engine::variable::class_string_resolution::classes_named_by_type(
-                &rt.type_string,
-                &owning_class,
-                ctx.all_classes,
-                ctx.class_loader,
-            )
-        })
+    let object = crate::parser::unwrap_parens(object);
+    if let Expression::Variable(Variable::Direct(dv)) = object
+        && dv.name == b"$this"
+        && scope.get("$this").is_empty()
+    {
+        if ctx.current_class.name.is_empty() {
+            return Vec::new();
+        }
+        return super::super::closure_resolution::find_owner_by_name(
+            &ctx.current_class.fqn(),
+            ctx.all_classes,
+            ctx.class_loader,
+        )
+        .into_iter()
         .collect();
-    if named.is_empty() {
-        ResolvedType::into_arced_classes(held)
-    } else {
-        named
     }
+    ResolvedType::into_arced_classes(super::assignment::resolve_rhs_with_scope(
+        object, scope, ctx,
+    ))
+}
+
+/// The classes the class expression of a static call or `new` names
+/// (`Foo::make()`, `$class::make()`, `new $class`), read against the
+/// scope.
+pub(super) fn static_receiver_classes(
+    class_expr: &Expression<'_>,
+    scope: &ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> Vec<Arc<ClassInfo>> {
+    let scope_resolver = |name: &str| scope.get(name).to_vec();
+    let var_ctx = ctx.var_ctx_for_with_scope(
+        "",
+        class_expr.span().start.offset,
+        &scope_resolver,
+        Some(scope.proofs()),
+    );
+    super::super::closure_resolution::resolve_static_receiver_classes(
+        class_expr,
+        &var_ctx.as_resolution_ctx(),
+    )
 }
 
 /// Whether `method_name` runs the callable passed as the `selector`
@@ -489,7 +493,7 @@ pub(crate) fn process_pass_by_ref<'b>(
     // by-reference parameter, so a call without one is left alone before
     // anything is looked up.  `extract()` is the exception: it writes
     // locals named by its argument's keys, whatever the argument is.
-    if extract_call_arg_variables(expr).is_empty() && !is_extract_call(expr) {
+    if !passes_a_variable(expr) && !is_extract_call(expr) {
         return;
     }
     if !super::array_assignment::process_array_push_call(expr, scope, ctx)
@@ -511,12 +515,7 @@ pub(super) struct ByRefCall<'b> {
 }
 
 /// Give the variables a call passes by reference the types its parameters
-/// declare for them.
-///
-/// The callee is looked up once for both passes: the one for class-typed
-/// parameters (`Type &$param`), and the one for primitive and untyped
-/// parameters (`array &$matches`, `&$result`), which the first leaves
-/// alone.
+/// leave in them.
 fn apply_by_ref_parameter_types<'b>(
     expr: &'b Expression<'b>,
     scope: &mut ScopeState,
@@ -528,49 +527,14 @@ fn apply_by_ref_parameter_types<'b>(
     if seed_preg_matches(expr, scope, ctx) {
         return;
     }
-    let Some(call) = by_ref_call(expr, scope, ctx) else {
-        return;
-    };
-
-    // Only a variable passed directly as an argument of this call can be
-    // written through a by-reference parameter, so those are the only
-    // candidates, whether or not they are in scope yet.  Visiting every
-    // local instead would make a long body cost statements × locals.
-    let scope_resolver = scope.snapshot_resolver();
-    let mut arg_var_names: Vec<String> = Vec::new();
-    for arg_var in extract_call_arg_variables(expr) {
-        if !arg_var_names.contains(&arg_var) {
-            arg_var_names.push(arg_var);
-        }
+    if let Some(call) = by_ref_call(expr, scope, ctx) {
+        seed_by_ref_parameters(expr, &call, scope, ctx);
     }
-
-    for var_name in arg_var_names {
-        let var_ctx = ctx.var_ctx_for_with_scope(
-            &var_name,
-            ctx.cursor_offset,
-            &scope_resolver,
-            Some(scope.proofs()),
-        );
-        let before = scope.get(&var_name).to_vec();
-        let mut results = before.clone();
-        super::super::resolution::apply_pass_by_reference_type(
-            call.arguments,
-            &call.parameters,
-            &call.callee,
-            &var_ctx,
-            &mut results,
-        );
-        if resolved_types_differ(&results, &before) {
-            scope.set(&var_name, results);
-        }
-    }
-
-    seed_pass_by_ref_primitives(expr, &call, scope, ctx);
 }
 
-/// The call `expr` makes, for the by-reference passes: a function, a
-/// method on any receiver the walk can type, a static method, or a
-/// constructor.
+/// The call `expr` makes, for the by-reference passes: a function, or a
+/// method or constructor on whichever class the receiver names first that
+/// declares it.
 fn by_ref_call<'b>(
     expr: &'b Expression<'b>,
     scope: &ScopeState,
@@ -592,128 +556,75 @@ fn by_ref_call<'b>(
                 callee: OutParamCallee::Function(Box::new(function)),
             })
         }
-        Expression::Call(Call::Method(call)) => {
-            let class_name = receiver_class_name(call.object, scope, ctx)?;
-            named_method_call(&call.argument_list, &call.method, &class_name, ctx)
-        }
-        Expression::Call(Call::NullSafeMethod(call)) => {
-            let class_name = receiver_class_name(call.object, scope, ctx)?;
-            named_method_call(&call.argument_list, &call.method, &class_name, ctx)
-        }
-        Expression::Call(Call::StaticMethod(call)) => {
-            let class_name = crate::class_lookup::class_expression_name(
-                call.class,
-                ctx.current_class,
-                ctx.all_classes,
-                ctx.source_class_loader,
-                ctx.source_imports,
-            )?;
-            named_method_call(&call.argument_list, &call.method, &class_name, ctx)
-        }
-        Expression::Instantiation(new) => {
-            let class_name = crate::class_lookup::class_expression_name(
-                new.class,
-                ctx.current_class,
-                ctx.all_classes,
-                ctx.source_class_loader,
-                ctx.source_imports,
-            )?;
-            let (parameters, callee) = resolved_method_callee(&class_name, "__construct", ctx)?;
-            Some(ByRefCall {
-                arguments: new.argument_list.as_ref()?,
-                parameters,
-                callee,
-            })
-        }
+        Expression::Call(Call::Method(call)) => named_method_call(
+            &call.argument_list,
+            &call.method,
+            &receiver_classes(call.object, scope, ctx),
+            ctx,
+        ),
+        Expression::Call(Call::NullSafeMethod(call)) => named_method_call(
+            &call.argument_list,
+            &call.method,
+            &receiver_classes(call.object, scope, ctx),
+            ctx,
+        ),
+        Expression::Call(Call::StaticMethod(call)) => named_method_call(
+            &call.argument_list,
+            &call.method,
+            &static_receiver_classes(call.class, scope, ctx),
+            ctx,
+        ),
+        Expression::Instantiation(new) => method_call_on(
+            new.argument_list.as_ref()?,
+            "__construct",
+            &static_receiver_classes(new.class, scope, ctx),
+            ctx,
+        ),
         _ => None,
     }
 }
 
-/// The class an instance call's receiver holds (the first one, when it may
-/// hold several).
-///
-/// `$this` names the enclosing class and a variable the class the scope
-/// recorded for it, both without resolving anything; any other receiver
-/// (`$this->filler`, `$repo->query()`) is typed the way the walk types any
-/// expression.  A scalar is not a receiver, so a variable holding one
-/// yields `None` rather than a class named `string`.
-fn receiver_class_name(
-    object: &Expression<'_>,
-    scope: &ScopeState,
-    ctx: &ForwardWalkCtx<'_>,
-) -> Option<String> {
-    match object {
-        Expression::Variable(Variable::Direct(dv)) if dv.name == b"$this" => {
-            Some(ctx.current_class.fqn().to_string())
-        }
-        Expression::Variable(Variable::Direct(dv)) => {
-            scope.get(bytes_to_str(dv.name)).iter().find_map(|rt| {
-                let name = rt.type_string.base_name()?;
-                (!crate::php_type::is_primitive_scalar_name(name)).then(|| name.to_string())
-            })
-        }
-        _ => {
-            let scope_resolver = |name: &str| scope.get(name).to_vec();
-            let var_ctx = ctx.var_ctx_for_with_scope(
-                "",
-                object.span().start.offset,
-                &scope_resolver,
-                Some(scope.proofs()),
-            );
-            super::super::rhs_resolution::resolve_rhs_expression(object, &var_ctx)
-                .into_iter()
-                .find_map(|rt| Some(rt.class_info?.fqn().to_string()))
-        }
-    }
-}
-
-/// The method a call's `selector` names on `class_name`, with the
-/// arguments the call passes it.
+/// The method a call's `selector` names on the first of `classes` that has
+/// it, with the arguments the call passes it.
 fn named_method_call<'b>(
     arguments: &'b ArgumentList<'b>,
     selector: &ClassLikeMemberSelector<'_>,
-    class_name: &str,
+    classes: &[Arc<ClassInfo>],
     ctx: &ForwardWalkCtx<'_>,
 ) -> Option<ByRefCall<'b>> {
     let ClassLikeMemberSelector::Identifier(ident) = selector else {
         return None;
     };
-    let (parameters, callee) = resolved_method_callee(class_name, bytes_to_str(ident.value), ctx)?;
-    Some(ByRefCall {
-        arguments,
-        parameters,
-        callee,
+    method_call_on(arguments, bytes_to_str(ident.value), classes, ctx)
+}
+
+/// `method_name` on the first of `classes` that has it, once everything the
+/// class inherits is merged in, with the arguments the call passes it.
+fn method_call_on<'b>(
+    arguments: &'b ArgumentList<'b>,
+    method_name: &str,
+    classes: &[Arc<ClassInfo>],
+    ctx: &ForwardWalkCtx<'_>,
+) -> Option<ByRefCall<'b>> {
+    classes.iter().find_map(|class| {
+        let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
+            class,
+            ctx.class_loader,
+            ctx.resolved_class_cache,
+        );
+        let parameters = merged.get_method(method_name)?.parameters.clone();
+        Some(ByRefCall {
+            arguments,
+            parameters,
+            callee: OutParamCallee::Method(merged, atom(method_name)),
+        })
     })
 }
 
-/// Load `class_name`, merge everything it inherits, and look `method_name`
-/// up on the result.
-fn resolved_method_callee(
-    class_name: &str,
-    method_name: &str,
-    ctx: &ForwardWalkCtx<'_>,
-) -> Option<(
-    crate::types::SharedVec<crate::types::ParameterInfo>,
-    OutParamCallee,
-)> {
-    let cls = (ctx.class_loader)(class_name)?;
-    let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
-        &cls,
-        ctx.class_loader,
-        ctx.resolved_class_cache,
-    );
-    let parameters = merged.get_method(method_name)?.parameters.clone();
-    Some((
-        parameters,
-        OutParamCallee::Method(merged, atom(method_name)),
-    ))
-}
-
-/// Extract all `$variable` names that appear as direct arguments in a
-/// call expression.  Used by [`process_pass_by_ref`] to discover
-/// variables that may be introduced by pass-by-reference parameters
-/// (e.g. `$matches` in `preg_match($pattern, $subject, $matches)`).
-pub(crate) fn extract_call_arg_variables<'b>(expr: &'b Expression<'b>) -> Vec<String> {
+/// Whether the call `expr` passes a plain variable as one of its arguments
+/// (`$matches` in `preg_match($pattern, $subject, $matches)`), the only
+/// kind of argument a by-reference parameter can write through.
+fn passes_a_variable(expr: &Expression<'_>) -> bool {
     let arg_list = match expr {
         Expression::Call(Call::Function(fc)) => &fc.argument_list,
         Expression::Call(Call::Method(mc)) => &mc.argument_list,
@@ -721,19 +632,12 @@ pub(crate) fn extract_call_arg_variables<'b>(expr: &'b Expression<'b>) -> Vec<St
         Expression::Call(Call::StaticMethod(sc)) => &sc.argument_list,
         Expression::Instantiation(inst) => match &inst.argument_list {
             Some(al) => al,
-            None => return vec![],
+            None => return false,
         },
-        _ => return vec![],
+        _ => return false,
     };
-    let mut vars = Vec::new();
-    for arg in arg_list.arguments.iter() {
-        let arg_expr = match arg {
-            Argument::Positional(pos) => pos.value,
-            Argument::Named(named) => named.value,
-        };
-        if let Expression::Variable(Variable::Direct(dv)) = arg_expr {
-            vars.push(bytes_to_str(dv.name).to_string());
-        }
-    }
-    vars
+    arg_list
+        .arguments
+        .iter()
+        .any(|arg| matches!(arg.value(), Expression::Variable(Variable::Direct(_))))
 }
