@@ -197,18 +197,7 @@ pub(in crate::type_engine) fn resolve_arg_raw_type<'b>(
         let resolved = if !from_walker.is_empty() || ctx.scope_var_resolver.is_some() {
             from_walker
         } else {
-            resolve_variable_types(
-                &var_text,
-                ctx.current_class,
-                ctx.all_classes,
-                ctx.content,
-                offset as u32,
-                ctx.class_loader,
-                ctx.source_class_loader,
-                ctx.source_imports,
-                ctx.backend,
-                ctx.loaders,
-            )
+            resolve_variable_types(ctx.var_query(&var_text, offset as u32))
         };
         let from_scope = (!resolved.is_empty())
             .then(|| crate::types::ResolvedType::types_joined(&resolved))

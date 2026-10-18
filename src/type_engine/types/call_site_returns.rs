@@ -30,7 +30,7 @@ use crate::php_type::{PhpType, TypeKind};
 use crate::types::ParameterInfo;
 
 use super::conditional::ArgTypeResolver;
-use crate::text_scan::split_top_level_commas;
+use crate::text_scan::{ScanStep, scan_top_level, split_top_level_commas};
 
 /// `JSON_THROW_ON_ERROR`, as defined by PHP's `ext/json/php_json.h`.
 ///
@@ -444,29 +444,28 @@ fn bitmask_sets_flag(
 
 /// Split a bitmask expression into its top-level `|` operands.
 ///
-/// Nested parentheses and bracket pairs are kept intact, and `||` is left
-/// alone: it is a boolean operator, so an expression containing one is not a
-/// mask this module can read apart.
+/// Nested parentheses, bracket pairs, quotes and comments are kept intact
+/// (see [`scan_top_level`]), and `||` is left alone: it is a boolean
+/// operator, so an expression containing one is not a mask this module can
+/// read apart.
 fn split_bitwise_or(text: &str) -> Vec<&str> {
-    let mut parts = Vec::new();
-    let mut depth: u32 = 0;
-    let mut start = 0;
     let bytes = text.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'(' | b'[' | b'{' => depth += 1,
-            b')' | b']' | b'}' => depth = depth.saturating_sub(1),
-            b'|' if depth == 0 => {
-                if bytes.get(i + 1) == Some(&b'|') {
-                    return vec![text];
-                }
-                parts.push(&text[start..i]);
-                start = i + 1;
-            }
-            _ => {}
+    let mut parts = Vec::new();
+    let mut start = 0;
+    // Each pass restarts at depth zero just past a top-level `|`.
+    while let Some(pipe) = scan_top_level(&bytes[start..], |bytes, i| {
+        if bytes[i] == b'|' {
+            ScanStep::Stop
+        } else {
+            ScanStep::Skip(1)
         }
-        i += 1;
+    }) {
+        let pipe = start + pipe;
+        if bytes.get(pipe + 1) == Some(&b'|') {
+            return vec![text];
+        }
+        parts.push(&text[start..pipe]);
+        start = pipe + 1;
     }
     parts.push(&text[start..]);
     parts

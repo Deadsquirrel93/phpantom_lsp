@@ -11,7 +11,7 @@ use crate::type_engine::subject_expr::SubjectExpr;
 use crate::types::*;
 
 use crate::text_scan::split_top_level_commas;
-use crate::type_engine::resolver::{Loaders, ResolutionCtx};
+use crate::type_engine::resolver::ResolutionCtx;
 use crate::type_engine::subject_expr::split_call_subject_raw;
 use crate::type_engine::variable::array_func_rules::ArrayFuncArgs;
 
@@ -214,8 +214,6 @@ impl Backend {
             key: arg_text.to_string(),
         };
 
-        let current_class = ctx.current_class;
-        let all_classes = ctx.all_classes;
         let class_loader = ctx.class_loader;
 
         // ── Plain variable: `$customers` ────────────────────────────────
@@ -239,28 +237,8 @@ impl Backend {
             }
 
             // Fall back to the unified variable resolution pipeline.
-            let default_class;
-            let effective_class = match current_class {
-                Some(cc) => cc,
-                None => {
-                    default_class = crate::class_lookup::class_context_placeholder(
-                        ctx.content,
-                        ctx.cursor_offset,
-                    );
-                    &default_class
-                }
-            };
             let resolved = crate::type_engine::variable::resolution::resolve_variable_types(
-                arg_text,
-                effective_class,
-                all_classes,
-                ctx.content,
-                ctx.cursor_offset,
-                class_loader,
-                ctx.source_class_loader,
-                ctx.source_imports,
-                ctx.backend,
-                Loaders::with_function(ctx.function_loader),
+                ctx.var_query(arg_text),
             );
             if !resolved.is_empty() {
                 return Some(ResolvedType::types_joined(&resolved));

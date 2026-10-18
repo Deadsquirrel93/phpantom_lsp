@@ -112,6 +112,25 @@ pub(crate) fn path_to_uri(path: &Path) -> String {
         .unwrap_or_else(|()| format!("file://{}", effective.display()))
 }
 
+/// The canonical spelling of `path`, for comparing against paths recorded
+/// canonically.
+///
+/// A file that has just been deleted has no canonical form of its own, so
+/// its directory is canonicalized instead: the file still has to match the
+/// path it was recorded under.
+pub(crate) fn canonical_path_for_comparison(path: &Path) -> std::path::PathBuf {
+    if let Ok(canonical) = path.canonicalize() {
+        return canonical;
+    }
+    match (
+        path.parent().and_then(|parent| parent.canonicalize().ok()),
+        path.file_name(),
+    ) {
+        (Some(parent), Some(name)) => parent.join(name),
+        _ => path.to_path_buf(),
+    }
+}
+
 /// The URI of the file at `internal_path` inside the phar at `phar_path`,
 /// e.g. `phar:///path/to/phpstan.phar/src/Type/Type.php`.
 pub(crate) fn phar_entry_uri(phar_path: &Path, internal_path: &str) -> String {
@@ -243,21 +262,6 @@ pub(crate) fn build_fqn(short_name: &str, namespace: Option<&str>) -> String {
         Some(ns) if !ns.is_empty() => format!("{}\\{}", ns, short_name),
         _ => short_name.to_string(),
     }
-}
-
-/// Check if a line contains the `function` keyword as a standalone word
-/// (not part of a larger identifier like `$functionality`).
-pub(crate) fn contains_function_keyword(line: &str) -> bool {
-    let trimmed = line.trim();
-    let Some(pos) = trimmed.find("function") else {
-        return false;
-    };
-    let before_ok = pos == 0 || trimmed.as_bytes()[pos - 1].is_ascii_whitespace();
-    let after_pos = pos + "function".len();
-    let after_ok = after_pos >= trimmed.len()
-        || !trimmed.as_bytes()[after_pos].is_ascii_alphanumeric()
-            && trimmed.as_bytes()[after_pos] != b'_';
-    before_ok && after_ok
 }
 
 /// Find the concrete method body block that contains `offset` within

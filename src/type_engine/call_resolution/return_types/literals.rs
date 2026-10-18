@@ -8,6 +8,7 @@ use crate::Backend;
 use crate::atom::atom;
 use crate::class_lookup::is_self_or_static;
 use crate::php_type::PhpType;
+use crate::text_scan::{find_matching_forward, is_whole_string_literal};
 use crate::type_engine::resolver::ResolutionCtx;
 use crate::types::*;
 
@@ -147,8 +148,7 @@ pub(in crate::type_engine::call_resolution) fn resolve_operator_type(
 /// forward walker types `$a = 'hello'`. A double-quoted string that
 /// interpolates is only known to be a string.
 pub(crate) fn literal_arg_type(text: &str) -> Option<PhpType> {
-    let quoted = |q: char| text.len() >= 2 && text.starts_with(q) && text.ends_with(q);
-    if quoted('\'') || (quoted('"') && !text.contains('$')) {
+    if is_whole_string_literal(text) && (text.starts_with('\'') || !text.contains('$')) {
         return Some(PhpType::literal_string_raw(text));
     }
     let numeric = text.strip_prefix('-').unwrap_or(text);
@@ -174,9 +174,7 @@ pub(in crate::type_engine::call_resolution) fn resolve_literal_type(text: &str) 
     }
 
     // String literals: "…" or '…'
-    if (text.starts_with('"') && text.ends_with('"'))
-        || (text.starts_with('\'') && text.ends_with('\''))
-    {
+    if is_whole_string_literal(text) {
         return Some(PhpType::named(atom("string")));
     }
 
@@ -195,9 +193,13 @@ pub(in crate::type_engine::call_resolution) fn resolve_literal_type(text: &str) 
         return Some(PhpType::false_());
     }
 
-    // Array literals: [...] or array(...)
-    if (text.starts_with('[') && text.ends_with(']'))
-        || (text.starts_with("array(") && text.ends_with(')'))
+    // Array literals: [...] or array(...), when the bracket that opens
+    // the text is the one that closes it (`[1] === [2]` is no array).
+    let closes_at_end = |open: usize, open_byte: u8, close_byte: u8| {
+        find_matching_forward(text, open, open_byte, close_byte) == Some(text.len() - 1)
+    };
+    if (text.starts_with('[') && closes_at_end(0, b'[', b']'))
+        || (text.starts_with("array(") && closes_at_end(5, b'(', b')'))
     {
         return Some(PhpType::named(atom("array")));
     }
@@ -222,4 +224,38 @@ pub(in crate::type_engine::call_resolution) fn resolve_literal_type(text: &str) 
     }
 
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{literal_arg_type, resolve_literal_type};
+
+    #[test]
+    fn a_comparison_of_two_strings_is_not_a_string_literal() {
+        assert_eq!(resolve_literal_type("'a' === 'b'"), None);
+        assert_eq!(literal_arg_type("'a' . 'b'"), None);
+        assert_eq!(
+            resolve_literal_type("'a'")
+                .map(|ty| ty.to_string())
+                .as_deref(),
+            Some("string")
+        );
+    }
+
+    #[test]
+    fn an_array_literal_is_one_bracket_pair() {
+        assert_eq!(resolve_literal_type("[1] === [2]"), None);
+        assert_eq!(
+            resolve_literal_type("[1, [2]]")
+                .map(|ty| ty.to_string())
+                .as_deref(),
+            Some("array")
+        );
+        assert_eq!(
+            resolve_literal_type("array(1, ')')")
+                .map(|ty| ty.to_string())
+                .as_deref(),
+            Some("array")
+        );
+    }
 }

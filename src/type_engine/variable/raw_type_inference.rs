@@ -14,6 +14,7 @@ use crate::parser::extract_hint_type;
 use crate::php_type::PhpType;
 
 use crate::type_engine::resolver::VarResolutionCtx;
+use crate::type_engine::variable::resolution::VarQuery;
 use crate::types::ResolvedType;
 
 /// Infer the raw PHPStan-style type for an array literal (`[…]` or
@@ -598,18 +599,10 @@ fn infer_element_type<'b>(
                 .iter()
                 .find(|c| c.fqn() == ctx.current_class.fqn())
                 .map(|c| c.as_ref());
-            crate::type_engine::variable::resolution::resolve_variable_php_type(
-                &var_text,
-                ctx.content,
-                offset as u32,
+            crate::type_engine::variable::resolution::resolve_variable_php_type(VarQuery {
                 current_class,
-                ctx.all_classes,
-                ctx.class_loader,
-                ctx.source_class_loader,
-                ctx.source_imports,
-                ctx.backend,
-                ctx.loaders,
-            )
+                ..ctx.var_query(&var_text, offset as u32)
+            })
         }
         // ── Parenthesized ──
         Expression::Parenthesized(p) => infer_element_type(p.expression, ctx),
@@ -658,7 +651,8 @@ impl ArrayFuncArgs for AstArrayFuncArgs<'_, '_, '_> {
         // compared against types that arrived fully qualified, so the
         // spelling is canonicalised on the way out.
         let qualify = |ty: PhpType| self.ctx.written_names().resolve_hint(&ty);
-        match super::resolution::nth_arg_expr(self.args, index)? {
+        let expr = super::resolution::nth_arg_expr(self.args, index)?;
+        match expr {
             Expression::Closure(closure) => closure
                 .return_type_hint
                 .as_ref()
@@ -678,14 +672,8 @@ impl ArrayFuncArgs for AstArrayFuncArgs<'_, '_, '_> {
             // `array_map(Row::fromCache(...), $rows)` hands over the method
             // itself, so its declared return is what each element becomes.
             Expression::PartialApplication(pa) => {
-                let span = pa.span();
-                let text = self
-                    .ctx
-                    .content
-                    .get(span.start.offset as usize..span.end.offset as usize)?;
-                crate::completion::source::helpers::resolve_first_class_callable_return_type(
-                    text,
-                    &self.ctx.as_resolution_ctx(),
+                crate::type_engine::variable::rhs_resolution::first_class_callable_return_type(
+                    pa, expr, self.ctx,
                 )
             }
             _ => None,

@@ -322,31 +322,9 @@ impl Backend {
                 // No outer scope resolver: replicate the assignment-scan
                 // fallback the body resolution would otherwise take for
                 // this variable (see `resolve_variable_fallback`).
-                None => {
-                    let dummy_class;
-                    let effective_class = match ctx.current_class {
-                        Some(cc) => cc,
-                        None => {
-                            dummy_class = crate::class_lookup::class_context_placeholder(
-                                ctx.content,
-                                ctx.cursor_offset,
-                            );
-                            &dummy_class
-                        }
-                    };
-                    crate::type_engine::variable::resolution::resolve_variable_types(
-                        name,
-                        effective_class,
-                        ctx.all_classes,
-                        ctx.content,
-                        ctx.cursor_offset,
-                        ctx.class_loader,
-                        ctx.source_class_loader,
-                        ctx.source_imports,
-                        ctx.backend,
-                        Loaders::with_function(ctx.function_loader),
-                    )
-                }
+                None => crate::type_engine::variable::resolution::resolve_variable_types(
+                    ctx.var_query(name),
+                ),
             }
         };
 

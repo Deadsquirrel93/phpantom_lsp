@@ -132,12 +132,12 @@ pub(super) fn resolve_conditional_return_for_call(
 /// for it while resolving one call.
 fn resolve_call_site_arg_types<'c>(
     method: Option<&MethodInfo>,
-    argument_list: &ArgumentList<'_>,
+    argument_list: Option<&ArgumentList<'_>>,
     ctx: &VarResolutionCtx<'_>,
     cell: &'c std::cell::OnceCell<Vec<PhpType>>,
 ) -> &'c [PhpType] {
     cell.get_or_init(|| {
-        let Some(method) = method else {
+        let (Some(method), Some(argument_list)) = (method, argument_list) else {
             return Vec::new();
         };
         if argument_list.arguments.is_empty() || method.parameters.is_empty() {
@@ -242,10 +242,13 @@ fn refine_declared_return(
 /// [`receiver_type_for_owner`](super::method_calls::receiver_type_for_owner))
 /// for instance calls, a plain FQN swap for static calls, which have no
 /// receiver expression to carry generics.
+///
+/// `argument_list` is `None` for a first-class callable (`$obj->m(...)`),
+/// whose return type is the method's own, decided by no arguments.
 pub(super) fn resolve_owner_method_call(
     owner: &ClassInfo,
     method_name: &str,
-    argument_list: &ArgumentList<'_>,
+    argument_list: Option<&ArgumentList<'_>>,
     ctx: &VarResolutionCtx<'_>,
     is_static: bool,
     template_subs: &HashMap<String, PhpType>,
@@ -253,10 +256,14 @@ pub(super) fn resolve_owner_method_call(
 ) -> Vec<ResolvedType> {
     let current_class_fqn = ctx.current_class.fqn();
     let current_class_name: &str = &current_class_fqn;
-    let arg_texts = crate::type_engine::variable::raw_type_inference::extract_arg_texts_from_ast(
-        argument_list,
-        ctx.content,
-    );
+    let arg_texts = argument_list
+        .map(|list| {
+            crate::type_engine::variable::raw_type_inference::extract_arg_texts_from_ast(
+                list,
+                ctx.content,
+            )
+        })
+        .unwrap_or_default();
     let text_args = arg_texts.join(", ");
     let rctx = ctx.as_resolution_ctx();
     let var_resolver = build_var_resolver_from_ctx(ctx);

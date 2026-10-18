@@ -272,6 +272,103 @@ fn reset_foreach_destructured_element(
     }
 }
 
+/// What a `foreach` binds its targets to at the top of every iteration:
+/// the iterable's key and element types, overridden by the inline
+/// `/** @var Type $var */` docblocks above the loop.
+struct ForeachBinding<'b> {
+    foreach: &'b Foreach<'b>,
+    /// The iterable expression's type.
+    iter_type: Option<PhpType>,
+    value_var_name: Option<String>,
+    key_var_name: Option<String>,
+    value_docblock_override: Option<Vec<ResolvedType>>,
+    key_docblock_override: Option<Vec<ResolvedType>>,
+}
+
+impl<'b> ForeachBinding<'b> {
+    fn new(foreach: &'b Foreach<'b>, iter_type: Option<PhpType>, ctx: &ForwardWalkCtx<'_>) -> Self {
+        let value_var_name = match &foreach.target {
+            ForeachTarget::Value(val) => extract_foreach_var_name(val.value),
+            ForeachTarget::KeyValue(kv) => extract_foreach_var_name(kv.value),
+        };
+        let key_var_name = match &foreach.target {
+            ForeachTarget::Value(_) => None,
+            ForeachTarget::KeyValue(kv) => extract_foreach_var_name(kv.key),
+        };
+
+        // Docblock fallback: when `bind_foreach_value`/`bind_foreach_key`
+        // could not determine the element type from the iterable (e.g. the
+        // iterable is `mixed` or a bare `array`), check for inline
+        // `/** @var Type $var */` docblock(s) preceding the foreach keyword
+        // and use them to seed the key and/or value variables.  @var
+        // annotations are explicit developer overrides that take priority
+        // over types inferred from the iterable.
+        let mut value_docblock_override: Option<Vec<ResolvedType>> = None;
+        let mut key_docblock_override: Option<Vec<ResolvedType>> = None;
+        let foreach_offset = foreach.foreach.span().start.offset as usize;
+        if let Some(doc_text) = docblock_above(ctx.content, foreach_offset) {
+            for (doc_var, php_type) in &parse_var_docblock_pairs(doc_text) {
+                if value_var_name.as_ref() == Some(doc_var) {
+                    value_docblock_override = Some(resolve_type_to_resolved_types(php_type, ctx));
+                }
+                if key_var_name.as_ref() == Some(doc_var) {
+                    key_docblock_override = Some(resolve_type_to_resolved_types(php_type, ctx));
+                }
+            }
+        }
+
+        Self {
+            foreach,
+            iter_type,
+            value_var_name,
+            key_var_name,
+            value_docblock_override,
+            key_docblock_override,
+        }
+    }
+
+    /// Bind the value variable (and optionally the key variable) for one
+    /// iteration.
+    fn bind(&self, scope: &mut ScopeState, ctx: &ForwardWalkCtx<'_>) {
+        match &self.foreach.target {
+            ForeachTarget::Value(val) => {
+                bind_foreach_value(val.value, &self.iter_type, scope, ctx);
+            }
+            ForeachTarget::KeyValue(kv) => {
+                bind_foreach_key(kv.key, &self.iter_type, scope, ctx);
+                bind_foreach_value(kv.value, &self.iter_type, scope, ctx);
+            }
+        }
+        // Apply docblock overrides (overwrites bind_foreach_key/value results).
+        if let Some(ref resolved) = self.value_docblock_override
+            && let Some(ref vn) = self.value_var_name
+        {
+            scope.set(vn, resolved.clone());
+        }
+        if let Some(ref resolved) = self.key_docblock_override
+            && let Some(ref kn) = self.key_var_name
+        {
+            scope.set(kn, resolved.clone());
+        }
+        if self.value_docblock_override.is_none() {
+            record_key_value_pairing(self.foreach, self.iter_type.as_ref(), scope, ctx);
+        }
+        record_existing_keys(self.foreach, scope);
+    }
+
+    /// Undo what the previous iteration wrote to the targets (see
+    /// [`reset_foreach_target`]).
+    fn reset(&self, scope: &mut ScopeState, pre_loop_scope: Option<&ScopeState>) {
+        match &self.foreach.target {
+            ForeachTarget::Value(val) => reset_foreach_target(val.value, scope, pre_loop_scope),
+            ForeachTarget::KeyValue(kv) => {
+                reset_foreach_target(kv.key, scope, pre_loop_scope);
+                reset_foreach_target(kv.value, scope, pre_loop_scope);
+            }
+        }
+    }
+}
+
 /// Process a `foreach` statement.
 pub(crate) fn process_foreach<'b>(
     foreach: &'b Foreach<'b>,
@@ -294,8 +391,12 @@ pub(crate) fn process_foreach<'b>(
     // reads `getTypes()` off the narrowed subject, not the declared one.
     process_expr(foreach.expression, scope, ctx);
 
-    // Resolve the iterable expression's type.
-    let iter_type = resolve_foreach_iterable_type(foreach, scope, ctx);
+    let binding = ForeachBinding::new(
+        foreach,
+        resolve_foreach_iterable_type(foreach, scope, ctx),
+        ctx,
+    );
+    let iter_type = &binding.iter_type;
 
     let pre_loop_scope = scope.clone();
 
@@ -308,74 +409,13 @@ pub(crate) fn process_foreach<'b>(
     );
     let cursor_in_body = loop_ctxs.cursor_in_body;
 
-    // Bind the value variable (and optionally the key variable).
-    match &foreach.target {
-        ForeachTarget::Value(val) => {
-            bind_foreach_value(val.value, &iter_type, scope, ctx);
-        }
-        ForeachTarget::KeyValue(kv) => {
-            bind_foreach_key(kv.key, &iter_type, scope, ctx);
-            bind_foreach_value(kv.value, &iter_type, scope, ctx);
-        }
-    }
-
-    // Docblock fallback: when `bind_foreach_value`/`bind_foreach_key`
-    // could not determine the element type from the iterable (e.g. the
-    // iterable is `mixed` or a bare `array`), check for inline
-    // `/** @var Type $var */` docblock(s) preceding the foreach keyword
-    // and use them to seed the key and/or value variables.  @var
-    // annotations are explicit developer overrides that take priority
-    // over types inferred from the iterable.
-    let value_var_name = match &foreach.target {
-        ForeachTarget::Value(val) => extract_foreach_var_name(val.value),
-        ForeachTarget::KeyValue(kv) => extract_foreach_var_name(kv.value),
-    };
-    let key_var_name = match &foreach.target {
-        ForeachTarget::Value(_) => None,
-        ForeachTarget::KeyValue(kv) => extract_foreach_var_name(kv.key),
-    };
-
-    // Collect resolved docblock overrides for key/value variables.
-    let mut value_docblock_override: Option<Vec<ResolvedType>> = None;
-    let mut key_docblock_override: Option<Vec<ResolvedType>> = None;
-    let foreach_offset = foreach.foreach.span().start.offset as usize;
-    if let Some(doc_text) = docblock_above(ctx.content, foreach_offset) {
-        let var_annotations = parse_var_docblock_pairs(doc_text);
-        for (doc_var, php_type) in &var_annotations {
-            if let Some(ref vn) = value_var_name
-                && doc_var == vn
-            {
-                value_docblock_override = Some(resolve_type_to_resolved_types(php_type, ctx));
-            }
-            if let Some(ref kn) = key_var_name
-                && doc_var == kn
-            {
-                key_docblock_override = Some(resolve_type_to_resolved_types(php_type, ctx));
-            }
-        }
-    }
-
-    // Apply docblock overrides (overwrites bind_foreach_key/value results).
-    if let Some(ref resolved) = value_docblock_override
-        && let Some(ref vn) = value_var_name
-    {
-        scope.set(vn, resolved.clone());
-    }
-    if let Some(ref resolved) = key_docblock_override
-        && let Some(ref kn) = key_var_name
-    {
-        scope.set(kn, resolved.clone());
-    }
-    if value_docblock_override.is_none() {
-        record_key_value_pairing(foreach, iter_type.as_ref(), scope, ctx);
-    }
-    record_existing_keys(foreach, scope);
+    binding.bind(scope, ctx);
     // When the iterable is a bare `array` (no generic parameters)
     // and no @var docblock provided a concrete type, the element
     // type is `mixed`.  Seed it so that assignments from the loop
     // variable propagate `mixed` correctly through the body.
-    if let Some(ref vn) = value_var_name
-        && value_docblock_override.is_none()
+    if let Some(ref vn) = binding.value_var_name
+        && binding.value_docblock_override.is_none()
         && scope.get(vn).is_empty()
         && iter_type.as_ref().is_some_and(|it| it.is_bare_array())
     {
@@ -384,8 +424,10 @@ pub(crate) fn process_foreach<'b>(
 
     // What one entry looks like before the body has said anything about
     // it, which is the baseline the loop's own guards narrow.
-    let entry_value_types: Option<Vec<ResolvedType>> =
-        value_var_name.as_ref().map(|vn| scope.get(vn).to_vec());
+    let entry_value_types: Option<Vec<ResolvedType>> = binding
+        .value_var_name
+        .as_ref()
+        .map(|vn| scope.get(vn).to_vec());
 
     // ── Assignment-depth-bounded loop iteration ─────────────────
     //
@@ -412,27 +454,7 @@ pub(crate) fn process_foreach<'b>(
     let own_key_write_target = foreach_own_keys(foreach)
         .filter(|(array_var, key_var)| body_writes_own_key(&body_stmts, array_var, key_var));
 
-    // A dynamic-key write onto some *other* array (`$out[$k] = …`, unlike
-    // `own_key_write_target`'s self-mutating `$pairs[$cn] = …`) that runs on
-    // every path through the body describes that array's element at
-    // whatever key the loop is currently visiting — a fact that stays true
-    // regardless of which concrete key that is, and so survives the key
-    // variable's rebind between fixed-point passes. Without this, the
-    // rebind's blanket invalidation of synthetic keys reading the old key
-    // (`reset_foreach_target`) drops it, and the next pass falls back to
-    // the array's own general element type, which a loop write always
-    // widens scalar literals in (see `array_shape_writes::merge_nested_array_write_inner`).
-    let carried_key_writes: Vec<String> = if let ForeachTarget::KeyValue(kv) = &foreach.target
-        && let Expression::Variable(Variable::Direct(dv)) = kv.key
-    {
-        let key_var = bytes_to_str(dv.name);
-        always_written_array_vars(&body_stmts, key_var)
-            .into_iter()
-            .filter_map(|array_var| array_write_synthetic_key(&array_var, &[kv.key]))
-            .collect()
-    } else {
-        Vec::new()
-    };
+    let carried_key_writes = carried_key_writes(foreach, &body_stmts);
 
     // A `foreach` over an array the engine watched being built and knows
     // is still empty runs zero times, so it cannot change any type.  The
@@ -451,13 +473,7 @@ pub(crate) fn process_foreach<'b>(
         .as_ref()
         .is_some_and(|it| it.is_empty_array_shape())
     {
-        match &foreach.target {
-            ForeachTarget::Value(val) => reset_foreach_target(val.value, scope, None),
-            ForeachTarget::KeyValue(kv) => {
-                reset_foreach_target(kv.key, scope, None);
-                reset_foreach_target(kv.value, scope, None);
-            }
-        }
+        binding.reset(scope, None);
         let exit_frame = ExitFrameGuard::push();
         walk_body_forward(body_stmts.iter().copied(), scope, &loop_ctxs.body_ctx);
         exit_frame.pop();
@@ -487,33 +503,8 @@ pub(crate) fn process_foreach<'b>(
                 .collect();
             // Re-bind the foreach variables for the next iteration,
             // discarding what the previous one wrote to them.
-            match &foreach.target {
-                ForeachTarget::Value(val) => {
-                    reset_foreach_target(val.value, next_scope, Some(&pre_loop_scope));
-                    bind_foreach_value(val.value, &iter_type, next_scope, ctx);
-                }
-                ForeachTarget::KeyValue(kv) => {
-                    reset_foreach_target(kv.key, next_scope, Some(&pre_loop_scope));
-                    reset_foreach_target(kv.value, next_scope, Some(&pre_loop_scope));
-                    bind_foreach_key(kv.key, &iter_type, next_scope, ctx);
-                    bind_foreach_value(kv.value, &iter_type, next_scope, ctx);
-                }
-            }
-            // Re-apply docblock overrides after re-binding.
-            if let Some(ref resolved) = value_docblock_override
-                && let Some(ref vn) = value_var_name
-            {
-                next_scope.set(vn, resolved.clone());
-            }
-            if let Some(ref resolved) = key_docblock_override
-                && let Some(ref kn) = key_var_name
-            {
-                next_scope.set(kn, resolved.clone());
-            }
-            if value_docblock_override.is_none() {
-                record_key_value_pairing(foreach, iter_type.as_ref(), next_scope, ctx);
-            }
-            record_existing_keys(foreach, next_scope);
+            binding.reset(next_scope, Some(&pre_loop_scope));
+            binding.bind(next_scope, ctx);
             for (key, types) in carried {
                 if !next_scope.contains(key) {
                     next_scope.set(key, types);
@@ -614,6 +605,35 @@ pub(crate) fn process_foreach<'b>(
             ctx,
         );
     }
+}
+
+/// The synthetic keys of the arrays a keyed `foreach` writes at the key
+/// it is visiting on every path through its body, which the next
+/// iteration's rebind must carry over.
+///
+/// A dynamic-key write onto some *other* array (`$out[$k] = …`, unlike an
+/// own-key write's self-mutating `$pairs[$cn] = …`) that runs on every
+/// path through the body describes that array's element at whatever key
+/// the loop is currently visiting — a fact that stays true regardless of
+/// which concrete key that is, and so survives the key variable's rebind
+/// between fixed-point passes. Without this, the rebind's blanket
+/// invalidation of synthetic keys reading the old key
+/// (`reset_foreach_target`) drops it, and the next pass falls back to the
+/// array's own general element type, which a loop write always widens
+/// scalar literals in (see
+/// `array_shape_writes::merge_nested_array_write_inner`).
+fn carried_key_writes(foreach: &Foreach<'_>, body_stmts: &[&Statement<'_>]) -> Vec<String> {
+    let ForeachTarget::KeyValue(kv) = &foreach.target else {
+        return Vec::new();
+    };
+    let Expression::Variable(Variable::Direct(dv)) = kv.key else {
+        return Vec::new();
+    };
+    let key_var = bytes_to_str(dv.name);
+    always_written_array_vars(body_stmts, key_var)
+        .into_iter()
+        .filter_map(|array_var| array_write_synthetic_key(&array_var, &[kv.key]))
+        .collect()
 }
 
 /// Make the entries a loop wrote at every key it visited required.

@@ -136,14 +136,25 @@ pub(crate) fn scan_ident_backward(bytes: &[u8], pos: usize) -> usize {
     i
 }
 
+/// Whether `text` is one whole quoted string literal (`'…'` or `"…"`)
+/// rather than an expression that merely starts and ends with a quote,
+/// such as `'a' . 'b'` or `'a' === 'b'`.
+pub(crate) fn is_whole_string_literal(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    bytes.len() >= 2
+        && matches!(bytes[0], b'\'' | b'"')
+        && skip_string_forward(bytes, 0) == bytes.len()
+        && bytes[bytes.len() - 1] == bytes[0]
+        && !is_escaped(bytes, bytes.len() - 1)
+}
+
 /// Remove surrounding single or double quotes from a PHP string literal.
 ///
 /// `"'hello'"` → `Some("hello")`, `"\"world\""` → `Some("world")`,
-/// `"bare"` → `None`.
+/// `"bare"` → `None`, and so is an expression that only starts and ends
+/// with a quote (`"'a' . 'b'"`).
 pub(crate) fn unquote_php_string(raw: &str) -> Option<&str> {
-    raw.strip_prefix('\'')
-        .and_then(|r| r.strip_suffix('\''))
-        .or_else(|| raw.strip_prefix('"').and_then(|r| r.strip_suffix('"')))
+    is_whole_string_literal(raw).then(|| &raw[1..raw.len() - 1])
 }
 
 /// Decode a PHP string literal's source spelling (including its

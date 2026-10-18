@@ -67,6 +67,15 @@ pub struct PerBlock<'a, T> {
 }
 
 impl<'a, T> PerBlock<'a, T> {
+    /// One value for every offset, for a consumer that only reads code in
+    /// the block it was built for.
+    pub fn single(item: T) -> Self {
+        PerBlock {
+            spans: &[],
+            items: vec![item],
+        }
+    }
+
     /// The value for the block containing `offset`.
     pub fn at(&self, offset: u32) -> &T {
         let index = self

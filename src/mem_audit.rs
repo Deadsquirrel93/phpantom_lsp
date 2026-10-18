@@ -1524,6 +1524,12 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
             for route in &discovery.routes {
                 laravel_keys.add(route.name.capacity());
                 laravel_keys.add(route.uri.capacity());
+                if let Some(first) = route.declarations.first() {
+                    laravel_keys.add(route.declarations.capacity() * size_of_val(first));
+                }
+            }
+            for source in &discovery.sources {
+                laravel_keys.add(source.capacity());
             }
             for prefix in &discovery.open_prefixes {
                 laravel_keys.add(prefix.capacity());

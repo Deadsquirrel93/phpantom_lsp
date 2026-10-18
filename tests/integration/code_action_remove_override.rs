@@ -296,7 +296,10 @@ class Foo {
 
     assert_eq!(edits.len(), 1);
     // Should keep the other attribute but remove Override.
-    assert_eq!(edits[0].new_text, "    #[Deprecated]");
+    assert_eq!(
+        crate::common::apply_edits(content, &edits),
+        "<?php\nclass Foo {\n    #[Deprecated]\n    public function bar(): void {}\n}\n"
+    );
 }
 
 #[test]

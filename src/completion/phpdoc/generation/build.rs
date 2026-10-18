@@ -12,6 +12,7 @@ use crate::completion::source::comment_position::position_to_byte_offset;
 use crate::completion::source::throws_analysis::{self, ThrowsContext};
 use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::resolver::FunctionLoaderFn;
+use crate::type_engine::variable::resolution::VarQuery;
 use crate::types::{ClassInfo, FunctionLoader};
 
 // ─── Type Enrichment Helpers ────────────────────────────────────────────────
@@ -335,7 +336,8 @@ fn build_function(
         class_loader,
         function_loader,
         use_map,
-        file_namespace,
+        local_classes,
+        backend,
     };
     let uncaught = throws_analysis::find_uncaught_throw_types_with_context(
         content,
@@ -532,18 +534,18 @@ pub(crate) fn infer_inline_variable_type(
 
     let resolved_class_loader =
         |name: &str| crate::class_lookup::load_resolved_name(name, class_loader);
-    crate::type_engine::variable::resolution::resolve_variable_php_type(
+    crate::type_engine::variable::resolution::resolve_variable_php_type(VarQuery {
         var_name,
-        effective_content,
         cursor_offset,
+        content: effective_content,
         current_class,
         all_classes,
-        &resolved_class_loader,
-        class_loader,
-        Some(&file_ctx.use_map),
+        class_loader: &resolved_class_loader,
+        source_class_loader: class_loader,
+        source_imports: Some(&file_ctx.use_map),
         backend,
-        crate::type_engine::resolver::Loaders::with_function(function_loader),
-    )
+        loaders: crate::type_engine::resolver::Loaders::with_function(function_loader),
+    })
 }
 
 /// Replace the `/**` (or `/** */`) block around `trigger_offset` with

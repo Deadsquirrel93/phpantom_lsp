@@ -146,6 +146,14 @@ fn a_boolean_or_is_not_read_as_a_mask() {
 }
 
 #[test]
+fn a_pipe_in_a_string_does_not_split_a_mask() {
+    assert_eq!(
+        split_bitwise_or("f('a|b') | JSON_THROW_ON_ERROR"),
+        vec!["f('a|b') ", " JSON_THROW_ON_ERROR"]
+    );
+}
+
+#[test]
 fn filter_var_without_a_filter_is_a_string_or_false() {
     assert_eq!(filter_var("$v").as_deref(), Some("string|false"));
 }

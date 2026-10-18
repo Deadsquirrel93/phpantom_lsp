@@ -104,10 +104,14 @@ impl LaravelStringKeyCache {
         // is where a Folio mount is most commonly registered
         // (`withRouting(pages: ...)`), and it is not a service provider, so
         // it needs its own trigger rather than riding along with one.
+        // Routes are also registered from files loaded outside `routes/`,
+        // such as a module's route file a service provider loads, so an edit
+        // to any file the last scan read drops them too.
         if uri.contains("/routes/")
             || uri.ends_with("/bootstrap/app.php")
             || (uri.ends_with(".blade.php")
                 && memchr::memmem::find(content.as_bytes(), b"Folio").is_some())
+            || self.routes.as_ref().is_some_and(|routes| routes.reads(uri))
         {
             self.routes = None;
         }

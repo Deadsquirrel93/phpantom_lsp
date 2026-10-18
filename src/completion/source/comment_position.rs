@@ -47,13 +47,21 @@ pub(crate) fn is_offset_inside_docblock(content: &str, byte_offset: usize) -> bo
 pub fn is_inside_non_doc_comment(content: &str, position: Position) -> bool {
     let target = position_to_byte_offset(content, position);
     matches!(
-        lexical_state_at(content.as_bytes(), target).0,
+        lexical_state_at(content.as_bytes(), target).state,
         Lexical::LineComment | Lexical::BlockComment
     )
 }
 
+/// Where the `/** … */` docblock that `byte_offset` sits in opens, from
+/// the forward scan of [`lexical_state_at`], so a `/**` inside a string
+/// literal is not taken for one.
+pub(crate) fn docblock_start_at(content: &str, byte_offset: usize) -> Option<usize> {
+    let at = lexical_state_at(content.as_bytes(), byte_offset);
+    (at.state == Lexical::Docblock).then_some(at.opened_at)
+}
+
 /// Classification of the string context at a given cursor position.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StringContext {
     /// The cursor is not inside any string literal.
     NotInString,
@@ -84,10 +92,11 @@ pub enum StringContext {
 pub fn classify_string_context(content: &str, position: Position) -> StringContext {
     let target = position_to_byte_offset(content, position);
     let bytes = content.as_bytes();
-    match lexical_state_at(bytes, target) {
-        (Lexical::SingleString | Lexical::Nowdoc, _) => StringContext::InStringLiteral,
-        (Lexical::DoubleString | Lexical::Heredoc, brace_depth) => {
-            if brace_depth > 0 {
+    let at = lexical_state_at(bytes, target);
+    match at.state {
+        Lexical::SingleString | Lexical::Nowdoc => StringContext::InStringLiteral,
+        Lexical::DoubleString | Lexical::Heredoc => {
+            if at.brace_depth > 0 {
                 StringContext::BraceInterpolation
             } else if is_simple_interpolation_site(bytes, target) {
                 StringContext::SimpleInterpolation
@@ -112,28 +121,47 @@ enum Lexical {
     Nowdoc,
 }
 
+/// What the forward scan of [`lexical_state_at`] finds at an offset.
+struct LexicalAt {
+    state: Lexical,
+    /// Where the string or comment the offset sits in opens.
+    opened_at: usize,
+    /// The depth of the `{$…}` interpolation braces open there: zero in
+    /// the body of a double-quoted string or heredoc proper and greater
+    /// inside a complex interpolation expression, whose own quotes do not
+    /// end the string.
+    brace_depth: u32,
+}
+
 /// The [`Lexical`] state at byte `target` of `bytes`, from a forward scan
-/// of the file up to it, with the depth of the `{$…}` interpolation braces
-/// open there.  The depth is zero in the body of a double-quoted string or
-/// heredoc proper and greater inside a complex interpolation expression,
-/// whose own quotes do not end the string.
-fn lexical_state_at(bytes: &[u8], target: usize) -> (Lexical, u32) {
+/// of the file up to it.
+fn lexical_state_at(bytes: &[u8], target: usize) -> LexicalAt {
     let len = bytes.len();
     let mut i = 0;
     let mut state = Lexical::Code;
+    let mut opened_at = 0;
     let mut heredoc_label: Vec<u8> = Vec::new();
     let mut brace_depth: u32 = 0;
 
     while i < len {
         if i >= target {
-            return (state, brace_depth);
+            return LexicalAt {
+                state,
+                opened_at,
+                brace_depth,
+            };
         }
 
         match state {
             Lexical::Code => {
+                opened_at = i;
                 if bytes[i] == b'/' && i + 1 < len && bytes[i + 1] == b'/' {
                     state = Lexical::LineComment;
                     i += 2;
+                } else if bytes[i] == b'#' && bytes.get(i + 1) != Some(&b'[') {
+                    // `#[` opens an attribute rather than a comment.
+                    state = Lexical::LineComment;
+                    i += 1;
                 } else if bytes[i] == b'/'
                     && i + 2 < len
                     && bytes[i + 1] == b'*'
@@ -271,7 +299,11 @@ fn lexical_state_at(bytes: &[u8], target: usize) -> (Lexical, u32) {
     }
 
     // Cursor at or past end of file
-    (state, brace_depth)
+    LexicalAt {
+        state,
+        opened_at,
+        brace_depth,
+    }
 }
 
 /// Checks whether the bytes immediately before `target` look like a PHP

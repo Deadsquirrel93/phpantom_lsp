@@ -542,9 +542,14 @@ fn wrapper_constructor_template(
     if wrapper_ctor.template_bindings().is_empty() {
         return None;
     }
+    // The argument list is the one that ends the expression: in
+    // `new W($a)->m()` the value is whatever `m()` returns, not a `W`.
     let paren_start = rest.find('(')?;
-    let paren_end = rest.rfind(')')?;
-    let inner_args = rest.get(paren_start + 1..paren_end)?.trim();
+    let paren_end = crate::text_scan::find_matching_forward(rest, paren_start, b'(', b')')?;
+    if !rest[paren_end + 1..].trim().is_empty() {
+        return None;
+    }
+    let inner_args = rest[paren_start + 1..paren_end].trim();
     let wrapper_arg_texts = crate::text_scan::split_top_level_commas(inner_args);
     let wrapper_subs =
         bind_constructor_template_args(&wrapper_cls, wrapper_ctor, &wrapper_arg_texts, ctx);

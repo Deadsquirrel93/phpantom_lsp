@@ -21,7 +21,7 @@ use super::calls::{
 };
 use super::laravel_calls::laravel_helper_call;
 use super::method_calls::resolve_rhs_method_call_inner;
-use super::static_calls::resolve_rhs_static_call;
+use super::static_calls::{StaticCallParts, resolve_rhs_static_call};
 use super::{resolve_rhs_expression, resolve_var_types, resolved_type_with_lookup};
 
 /// Resolve a plain function call: `someFunc()`, array functions, variable
@@ -92,16 +92,14 @@ fn first_class_callable_invocation<'b>(
     ctx: &VarResolutionCtx<'_>,
 ) -> Option<Vec<ResolvedType>> {
     match pa {
-        PartialApplication::StaticMethod(sma) => {
-            // Build a synthetic StaticMethodCall and resolve it.
-            let synthetic = StaticMethodCall {
+        PartialApplication::StaticMethod(sma) => Some(resolve_rhs_static_call(
+            StaticCallParts {
                 class: sma.class,
-                double_colon: sma.double_colon,
-                method: sma.method.clone(),
-                argument_list: argument_list.clone(),
-            };
-            Some(resolve_rhs_static_call(&synthetic, ctx))
-        }
+                method: &sma.method,
+                argument_list: Some(argument_list),
+            },
+            ctx,
+        )),
         PartialApplication::Method(ma) => Some(resolve_rhs_method_call_inner(
             ma.object,
             &ma.method,

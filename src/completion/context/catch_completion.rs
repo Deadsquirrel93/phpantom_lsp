@@ -87,7 +87,7 @@ pub(crate) fn detect_catch_context(content: &str, position: Position) -> Option<
     // 1. Direct `throw new ExceptionType(…)` statements
     let throws = throws_analysis::find_throw_statements(&try_body);
     for throw in &throws {
-        let raw = throw.type_name.to_string();
+        let raw = throw.to_string();
         let short_name = raw
             .trim_start_matches('\\')
             .rsplit('\\')
@@ -101,7 +101,7 @@ pub(crate) fn detect_catch_context(content: &str, position: Position) -> Option<
     // 2. Inline `/** @throws ExceptionType */` annotations
     let inline_throws = throws_analysis::find_inline_throws_annotations(&try_body);
     for info in &inline_throws {
-        let raw = info.type_name.to_string();
+        let raw = info.to_string();
         let short_name = raw
             .trim_start_matches('\\')
             .rsplit('\\')
@@ -114,7 +114,7 @@ pub(crate) fn detect_catch_context(content: &str, position: Position) -> Option<
 
     // 3. Propagated @throws from called methods
     let propagated = throws_analysis::find_propagated_throws(&try_body, content);
-    let propagated: Vec<String> = propagated.iter().map(|t| t.type_name.to_string()).collect();
+    let propagated: Vec<String> = propagated.iter().map(|t| t.to_string()).collect();
     for exc_type in &propagated {
         let short_name = exc_type
             .trim_start_matches('\\')
@@ -128,10 +128,7 @@ pub(crate) fn detect_catch_context(content: &str, position: Position) -> Option<
 
     // 4. `throw $this->method()` / `throw self::method()` return types
     let throw_expr_types = throws_analysis::find_throw_expression_types(&try_body, content);
-    let throw_expr_types: Vec<String> = throw_expr_types
-        .iter()
-        .map(|t| t.type_name.to_string())
-        .collect();
+    let throw_expr_types: Vec<String> = throw_expr_types.iter().map(|t| t.to_string()).collect();
     for exc_type in &throw_expr_types {
         let short_name = exc_type
             .trim_start_matches('\\')

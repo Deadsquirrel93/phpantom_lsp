@@ -151,7 +151,24 @@ pub(crate) fn resolve_class_with_inheritance(
     );
 
     // 2. Walk up the `extends` chain and merge parent members.
-    //
+    merge_parent_chain(class, &mut merged, &mut dedup, class_loader);
+
+    // 3. Enrich methods from implemented interfaces.
+    enrich_from_interfaces(class, &mut merged, class_loader);
+
+    retype_documented_properties(class, &mut merged);
+    refine_enum_cases(&mut merged);
+    merged
+}
+
+/// Walk up the `extends` chain of `class` and merge each parent's traits
+/// and members into `merged`.
+fn merge_parent_chain(
+    class: &ClassInfo,
+    merged: &mut ClassInfo,
+    dedup: &mut MergeDedup,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) {
     // `current` holds a reference to the class whose `parent_class`,
     // `extends_generics`, `used_traits`, etc. we read at each level.
     // For the first iteration this is the root `class` (a borrow —
@@ -164,15 +181,10 @@ pub(crate) fn resolve_class_with_inheritance(
     // It maps template parameter names → concrete types, and is
     // re-computed at each level based on the `@extends` generics
     // of the current class and the `@template` params of the parent.
-    let mut active_subs: HashMap<String, PhpType> = HashMap::new();
-
-    // Seed the initial substitution map from the root class's
-    // `@extends` generics.  If the root class has
-    // `@extends Collection<int, Language>`, this will be applied
-    // when we load `Collection` as the first parent.
     //
-    // We don't apply it yet — it's matched against the parent's
-    // template_params in the loop below.
+    // It starts empty: the root class's own `@extends` generics are
+    // matched against the first parent's template_params in the loop.
+    let mut active_subs: HashMap<String, PhpType> = HashMap::new();
 
     while let Some(ref parent_name) = current.parent_class {
         depth += 1;
@@ -180,265 +192,22 @@ pub(crate) fn resolve_class_with_inheritance(
             break;
         }
 
-        let parent = if let Some(p) =
+        let Some(parent) =
             crate::class_lookup::load_ancestor(&current.fqn(), parent_name, class_loader)
-        {
-            p
-        } else {
+        else {
             break;
         };
 
-        // `readonly` covers the whole hierarchy: PHP rejects a
-        // non-readonly class extending a readonly one, so a subclass is
-        // readonly whether or not it repeats the keyword, and the
-        // properties it inherits are readonly as well.
-        merged.is_readonly |= parent.is_readonly;
-
-        // Eloquent model configuration (`$fillable`, `$casts`,
-        // `$primaryKey`, …) comes from the nearest class that declares it.
-        // The framework's own `Model` is skipped: its declarations are the
-        // defaults (`$guarded = ['*']`, `$primaryKey = 'id'`, …) that an
-        // undeclared setting already stands for.
-        if let Some(parent_meta) = parent.laravel()
-            && has_inheritable_model_metadata(parent_meta)
-            && !parent.fqn().eq_ignore_ascii_case(ELOQUENT_MODEL_FQN)
-        {
-            inherit_model_metadata(merged.laravel_mut(), parent_meta);
-        }
-
-        // Build the substitution map for this parent level.
-        //
-        // Look through current's `extends_generics` for an entry
-        // whose class name matches this parent, and zip its type
-        // arguments with the parent's `template_params`.
-        let mut level_subs = build_substitution_map(&current, &parent, &active_subs);
-
-        // ── Laravel Factory model binding ────────────────────────
-        // Set `TModel` from the source-aware factory hierarchy lookup:
-        // a concrete generic binding, then `$model`, then the convention.
-        if is_factory_class(parent_name)
-            && !parent.template_params.is_empty()
-            && let Some(model_type) = factory_model_type(class, class_loader)
-        {
-            // Re-apply the source-aware answer even when `level_subs` already
-            // contains `Model`: an unbound template on an intermediate base is
-            // filled from its bound during the preceding level, but that
-            // fallback must not hide the concrete factory's `$model`. A real
-            // explicit binding is returned by `factory_model_type` instead and
-            // therefore remains authoritative here.
-            for param in &parent.template_params {
-                level_subs.insert(param.to_string(), model_type.clone());
-            }
-        }
-
-        // ── Template bound fallback ─────────────────────────────
-        // When a subclass extends a generic parent without providing
-        // explicit `@extends` generics and no convention-based
-        // substitution filled the map, fall back to the template
-        // parameter bounds (e.g. `@template T of object` → `object`)
-        // so that inherited methods don't leak raw template names.
-        fill_template_bounds(&parent, &mut level_subs);
-
-        // Merge traits used by the parent class as well, so that
-        // grandparent-level trait members are visible.
-        // Apply the current level's template substitutions to the
-        // parent's `@use` generics.  Without this, a chain like:
-        //
-        //   /** @extends DataCollection<int, DeliveryOption> */
-        //   class DeliveryOptionCollection extends DataCollection
-        //
-        // where DataCollection has:
-        //   /** @use EnumerableMethods<TKey, TValue> */
-        //
-        // would pass the raw `TKey`/`TValue` template params to the
-        // trait instead of the concrete `int`/`DeliveryOption` types.
-        let substituted_use_generics: Vec<(Atom, Vec<PhpType>)> = if level_subs.is_empty() {
-            parent.use_generics.clone()
-        } else {
-            parent
-                .use_generics
-                .iter()
-                .map(|(name, args)| {
-                    let substituted_args: Vec<PhpType> =
-                        args.iter().map(|arg| arg.substitute(&level_subs)).collect();
-                    (*name, substituted_args)
-                })
-                .collect()
-        };
-
-        traits::merge_traits_into(
-            &mut merged,
-            &parent.used_traits,
-            &TraitContext {
-                use_generics: &substituted_use_generics,
-                precedences: &parent.trait_precedences,
-                aliases: &parent.trait_aliases,
-            },
+        inherit_class_metadata(merged, &parent);
+        let level_subs = level_substitutions(
+            class,
+            &current,
+            &parent,
+            parent_name,
+            &active_subs,
             class_loader,
-            0,
-            &mut dedup,
-            &parent.fqn(),
         );
-
-        // Template parameter names substituted at this level, used to
-        // decide per member whether substitution would change anything.
-        // Empty when the parent is non-generic, in which case every
-        // member below keeps its shared `Arc` / avoids the substitution
-        // walk (copy-on-write).
-        let sub_keys: Vec<String> = if level_subs.is_empty() {
-            Vec::new()
-        } else {
-            level_subs.keys().cloned().collect()
-        };
-
-        // Interning fingerprints for the three transform shapes a parent
-        // method can need (substitution, relative-keyword binding, or
-        // both), computed once per level.  The keyword binding is fully
-        // determined by the declaring parent (its own parent is what a bare
-        // `parent` binds to), so the transformed copies are identical for
-        // every subclass and can be shared through the interning store.
-        let parent_fqn = parent.fqn();
-        let declaring_parent = parent.parent_class.map(|a| a.to_string());
-        let fp_sub = TransformFingerprint::new(Some(&level_subs), None, 0);
-        let fp_self = TransformFingerprint::new(None, Some(parent_fqn.as_str()), 0);
-        let fp_both = TransformFingerprint::new(Some(&level_subs), Some(parent_fqn.as_str()), 0);
-
-        // Merge parent methods — skip private.
-        // When the child already has a method with the same name,
-        // enrich it with the parent's richer docblock types instead
-        // of silently discarding the parent's type information.
-        for method in &parent.methods {
-            if method.visibility == Visibility::Private {
-                continue;
-            }
-            let needs_sub = method_references_params(method, &sub_keys);
-            if !dedup
-                .methods
-                .insert(crate::atom::ascii_lowercase_atom(&method.name))
-            {
-                // Child already has this method — enrich it from parent.
-                // Only clone + substitute when the parent's signature
-                // actually references a substituted template param;
-                // otherwise enrich directly from the shared method.
-                if let Some(existing) = merged
-                    .methods
-                    .make_mut()
-                    .iter_mut()
-                    .find(|m| m.name.eq_ignore_ascii_case(&method.name))
-                {
-                    if needs_sub {
-                        let ancestor_method = intern_transformed_method(method, fp_sub, || {
-                            let mut m = (**method).clone();
-                            apply_substitution_to_method(&mut m, &level_subs);
-                            m
-                        });
-                        enrich_method_arc_from_ancestor(existing, &ancestor_method, class_loader);
-                    } else {
-                        enrich_method_arc_from_ancestor(existing, method, class_loader);
-                    }
-                }
-                continue;
-            }
-            // Bind bare `self` / `parent` in the return type and parameter
-            // hints to the declaring (parent) class and its own parent, so
-            // they resolve to the classes that the declaration meant rather
-            // than to the inheriting child and its parent.
-            let needs_keywords =
-                method_has_inherited_class_keyword(method, declaring_parent.as_deref());
-            if !needs_sub && !needs_keywords {
-                // Substitution is a no-op and there is no relative keyword:
-                // keep the shared `Arc` instead of deep-cloning.
-                merged.methods.push(Arc::clone(method));
-                continue;
-            }
-            let fp = match (needs_sub, needs_keywords) {
-                (true, false) => fp_sub,
-                (false, true) => fp_self,
-                _ => fp_both,
-            };
-            let transformed = intern_transformed_method(method, fp, || {
-                let mut ancestor_method = (**method).clone();
-                if needs_sub {
-                    apply_substitution_to_method(&mut ancestor_method, &level_subs);
-                }
-                if needs_keywords {
-                    bind_inherited_class_keywords(
-                        &mut ancestor_method,
-                        &parent_fqn,
-                        declaring_parent.as_deref(),
-                    );
-                }
-                ancestor_method
-            });
-            merged.methods.push(transformed);
-        }
-
-        // Merge parent properties — same enrichment logic as methods.
-        // The substitution transform reuses `fp_sub` (a property and a
-        // method with the same substitution map fingerprint to the same
-        // value, but they intern into separate maps keyed by origin type,
-        // so there is no collision).
-        for property in &parent.properties {
-            if property.visibility == Visibility::Private {
-                continue;
-            }
-            let needs_sub = property_references_params(property, &sub_keys);
-            // A bare `self` / `parent` in the type names the declaring
-            // class and its parent, not the class the property is read
-            // through, exactly as for an inherited method.
-            let needs_keywords =
-                property_has_inherited_class_keyword(property, declaring_parent.as_deref());
-            let transformed = if !needs_sub && !needs_keywords {
-                // Neither transform applies: keep the shared `Arc`.
-                Arc::clone(property)
-            } else {
-                let fp = match (needs_sub, needs_keywords) {
-                    (true, false) => fp_sub,
-                    (false, true) => fp_self,
-                    _ => fp_both,
-                };
-                intern_transformed_property(property, fp, || {
-                    let mut p = (**property).clone();
-                    if needs_sub {
-                        apply_substitution_to_property(&mut p, &level_subs);
-                    }
-                    if needs_keywords {
-                        bind_inherited_class_keywords_in_property(
-                            &mut p,
-                            &parent_fqn,
-                            declaring_parent.as_deref(),
-                        );
-                    }
-                    p
-                })
-            };
-            if !dedup.properties.insert(property.name) {
-                // Child already has this property — enrich it from parent.
-                if let Some(existing) = merged
-                    .properties
-                    .make_mut()
-                    .iter_mut()
-                    .find(|p| p.name == property.name)
-                {
-                    enrich_property_arc_from_ancestor(existing, &transformed);
-                }
-                continue;
-            }
-            merged.properties.push(transformed);
-        }
-
-        // Merge parent constants.  Constants are never transformed on
-        // inheritance, so an inherited constant is always a plain
-        // `Arc::clone` of the declaring class's.
-        for constant in &parent.constants {
-            if constant.visibility == Visibility::Private {
-                continue;
-            }
-            if !dedup.constants.insert(constant.name) {
-                continue;
-            }
-            merged.constants.push(Arc::clone(constant));
-        }
+        merge_parent_members(merged, dedup, &parent, &level_subs, class_loader);
 
         // Carry the substitution map forward for the next level.
         // If `Collection` extends `AbstractCollection<TKey, TValue>`,
@@ -447,11 +216,331 @@ pub(crate) fn resolve_class_with_inheritance(
         active_subs = level_subs;
         current = ClassRef::Owned(parent);
     }
+}
 
-    // 3. Enrich methods from implemented interfaces.
-    //    When a class overrides an interface method without a return type,
-    //    propagate the interface method's return type (with template
-    //    substitution from `@implements` generics).
+/// What a class inherits from a parent beyond its members.
+fn inherit_class_metadata(merged: &mut ClassInfo, parent: &ClassInfo) {
+    // `readonly` covers the whole hierarchy: PHP rejects a
+    // non-readonly class extending a readonly one, so a subclass is
+    // readonly whether or not it repeats the keyword, and the
+    // properties it inherits are readonly as well.
+    merged.is_readonly |= parent.is_readonly;
+
+    // Eloquent model configuration (`$fillable`, `$casts`,
+    // `$primaryKey`, …) comes from the nearest class that declares it.
+    // The framework's own `Model` is skipped: its declarations are the
+    // defaults (`$guarded = ['*']`, `$primaryKey = 'id'`, …) that an
+    // undeclared setting already stands for.
+    if let Some(parent_meta) = parent.laravel()
+        && has_inheritable_model_metadata(parent_meta)
+        && !parent.fqn().eq_ignore_ascii_case(ELOQUENT_MODEL_FQN)
+    {
+        inherit_model_metadata(merged.laravel_mut(), parent_meta);
+    }
+}
+
+/// The template substitutions for one parent level of `class`'s chain:
+/// `current`'s `@extends` generics for `parent` (with `active_subs`, the
+/// level below's, applied), the Laravel factory's model, then the bounds
+/// of whatever template is still unbound.
+fn level_substitutions(
+    class: &ClassInfo,
+    current: &ClassRef<'_>,
+    parent: &ClassInfo,
+    parent_name: &str,
+    active_subs: &HashMap<String, PhpType>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> HashMap<String, PhpType> {
+    // Look through current's `extends_generics` for an entry
+    // whose class name matches this parent, and zip its type
+    // arguments with the parent's `template_params`.
+    let mut level_subs = build_substitution_map(current, parent, active_subs);
+
+    // ── Laravel Factory model binding ────────────────────────
+    // Set `TModel` from the source-aware factory hierarchy lookup:
+    // a concrete generic binding, then `$model`, then the convention.
+    if is_factory_class(parent_name)
+        && !parent.template_params.is_empty()
+        && let Some(model_type) = factory_model_type(class, class_loader)
+    {
+        // Re-apply the source-aware answer even when `level_subs` already
+        // contains `Model`: an unbound template on an intermediate base is
+        // filled from its bound during the preceding level, but that
+        // fallback must not hide the concrete factory's `$model`. A real
+        // explicit binding is returned by `factory_model_type` instead and
+        // therefore remains authoritative here.
+        for param in &parent.template_params {
+            level_subs.insert(param.to_string(), model_type.clone());
+        }
+    }
+
+    // ── Template bound fallback ─────────────────────────────
+    // When a subclass extends a generic parent without providing
+    // explicit `@extends` generics and no convention-based
+    // substitution filled the map, fall back to the template
+    // parameter bounds (e.g. `@template T of object` → `object`)
+    // so that inherited methods don't leak raw template names.
+    fill_template_bounds(parent, &mut level_subs);
+    level_subs
+}
+
+/// How one parent's members are rewritten on their way into a subclass:
+/// the level's template substitutions, and the classes a bare `self` /
+/// `parent` in them binds to.
+struct LevelTransform<'a> {
+    subs: &'a HashMap<String, PhpType>,
+    /// Template parameter names substituted at this level, used to
+    /// decide per member whether substitution would change anything.
+    /// Empty when the parent is non-generic, in which case every
+    /// member keeps its shared `Arc` / avoids the substitution
+    /// walk (copy-on-write).
+    sub_keys: Vec<String>,
+    parent_fqn: Atom,
+    declaring_parent: Option<String>,
+    /// Interning fingerprints for the three transform shapes a parent
+    /// member can need (substitution, relative-keyword binding, or
+    /// both), computed once per level.  The keyword binding is fully
+    /// determined by the declaring parent (its own parent is what a bare
+    /// `parent` binds to), so the transformed copies are identical for
+    /// every subclass and can be shared through the interning store.
+    fp_sub: TransformFingerprint,
+    fp_self: TransformFingerprint,
+    fp_both: TransformFingerprint,
+}
+
+impl<'a> LevelTransform<'a> {
+    fn new(parent: &ClassInfo, subs: &'a HashMap<String, PhpType>) -> Self {
+        let parent_fqn = parent.fqn();
+        Self {
+            subs,
+            sub_keys: subs.keys().cloned().collect(),
+            parent_fqn,
+            declaring_parent: parent.parent_class.map(|a| a.to_string()),
+            fp_sub: TransformFingerprint::new(Some(subs), None, 0),
+            fp_self: TransformFingerprint::new(None, Some(parent_fqn.as_str()), 0),
+            fp_both: TransformFingerprint::new(Some(subs), Some(parent_fqn.as_str()), 0),
+        }
+    }
+
+    /// The fingerprint of the transform a member needs.
+    fn fingerprint(&self, needs_sub: bool, needs_keywords: bool) -> TransformFingerprint {
+        match (needs_sub, needs_keywords) {
+            (true, false) => self.fp_sub,
+            (false, true) => self.fp_self,
+            _ => self.fp_both,
+        }
+    }
+}
+
+/// Merge one parent's traits, methods, properties and constants into
+/// `merged`, with the level's template substitutions applied.
+fn merge_parent_members(
+    merged: &mut ClassInfo,
+    dedup: &mut MergeDedup,
+    parent: &ClassInfo,
+    level_subs: &HashMap<String, PhpType>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) {
+    // Merge traits used by the parent class as well, so that
+    // grandparent-level trait members are visible.
+    // Apply the current level's template substitutions to the
+    // parent's `@use` generics.  Without this, a chain like:
+    //
+    //   /** @extends DataCollection<int, DeliveryOption> */
+    //   class DeliveryOptionCollection extends DataCollection
+    //
+    // where DataCollection has:
+    //   /** @use EnumerableMethods<TKey, TValue> */
+    //
+    // would pass the raw `TKey`/`TValue` template params to the
+    // trait instead of the concrete `int`/`DeliveryOption` types.
+    let substituted_use_generics: Vec<(Atom, Vec<PhpType>)> = if level_subs.is_empty() {
+        parent.use_generics.clone()
+    } else {
+        parent
+            .use_generics
+            .iter()
+            .map(|(name, args)| {
+                let substituted_args: Vec<PhpType> =
+                    args.iter().map(|arg| arg.substitute(level_subs)).collect();
+                (*name, substituted_args)
+            })
+            .collect()
+    };
+
+    traits::merge_traits_into(
+        merged,
+        &parent.used_traits,
+        &TraitContext {
+            use_generics: &substituted_use_generics,
+            precedences: &parent.trait_precedences,
+            aliases: &parent.trait_aliases,
+        },
+        class_loader,
+        0,
+        dedup,
+        &parent.fqn(),
+    );
+
+    let transform = LevelTransform::new(parent, level_subs);
+    merge_parent_methods(merged, dedup, parent, &transform, class_loader);
+    merge_parent_properties(merged, dedup, parent, &transform);
+
+    // Merge parent constants.  Constants are never transformed on
+    // inheritance, so an inherited constant is always a plain
+    // `Arc::clone` of the declaring class's.
+    for constant in &parent.constants {
+        if constant.visibility == Visibility::Private {
+            continue;
+        }
+        if !dedup.constants.insert(constant.name) {
+            continue;
+        }
+        merged.constants.push(Arc::clone(constant));
+    }
+}
+
+/// Merge parent methods — skip private.
+/// When the child already has a method with the same name,
+/// enrich it with the parent's richer docblock types instead
+/// of silently discarding the parent's type information.
+fn merge_parent_methods(
+    merged: &mut ClassInfo,
+    dedup: &mut MergeDedup,
+    parent: &ClassInfo,
+    transform: &LevelTransform,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) {
+    for method in &parent.methods {
+        if method.visibility == Visibility::Private {
+            continue;
+        }
+        let needs_sub = method_references_params(method, &transform.sub_keys);
+        if !dedup
+            .methods
+            .insert(crate::atom::ascii_lowercase_atom(&method.name))
+        {
+            // Child already has this method — enrich it from parent.
+            // Only clone + substitute when the parent's signature
+            // actually references a substituted template param;
+            // otherwise enrich directly from the shared method.
+            if let Some(existing) = merged
+                .methods
+                .make_mut()
+                .iter_mut()
+                .find(|m| m.name.eq_ignore_ascii_case(&method.name))
+            {
+                if needs_sub {
+                    let ancestor_method =
+                        intern_transformed_method(method, transform.fp_sub, || {
+                            let mut m = (**method).clone();
+                            apply_substitution_to_method(&mut m, transform.subs);
+                            m
+                        });
+                    enrich_method_arc_from_ancestor(existing, &ancestor_method, class_loader);
+                } else {
+                    enrich_method_arc_from_ancestor(existing, method, class_loader);
+                }
+            }
+            continue;
+        }
+        // Bind bare `self` / `parent` in the return type and parameter
+        // hints to the declaring (parent) class and its own parent, so
+        // they resolve to the classes that the declaration meant rather
+        // than to the inheriting child and its parent.
+        let needs_keywords =
+            method_has_inherited_class_keyword(method, transform.declaring_parent.as_deref());
+        if !needs_sub && !needs_keywords {
+            // Substitution is a no-op and there is no relative keyword:
+            // keep the shared `Arc` instead of deep-cloning.
+            merged.methods.push(Arc::clone(method));
+            continue;
+        }
+        let fp = transform.fingerprint(needs_sub, needs_keywords);
+        let transformed = intern_transformed_method(method, fp, || {
+            let mut ancestor_method = (**method).clone();
+            if needs_sub {
+                apply_substitution_to_method(&mut ancestor_method, transform.subs);
+            }
+            if needs_keywords {
+                bind_inherited_class_keywords(
+                    &mut ancestor_method,
+                    &transform.parent_fqn,
+                    transform.declaring_parent.as_deref(),
+                );
+            }
+            ancestor_method
+        });
+        merged.methods.push(transformed);
+    }
+}
+
+/// Merge parent properties — same enrichment logic as methods.
+/// The substitution transform reuses the methods' fingerprint (a property
+/// and a method with the same substitution map fingerprint to the same
+/// value, but they intern into separate maps keyed by origin type, so
+/// there is no collision).
+fn merge_parent_properties(
+    merged: &mut ClassInfo,
+    dedup: &mut MergeDedup,
+    parent: &ClassInfo,
+    transform: &LevelTransform,
+) {
+    for property in &parent.properties {
+        if property.visibility == Visibility::Private {
+            continue;
+        }
+        let needs_sub = property_references_params(property, &transform.sub_keys);
+        // A bare `self` / `parent` in the type names the declaring
+        // class and its parent, not the class the property is read
+        // through, exactly as for an inherited method.
+        let needs_keywords =
+            property_has_inherited_class_keyword(property, transform.declaring_parent.as_deref());
+        let transformed = if !needs_sub && !needs_keywords {
+            // Neither transform applies: keep the shared `Arc`.
+            Arc::clone(property)
+        } else {
+            let fp = transform.fingerprint(needs_sub, needs_keywords);
+            intern_transformed_property(property, fp, || {
+                let mut p = (**property).clone();
+                if needs_sub {
+                    apply_substitution_to_property(&mut p, transform.subs);
+                }
+                if needs_keywords {
+                    bind_inherited_class_keywords_in_property(
+                        &mut p,
+                        &transform.parent_fqn,
+                        transform.declaring_parent.as_deref(),
+                    );
+                }
+                p
+            })
+        };
+        if !dedup.properties.insert(property.name) {
+            // Child already has this property — enrich it from parent.
+            if let Some(existing) = merged
+                .properties
+                .make_mut()
+                .iter_mut()
+                .find(|p| p.name == property.name)
+            {
+                enrich_property_arc_from_ancestor(existing, &transformed);
+            }
+            continue;
+        }
+        merged.properties.push(transformed);
+    }
+}
+
+/// Enrich the methods `class` overrides from the interfaces it implements.
+/// When a class overrides an interface method without a return type,
+/// propagate the interface method's return type (with template
+/// substitution from `@implements` generics).
+fn enrich_from_interfaces(
+    class: &ClassInfo,
+    merged: &mut ClassInfo,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) {
     let class_fqn = class.fqn();
     for iface_name in &class.interfaces {
         let Some(iface) = crate::class_lookup::load_ancestor(&class_fqn, iface_name, class_loader)
@@ -500,61 +589,64 @@ pub(crate) fn resolve_class_with_inheritance(
             }
         }
     }
+}
 
-    // Retype an inherited non-public property that the class documents
-    // with a `@property` tag of its own.
-    //
-    // A tag documents a magic read, and PHP only reaches `__get()` when no
-    // *accessible* property of that name exists.  An ancestor's
-    // `protected` / `private` declaration is invisible from outside, so it
-    // is not what the read yields and its type must not describe it — an
-    // Eloquent model declaring `@property string $connection` means
-    // `string`, not `Model::$connection`'s `\UnitEnum|string|null`. The
-    // same shadowing is routine for `$table` and `$keyType`.
-    //
-    // A property the class declares *itself* is a different matter: it is
-    // in scope everywhere the tag is, so it keeps its own type (the tag is
-    // then a contradiction, and the real declaration is the truth).
-    if let Some(doc) = class.doc_members.as_deref() {
-        for (name, type_hint) in &doc.properties {
-            let Some(hint) = type_hint else {
-                continue;
-            };
-            if class.properties.iter().any(|p| p.name == *name) {
-                continue;
-            }
-            // Look the index up immutably so a class with nothing to
-            // retype keeps sharing its property vector.
-            let Some(idx) = merged
-                .properties
-                .iter()
-                .position(|p| p.name == *name && p.visibility != Visibility::Public)
-            else {
-                continue;
-            };
-            let prop = &mut merged.properties.make_mut()[idx];
-            Arc::make_mut(prop).type_hint = Some(hint.clone());
+/// Retype an inherited non-public property that the class documents
+/// with a `@property` tag of its own.
+///
+/// A tag documents a magic read, and PHP only reaches `__get()` when no
+/// *accessible* property of that name exists.  An ancestor's
+/// `protected` / `private` declaration is invisible from outside, so it
+/// is not what the read yields and its type must not describe it — an
+/// Eloquent model declaring `@property string $connection` means
+/// `string`, not `Model::$connection`'s `\UnitEnum|string|null`. The
+/// same shadowing is routine for `$table` and `$keyType`.
+///
+/// A property the class declares *itself* is a different matter: it is
+/// in scope everywhere the tag is, so it keeps its own type (the tag is
+/// then a contradiction, and the real declaration is the truth).
+fn retype_documented_properties(class: &ClassInfo, merged: &mut ClassInfo) {
+    let Some(doc) = class.doc_members.as_deref() else {
+        return;
+    };
+    for (name, type_hint) in &doc.properties {
+        let Some(hint) = type_hint else {
+            continue;
+        };
+        if class.properties.iter().any(|p| p.name == *name) {
+            continue;
         }
+        // Look the index up immutably so a class with nothing to
+        // retype keeps sharing its property vector.
+        let Some(idx) = merged
+            .properties
+            .iter()
+            .position(|p| p.name == *name && p.visibility != Visibility::Public)
+        else {
+            continue;
+        };
+        let prop = &mut merged.properties.make_mut()[idx];
+        Arc::make_mut(prop).type_hint = Some(hint.clone());
     }
+}
 
-    // Refine the `cases()` method on enums.  The `UnitEnum` interface
-    // declares `public static function cases(): array`, which loses the
-    // element type: `Country::cases()[0]` would resolve to `mixed`.
-    // Every concrete enum returns a list of its own instances, so
-    // replace the bare `array` with `list<EnumName>` (using the FQN so
-    // the element resolves regardless of the call site's namespace).
-    if merged.kind == crate::types::ClassLikeKind::Enum {
-        let element = PhpType::named(merged.fqn());
-        let list_type = PhpType::list(element);
-        if let Some(cases) = merged
-            .methods
-            .make_mut()
-            .iter_mut()
-            .find(|m| m.name.eq_ignore_ascii_case("cases"))
-        {
-            Arc::make_mut(cases).return_type = Some(list_type);
-        }
+/// Refine the `cases()` method on enums.  The `UnitEnum` interface
+/// declares `public static function cases(): array`, which loses the
+/// element type: `Country::cases()[0]` would resolve to `mixed`.
+/// Every concrete enum returns a list of its own instances, so
+/// replace the bare `array` with `list<EnumName>` (using the FQN so
+/// the element resolves regardless of the call site's namespace).
+fn refine_enum_cases(merged: &mut ClassInfo) {
+    if merged.kind != crate::types::ClassLikeKind::Enum {
+        return;
     }
-
-    merged
+    let list_type = PhpType::list(PhpType::named(merged.fqn()));
+    if let Some(cases) = merged
+        .methods
+        .make_mut()
+        .iter_mut()
+        .find(|m| m.name.eq_ignore_ascii_case("cases"))
+    {
+        Arc::make_mut(cases).return_type = Some(list_type);
+    }
 }

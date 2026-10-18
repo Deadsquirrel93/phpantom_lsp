@@ -243,6 +243,9 @@ impl Backend {
         // `stale::is_stale_phpstan_diagnostic` for the specific checks.
         if !phpstan_before.is_empty() {
             let content: Option<Arc<String>> = self.open_files.read().get(uri_str).cloned();
+            // The checks that read the member a diagnostic points at share
+            // one parse of the file.
+            let _parse_guard = content.clone().map(crate::parser::with_parse_cache_arc);
             let filtered: Vec<Diagnostic> = phpstan_before
                 .iter()
                 .filter(|d| {

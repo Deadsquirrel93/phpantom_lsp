@@ -111,25 +111,78 @@ pub(super) fn enrich_builder_type_in_scope(
     ))
 }
 
+/// A question for the forward walker: the type of `var_name` at
+/// `cursor_offset` in `content`, read inside `current_class` (outside a
+/// class, inside a placeholder for the namespace there), with the loaders
+/// that resolve the names the walk meets.
+///
+/// The walk builds its own [`VarResolutionCtx`] from these, so none of a
+/// caller's forward-walk state (scope resolvers, branch narrowing, …)
+/// reaches it.  [`VarResolutionCtx::var_query`] and
+/// [`ResolutionCtx::var_query`](crate::type_engine::resolver::ResolutionCtx::var_query)
+/// project one out of the contexts that already hold the inputs.
+#[derive(Clone, Copy)]
+pub(crate) struct VarQuery<'a> {
+    pub var_name: &'a str,
+    pub cursor_offset: u32,
+    pub content: &'a str,
+    pub current_class: Option<&'a ClassInfo>,
+    pub all_classes: &'a [Arc<ClassInfo>],
+    pub class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    pub source_class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    pub source_imports: SourceImports<'a>,
+    pub backend: Option<&'a Backend>,
+    pub loaders: Loaders<'a>,
+}
+
+impl VarQuery<'_> {
+    /// The forward walker's context for this query, read inside
+    /// `current_class`.
+    fn var_ctx<'q>(&'q self, current_class: &'q ClassInfo) -> VarResolutionCtx<'q> {
+        VarResolutionCtx {
+            source_imports: self.source_imports,
+            backend: self.backend,
+            loaders: self.loaders,
+            resolved_class_cache: crate::virtual_members::active_resolved_class_cache(),
+            ..VarResolutionCtx::new(
+                self.var_name,
+                current_class,
+                self.all_classes,
+                self.content,
+                self.cursor_offset,
+                self.class_loader,
+                self.source_class_loader,
+            )
+        }
+    }
+}
+
+/// The class `query` is read inside: its own, or a placeholder for the
+/// namespace at the cursor, built in `slot`.
+fn query_class<'q>(query: &VarQuery<'q>, slot: &'q mut Option<ClassInfo>) -> &'q ClassInfo {
+    match query.current_class {
+        Some(cls) => cls,
+        None => slot.insert(crate::class_lookup::class_context_placeholder(
+            query.content,
+            query.cursor_offset,
+        )),
+    }
+}
+
 /// Resolve the type of `$variable` at `cursor_offset`.
 ///
 /// Checks the diagnostic scope cache first (O(log N) lookup from the
 /// forward walker's pre-computed snapshots).  On cache miss, parses the
 /// file and delegates to the forward walker via
 /// [`resolve_variable_in_statements`].
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn resolve_variable_types(
-    var_name: &str,
-    current_class: &ClassInfo,
-    all_classes: &[Arc<ClassInfo>],
-    content: &str,
-    cursor_offset: u32,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    source_class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    source_imports: SourceImports<'_>,
-    backend: Option<&Backend>,
-    loaders: Loaders<'_>,
-) -> Vec<ResolvedType> {
+pub(crate) fn resolve_variable_types(query: VarQuery<'_>) -> Vec<ResolvedType> {
+    let VarQuery {
+        var_name,
+        cursor_offset,
+        content,
+        ..
+    } = query;
+
     // ── Diagnostic scope cache fast path ─────────────────────────
     // When the diagnostic scope cache is active (populated by
     // `build_diagnostic_scopes` during a diagnostic pass), look up
@@ -154,6 +207,8 @@ pub(crate) fn resolve_variable_types(
         // the full resolution path.
     }
 
+    let mut placeholder = None;
+    let current_class = query_class(&query, &mut placeholder);
     let key = var_query_key(content, var_name, cursor_offset, current_class.name);
 
     // The walk below is shared by every name asked about at the same
@@ -175,19 +230,7 @@ pub(crate) fn resolve_variable_types(
     };
 
     with_parsed_program(content, "resolve_variable_types", |program, _content| {
-        resolve_variable_types_in_program(
-            program,
-            var_name,
-            current_class,
-            all_classes,
-            content,
-            cursor_offset,
-            class_loader,
-            source_class_loader,
-            source_imports,
-            backend,
-            loaders,
-        )
+        resolve_variable_in_statements(program.statements.iter(), &query.var_ctx(current_class))
     })
 }
 
@@ -198,38 +241,13 @@ pub(crate) fn resolve_variable_types(
 /// the offset to resolve at, say) and would otherwise parse the file
 /// twice. It bypasses the per-pass memo and the diagnostic scope cache,
 /// both of which key on offsets into the request's own file.
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn resolve_variable_types_in_program(
     program: &Program<'_>,
-    var_name: &str,
-    current_class: &ClassInfo,
-    all_classes: &[Arc<ClassInfo>],
-    content: &str,
-    cursor_offset: u32,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    source_class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    source_imports: SourceImports<'_>,
-    backend: Option<&Backend>,
-    loaders: Loaders<'_>,
+    query: VarQuery<'_>,
 ) -> Vec<ResolvedType> {
-    let active_cache = crate::virtual_members::active_resolved_class_cache();
-    let ctx = VarResolutionCtx {
-        source_imports,
-        backend,
-        loaders,
-        resolved_class_cache: active_cache,
-        ..VarResolutionCtx::new(
-            var_name,
-            current_class,
-            all_classes,
-            content,
-            cursor_offset,
-            class_loader,
-            source_class_loader,
-        )
-    };
-
-    resolve_variable_in_statements(program.statements.iter(), &ctx)
+    let mut placeholder = None;
+    let current_class = query_class(&query, &mut placeholder);
+    resolve_variable_in_statements(program.statements.iter(), &query.var_ctx(current_class))
 }
 
 /// Resolve the type of a variable at `cursor_offset` as a [`PhpType`].
@@ -250,19 +268,15 @@ pub(crate) fn resolve_variable_types_in_program(
 ///
 /// Consumers: hover, go-to-type-definition, find-references (variable
 /// subject resolution), deprecated diagnostics, code actions.
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn resolve_variable_php_type(
-    var_name: &str,
-    content: &str,
-    cursor_offset: u32,
-    current_class: Option<&ClassInfo>,
-    all_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    source_class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    source_imports: SourceImports<'_>,
-    backend: Option<&Backend>,
-    loaders: Loaders<'_>,
-) -> Option<PhpType> {
+pub(crate) fn resolve_variable_php_type(query: VarQuery<'_>) -> Option<PhpType> {
+    let VarQuery {
+        var_name,
+        cursor_offset,
+        content,
+        class_loader,
+        source_class_loader,
+        ..
+    } = query;
     let prefixed = if var_name.starts_with('$') {
         var_name.to_owned()
     } else {
@@ -271,37 +285,24 @@ pub(crate) fn resolve_variable_php_type(
 
     let written_names = || {
         WrittenNames::new(
-            current_class,
-            all_classes,
+            query.current_class,
+            query.all_classes,
             content,
             cursor_offset,
-            source_imports,
+            query.source_imports,
             source_class_loader,
         )
     };
 
     // 1. Forward walker resolution.
-    let dummy_class;
-    let effective_class = match current_class {
-        Some(cc) => cc,
-        None => {
-            dummy_class = crate::class_lookup::class_context_placeholder(content, cursor_offset);
-            &dummy_class
-        }
-    };
+    let mut placeholder = None;
+    let effective_class = query_class(&query, &mut placeholder);
 
-    let resolved = resolve_variable_types(
-        &prefixed,
-        effective_class,
-        all_classes,
-        content,
-        cursor_offset,
-        class_loader,
-        source_class_loader,
-        source_imports,
-        backend,
-        loaders,
-    );
+    let resolved = resolve_variable_types(VarQuery {
+        var_name: &prefixed,
+        current_class: Some(effective_class),
+        ..query
+    });
 
     if !resolved.is_empty() {
         return Some(ResolvedType::types_joined(&resolved));

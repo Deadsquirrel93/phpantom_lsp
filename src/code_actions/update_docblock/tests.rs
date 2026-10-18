@@ -1,4 +1,13 @@
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use mago_allocator::LocalArena;
+
+use super::changes::is_type_contradiction;
+use super::find::parse_doc_params_from_info;
 use super::*;
+use crate::docblock::parser::parse_docblock_for_tags;
+use crate::types::ClassInfo;
 
 /// Helper: parse PHP and check if an update is needed at the given offset.
 fn find_info(php: &str, offset: u32) -> Option<FunctionWithDocblock> {

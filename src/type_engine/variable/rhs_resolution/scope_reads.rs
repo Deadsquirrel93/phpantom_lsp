@@ -53,18 +53,7 @@ pub(in crate::type_engine) fn resolve_var_types(
         return vec![];
     }
 
-    resolution::resolve_variable_types(
-        var_name,
-        ctx.current_class,
-        ctx.all_classes,
-        ctx.content,
-        cursor_offset,
-        ctx.class_loader,
-        ctx.source_class_loader,
-        ctx.source_imports,
-        ctx.backend,
-        ctx.loaders,
-    )
+    resolution::resolve_variable_types(ctx.var_query(var_name, cursor_offset))
 }
 
 /// The narrowed type recorded for `key` at this expression's position,
@@ -105,18 +94,7 @@ pub(super) fn narrowed_subject_from_scope(
         // inferred would each walk that body again for every file that
         // calls it, and nothing narrows them often enough to pay for that.
         None if !key.contains("->") => return None,
-        None => resolution::resolve_variable_types(
-            key,
-            ctx.current_class,
-            ctx.all_classes,
-            ctx.content,
-            ctx.cursor_offset,
-            ctx.class_loader,
-            ctx.source_class_loader,
-            ctx.source_imports,
-            ctx.backend,
-            ctx.loaders,
-        ),
+        None => resolution::resolve_variable_types(ctx.var_query(key, ctx.cursor_offset)),
     };
     (!from_scope.is_empty()).then_some(from_scope)
 }

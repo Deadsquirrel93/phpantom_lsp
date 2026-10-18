@@ -37,6 +37,7 @@ use crate::class_lookup::find_class_at_offset;
 use crate::php_type::PhpType;
 use crate::text_position::position_to_offset;
 use crate::type_engine::resolver::Loaders;
+use crate::type_engine::variable::resolution::VarQuery;
 use crate::types::{ClassInfo, FileContext, ResolvedType};
 
 /// Well-known keys for the `$_SERVER` superglobal.
@@ -559,35 +560,26 @@ impl Backend {
         // The unified variable resolver handles `@var`/`@param`
         // annotations, array literals with incremental key assignments,
         // push-style assignments, and function return types.
-        let dummy_class;
-        let effective_class = match current_class {
-            Some(cc) => cc,
-            None => {
-                dummy_class =
-                    crate::class_lookup::class_context_placeholder(content, cursor_offset as u32);
-                &dummy_class
-            }
-        };
         let function_loader = self.function_loader(file_ctx);
         let config_resolver = |key: &str| self.resolve_config_type(key);
         let trans_resolver = |key: &str| self.resolve_trans_type(key);
-        let resolved = crate::type_engine::variable::resolution::resolve_variable_types(
+        let resolved = crate::type_engine::variable::resolution::resolve_variable_types(VarQuery {
             var_name,
-            effective_class,
-            &file_ctx.classes,
+            cursor_offset: cursor_offset as u32,
             content,
-            cursor_offset as u32,
-            &resolved_class_loader,
-            &class_loader,
-            Some(&file_ctx.use_map),
-            Some(self),
-            Loaders {
+            current_class,
+            all_classes: &file_ctx.classes,
+            class_loader: &resolved_class_loader,
+            source_class_loader: &class_loader,
+            source_imports: Some(&file_ctx.use_map),
+            backend: Some(self),
+            loaders: Loaders {
                 function_loader: Some(&function_loader),
                 config_resolver: Some(&config_resolver),
                 trans_resolver: Some(&trans_resolver),
                 ..Loaders::default()
             },
-        );
+        });
         if resolved.is_empty() {
             None
         } else {

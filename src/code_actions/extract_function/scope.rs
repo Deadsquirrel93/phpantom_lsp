@@ -1,4 +1,5 @@
 use super::*;
+use crate::type_engine::variable::resolution::VarQuery;
 
 // ─── Scope map building ─────────────────────────────────────────────────────
 
@@ -42,16 +43,16 @@ pub(crate) fn resolve_var_type(
 
     let current_class = find_class_at_offset(&ctx.classes, cursor_offset);
 
-    crate::type_engine::variable::resolution::resolve_variable_php_type(
+    crate::type_engine::variable::resolution::resolve_variable_php_type(VarQuery {
         var_name,
-        content,
         cursor_offset,
+        content,
         current_class,
-        &ctx.classes,
-        &resolved_class_loader,
-        &class_loader,
-        Some(&ctx.use_map),
-        Some(backend),
+        all_classes: &ctx.classes,
+        class_loader: &resolved_class_loader,
+        source_class_loader: &class_loader,
+        source_imports: Some(&ctx.use_map),
+        backend: Some(backend),
         loaders,
-    )
+    })
 }

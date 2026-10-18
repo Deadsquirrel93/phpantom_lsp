@@ -5,10 +5,9 @@
 //! `Laravel\Folio\name()` inside the page gives it a name.  Nothing calls
 //! `Route::` for these, so the conventional scanner in [`super::route_names`]
 //! never sees them — this module bridges that gap, and its results are
-//! folded into [`super::route_names::enumerate_all_routes`] and
-//! [`super::route_names::resolve_route_definitions`] so every existing route
-//! consumer (completion, hover, diagnostics, go-to-definition,
-//! find-references) picks up Folio pages for free.
+//! folded into [`super::route_names::enumerate_all_routes`] so every
+//! existing route consumer (completion, hover, diagnostics,
+//! go-to-definition, find-references) picks up Folio pages for free.
 //!
 //! A mount is registered one of three ways, all recovered statically:
 //!
@@ -28,13 +27,14 @@
 
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use mago_allocator::LocalArena;
 use mago_database::file::FileId;
 use mago_names::resolver::NameResolver;
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
-use tower_lsp::lsp_types::{Location, Url};
+use tower_lsp::lsp_types::Url;
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
@@ -44,7 +44,7 @@ use crate::text_position::offset_to_position;
 use super::helpers::extract_string_literal;
 use super::provider_resources::{PathContext, resolve_path_arg};
 use super::route_groups::{chain_name_prefix, chain_uri_modifier, join_uri_segments};
-use super::route_names::{RouteEntry, for_each_nested_statement, route_name_matches};
+use super::route_names::{RouteDeclaration, RouteEntry, for_each_nested_statement};
 
 /// The FQN of Folio's page-naming helper, as `mago-names` resolves it.
 const FOLIO_NAME_FUNCTION: &str = "Laravel\\Folio\\name";
@@ -270,12 +270,13 @@ fn with_routing_pages_mount(
 
 // ─── Page walking ────────────────────────────────────────────────────────
 
-/// Every named route a project's Folio pages register.
+/// Every named route a project's Folio pages register, each with the page
+/// that registers it.
 ///
 /// Unnamed pages have a URI but no `route()`-reachable name, so they
 /// contribute nothing here — matching how a conventional route with no
 /// `->name()` is invisible to `route()` too.
-pub(crate) fn enumerate_folio_routes(backend: &Backend) -> Vec<RouteEntry> {
+pub(crate) fn enumerate_folio_routes(backend: &Backend) -> Vec<(RouteEntry, PathBuf)> {
     let mut routes = Vec::new();
     for mount in discover_folio_mounts(backend) {
         let mut pages = Vec::new();
@@ -284,46 +285,27 @@ pub(crate) fn enumerate_folio_routes(backend: &Backend) -> Vec<RouteEntry> {
             let Ok(content) = std::fs::read_to_string(&path) else {
                 continue;
             };
-            let Some((page_name, _offset)) = extract_page_route_name(&content) else {
-                continue;
-            };
-            routes.push(RouteEntry {
-                name: compose_folio_name(&mount.name_prefix, &page_name),
-                uri: compose_folio_uri(&mount.uri_prefix, &derive_folio_uri(&relative)),
-                from_vendor: false,
-            });
-        }
-    }
-    routes
-}
-
-/// Resolve `name` to the Folio page that declares it, if any.
-pub(crate) fn resolve_folio_route_definition(backend: &Backend, name: &str) -> Vec<Location> {
-    let mut results = Vec::new();
-    for mount in discover_folio_mounts(backend) {
-        let mut pages = Vec::new();
-        collect_page_files(&mount.directory, &mount.directory, &mut pages);
-        for (_relative, path) in pages {
-            let Ok(content) = std::fs::read_to_string(&path) else {
-                continue;
-            };
             let Some((page_name, offset)) = extract_page_route_name(&content) else {
                 continue;
             };
-            let full_name = compose_folio_name(&mount.name_prefix, &page_name);
-            if !route_name_matches(name, &full_name) {
-                continue;
-            }
-            let Ok(uri) = Url::from_file_path(&path) else {
-                continue;
+            let declarations = Url::from_file_path(&path)
+                .map(|file| RouteDeclaration {
+                    file: Arc::new(file),
+                    position: offset_to_position(&content, offset),
+                    name_arg: None,
+                })
+                .into_iter()
+                .collect();
+            let route = RouteEntry {
+                name: compose_folio_name(&mount.name_prefix, &page_name),
+                uri: compose_folio_uri(&mount.uri_prefix, &derive_folio_uri(&relative)),
+                from_vendor: false,
+                declarations,
             };
-            results.push(crate::definition::point_location(
-                uri,
-                offset_to_position(&content, offset),
-            ));
+            routes.push((route, path));
         }
     }
-    results
+    routes
 }
 
 /// Recursively record every `.blade.php` file under `dir` as

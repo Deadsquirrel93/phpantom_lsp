@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use super::catch::*;
 use super::*;
 use crate::atom::atom;
 use crate::php_type::PhpType;
@@ -18,14 +17,8 @@ fn test_find_throw_statements_basic() {
     "#;
     let throws = find_throw_statements(body);
     assert_eq!(throws.len(), 2);
-    assert_eq!(
-        throws[0].type_name,
-        PhpType::named(atom("InvalidArgumentException"))
-    );
-    assert_eq!(
-        throws[1].type_name,
-        PhpType::named(atom("\\RuntimeException"))
-    );
+    assert_eq!(throws[0], PhpType::named(atom("InvalidArgumentException")));
+    assert_eq!(throws[1], PhpType::named(atom("\\RuntimeException")));
 }
 
 #[test]
@@ -36,7 +29,7 @@ fn test_find_throw_statements_skips_strings() {
     "#;
     let throws = find_throw_statements(body);
     assert_eq!(throws.len(), 1);
-    assert_eq!(throws[0].type_name, PhpType::named(atom("RealException")));
+    assert_eq!(throws[0], PhpType::named(atom("RealException")));
 }
 
 #[test]
@@ -49,7 +42,7 @@ fn test_find_throw_statements_skips_comments() {
     "#;
     let throws = find_throw_statements(body);
     assert_eq!(throws.len(), 1);
-    assert_eq!(throws[0].type_name, PhpType::named(atom("RealException")));
+    assert_eq!(throws[0], PhpType::named(atom("RealException")));
 }
 
 #[test]
@@ -130,10 +123,7 @@ fn test_find_inline_throws_annotations() {
         $db->query();
     "#;
     let annotations = find_inline_throws_annotations(body);
-    let names: Vec<String> = annotations
-        .iter()
-        .map(|t| t.type_name.to_string())
-        .collect();
+    let names: Vec<String> = annotations.iter().map(|t| t.to_string()).collect();
     assert_eq!(names, vec!["InvalidArgumentException", "RuntimeException"]);
 }
 
@@ -155,7 +145,7 @@ public function caller(): void {
     // Scan the body of `caller`
     let body = "$this->riskyMethod();";
     let propagated = find_propagated_throws(body, file_content);
-    let names: Vec<String> = propagated.iter().map(|t| t.type_name.to_string()).collect();
+    let names: Vec<String> = propagated.iter().map(|t| t.to_string()).collect();
     assert_eq!(names, vec!["IOException", "NetworkException"]);
 }
 
@@ -173,7 +163,7 @@ public function caller(): void {
     let body = "throw $this->createException();";
     let types = find_throw_expression_types(body, file_content);
     assert_eq!(types.len(), 1);
-    assert_eq!(types[0].type_name, PhpType::named(atom("RuntimeException")));
+    assert_eq!(types[0], PhpType::named(atom("RuntimeException")));
 }
 
 #[test]
@@ -199,116 +189,85 @@ public function createException(array $opts = array()): RuntimeException {
     assert_eq!(ret, Some(PhpType::named(atom("RuntimeException"))));
 }
 
-// ── High-level analysis tests ───────────────────────────────────────
+// ── Uncaught throws ─────────────────────────────────────────────────
 
-#[test]
-fn test_extract_function_body_basic() {
-    let content = "<?php\n/** @return void */\nfunction foo(): void {\n    echo \"hello\";\n}\n";
-    let pos = Position {
-        line: 1,
+/// The cursor inside the first docblock of `content`, on its `@` line.
+fn docblock_cursor(content: &str) -> Position {
+    let line = content
+        .lines()
+        .position(|line| line.trim() == "* @")
+        .expect("a `* @` line in the fixture");
+    Position {
+        line: line as u32,
         character: 5,
-    };
-    let body = extract_function_body(content, pos);
-    assert!(body.is_some());
-    assert!(body.unwrap().contains("echo"));
+    }
+}
+
+/// The uncaught exception names `content`'s documented function throws,
+/// with nothing to resolve names or calls with.
+fn uncaught_names(content: &str) -> Vec<String> {
+    find_uncaught_throw_types(content, docblock_cursor(content))
+        .iter()
+        .map(|ty| ty.to_string())
+        .collect()
+}
+
+/// The uncaught exception names, resolving names and calls with the given
+/// loaders.
+fn uncaught_names_with(
+    content: &str,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    function_loader: crate::types::FunctionLoader<'_>,
+    use_map: &HashMap<String, String>,
+) -> Vec<String> {
+    find_uncaught_throw_types_with_context(
+        content,
+        docblock_cursor(content),
+        Some(&ThrowsContext {
+            class_loader,
+            function_loader,
+            use_map,
+            local_classes: &[],
+            backend: None,
+        }),
+    )
+    .iter()
+    .map(|ty| ty.to_string())
+    .collect()
+}
+
+/// The uncaught exception names, with a backend that has indexed
+/// `content` resolving the body's names and calls, as in the editor.
+fn uncaught_names_indexed(content: &str) -> Vec<String> {
+    uncaught_names_in(&crate::Backend::new_test(), content)
+}
+
+/// [`uncaught_names_indexed`] with `backend`, such as one that knows the
+/// standard library's classes.
+fn uncaught_names_in(backend: &crate::Backend, content: &str) -> Vec<String> {
+    let uri = "file:///throws.php";
+    backend.update_ast(uri, content);
+    let file_ctx = backend.file_context(uri);
+    let class_loader = backend.class_loader(&file_ctx);
+    let function_loader = backend.function_loader(&file_ctx);
+    find_uncaught_throw_types_with_context(
+        content,
+        docblock_cursor(content),
+        Some(&ThrowsContext {
+            class_loader: &class_loader,
+            function_loader: Some(&function_loader),
+            use_map: &file_ctx.use_map,
+            local_classes: &file_ctx.classes,
+            backend: Some(backend),
+        }),
+    )
+    .iter()
+    .map(|ty| ty.to_string())
+    .collect()
 }
 
 #[test]
-fn test_extract_function_body_abstract() {
-    let content = "<?php\n/** @return void */\nabstract function foo(): void;\n";
-    let pos = Position {
-        line: 1,
-        character: 5,
-    };
-    let body = extract_function_body(content, pos);
-    assert!(body.is_none());
-}
-
-#[test]
-fn test_extract_function_body_with_nested_braces() {
-    let content = concat!(
-        "<?php\n",
-        "/** @return void */\n",
-        "function foo(): void {\n",
-        "    if (true) {\n",
-        "        echo 'inner';\n",
-        "    }\n",
-        "}\n",
-    );
-    let pos = Position {
-        line: 1,
-        character: 5,
-    };
-    let body = extract_function_body(content, pos).unwrap();
-    assert!(body.contains("if (true)"));
-    assert!(body.contains("echo 'inner'"));
-}
-
-#[test]
-fn test_find_catch_blocks_basic() {
-    let body = r#"
-        try {
-            throw new InvalidArgumentException("bad");
-        } catch (InvalidArgumentException $e) {
-            // handled
-        }
-        throw new RuntimeException("oops");
-    "#;
-    let catches = find_catch_blocks(body);
-    assert_eq!(catches.len(), 1);
-    assert_eq!(
-        catches[0].type_names,
-        vec![PhpType::named(atom("InvalidArgumentException"))]
-    );
-}
-
-#[test]
-fn test_find_catch_blocks_multi_catch() {
-    let body = r#"
-        try {
-            doSomething();
-        } catch (InvalidArgumentException | RuntimeException $e) {
-            // handled
-        }
-    "#;
-    let catches = find_catch_blocks(body);
-    assert_eq!(catches.len(), 1);
-    assert_eq!(
-        catches[0].type_names,
-        vec![
-            PhpType::named(atom("InvalidArgumentException")),
-            PhpType::named(atom("RuntimeException"))
-        ]
-    );
-}
-
-#[test]
-fn test_parse_catch_types_basic() {
-    let (types, var) = parse_catch_types("InvalidArgumentException $e");
-    assert_eq!(
-        types,
-        vec![PhpType::named(atom("InvalidArgumentException"))]
-    );
-    assert_eq!(var.as_deref(), Some("$e"));
-}
-
-#[test]
-fn test_parse_catch_types_multi() {
-    let (types, var) = parse_catch_types("\\InvalidArgumentException | \\RuntimeException $e");
-    // The fully-qualified `\` prefix is retained by the type parser; downstream
-    // resolution (`base_name`/`normalize_throw_type`) strips it.
-    assert_eq!(
-        types,
-        vec![
-            PhpType::named(atom("\\InvalidArgumentException")),
-            PhpType::named(atom("\\RuntimeException"))
-        ]
-    );
-    assert_eq!(var.as_deref(), Some("$e"));
-}
-
-#[test]
-fn test_find_uncaught_throw_types_all_caught() {
+fn caught_throw_is_not_reported() {
     let content = concat!(
         "<?php\nclass Foo {\n",
         "    /**\n",
@@ -323,16 +282,11 @@ fn test_find_uncaught_throw_types_all_caught() {
         "    }\n",
         "}\n",
     );
-    let pos = Position {
-        line: 3,
-        character: 5,
-    };
-    let uncaught = find_uncaught_throw_types(content, pos);
-    assert!(uncaught.is_empty());
+    assert!(uncaught_names(content).is_empty());
 }
 
 #[test]
-fn test_find_uncaught_throw_types_uncaught() {
+fn uncaught_throw_is_reported() {
     let content = concat!(
         "<?php\nclass Foo {\n",
         "    /**\n",
@@ -343,16 +297,11 @@ fn test_find_uncaught_throw_types_uncaught() {
         "    }\n",
         "}\n",
     );
-    let pos = Position {
-        line: 3,
-        character: 5,
-    };
-    let uncaught = find_uncaught_throw_types(content, pos);
-    assert_eq!(uncaught, vec![PhpType::named(atom("RuntimeException"))]);
+    assert_eq!(uncaught_names(content), vec!["RuntimeException"]);
 }
 
 #[test]
-fn test_find_uncaught_throw_types_mixed() {
+fn only_the_throw_outside_the_try_is_reported() {
     let content = concat!(
         "<?php\nclass Foo {\n",
         "    /**\n",
@@ -368,45 +317,11 @@ fn test_find_uncaught_throw_types_mixed() {
         "    }\n",
         "}\n",
     );
-    let pos = Position {
-        line: 3,
-        character: 5,
-    };
-    let uncaught = find_uncaught_throw_types(content, pos);
-    assert_eq!(uncaught, vec![PhpType::named(atom("RuntimeException"))]);
+    assert_eq!(uncaught_names(content), vec!["RuntimeException"]);
 }
 
 #[test]
-fn test_find_uncaught_throw_types_inline_annotation_caught() {
-    let content = concat!(
-        "<?php\nclass Foo {\n",
-        "    /**\n",
-        "     * @\n",
-        "     */\n",
-        "    public function bar(): void {\n",
-        "        try {\n",
-        "            /** @throws NotFoundException */\n",
-        "            findOrFail();\n",
-        "        } catch (NotFoundException $e) {\n",
-        "            // handled\n",
-        "        }\n",
-        "    }\n",
-        "}\n",
-    );
-    let pos = Position {
-        line: 3,
-        character: 5,
-    };
-    let uncaught = find_uncaught_throw_types(content, pos);
-    assert!(
-        uncaught.is_empty(),
-        "inline @throws inside try/catch should be excluded, got: {:?}",
-        uncaught
-    );
-}
-
-#[test]
-fn test_find_uncaught_throw_types_inline_annotation_partially_caught() {
+fn inline_throws_annotation_inside_a_try_is_caught() {
     let content = concat!(
         "<?php\nclass Foo {\n",
         "    /**\n",
@@ -424,81 +339,11 @@ fn test_find_uncaught_throw_types_inline_annotation_partially_caught() {
         "    }\n",
         "}\n",
     );
-    let pos = Position {
-        line: 3,
-        character: 5,
-    };
-    let uncaught = find_uncaught_throw_types(content, pos);
-    assert_eq!(
-        uncaught,
-        vec![PhpType::named(atom("RuntimeException"))],
-        "only the uncaught inline @throws should remain"
-    );
-}
-
-// ── throw $variable tests ───────────────────────────────────────────
-
-#[test]
-fn test_find_uncaught_throw_variable_from_catch() {
-    // `throw $e` inside a catch block re-throws the caught type.
-    let content = concat!(
-        "<?php\nclass Foo {\n",
-        "    /**\n",
-        "     * @\n",
-        "     */\n",
-        "    public function bar(): void {\n",
-        "        try {\n",
-        "            throw new ValidationException('bad');\n",
-        "        } catch (ValidationException $e) {\n",
-        "            throw $e;\n",
-        "        }\n",
-        "    }\n",
-        "}\n",
-    );
-    let pos = Position {
-        line: 3,
-        character: 5,
-    };
-    let uncaught = find_uncaught_throw_types(content, pos);
-    assert_eq!(
-        uncaught,
-        vec![PhpType::named(atom("ValidationException"))],
-        "re-thrown catch variable should appear in uncaught list"
-    );
+    assert_eq!(uncaught_names(content), vec!["RuntimeException"]);
 }
 
 #[test]
-fn test_find_uncaught_throw_variable_not_rethrown() {
-    // The caught exception is NOT re-thrown — should be empty.
-    let content = concat!(
-        "<?php\nclass Foo {\n",
-        "    /**\n",
-        "     * @\n",
-        "     */\n",
-        "    public function bar(): void {\n",
-        "        try {\n",
-        "            throw new ValidationException('bad');\n",
-        "        } catch (ValidationException $e) {\n",
-        "            // swallowed\n",
-        "        }\n",
-        "    }\n",
-        "}\n",
-    );
-    let pos = Position {
-        line: 3,
-        character: 5,
-    };
-    let uncaught = find_uncaught_throw_types(content, pos);
-    assert!(
-        uncaught.is_empty(),
-        "caught and not re-thrown should be empty, got: {:?}",
-        uncaught
-    );
-}
-
-#[test]
-fn test_find_uncaught_throw_variable_multiple_catches() {
-    // Two catch blocks, each re-throwing — both types should appear.
+fn rethrown_catch_variable_throws_the_caught_type() {
     let content = concat!(
         "<?php\nclass Foo {\n",
         "    /**\n",
@@ -515,44 +360,118 @@ fn test_find_uncaught_throw_variable_multiple_catches() {
         "    }\n",
         "}\n",
     );
-    let pos = Position {
-        line: 3,
-        character: 5,
-    };
-    let uncaught = find_uncaught_throw_types(content, pos);
-    assert!(
-        uncaught.contains(&PhpType::named(atom("ValidationException"))),
-        "should contain ValidationException, got: {:?}",
-        uncaught
-    );
-    assert!(
-        uncaught.contains(&PhpType::named(atom("NotFoundException"))),
-        "should contain NotFoundException, got: {:?}",
-        uncaught
+    assert_eq!(
+        uncaught_names(content),
+        vec!["ValidationException", "NotFoundException"]
     );
 }
 
-// ── throw functionCall() tests ──────────────────────────────────────
+#[test]
+fn swallowed_catch_variable_is_not_reported() {
+    let content = concat!(
+        "<?php\nclass Foo {\n",
+        "    /**\n",
+        "     * @\n",
+        "     */\n",
+        "    public function bar(): void {\n",
+        "        try {\n",
+        "            throw new ValidationException('bad');\n",
+        "        } catch (ValidationException $e) {\n",
+        "            // swallowed\n",
+        "        }\n",
+        "    }\n",
+        "}\n",
+    );
+    assert!(uncaught_names(content).is_empty());
+}
 
 #[test]
-fn test_find_throw_expression_bare_function_call() {
-    let file_content = r#"
-function makeException(): RuntimeException {
-    return new RuntimeException("oops");
-}
-
-public function caller(): void {
-    throw makeException();
-}
-    "#;
-    let body = "throw makeException();";
-    let types = find_throw_expression_types(body, file_content);
-    assert_eq!(types.len(), 1, "should resolve bare function call");
-    assert_eq!(types[0].type_name, PhpType::named(atom("RuntimeException")));
+fn throw_in_a_string_comment_or_closure_is_not_reported() {
+    let content = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @\n",
+        " */\n",
+        "function bar(): void {\n",
+        "    echo 'throw new StringException();';\n",
+        "    // throw new CommentException();\n",
+        "    $later = function () { throw new ClosureException(); };\n",
+        "}\n",
+    );
+    assert!(uncaught_names(content).is_empty());
 }
 
 #[test]
-fn test_find_uncaught_throw_bare_function_call() {
+fn an_immediately_invoked_closure_throws_where_it_is_written() {
+    let content = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @\n",
+        " */\n",
+        "function bar(): void {\n",
+        "    (function () { throw new InvokedException(); })();\n",
+        "}\n",
+    );
+    assert_eq!(uncaught_names(content), vec!["InvokedException"]);
+}
+
+#[test]
+fn the_function_after_a_docblock_being_opened_is_found() {
+    // Completion on `/**` fires before the editor closes the comment.
+    let content = concat!(
+        "<?php\n",
+        "/**\n",
+        "function first(): void {\n",
+        "    throw new FirstException();\n",
+        "}\n",
+        "/** Second. */\n",
+        "function second(): void {\n",
+        "    throw new SecondException();\n",
+        "}\n",
+    );
+    let uncaught = find_uncaught_throw_types(content, Position::new(1, 3));
+    assert_eq!(uncaught, vec![PhpType::named(atom("FirstException"))]);
+}
+
+#[test]
+fn the_lines_of_a_docblock_being_typed_are_not_code() {
+    let content = concat!(
+        "<?php\n",
+        "class Foo {\n",
+        "    /**\n",
+        "     * @thr\n",
+        "     * @param int $x\n",
+        "    public function bar(int $x): void {\n",
+        "        throw new BarException();\n",
+        "    }\n",
+        "}\n",
+    );
+    let uncaught = find_uncaught_throw_types(content, Position::new(3, 11));
+    assert_eq!(uncaught, vec![PhpType::named(atom("BarException"))]);
+}
+
+/// A `/*` in a string or in the docblock's own text opens no comment.
+#[test]
+fn a_comment_opener_in_a_string_or_the_docblock_text_is_not_one() {
+    let content = concat!(
+        "<?php\n",
+        "$accept = 'image/*';\n",
+        "/**\n",
+        " * @\n",
+        " * @param string $pattern like src/*.php\n",
+        " */\n",
+        "function scan(string $pattern): void {\n",
+        "    throw new ScanException();\n",
+        "}\n",
+    );
+    assert_eq!(uncaught_names(content), vec!["ScanException"]);
+    // "Update docblock" asks from the start of the docblock.
+    let uncaught = find_uncaught_throw_types(content, Position::new(2, 0));
+    assert_eq!(uncaught, vec![PhpType::named(atom("ScanException"))]);
+}
+
+#[test]
+fn a_throw_whose_return_type_names_the_exception_is_reported() {
     let content = concat!(
         "<?php\n",
         "function makeException(): RuntimeException {\n",
@@ -565,50 +484,316 @@ fn test_find_uncaught_throw_bare_function_call() {
         "    public function bar(): void {\n",
         "        throw makeException();\n",
         "    }\n",
+        "    /**\n",
+        "     * Caught.\n",
+        "     */\n",
+        "    public function baz(): void {\n",
+        "        try {\n",
+        "            throw makeException();\n",
+        "        } catch (RuntimeException $e) {\n",
+        "        }\n",
+        "    }\n",
         "}\n",
     );
-    let pos = Position {
-        line: 6,
-        character: 5,
-    };
-    let uncaught = find_uncaught_throw_types(content, pos);
+    assert_eq!(uncaught_names_indexed(content), vec!["RuntimeException"]);
+    let caught = content
+        .replace("     * @\n", "     * Bar.\n")
+        .replace("     * Caught.\n", "     * @\n");
+    assert!(uncaught_names_indexed(&caught).is_empty());
+}
+
+#[test]
+fn same_class_methods_propagate_their_throws() {
+    let content = concat!(
+        "<?php\n",
+        "class Repo {\n",
+        "    /** @throws NotFoundException */\n",
+        "    public function find(int $id): object {}\n",
+        "}\n",
+        "class Service {\n",
+        "    private Repo $repo;\n",
+        "    /** @throws LockedException */\n",
+        "    private function lock(): void {}\n",
+        "    /**\n",
+        "     * @\n",
+        "     */\n",
+        "    public function load(int $id): object {\n",
+        "        $this->lock();\n",
+        "        return $this->repo->find($id);\n",
+        "    }\n",
+        "}\n",
+    );
     assert_eq!(
-        uncaught,
-        vec![PhpType::named(atom("RuntimeException"))],
-        "bare function call return type should appear in uncaught"
+        uncaught_names_indexed(content),
+        vec!["LockedException", "NotFoundException"]
     );
 }
 
 #[test]
-fn test_find_uncaught_throw_bare_function_caught() {
-    // throw functionCall() inside a try/catch that catches it.
+fn a_variable_assigned_from_a_factory_is_typed_for_its_calls() {
     let content = concat!(
         "<?php\n",
-        "function makeException(): RuntimeException {\n",
-        "    return new RuntimeException('oops');\n",
+        "class Client {\n",
+        "    /** @throws TimeoutException */\n",
+        "    public function send(): void {}\n",
         "}\n",
-        "class Foo {\n",
+        "function client(): Client { return new Client(); }\n",
+        "/**\n",
+        " * @\n",
+        " */\n",
+        "function run(): void {\n",
+        "    $client = client();\n",
+        "    $client->send();\n",
+        "}\n",
+    );
+    assert_eq!(uncaught_names_indexed(content), vec!["TimeoutException"]);
+}
+
+#[test]
+fn a_catch_of_a_parent_class_catches_its_subclasses() {
+    let content = concat!(
+        "<?php\n",
+        "class BaseException extends Exception {}\n",
+        "class ChildException extends BaseException {}\n",
+        "/**\n",
+        " * @\n",
+        " */\n",
+        "function run(): void {\n",
+        "    try {\n",
+        "        throw new ChildException();\n",
+        "    } catch (BaseException $e) {\n",
+        "    }\n",
+        "}\n",
+    );
+    assert!(uncaught_names_indexed(content).is_empty());
+}
+
+#[test]
+fn a_catch_of_exception_does_not_take_an_error() {
+    let content = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @\n",
+        " */\n",
+        "function run(): void {\n",
+        "    try {\n",
+        "        throw new TypeError();\n",
+        "    } catch (Exception $e) {\n",
+        "    }\n",
+        "}\n",
+    );
+    let backend = crate::Backend::new_test_with_full_stubs();
+    assert_eq!(uncaught_names_in(&backend, content), vec!["TypeError"]);
+}
+
+// ── Callee `@throws` propagation ────────────────────────────────────
+
+fn make_class_with_throws(name: &str, methods: Vec<(&str, Vec<&str>)>) -> Arc<ClassInfo> {
+    let method_infos: Vec<MethodInfo> = methods
+        .into_iter()
+        .map(|(method_name, throws)| MethodInfo {
+            name: crate::atom::atom(method_name),
+            extras: MethodExtras {
+                throws: throws.into_iter().map(PhpType::parse).collect(),
+                ..Default::default()
+            }
+            .into_option(),
+            ..Default::default()
+        })
+        .collect();
+
+    Arc::new(ClassInfo {
+        name: crate::atom::atom(name),
+        methods: method_infos
+            .into_iter()
+            .map(Arc::new)
+            .collect::<Vec<_>>()
+            .into(),
+        ..Default::default()
+    })
+}
+
+fn loader_for(classes: Vec<Arc<ClassInfo>>) -> impl Fn(&str) -> Option<Arc<ClassInfo>> {
+    move |name: &str| {
+        classes
+            .iter()
+            .find(|cls| cls.fqn() == name.trim_start_matches('\\'))
+            .cloned()
+    }
+}
+
+#[test]
+fn a_parameter_receiver_propagates_the_method_throws() {
+    let content = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @\n",
+        " */\n",
+        "function handle(BusinessCentralService $service): void {\n",
+        "    $service->sendData($customer, Kind::CREATE);\n",
+        "}\n",
+    );
+    let class_loader = loader_for(vec![make_class_with_throws(
+        "BusinessCentralService",
+        vec![(
+            "sendData",
+            vec!["BusinessCentralException", "ConvertException"],
+        )],
+    )]);
+    assert_eq!(
+        uncaught_names_with(content, &class_loader, None, &HashMap::new()),
+        vec!["BusinessCentralException", "ConvertException"]
+    );
+}
+
+#[test]
+fn unknown_receivers_properties_and_quiet_methods_add_nothing() {
+    let content = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @\n",
+        " */\n",
+        "function handle(MyService $service): void {\n",
+        "    $unknown->doStuff();\n",
+        "    $service->someProperty;\n",
+        "    $service->safeMethod();\n",
+        "    if ($x) {}\n",
+        "    foreach ($items as $item) {}\n",
+        "}\n",
+    );
+    let class_loader = loader_for(vec![make_class_with_throws(
+        "MyService",
+        vec![("safeMethod", vec![])],
+    )]);
+    assert!(uncaught_names_with(content, &class_loader, None, &HashMap::new()).is_empty());
+}
+
+#[test]
+fn each_exception_is_reported_once_in_the_order_first_thrown() {
+    let content = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @\n",
+        " */\n",
+        "function handle(MyService $service): void {\n",
+        "    $service->methodA();\n",
+        "    $service->methodB();\n",
+        "    $service->methodA();\n",
+        "}\n",
+    );
+    let class_loader = loader_for(vec![make_class_with_throws(
+        "MyService",
+        vec![
+            ("methodA", vec!["IOException"]),
+            ("methodB", vec!["NetworkException"]),
+        ],
+    )]);
+    assert_eq!(
+        uncaught_names_with(content, &class_loader, None, &HashMap::new()),
+        vec!["IOException", "NetworkException"]
+    );
+}
+
+#[test]
+fn static_calls_constructors_and_functions_propagate_their_throws() {
+    let content = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @\n",
+        " */\n",
+        "function handle(): void {\n",
+        "    BusinessCentralService::validate();\n",
+        "    new HttpClient();\n",
+        "    helperFunction();\n",
+        "}\n",
+    );
+    let class_loader = loader_for(vec![
+        make_class_with_throws(
+            "BusinessCentralService",
+            vec![("validate", vec!["ValidationException"])],
+        ),
+        make_class_with_throws(
+            "HttpClient",
+            vec![("__construct", vec!["ConnectionException"])],
+        ),
+    ]);
+    let helper = FunctionInfo {
+        name: atom("helperFunction"),
+        throws: vec![PhpType::parse("HelperException")],
+        ..Default::default()
+    };
+    let function_loader = move |name: &str, _offset: u32| -> Option<FunctionInfo> {
+        (name.trim_start_matches('\\') == "helperFunction").then(|| helper.clone())
+    };
+    assert_eq!(
+        uncaught_names_with(
+            content,
+            &class_loader,
+            Some(&function_loader),
+            &HashMap::new()
+        ),
+        vec![
+            "ValidationException",
+            "ConnectionException",
+            "HelperException"
+        ]
+    );
+}
+
+/// A parameter's class hint is resolved through the file's imports and
+/// namespace, and a leading `\` keeps it exact.
+#[test]
+fn parameter_hints_resolve_through_imports_and_namespace() {
+    let content = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "use Lib\\Svc;\n",
+        "/**\n",
+        " * @\n",
+        " */\n",
+        "function handle(Svc $a, Local $b, \\Other $c): void {\n",
+        "    $a->run();\n",
+        "    $b->run();\n",
+        "    $c->run();\n",
+        "}\n",
+    );
+    let mut svc = (*make_class_with_throws("Svc", vec![("run", vec!["SvcException"])])).clone();
+    svc.file_namespace = Some(atom("Lib"));
+    let mut local =
+        (*make_class_with_throws("Local", vec![("run", vec!["LocalException"])])).clone();
+    local.file_namespace = Some(atom("App"));
+    let other = make_class_with_throws("Other", vec![("run", vec!["OtherException"])]);
+    let class_loader = loader_for(vec![Arc::new(svc), Arc::new(local), other]);
+    let use_map = HashMap::from([("Svc".to_string(), "Lib\\Svc".to_string())]);
+    assert_eq!(
+        uncaught_names_with(content, &class_loader, None, &use_map),
+        vec!["SvcException", "LocalException", "OtherException"]
+    );
+}
+
+#[test]
+fn a_propagated_throw_inside_a_try_is_caught() {
+    let content = concat!(
+        "<?php\nclass Foo {\n",
         "    /**\n",
         "     * @\n",
         "     */\n",
-        "    public function bar(): void {\n",
+        "    public function handle(BusinessCentralService $service): void {\n",
         "        try {\n",
-        "            throw makeException();\n",
+        "            $service->sendData();\n",
         "        } catch (RuntimeException $e) {\n",
         "            // handled\n",
         "        }\n",
         "    }\n",
         "}\n",
     );
-    let pos = Position {
-        line: 6,
-        character: 5,
-    };
-    let uncaught = find_uncaught_throw_types(content, pos);
-    assert!(
-        uncaught.is_empty(),
-        "caught bare function throw should be empty, got: {:?}",
-        uncaught
+    let class_loader = loader_for(vec![make_class_with_throws(
+        "BusinessCentralService",
+        vec![("sendData", vec!["RuntimeException", "ConvertException"])],
+    )]);
+    assert_eq!(
+        uncaught_names_with(content, &class_loader, None, &HashMap::new()),
+        vec!["ConvertException"]
     );
 }
 
@@ -659,713 +844,6 @@ fn test_has_use_import_group() {
 fn test_has_use_import_alias() {
     let content = "<?php\nuse App\\Exceptions\\RuntimeException as RE;\n";
     assert!(has_use_import(content, "App\\Exceptions\\RuntimeException"));
-}
-
-// ── parse_param_type_map tests ──────────────────────────────────────
-
-#[test]
-fn test_parse_param_type_map_basic() {
-    let sig = "handle(BusinessCentralService $service): void";
-    let map = parse_param_type_map(sig);
-    assert_eq!(
-        map,
-        vec![(
-            "$service".to_string(),
-            PhpType::named(atom("BusinessCentralService"))
-        )]
-    );
-}
-
-#[test]
-fn test_parse_param_type_map_multiple_params() {
-    let sig = "handle(BusinessCentralService $service, int $count, string $name): void";
-    let map = parse_param_type_map(sig);
-    assert_eq!(
-        map,
-        vec![
-            (
-                "$service".to_string(),
-                PhpType::named(atom("BusinessCentralService"))
-            ),
-            ("$count".to_string(), PhpType::named(atom("int"))),
-            ("$name".to_string(), PhpType::named(atom("string"))),
-        ]
-    );
-}
-
-#[test]
-fn test_parse_param_type_map_nullable() {
-    let sig = "handle(?Model $model): void";
-    let map = parse_param_type_map(sig);
-    assert_eq!(
-        map,
-        vec![("$model".to_string(), PhpType::named(atom("Model")))]
-    );
-}
-
-#[test]
-fn test_parse_param_type_map_fqn() {
-    let sig = r"handle(\App\Services\BusinessCentralService $service): void";
-    let map = parse_param_type_map(sig);
-    assert_eq!(
-        map,
-        vec![(
-            "$service".to_string(),
-            PhpType::named(atom("\\App\\Services\\BusinessCentralService"))
-        ),]
-    );
-}
-
-#[test]
-fn test_parse_param_type_map_no_type() {
-    let sig = "handle($service): void";
-    let map = parse_param_type_map(sig);
-    assert!(map.is_empty());
-}
-
-#[test]
-fn test_parse_param_type_map_with_defaults() {
-    let sig = "handle(string $name = 'foo', int $count = 0): void";
-    let map = parse_param_type_map(sig);
-    assert_eq!(
-        map,
-        vec![
-            ("$name".to_string(), PhpType::named(atom("string"))),
-            ("$count".to_string(), PhpType::named(atom("int"))),
-        ]
-    );
-}
-
-#[test]
-fn test_parse_param_type_map_variadic() {
-    let sig = "handle(string ...$names): void";
-    let map = parse_param_type_map(sig);
-    assert_eq!(
-        map,
-        vec![("$names".to_string(), PhpType::named(atom("string")))]
-    );
-}
-
-#[test]
-fn test_parse_param_type_map_reference() {
-    let sig = "handle(array &$items): void";
-    let map = parse_param_type_map(sig);
-    assert_eq!(
-        map,
-        vec![("$items".to_string(), PhpType::named(atom("array")))]
-    );
-}
-
-#[test]
-fn test_parse_param_type_map_promoted_property() {
-    let sig = "__construct(public readonly string $name): void";
-    let map = parse_param_type_map(sig);
-    assert_eq!(
-        map,
-        vec![("$name".to_string(), PhpType::named(atom("string")))]
-    );
-}
-
-// ── extract_function_signature tests ────────────────────────────────
-
-#[test]
-fn test_extract_function_signature_basic() {
-    let content = concat!(
-        "<?php\nclass Foo {\n",
-        "    /**\n",
-        "     * @\n",
-        "     */\n",
-        "    public function handle(BusinessCentralService $service): void {\n",
-        "        $service->doStuff();\n",
-        "    }\n",
-        "}\n",
-    );
-    let pos = Position {
-        line: 2,
-        character: 5,
-    };
-    let sig = extract_function_signature(content, pos);
-    assert!(sig.contains("BusinessCentralService $service"));
-    assert!(sig.contains("handle"));
-}
-
-// ── find_typed_variable_propagated_throws tests ─────────────────────
-
-fn make_class_with_throws(name: &str, methods: Vec<(&str, Vec<&str>)>) -> Arc<ClassInfo> {
-    let method_infos: Vec<MethodInfo> = methods
-        .into_iter()
-        .map(|(method_name, throws)| MethodInfo {
-            name: crate::atom::atom(method_name),
-            extras: MethodExtras {
-                throws: throws.into_iter().map(PhpType::parse).collect(),
-                ..Default::default()
-            }
-            .into_option(),
-            ..Default::default()
-        })
-        .collect();
-
-    Arc::new(ClassInfo {
-        name: crate::atom::atom(name),
-        methods: method_infos
-            .into_iter()
-            .map(Arc::new)
-            .collect::<Vec<_>>()
-            .into(),
-        ..Default::default()
-    })
-}
-
-#[test]
-fn test_find_cross_file_propagated_throws_basic() {
-    let body = "$service->sendDataToBusinessCentral($this->customer, BusinessCentralEventTypeEnum::CREATE_CUSTOMER);";
-    let signature = "handle(BusinessCentralService $service): void";
-    let file_content = "";
-
-    let bc_class = make_class_with_throws(
-        "BusinessCentralService",
-        vec![(
-            "sendDataToBusinessCentral",
-            vec![
-                "BusinessCentralException",
-                "ConvertException",
-                "RuntimeException",
-                "RandomException",
-            ],
-        )],
-    );
-
-    let class_loader = |name: &str| -> Option<Arc<ClassInfo>> {
-        if name.trim_start_matches('\\') == "BusinessCentralService" {
-            Some(bc_class.clone())
-        } else {
-            None
-        }
-    };
-
-    let use_map = HashMap::new();
-    let file_namespace = None;
-    let ctx = ThrowsContext {
-        class_loader: &class_loader,
-        function_loader: None,
-        use_map: &use_map,
-        file_namespace: &file_namespace,
-    };
-    let results = find_cross_file_propagated_throws(body, signature, file_content, &ctx);
-    let names: Vec<String> = results
-        .iter()
-        .map(|t| t.type_name.to_string().trim_start_matches('\\').to_string())
-        .collect();
-    assert_eq!(
-        names,
-        vec![
-            "BusinessCentralException",
-            "ConvertException",
-            "RuntimeException",
-            "RandomException",
-        ]
-    );
-}
-
-/// A parameter's class hint is resolved through the file's imports and
-/// namespace exactly once, and a leading `\` keeps it exact.
-#[test]
-fn test_find_cross_file_propagated_throws_namespaced_param_hints() {
-    let body = "$a->run();\n$b->run();\n$c->run();";
-    let signature = "handle(Svc $a, Local $b, \\Other $c): void";
-
-    let svc = make_class_with_throws("Svc", vec![("run", vec!["SvcException"])]);
-    let local = make_class_with_throws("Local", vec![("run", vec!["LocalException"])]);
-    let other = make_class_with_throws("Other", vec![("run", vec!["OtherException"])]);
-    let class_loader = |name: &str| -> Option<Arc<ClassInfo>> {
-        match name.trim_start_matches('\\') {
-            "Lib\\Svc" => Some(svc.clone()),
-            "App\\Local" => Some(local.clone()),
-            "Other" => Some(other.clone()),
-            _ => None,
-        }
-    };
-
-    let use_map = HashMap::from([("Svc".to_string(), "Lib\\Svc".to_string())]);
-    let file_namespace = Some("App".to_string());
-    let ctx = ThrowsContext {
-        class_loader: &class_loader,
-        function_loader: None,
-        use_map: &use_map,
-        file_namespace: &file_namespace,
-    };
-    let results = find_cross_file_propagated_throws(body, signature, "", &ctx);
-    let names: Vec<String> = results.iter().map(|t| t.type_name.to_string()).collect();
-    assert_eq!(
-        names,
-        vec!["\\SvcException", "\\LocalException", "\\OtherException"]
-    );
-}
-
-#[test]
-fn test_find_cross_file_propagated_throws_skips_this() {
-    let body = "$this->riskyMethod();";
-    let signature = "handle(): void";
-    let file_content = "";
-
-    let class_loader = |_name: &str| -> Option<Arc<ClassInfo>> { None };
-
-    let use_map = HashMap::new();
-    let file_namespace = None;
-    let ctx = ThrowsContext {
-        class_loader: &class_loader,
-        function_loader: None,
-        use_map: &use_map,
-        file_namespace: &file_namespace,
-    };
-    let results = find_cross_file_propagated_throws(body, signature, file_content, &ctx);
-    assert!(
-        results.is_empty(),
-        "$this-> calls should be handled by find_propagated_throws, not here"
-    );
-}
-
-#[test]
-fn test_find_cross_file_propagated_throws_unknown_variable() {
-    let body = "$unknown->doStuff();";
-    let signature = "handle(SomeService $service): void";
-    let file_content = "";
-
-    let class_loader = |_name: &str| -> Option<Arc<ClassInfo>> { None };
-
-    let use_map = HashMap::new();
-    let file_namespace = None;
-    let ctx = ThrowsContext {
-        class_loader: &class_loader,
-        function_loader: None,
-        use_map: &use_map,
-        file_namespace: &file_namespace,
-    };
-    let results = find_cross_file_propagated_throws(body, signature, file_content, &ctx);
-    assert!(results.is_empty());
-}
-
-#[test]
-fn test_find_cross_file_propagated_throws_property_access_ignored() {
-    let body = "$service->someProperty;";
-    let signature = "handle(SomeService $service): void";
-    let file_content = "";
-
-    let class_loader = |_name: &str| -> Option<Arc<ClassInfo>> { None };
-
-    let use_map = HashMap::new();
-    let file_namespace = None;
-    let ctx = ThrowsContext {
-        class_loader: &class_loader,
-        function_loader: None,
-        use_map: &use_map,
-        file_namespace: &file_namespace,
-    };
-    let results = find_cross_file_propagated_throws(body, signature, file_content, &ctx);
-    assert!(
-        results.is_empty(),
-        "Property access should not be treated as a method call"
-    );
-}
-
-#[test]
-fn test_find_cross_file_propagated_throws_multiple_calls() {
-    let body = concat!("$service->methodA();\n", "$service->methodB();\n",);
-    let signature = "handle(MyService $service): void";
-    let file_content = "";
-
-    let svc_class = make_class_with_throws(
-        "MyService",
-        vec![
-            ("methodA", vec!["IOException"]),
-            ("methodB", vec!["NetworkException"]),
-        ],
-    );
-
-    let class_loader = |name: &str| -> Option<Arc<ClassInfo>> {
-        if name.trim_start_matches('\\') == "MyService" {
-            Some(svc_class.clone())
-        } else {
-            None
-        }
-    };
-
-    let use_map = HashMap::new();
-    let file_namespace = None;
-    let ctx = ThrowsContext {
-        class_loader: &class_loader,
-        function_loader: None,
-        use_map: &use_map,
-        file_namespace: &file_namespace,
-    };
-    let results = find_cross_file_propagated_throws(body, signature, file_content, &ctx);
-    let names: Vec<String> = results
-        .iter()
-        .map(|t| t.type_name.to_string().trim_start_matches('\\').to_string())
-        .collect();
-    assert_eq!(names, vec!["IOException", "NetworkException"]);
-}
-
-#[test]
-fn test_find_cross_file_propagated_throws_deduplicates_calls() {
-    let body = concat!("$service->doStuff();\n", "$service->doStuff();\n",);
-    let signature = "handle(MyService $service): void";
-    let file_content = "";
-
-    let svc_class = make_class_with_throws("MyService", vec![("doStuff", vec!["SomeException"])]);
-
-    let class_loader = |name: &str| -> Option<Arc<ClassInfo>> {
-        if name.trim_start_matches('\\') == "MyService" {
-            Some(svc_class.clone())
-        } else {
-            None
-        }
-    };
-
-    let use_map = HashMap::new();
-    let file_namespace = None;
-    let ctx = ThrowsContext {
-        class_loader: &class_loader,
-        function_loader: None,
-        use_map: &use_map,
-        file_namespace: &file_namespace,
-    };
-    let results = find_cross_file_propagated_throws(body, signature, file_content, &ctx);
-    let names: Vec<String> = results
-        .iter()
-        .map(|t| t.type_name.to_string().trim_start_matches('\\').to_string())
-        .collect();
-    assert_eq!(
-        names,
-        vec!["SomeException"],
-        "Duplicate calls should only produce throws once"
-    );
-}
-
-#[test]
-fn test_find_cross_file_propagated_throws_method_without_throws() {
-    let body = "$service->safeMethod();";
-    let signature = "handle(MyService $service): void";
-    let file_content = "";
-
-    let svc_class = make_class_with_throws("MyService", vec![("safeMethod", vec![])]);
-
-    let class_loader = |name: &str| -> Option<Arc<ClassInfo>> {
-        if name.trim_start_matches('\\') == "MyService" {
-            Some(svc_class.clone())
-        } else {
-            None
-        }
-    };
-
-    let use_map = HashMap::new();
-    let file_namespace = None;
-    let ctx = ThrowsContext {
-        class_loader: &class_loader,
-        function_loader: None,
-        use_map: &use_map,
-        file_namespace: &file_namespace,
-    };
-    let results = find_cross_file_propagated_throws(body, signature, file_content, &ctx);
-    assert!(results.is_empty());
-}
-
-#[test]
-fn test_find_cross_file_propagated_throws_static_method_call() {
-    let body = "BusinessCentralService::validate();";
-    let signature = "handle(): void";
-    let file_content = "";
-
-    let bc_class = make_class_with_throws(
-        "BusinessCentralService",
-        vec![("validate", vec!["ValidationException"])],
-    );
-
-    let class_loader = |name: &str| -> Option<Arc<ClassInfo>> {
-        if name.trim_start_matches('\\') == "BusinessCentralService" {
-            Some(bc_class.clone())
-        } else {
-            None
-        }
-    };
-
-    let use_map = HashMap::new();
-    let file_namespace = None;
-    let ctx = ThrowsContext {
-        class_loader: &class_loader,
-        function_loader: None,
-        use_map: &use_map,
-        file_namespace: &file_namespace,
-    };
-    let results = find_cross_file_propagated_throws(body, signature, file_content, &ctx);
-    let names: Vec<String> = results
-        .iter()
-        .map(|t| t.type_name.to_string().trim_start_matches('\\').to_string())
-        .collect();
-    assert_eq!(names, vec!["ValidationException"]);
-}
-
-#[test]
-fn test_find_cross_file_propagated_throws_static_skips_self() {
-    let body = "self::validate();";
-    let signature = "handle(): void";
-    let file_content = "";
-
-    let class_loader = |_name: &str| -> Option<Arc<ClassInfo>> { None };
-
-    let use_map = HashMap::new();
-    let file_namespace = None;
-    let ctx = ThrowsContext {
-        class_loader: &class_loader,
-        function_loader: None,
-        use_map: &use_map,
-        file_namespace: &file_namespace,
-    };
-    let results = find_cross_file_propagated_throws(body, signature, file_content, &ctx);
-    assert!(
-        results.is_empty(),
-        "self:: should be handled by same-file propagation"
-    );
-}
-
-#[test]
-fn test_find_cross_file_propagated_throws_function_call() {
-    let body = "riskyFunction();";
-    let signature = "handle(): void";
-    let file_content = "";
-
-    let func_info = FunctionInfo {
-        name: crate::atom::atom("riskyFunction"),
-        throws: vec![PhpType::parse("DatabaseException")],
-        ..Default::default()
-    };
-
-    let class_loader = |_name: &str| -> Option<Arc<ClassInfo>> { None };
-    let function_loader = move |name: &str, _offset: u32| -> Option<FunctionInfo> {
-        if name.trim_start_matches('\\') == "riskyFunction" {
-            Some(func_info.clone())
-        } else {
-            None
-        }
-    };
-
-    let use_map = HashMap::new();
-    let file_namespace = None;
-    let ctx = ThrowsContext {
-        class_loader: &class_loader,
-        function_loader: Some(&function_loader),
-        use_map: &use_map,
-        file_namespace: &file_namespace,
-    };
-    let results = find_cross_file_propagated_throws(body, signature, file_content, &ctx);
-    let names: Vec<String> = results
-        .iter()
-        .map(|t| t.type_name.to_string().trim_start_matches('\\').to_string())
-        .collect();
-    assert_eq!(names, vec!["DatabaseException"]);
-}
-
-#[test]
-fn test_find_cross_file_propagated_throws_new_constructor() {
-    let body = "new BusinessCentralClient($config);";
-    let signature = "handle(): void";
-    let file_content = "";
-
-    let bc_class = make_class_with_throws(
-        "BusinessCentralClient",
-        vec![("__construct", vec!["ConnectionException"])],
-    );
-
-    let class_loader = |name: &str| -> Option<Arc<ClassInfo>> {
-        if name.trim_start_matches('\\') == "BusinessCentralClient" {
-            Some(bc_class.clone())
-        } else {
-            None
-        }
-    };
-
-    let use_map = HashMap::new();
-    let file_namespace = None;
-    let ctx = ThrowsContext {
-        class_loader: &class_loader,
-        function_loader: None,
-        use_map: &use_map,
-        file_namespace: &file_namespace,
-    };
-    let results = find_cross_file_propagated_throws(body, signature, file_content, &ctx);
-    let names: Vec<String> = results
-        .iter()
-        .map(|t| t.type_name.to_string().trim_start_matches('\\').to_string())
-        .collect();
-    assert_eq!(names, vec!["ConnectionException"]);
-}
-
-#[test]
-fn test_find_cross_file_propagated_throws_skips_php_keywords() {
-    let body = concat!(
-        "if ($x) {}\n",
-        "foreach ($items as $item) {}\n",
-        "return $result;\n",
-    );
-    let signature = "handle(): void";
-    let file_content = "";
-
-    let class_loader = |_name: &str| -> Option<Arc<ClassInfo>> { None };
-
-    let use_map = HashMap::new();
-    let file_namespace = None;
-    let ctx = ThrowsContext {
-        class_loader: &class_loader,
-        function_loader: None,
-        use_map: &use_map,
-        file_namespace: &file_namespace,
-    };
-    let results = find_cross_file_propagated_throws(body, signature, file_content, &ctx);
-    assert!(
-        results.is_empty(),
-        "PHP keywords should not be treated as function calls"
-    );
-}
-
-#[test]
-fn test_find_cross_file_propagated_throws_mixed_patterns() {
-    let body = concat!(
-        "$service->sendData();\n",
-        "BusinessCentralService::validate();\n",
-        "new HttpClient();\n",
-        "helperFunction();\n",
-    );
-    let signature = "handle(MyService $service): void";
-    let file_content = "";
-
-    let svc_class = make_class_with_throws("MyService", vec![("sendData", vec!["SendException"])]);
-    let bc_class = make_class_with_throws(
-        "BusinessCentralService",
-        vec![("validate", vec!["ValidationException"])],
-    );
-    let http_class = make_class_with_throws(
-        "HttpClient",
-        vec![("__construct", vec!["ConnectionException"])],
-    );
-
-    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
-        match name.trim_start_matches('\\') {
-            "MyService" => Some(svc_class.clone()),
-            "BusinessCentralService" => Some(bc_class.clone()),
-            "HttpClient" => Some(http_class.clone()),
-            _ => None,
-        }
-    };
-
-    let func_info = FunctionInfo {
-        name: crate::atom::atom("helperFunction"),
-        throws: vec![PhpType::parse("HelperException")],
-        ..Default::default()
-    };
-
-    let function_loader = move |name: &str, _offset: u32| -> Option<FunctionInfo> {
-        if name.trim_start_matches('\\') == "helperFunction" {
-            Some(func_info.clone())
-        } else {
-            None
-        }
-    };
-
-    let use_map = HashMap::new();
-    let file_namespace = None;
-    let ctx = ThrowsContext {
-        class_loader: &class_loader,
-        function_loader: Some(&function_loader),
-        use_map: &use_map,
-        file_namespace: &file_namespace,
-    };
-    let results = find_cross_file_propagated_throws(body, signature, file_content, &ctx);
-    let names: Vec<String> = results
-        .iter()
-        .map(|t| t.type_name.to_string().trim_start_matches('\\').to_string())
-        .collect();
-    assert!(
-        names.contains(&"SendException".to_string()),
-        "Should propagate from $service->sendData(), got: {:?}",
-        names
-    );
-    assert!(
-        names.contains(&"ValidationException".to_string()),
-        "Should propagate from BusinessCentralService::validate(), got: {:?}",
-        names
-    );
-    assert!(
-        names.contains(&"ConnectionException".to_string()),
-        "Should propagate from new HttpClient(), got: {:?}",
-        names
-    );
-    assert!(
-        names.contains(&"HelperException".to_string()),
-        "Should propagate from helperFunction(), got: {:?}",
-        names
-    );
-}
-
-#[test]
-fn test_find_uncaught_with_class_loader_catches_cross_file() {
-    let content = concat!(
-        "<?php\nclass Foo {\n",
-        "    /**\n",
-        "     * @\n",
-        "     */\n",
-        "    public function handle(BusinessCentralService $service): void {\n",
-        "        try {\n",
-        "            $service->sendData();\n",
-        "        } catch (RuntimeException $e) {\n",
-        "            // handled\n",
-        "        }\n",
-        "    }\n",
-        "}\n",
-    );
-    let pos = Position {
-        line: 2,
-        character: 5,
-    };
-
-    let bc_class = make_class_with_throws(
-        "BusinessCentralService",
-        vec![("sendData", vec!["RuntimeException", "ConvertException"])],
-    );
-
-    let class_loader = |name: &str| -> Option<Arc<ClassInfo>> {
-        if name.trim_start_matches('\\') == "BusinessCentralService" {
-            Some(bc_class.clone())
-        } else {
-            None
-        }
-    };
-
-    let use_map = HashMap::new();
-    let file_namespace = None;
-    let uncaught = find_uncaught_throw_types_with_context(
-        content,
-        pos,
-        Some(&ThrowsContext {
-            class_loader: &class_loader,
-            function_loader: None,
-            use_map: &use_map,
-            file_namespace: &file_namespace,
-        }),
-    );
-    // RuntimeException is caught, but ConvertException is not.
-    assert!(
-        !uncaught
-            .iter()
-            .any(|t| t == &PhpType::named(atom("RuntimeException"))),
-        "RuntimeException should be caught"
-    );
-    assert!(
-        uncaught
-            .iter()
-            .any(|t| t == &PhpType::named(atom("ConvertException"))),
-        "ConvertException should be uncaught, got: {:?}",
-        uncaught
-    );
 }
 
 // ── extract_throws_tags tests ───────────────────────────────────────

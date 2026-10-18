@@ -3,6 +3,7 @@ pub(crate) mod balance;
 pub(crate) mod block_index;
 pub(crate) mod blocks;
 pub(crate) mod call_site_inference;
+mod call_site_refresh;
 pub(crate) mod component_names;
 pub(crate) mod component_tags;
 pub(crate) mod contract;

@@ -1,40 +1,24 @@
-//! Core scanning primitives and method-lookup helpers for throws analysis.
+//! Text scanners for the exceptions a `try` block throws.
 //!
-//! These byte-level scanners are shared by [`super::catch`] and
-//! [`super::cross_file`]:
+//! Catch completion runs while the `catch (…)` clause is still being
+//! typed, on code that does not parse yet, so it reads the `try` block's
+//! text instead of its syntax tree:
 //!   - Find `throw new Type(…)` statements in a block of PHP code
 //!   - Find `throw $this->method(…)` / `throw self::method(…)` patterns
 //!     and resolve the called method's return type
 //!   - Find method calls and collect their `@throws` docblock annotations
 //!   - Look up a method's return type from its declaration or docblock
 //!   - Look up a method's `@throws` tags from its docblock
-//!   - Extract the function body following a docblock
 
 use crate::atom::atom;
-use crate::completion::source::comment_position::position_to_byte_offset;
 use crate::php_type::PhpType;
 use crate::text_scan::{CodeOffsets, find_matching_forward, is_ident_byte, keyword_starts_at};
-use tower_lsp::lsp_types::Position;
-
-/// Information about a `throw` statement (or throw-expression) found in
-/// a block of PHP source code.
-#[derive(Debug)]
-pub(crate) struct ThrowInfo {
-    /// The exception type as written in source (e.g.
-    /// `InvalidArgumentException`, `RuntimeException`).
-    pub type_name: PhpType,
-    /// Byte offset of this throw statement relative to the start of the
-    /// scanned block.
-    pub offset: usize,
-}
 
 // ─── Core Scanning Primitives ───────────────────────────────────────────────
 
-/// Find all `throw new Type(…)` statements in the given PHP source text.
-///
-/// Returns a [`ThrowInfo`] for each statement with the type name and the
-/// byte offset of the `throw` keyword within `body`.
-pub(crate) fn find_throw_statements(body: &str) -> Vec<ThrowInfo> {
+/// Find all `throw new Type(…)` statements in the given PHP source text,
+/// as the type names written.
+pub(crate) fn find_throw_statements(body: &str) -> Vec<PhpType> {
     let mut results = Vec::new();
     let bytes = body.as_bytes();
 
@@ -45,10 +29,7 @@ pub(crate) fn find_throw_statements(body: &str) -> Vec<ThrowInfo> {
                 .unwrap_or(after_new.len());
             let type_name = &after_new[..type_end];
             if !type_name.is_empty() {
-                results.push(ThrowInfo {
-                    type_name: PhpType::named(atom(type_name)),
-                    offset: pos,
-                });
+                results.push(PhpType::named(atom(type_name)));
             }
         }
     }
@@ -73,8 +54,8 @@ fn throw_new_at(body: &str, pos: usize) -> Option<&str> {
 /// `throw static::method(…)` patterns and resolve the called method's
 /// return type from its declaration or docblock in the same file.
 ///
-/// Returns a [`ThrowInfo`] for each resolved throw-expression.
-pub(crate) fn find_throw_expression_types(body: &str, file_content: &str) -> Vec<ThrowInfo> {
+/// Returns the type each resolved throw-expression throws.
+pub(crate) fn find_throw_expression_types(body: &str, file_content: &str) -> Vec<PhpType> {
     let mut results = Vec::new();
     let method_patterns: &[&str] = &["$this->", "self::", "static::"];
 
@@ -97,10 +78,7 @@ pub(crate) fn find_throw_expression_types(body: &str, file_content: &str) -> Vec
                 if !method_name.is_empty()
                     && let Some(ret_type) = find_method_return_type(file_content, method_name)
                 {
-                    results.push(ThrowInfo {
-                        type_name: ret_type,
-                        offset: pos,
-                    });
+                    results.push(ret_type);
                 }
                 matched = true;
                 break;
@@ -117,10 +95,7 @@ pub(crate) fn find_throw_expression_types(body: &str, file_content: &str) -> Vec
                 && after_name.starts_with('(')
                 && let Some(ret_type) = find_method_return_type(file_content, func_name)
             {
-                results.push(ThrowInfo {
-                    type_name: ret_type,
-                    offset: pos,
-                });
+                results.push(ret_type);
             }
         }
     }
@@ -136,9 +111,8 @@ pub(crate) fn find_throw_expression_types(body: &str, file_content: &str) -> Vec
 /// and B declares `@throws SomeException`, then A should also be aware
 /// of that exception.
 ///
-/// Returns a [`ThrowInfo`] for each propagated throw, with the byte
-/// offset set to the call site so that catch-block filtering works.
-pub(crate) fn find_propagated_throws(body: &str, file_content: &str) -> Vec<ThrowInfo> {
+/// Returns the type of each propagated throw.
+pub(crate) fn find_propagated_throws(body: &str, file_content: &str) -> Vec<PhpType> {
     let mut results = Vec::new();
     let mut seen_methods = std::collections::HashSet::new();
     let patterns: &[&str] = &["$this->", "self::", "static::"];
@@ -166,10 +140,7 @@ pub(crate) fn find_propagated_throws(body: &str, file_content: &str) -> Vec<Thro
                 {
                     let throws = find_method_throws_tags(file_content, method_name);
                     for t in throws {
-                        results.push(ThrowInfo {
-                            type_name: t,
-                            offset: pos,
-                        });
+                        results.push(t);
                     }
                 }
                 break;
@@ -188,7 +159,7 @@ pub(crate) fn find_propagated_throws(body: &str, file_content: &str) -> Vec<Thro
 /// doesn't have `@throws` annotations itself.
 ///
 /// Returns the short type names found.
-pub(crate) fn find_inline_throws_annotations(body: &str) -> Vec<ThrowInfo> {
+pub(crate) fn find_inline_throws_annotations(body: &str) -> Vec<PhpType> {
     let mut results = Vec::new();
     let bytes = body.as_bytes();
     let len = bytes.len();
@@ -222,10 +193,7 @@ pub(crate) fn find_inline_throws_annotations(body: &str) -> Vec<ThrowInfo> {
                                 .trim_end_matches('*')
                                 .trim_end_matches('/');
                             if !clean.is_empty() && !clean.starts_with('$') {
-                                results.push(ThrowInfo {
-                                    type_name: PhpType::named(atom(clean)),
-                                    offset: doc_start,
-                                });
+                                results.push(PhpType::named(atom(clean)));
                             }
                         }
                     }
@@ -384,113 +352,4 @@ pub(crate) fn skip_modifiers_backward(text: &str) -> &str {
         }
     }
     s
-}
-
-// ─── Function Body Extraction ───────────────────────────────────────────────
-
-/// Extract the function/method body text that follows the docblock at
-/// the cursor position.
-///
-/// Returns the text between the opening `{` and matching closing `}` of
-/// the function/method declaration.  Returns `None` if the body cannot
-/// be located (e.g. abstract method, or the docblock is not followed by
-/// a function).
-pub(crate) fn extract_function_body(content: &str, position: Position) -> Option<String> {
-    let after_docblock = {
-        let byte_offset = position_to_byte_offset(content, position);
-        let after_cursor = &content[byte_offset.min(content.len())..];
-
-        if let Some(close_pos) = after_cursor.find("*/") {
-            after_cursor[close_pos + 2..].to_string()
-        } else {
-            after_cursor.to_string()
-        }
-    };
-
-    // Find the `function` keyword to confirm this is a function/method.
-    let func_idx = {
-        let lower = after_docblock.to_lowercase();
-        let mut start = 0;
-        let mut found = None;
-        while let Some(pos) = lower[start..].find("function") {
-            let abs = start + pos;
-            let before_ok = abs == 0 || !after_docblock.as_bytes()[abs - 1].is_ascii_alphanumeric();
-            let after_pos = abs + 8; // "function".len()
-            let after_ok = after_pos >= after_docblock.len()
-                || !after_docblock.as_bytes()[after_pos].is_ascii_alphanumeric();
-            if before_ok && after_ok {
-                found = Some(abs);
-                break;
-            }
-            start = abs + 8;
-        }
-        found?
-    };
-
-    let after_func = &after_docblock[func_idx..];
-
-    // Find the opening brace of the function body.
-    let open_brace = after_func.find('{')?;
-    let body_start = open_brace + 1;
-
-    // Walk forward to find the matching closing brace.
-    let mut depth = 1u32;
-    let mut pos = body_start;
-    let bytes = after_func.as_bytes();
-    // Track whether we are inside a string literal to avoid counting
-    // braces inside strings.
-    let mut in_single_quote = false;
-    let mut in_double_quote = false;
-    while pos < bytes.len() && depth > 0 {
-        let b = bytes[pos];
-        if in_single_quote {
-            if b == b'\\' {
-                pos += 1; // skip escaped char
-            } else if b == b'\'' {
-                in_single_quote = false;
-            }
-        } else if in_double_quote {
-            if b == b'\\' {
-                pos += 1; // skip escaped char
-            } else if b == b'"' {
-                in_double_quote = false;
-            }
-        } else {
-            match b {
-                b'\'' => in_single_quote = true,
-                b'"' => in_double_quote = true,
-                b'{' => depth += 1,
-                b'}' => {
-                    depth -= 1;
-                    if depth == 0 {
-                        return Some(after_func[body_start..pos].to_string());
-                    }
-                }
-                b'/' if pos + 1 < bytes.len() => {
-                    // Skip line comments
-                    if bytes[pos + 1] == b'/' {
-                        while pos < bytes.len() && bytes[pos] != b'\n' {
-                            pos += 1;
-                        }
-                        continue;
-                    }
-                    // Skip block comments
-                    if bytes[pos + 1] == b'*' {
-                        pos += 2;
-                        while pos + 1 < bytes.len() {
-                            if bytes[pos] == b'*' && bytes[pos + 1] == b'/' {
-                                pos += 1;
-                                break;
-                            }
-                            pos += 1;
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-        pos += 1;
-    }
-
-    None
 }

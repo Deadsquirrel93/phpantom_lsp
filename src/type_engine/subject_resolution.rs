@@ -17,6 +17,7 @@ use crate::names::resolve_to_fqn;
 use crate::php_type::PhpType;
 use crate::type_engine::resolver::Loaders;
 use crate::type_engine::subject_expr::SubjectExpr;
+use crate::type_engine::variable::resolution::VarQuery;
 use crate::types::{AccessKind, ClassInfo, ResolvedType};
 
 /// Context for resolving a subject expression to its type.
@@ -81,16 +82,18 @@ pub(crate) fn resolve_subject_type(
                 // which is position-accurate (reassignment, narrowing).
                 let current_class = find_class_at_offset(ctx.local_classes, access_offset);
                 return crate::type_engine::variable::resolution::resolve_variable_php_type(
-                    trimmed,
-                    ctx.content,
-                    access_offset,
-                    current_class,
-                    ctx.local_classes,
-                    ctx.class_loader,
-                    ctx.source_class_loader,
-                    Some(ctx.use_map),
-                    ctx.backend,
-                    Loaders::with_function(Some(ctx.function_loader)),
+                    VarQuery {
+                        var_name: trimmed,
+                        cursor_offset: access_offset,
+                        content: ctx.content,
+                        current_class,
+                        all_classes: ctx.local_classes,
+                        class_loader: ctx.class_loader,
+                        source_class_loader: ctx.source_class_loader,
+                        source_imports: Some(ctx.use_map),
+                        backend: ctx.backend,
+                        loaders: Loaders::with_function(Some(ctx.function_loader)),
+                    },
                 );
             }
 

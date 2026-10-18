@@ -2,8 +2,9 @@
 //! and the top-level scanners.
 
 use super::{
-    NamespaceDecls, ScanStep, find_semicolon_balanced, namespace_at_offset, namespace_decl_at,
-    scan_top_level_backward, split_top_level_commas, top_level_commas,
+    NamespaceDecls, ScanStep, find_semicolon_balanced, is_whole_string_literal,
+    namespace_at_offset, namespace_decl_at, scan_top_level_backward, split_top_level_commas,
+    top_level_commas, unquote_php_string,
 };
 
 /// Return the namespace in force where `|` sits in `src` (the marker is
@@ -220,4 +221,26 @@ fn backward_scan_stops_at_what_the_visitor_rules_out() {
     assert_eq!(enclosing_open("done(); $x, "), None);
     assert_eq!(enclosing_open("no bracket at all"), None);
     assert_eq!(enclosing_open("f(';', "), Some(1));
+}
+
+#[test]
+fn a_whole_string_literal_is_one_quoted_string() {
+    assert!(is_whole_string_literal("'a'"));
+    assert!(is_whole_string_literal("\"a \\\" b\""));
+    assert!(is_whole_string_literal("'a\\\\'"));
+    assert!(is_whole_string_literal("''"));
+    assert!(!is_whole_string_literal("'a' === 'b'"));
+    assert!(!is_whole_string_literal("'a' . 'b'"));
+    assert!(!is_whole_string_literal("'a\\'"));
+    assert!(!is_whole_string_literal("'a\""));
+    assert!(!is_whole_string_literal("a"));
+    assert!(!is_whole_string_literal("'"));
+}
+
+#[test]
+fn unquoting_takes_only_a_whole_literal() {
+    assert_eq!(unquote_php_string("'key'"), Some("key"));
+    assert_eq!(unquote_php_string("\"key\""), Some("key"));
+    assert_eq!(unquote_php_string("'a' . 'b'"), None);
+    assert_eq!(unquote_php_string("key"), None);
 }

@@ -22,6 +22,7 @@ use crate::class_lookup::find_class_at_offset;
 use crate::php_type::PhpType;
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind};
 use crate::type_engine::resolver::Loaders;
+use crate::type_engine::variable::resolution::VarQuery;
 use crate::types::*;
 
 impl Backend {
@@ -308,18 +309,18 @@ fn resolve_variable_type_names(
     // Delegate to the unified pipeline.
     let resolved_class_loader =
         |name: &str| crate::class_lookup::load_resolved_name(name, class_loader);
-    let resolved = crate::type_engine::variable::resolution::resolve_variable_php_type(
-        name,
-        content,
+    let resolved = crate::type_engine::variable::resolution::resolve_variable_php_type(VarQuery {
+        var_name: name,
         cursor_offset,
+        content,
         current_class,
-        &ctx.classes,
-        &resolved_class_loader,
-        class_loader,
-        Some(&ctx.use_map),
+        all_classes: &ctx.classes,
+        class_loader: &resolved_class_loader,
+        source_class_loader: class_loader,
+        source_imports: Some(&ctx.use_map),
         backend,
-        Loaders::with_function(Some(function_loader)),
-    );
+        loaders: Loaders::with_function(Some(function_loader)),
+    });
 
     // Only return types that contain at least one class name (scalars
     // are not useful for go-to-type-definition).

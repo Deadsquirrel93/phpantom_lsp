@@ -9,6 +9,7 @@ use crate::Backend;
 
 use crate::php_type::PhpType;
 use crate::type_engine::variable::forward_walk::{ExprTypes, ScopeProofs};
+use crate::type_engine::variable::resolution::VarQuery;
 use crate::types::*;
 
 use super::WrittenNames;
@@ -409,33 +410,28 @@ impl<'a> ResolutionCtx<'a> {
         )
     }
 
-    /// [`resolve_variable_types`](crate::type_engine::variable::resolution::resolve_variable_types)
-    /// for `var_name` at the cursor, read inside the current class, or
-    /// inside a placeholder for the cursor's namespace outside one.
-    pub(crate) fn resolve_variable_at_cursor(&self, var_name: &str) -> Vec<ResolvedType> {
-        let placeholder;
-        let current_class = match self.current_class {
-            Some(cls) => cls,
-            None => {
-                placeholder = crate::class_lookup::class_context_placeholder(
-                    self.content,
-                    self.cursor_offset,
-                );
-                &placeholder
-            }
-        };
-        crate::type_engine::variable::resolution::resolve_variable_types(
+    /// A forward-walker query for `var_name` at the cursor, read inside
+    /// the current class, or inside a placeholder for the cursor's
+    /// namespace outside one.
+    pub(crate) fn var_query<'q>(&'q self, var_name: &'q str) -> VarQuery<'q> {
+        VarQuery {
             var_name,
-            current_class,
-            self.all_classes,
-            self.content,
-            self.cursor_offset,
-            self.class_loader,
-            self.source_class_loader,
-            self.source_imports,
-            self.backend,
-            Loaders::with_function(self.function_loader),
-        )
+            cursor_offset: self.cursor_offset,
+            content: self.content,
+            current_class: self.current_class,
+            all_classes: self.all_classes,
+            class_loader: self.class_loader,
+            source_class_loader: self.source_class_loader,
+            source_imports: self.source_imports,
+            backend: self.backend,
+            loaders: Loaders::with_function(self.function_loader),
+        }
+    }
+
+    /// [`resolve_variable_types`](crate::type_engine::variable::resolution::resolve_variable_types)
+    /// for `var_name` at the cursor (see [`Self::var_query`]).
+    pub(crate) fn resolve_variable_at_cursor(&self, var_name: &str) -> Vec<ResolvedType> {
+        crate::type_engine::variable::resolution::resolve_variable_types(self.var_query(var_name))
     }
 }
 
@@ -606,6 +602,23 @@ impl<'a> VarResolutionCtx<'a> {
             scope_contains_resolver: None,
             scope_proofs: None,
             expr_types: None,
+        }
+    }
+
+    /// A forward-walker query for `var_name` at `cursor_offset` with this
+    /// context's file, class and loaders (none of its scope state).
+    pub(crate) fn var_query<'q>(&'q self, var_name: &'q str, cursor_offset: u32) -> VarQuery<'q> {
+        VarQuery {
+            var_name,
+            cursor_offset,
+            content: self.content,
+            current_class: Some(self.current_class),
+            all_classes: self.all_classes,
+            class_loader: self.class_loader,
+            source_class_loader: self.source_class_loader,
+            source_imports: self.source_imports,
+            backend: self.backend,
+            loaders: self.loaders,
         }
     }
 

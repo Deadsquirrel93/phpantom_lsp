@@ -113,9 +113,10 @@ pub(crate) use assignment_value::{
     assignment_value, coalesce_assign_value, compound_assignment_result,
 };
 pub(crate) use calls::{
-    ArgWalkerTypes, build_function_template_subs, infer_closure_literal_type,
-    is_array_like_wrapper, resolve_arg_call_raw_type, resolve_arg_iterable_raw_type,
-    resolve_arg_variable_raw_type, substitute_function_templates, walker_arg_types,
+    ArgWalkerTypes, build_function_template_subs, first_class_callable_return_type,
+    infer_closure_literal_type, is_array_like_wrapper, resolve_arg_call_raw_type,
+    resolve_arg_iterable_raw_type, resolve_arg_variable_raw_type, substitute_function_templates,
+    walker_arg_types,
 };
 pub(crate) use instantiation::{
     TemplateBindingMode, array_element_binding, bound_binding_hint, candidate_binding_modes,

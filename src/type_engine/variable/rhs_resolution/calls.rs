@@ -17,9 +17,11 @@ use crate::types::ResolvedType;
 
 use crate::type_engine::resolver::VarResolutionCtx;
 
-use super::function_calls::{first_class_function_return_type, resolve_rhs_function_call};
-use super::method_calls::resolve_rhs_method_call_inner;
-use super::static_calls::resolve_rhs_static_call;
+use super::function_calls::{
+    callable_invocation, first_class_function_return_type, resolve_rhs_function_call,
+};
+use super::method_calls::{resolve_member_call_on_receiver, resolve_rhs_method_call_inner};
+use super::static_calls::{StaticCallParts, resolve_rhs_static_call};
 use super::{resolve_rhs_expression, resolve_var_types, resolved_type_with_lookup};
 
 /// A call argument's type as the AST walker resolves it, looked up by the
@@ -394,7 +396,9 @@ pub(super) fn resolve_rhs_call<'b>(
             &method_call.argument_list,
             ctx,
         ),
-        Call::StaticMethod(static_call) => resolve_rhs_static_call(static_call, ctx),
+        Call::StaticMethod(static_call) => {
+            resolve_rhs_static_call(StaticCallParts::of_call(static_call), ctx)
+        }
     };
 
     finish_return_constant_operands(&mut resolved, ctx);
@@ -615,27 +619,10 @@ pub(crate) fn infer_closure_literal_type(
             Some(narrowed.unwrap_or(declared))
         }
         None => body_return().or_else(|| match expr {
-            // First-class callable syntax: `strlen(...)` returns what the
-            // function it names does.
-            Expression::PartialApplication(PartialApplication::Function(fpa))
-                if matches!(fpa.function, Expression::Identifier(_)) =>
-            {
-                first_class_function_return_type(fpa, ctx)
-            }
-            // `$this->method(...)`, `ClassName::method(...)`, `$invokable(...)`:
-            // the method's return type, resolved from the callable's own
-            // source text.
-            Expression::PartialApplication(_) => {
-                let span = expr.span();
-                let start = (span.start.offset as usize).min(ctx.content.len());
-                let end = (span.end.offset as usize).min(ctx.content.len());
-                ctx.content.get(start..end).and_then(|text| {
-                    let rctx = ctx.as_resolution_ctx();
-                    crate::completion::source::helpers::resolve_first_class_callable_return_type(
-                        text, &rctx,
-                    )
-                })
-            }
+            // First-class callable syntax: `strlen(...)`,
+            // `$this->method(...)`, `ClassName::method(...)` and
+            // `$invokable(...)` return what calling the callable does.
+            Expression::PartialApplication(pa) => first_class_callable_return_type(pa, expr, ctx),
             _ => None,
         }),
     };
@@ -662,6 +649,34 @@ pub(crate) fn infer_closure_literal_type(
     } else {
         PhpType::closure()
     }
+}
+
+/// What calling the first-class callable `pa` (written as `at`) returns:
+/// the method it names, called with no arguments to decide anything, or
+/// what invoking the value it wraps returns.
+pub(crate) fn first_class_callable_return_type<'b>(
+    pa: &'b PartialApplication<'b>,
+    at: &Expression<'_>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<PhpType> {
+    let resolved = match pa {
+        PartialApplication::Method(ma) => {
+            resolve_member_call_on_receiver(ma.object, &ma.method, None, None, false, ctx)
+        }
+        PartialApplication::StaticMethod(sma) => resolve_rhs_static_call(
+            StaticCallParts {
+                class: sma.class,
+                method: &sma.method,
+                argument_list: None,
+            },
+            ctx,
+        ),
+        PartialApplication::Function(fa) if matches!(fa.function, Expression::Identifier(_)) => {
+            return first_class_function_return_type(fa, ctx);
+        }
+        PartialApplication::Function(fa) => callable_invocation(fa.function, at, ctx),
+    };
+    (!resolved.is_empty()).then(|| ResolvedType::types_joined(&resolved))
 }
 
 /// The parameter list a closure or arrow function literal declares, as

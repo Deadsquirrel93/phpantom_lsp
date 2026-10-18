@@ -13,8 +13,7 @@ use crate::virtual_members::resolve_class_fully_maybe_cached;
 
 use super::context::resolved_to_arcs;
 use super::{
-    Loaders, ResolutionCtx, resolve_static_owner_class, resolve_target_classes,
-    resolve_target_classes_expr,
+    ResolutionCtx, resolve_static_owner_class, resolve_target_classes, resolve_target_classes_expr,
 };
 
 /// Whether every non-null member of `ty` is the bare `string` type.
@@ -206,16 +205,7 @@ pub(crate) fn resolve_subject_outcome(
     if let SubjectExpr::Variable(var_name) = &expr
         && let Some(resolved_type) =
             crate::type_engine::variable::resolution::resolve_variable_php_type(
-                var_name,
-                ctx.content,
-                ctx.cursor_offset,
-                ctx.current_class,
-                ctx.all_classes,
-                ctx.class_loader,
-                ctx.source_class_loader,
-                ctx.source_imports,
-                ctx.backend,
-                Loaders::with_function(ctx.function_loader),
+                ctx.var_query(var_name),
             )
         && let Some(unresolved) = check_unresolvable_class_name(&resolved_type, ctx.class_loader)
     {

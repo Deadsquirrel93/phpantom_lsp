@@ -39,6 +39,7 @@ use crate::type_engine::conditional_resolution::{
     resolve_conditional_with_text_args_and_defaults,
 };
 use crate::type_engine::resolver::{Loaders, ResolutionCtx};
+use crate::type_engine::variable::resolution::VarQuery;
 use crate::types::{ClassInfo, FunctionInfo, ParameterInfo};
 
 // ─── Callee identity ────────────────────────────────────────────────────────
@@ -388,16 +389,18 @@ fn read_out_type(
             .flat_map(|exit| {
                 crate::type_engine::variable::resolution::resolve_variable_types_in_program(
                     program,
-                    param_name,
-                    current_class,
-                    &file_ctx.classes,
-                    content,
-                    exit,
-                    &resolved_class_loader,
-                    &class_loader,
-                    Some(use_map),
-                    Some(backend),
-                    loaders,
+                    VarQuery {
+                        var_name: param_name,
+                        cursor_offset: exit,
+                        content,
+                        current_class: Some(current_class),
+                        all_classes: &file_ctx.classes,
+                        class_loader: &resolved_class_loader,
+                        source_class_loader: &class_loader,
+                        source_imports: Some(use_map),
+                        backend: Some(backend),
+                        loaders,
+                    },
                 )
             })
             .collect()

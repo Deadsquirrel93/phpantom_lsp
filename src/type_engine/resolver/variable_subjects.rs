@@ -3,9 +3,10 @@
 //! scope so narrowing applies to them.
 
 use crate::php_type::TypeKind;
+use crate::type_engine::variable::resolution::VarQuery;
 use crate::types::*;
 
-use super::{Loaders, ResolutionCtx, is_bare_variable};
+use super::{ResolutionCtx, is_bare_variable};
 
 /// Resolve `$this`: the enclosing class, unless a closure binds it to
 /// something else or the forward walker narrowed it.
@@ -183,7 +184,6 @@ pub(super) fn resolve_variable_fallback(
     let current_class = ctx.current_class;
     let all_classes = ctx.all_classes;
     let class_loader = ctx.class_loader;
-    let function_loader = ctx.function_loader;
 
     let dummy_class;
     let effective_class = match current_class {
@@ -216,18 +216,10 @@ pub(super) fn resolve_variable_fallback(
             };
             scope_resolver(&prefixed)
         } else {
-            crate::type_engine::variable::resolution::resolve_variable_types(
-                var_name,
-                effective_class,
-                all_classes,
-                ctx.content,
-                ctx.cursor_offset,
-                class_loader,
-                ctx.source_class_loader,
-                ctx.source_imports,
-                ctx.backend,
-                Loaders::with_function(function_loader),
-            )
+            crate::type_engine::variable::resolution::resolve_variable_types(VarQuery {
+                current_class: Some(effective_class),
+                ..ctx.var_query(var_name)
+            })
         }
     } else {
         vec![]

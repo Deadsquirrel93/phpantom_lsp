@@ -17,21 +17,42 @@ use crate::type_engine::variable::raw_type_inference::extract_arg_texts_from_ast
 use crate::type_engine::variable::resolution::build_var_resolver_from_ctx;
 
 use super::laravel_calls::{try_resolve_config_method_type, try_resolve_trans_method_type};
-use super::method_calls::resolve_member_call_on_receiver;
+use super::method_calls::{resolve_member_call_on_receiver, selected_member_name};
 use super::owner_method_call::resolve_owner_method_call;
 use super::{resolve_rhs_expression, resolve_var_types};
+
+/// The parts of a static method call its resolution reads: what names the
+/// class, the method, and the arguments when there are any.  A first-class
+/// callable (`Foo::bar(...)`) has none, and what its closure returns is
+/// what the method declares.
+pub(super) struct StaticCallParts<'b> {
+    pub(super) class: &'b Expression<'b>,
+    pub(super) method: &'b ClassLikeMemberSelector<'b>,
+    pub(super) argument_list: Option<&'b ArgumentList<'b>>,
+}
+
+impl<'b> StaticCallParts<'b> {
+    pub(super) fn of_call(call: &'b StaticMethodCall<'b>) -> Self {
+        Self {
+            class: call.class,
+            method: &call.method,
+            argument_list: Some(&call.argument_list),
+        }
+    }
+}
 
 /// Resolve a static method call: `ClassName::method()`, `self::method()`,
 /// `static::method()`.
 pub(super) fn resolve_rhs_static_call(
-    static_call: &StaticMethodCall<'_>,
+    static_call: StaticCallParts<'_>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Vec<ResolvedType> {
-    // `Cls::{$expr}()` / `Cls::$name()` — see `runtime_named_member_type`.
-    let ClassLikeMemberSelector::Identifier(ident) = &static_call.method else {
+    // `Cls::{$expr}()`, or `Cls::$name()` with a `$name` that holds no
+    // one known string — see `runtime_named_member_type`.
+    let Some(method_name) = selected_member_name(static_call.method, ctx) else {
         return super::runtime_named_member_type();
     };
-    let method_name = bytes_to_str(ident.value);
+    let method_name = method_name.as_str();
 
     let class_name = match static_call.class {
         Expression::Self_(_)
@@ -61,9 +82,9 @@ pub(super) fn resolve_rhs_static_call(
                 &resolved, ctx,
             );
             return match targets.as_slice() {
-                [] => static_call_on_object(static_call, resolved, ctx),
-                [only] => static_call_on_class(only, method_name, static_call, ctx),
-                _ => static_call_on_class_strings(&targets, method_name, static_call, ctx),
+                [] => static_call_on_object(&static_call, resolved, ctx),
+                [only] => static_call_on_class(only, method_name, &static_call, ctx),
+                _ => static_call_on_class_strings(&targets, method_name, &static_call, ctx),
             };
         }
     };
@@ -75,14 +96,14 @@ pub(super) fn resolve_rhs_static_call(
     }) else {
         return vec![];
     };
-    static_call_on_class(&owner, method_name, static_call, ctx)
+    static_call_on_class(&owner, method_name, &static_call, ctx)
 }
 
 /// `ClassName::method()` once the class the call names is known.
 fn static_call_on_class(
     owner: &ClassInfo,
     method_name: &str,
-    static_call: &StaticMethodCall<'_>,
+    static_call: &StaticCallParts<'_>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Vec<ResolvedType> {
     let concrete_owner = crate::type_engine::call_resolution::facade_concrete_owner(
@@ -109,19 +130,20 @@ fn static_call_on_class(
         });
     let owner = bound_owner.as_deref().unwrap_or(owner);
 
-    if let Some(result) =
-        try_resolve_config_method_type(&owner.fqn(), method_name, &static_call.argument_list, ctx)
-    {
-        return result;
+    if let Some(argument_list) = static_call.argument_list {
+        if let Some(result) =
+            try_resolve_config_method_type(&owner.fqn(), method_name, argument_list, ctx)
+        {
+            return result;
+        }
+        if let Some(result) =
+            try_resolve_trans_method_type(&owner.fqn(), method_name, argument_list, ctx)
+        {
+            return result;
+        }
     }
 
-    if let Some(result) =
-        try_resolve_trans_method_type(&owner.fqn(), method_name, &static_call.argument_list, ctx)
-    {
-        return result;
-    }
-
-    let arg_texts = extract_arg_texts_from_ast(&static_call.argument_list, ctx.content);
+    let arg_texts = static_arg_texts(static_call, ctx);
     let arg_refs: Vec<&str> = arg_texts.iter().map(|s| s.as_str()).collect();
     let rctx = ctx.as_resolution_ctx();
     let template_subs = Backend::build_method_template_subs(owner, method_name, &arg_refs, &rctx);
@@ -148,7 +170,7 @@ fn static_call_on_class(
     let mut results = resolve_owner_method_call(
         owner,
         method_name,
-        &static_call.argument_list,
+        static_call.argument_list,
         ctx,
         true,
         &template_subs,
@@ -161,7 +183,7 @@ fn static_call_on_class(
     // argument is resolved, which is why the type is fetched
     // lazily rather than for every static call in the file.
     let first_arg_type = || {
-        let arg = static_call.argument_list.arguments.first()?;
+        let arg = static_call.argument_list?.arguments.first()?;
         let resolved = resolve_rhs_expression(arg.value(), ctx);
         (!resolved.is_empty()).then(|| ResolvedType::types_joined(&resolved))
     };
@@ -180,10 +202,10 @@ fn static_call_on_class(
 fn static_call_on_class_strings(
     targets: &[Arc<ClassInfo>],
     method_name: &str,
-    static_call: &StaticMethodCall<'_>,
+    static_call: &StaticCallParts<'_>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Vec<ResolvedType> {
-    let arg_texts = extract_arg_texts_from_ast(&static_call.argument_list, ctx.content);
+    let arg_texts = static_arg_texts(static_call, ctx);
     let arg_refs: Vec<&str> = arg_texts.iter().map(|s| s.as_str()).collect();
     let text_args = arg_texts.join(", ");
     let rctx = ctx.as_resolution_ctx();
@@ -267,7 +289,7 @@ fn static_call_on_class_strings(
 /// like `$obj->method()` would: a union receiver unions the results, an
 /// intersection intersects them, and `static` binds to the receiver.
 fn static_call_on_object(
-    static_call: &StaticMethodCall<'_>,
+    static_call: &StaticCallParts<'_>,
     resolved: Vec<ResolvedType>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Vec<ResolvedType> {
@@ -277,12 +299,20 @@ fn static_call_on_object(
     }
     resolve_member_call_on_receiver(
         static_call.class,
-        &static_call.method,
-        &static_call.argument_list,
+        static_call.method,
+        static_call.argument_list,
         Some((classes, resolved)),
         true,
         ctx,
     )
+}
+
+/// The source text of each of the call's arguments.
+fn static_arg_texts(static_call: &StaticCallParts<'_>, ctx: &VarResolutionCtx<'_>) -> Vec<String> {
+    static_call
+        .argument_list
+        .map(|list| extract_arg_texts_from_ast(list, ctx.content))
+        .unwrap_or_default()
 }
 
 /// Whether `method_name` on `class_info` is declared `static`, looking through

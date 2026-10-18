@@ -109,7 +109,7 @@ pub(super) fn resolve_method_call_on_receiver<'b>(
     if any_argument_is_never(argument_list, ctx) {
         return vec![ResolvedType::from_type_string(PhpType::never())];
     }
-    resolve_member_call_on_receiver(object, method, argument_list, receiver, false, ctx)
+    resolve_member_call_on_receiver(object, method, Some(argument_list), receiver, false, ctx)
 }
 
 /// [`resolve_method_call_on_receiver`] for either call form.
@@ -117,21 +117,23 @@ pub(super) fn resolve_method_call_on_receiver<'b>(
 /// `is_static` marks `$obj::method()`, which PHP dispatches on the class of
 /// the object `$obj` holds: every rule of an instance call applies, except
 /// that a missing method falls back to `__callStatic` rather than `__call`.
+///
+/// `argument_list` is `None` for a first-class callable (`$obj->m(...)`):
+/// what the closure returns is what the method declares, so the rules that
+/// read a call's arguments do not apply.
 pub(super) fn resolve_member_call_on_receiver<'b>(
     object: &'b Expression<'b>,
     method: &'b ClassLikeMemberSelector<'b>,
-    argument_list: &'b ArgumentList<'b>,
+    argument_list: Option<&'b ArgumentList<'b>>,
     receiver: Option<MethodReceiver>,
     is_static: bool,
     ctx: &VarResolutionCtx<'_>,
 ) -> Vec<ResolvedType> {
-    let method_name = match method {
-        ClassLikeMemberSelector::Identifier(ident) => bytes_to_str(ident.value).to_string(),
-        // Variable method name (`$obj->$method()`) — see
-        // `runtime_named_member_type`.
-        _ => return super::runtime_named_member_type(),
+    let Some(method_name) = selected_member_name(method, ctx) else {
+        return super::runtime_named_member_type();
     };
     if method_name.eq_ignore_ascii_case("call")
+        && let Some(argument_list) = argument_list
         && let Some(returned) = closure_call_return(object, argument_list, ctx)
     {
         return returned;
@@ -139,10 +141,14 @@ pub(super) fn resolve_member_call_on_receiver<'b>(
     let (owner_classes, receiver_resolved) =
         receiver.unwrap_or_else(|| resolve_method_receiver(object, ctx));
 
-    let arg_texts = crate::type_engine::variable::raw_type_inference::extract_arg_texts_from_ast(
-        argument_list,
-        ctx.content,
-    );
+    let arg_texts = argument_list
+        .map(|list| {
+            crate::type_engine::variable::raw_type_inference::extract_arg_texts_from_ast(
+                list,
+                ctx.content,
+            )
+        })
+        .unwrap_or_default();
     let arg_refs: Vec<&str> = arg_texts.iter().map(|s| s.as_str()).collect();
     let rctx = ctx.as_resolution_ctx();
 
@@ -200,38 +206,43 @@ pub(super) fn resolve_member_call_on_receiver<'b>(
     let input_accessor =
         crate::virtual_members::laravel::request_input::input_accessor(&method_name);
 
-    for owner in &owner_classes {
-        if let Some(result) =
-            try_resolve_config_method_type(&owner.fqn(), &method_name, argument_list, ctx)
-        {
-            return result;
-        }
-        if let Some(result) =
-            try_resolve_trans_method_type(&owner.fqn(), &method_name, argument_list, ctx)
-        {
-            return result;
-        }
-        if let Some(result) =
-            try_resolve_command_accessor_type(owner, &method_name, argument_list, ctx)
-        {
-            return result;
-        }
-        if let Some(call) = shape_call
-            && let Some(shape) = try_resolve_validated_shape(owner, call, object, &arg_refs, ctx)
-        {
-            return vec![ResolvedType::from_type_string(shape)];
-        }
-        if let Some(accessor) = input_accessor
-            && let Some(result) = try_resolve_request_accessor_type(
-                owner,
-                accessor,
-                &method_name,
-                argument_list,
-                &arg_refs,
-                ctx,
-            )
-        {
-            return result;
+    // Each of these reads its answer off the call's arguments, so a
+    // first-class callable, which has none, takes the declared type.
+    if let Some(argument_list) = argument_list {
+        for owner in &owner_classes {
+            if let Some(result) =
+                try_resolve_config_method_type(&owner.fqn(), &method_name, argument_list, ctx)
+            {
+                return result;
+            }
+            if let Some(result) =
+                try_resolve_trans_method_type(&owner.fqn(), &method_name, argument_list, ctx)
+            {
+                return result;
+            }
+            if let Some(result) =
+                try_resolve_command_accessor_type(owner, &method_name, argument_list, ctx)
+            {
+                return result;
+            }
+            if let Some(call) = shape_call
+                && let Some(shape) =
+                    try_resolve_validated_shape(owner, call, object, &arg_refs, ctx)
+            {
+                return vec![ResolvedType::from_type_string(shape)];
+            }
+            if let Some(accessor) = input_accessor
+                && let Some(result) = try_resolve_request_accessor_type(
+                    owner,
+                    accessor,
+                    &method_name,
+                    argument_list,
+                    &arg_refs,
+                    ctx,
+                )
+            {
+                return result;
+            }
         }
     }
 
@@ -262,7 +273,7 @@ pub(super) fn resolve_member_call_on_receiver<'b>(
     // Laravel's nullable `count()` needs it to distinguish int, null and a
     // value that could be either.
     let first_arg_type = || {
-        let arg = argument_list.arguments.first()?;
+        let arg = argument_list?.arguments.first()?;
         let resolved = resolve_rhs_expression(arg.value(), ctx);
         (!resolved.is_empty()).then(|| ResolvedType::types_joined(&resolved))
     };
@@ -374,6 +385,35 @@ pub(super) fn resolve_member_call_on_receiver<'b>(
     }
 
     union_results
+}
+
+/// The member a selector names: an identifier as written, or a variable
+/// holding one known string (`$name = 'length'; $obj->$name()`), which
+/// calls that member exactly as spelling it out would.  `None` when only the
+/// running code can tell (see `runtime_named_member_type`).
+pub(super) fn selected_member_name(
+    selector: &ClassLikeMemberSelector<'_>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<String> {
+    match selector {
+        ClassLikeMemberSelector::Identifier(ident) => Some(bytes_to_str(ident.value).to_string()),
+        ClassLikeMemberSelector::Variable(Variable::Direct(dv)) => {
+            let resolved = resolve_var_types(bytes_to_str(dv.name), ctx, dv.span.start.offset);
+            if resolved.is_empty() {
+                return None;
+            }
+            match ResolvedType::types_joined(&resolved).kind() {
+                TypeKind::Literal(literal) => match &**literal {
+                    crate::php_type::LiteralValue::String(raw) => {
+                        crate::util::unescape_php_string_literal(raw)
+                    }
+                    _ => None,
+                },
+                _ => None,
+            }
+        }
+        _ => None,
+    }
 }
 
 /// Combine what each member of an intersection receiver returns for the same
