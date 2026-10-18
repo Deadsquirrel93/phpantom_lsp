@@ -574,11 +574,7 @@ impl Backend {
                 return true;
             }
             match self.symbols.fqn_uri_index.read().get(fqn) {
-                Some(uri) => {
-                    !uri.contains("/vendor/")
-                        && !uri.starts_with("phpantom-stub://")
-                        && !uri.starts_with("phpantom-stub-fn://")
-                }
+                Some(uri) => !uri.contains("/vendor/") && !crate::stubs::is_stub_uri(uri),
                 None => true,
             }
         };

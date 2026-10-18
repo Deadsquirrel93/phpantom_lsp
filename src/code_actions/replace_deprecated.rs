@@ -386,7 +386,7 @@ fn summarize_replacement(replacement: &str) -> String {
     if replacement.len() <= 60 {
         format!("`{}`", replacement)
     } else {
-        format!("`{}…`", &replacement[..57])
+        format!("`{}…`", &replacement[..replacement.floor_char_boundary(57)])
     }
 }
 
@@ -412,10 +412,10 @@ fn find_subject_start(content: &str, member_start: usize, is_static: bool) -> us
 
     // Skip the operator itself: `->`, `?->`, or `::`.
     if is_static {
-        if pos >= 2 && &content[pos - 2..pos] == "::" {
+        if bytes[..pos].ends_with(b"::") {
             pos -= 2;
         }
-    } else if pos >= 2 && &content[pos - 2..pos] == "->" {
+    } else if bytes[..pos].ends_with(b"->") {
         pos -= 2;
         // Also handle `?->` (nullsafe).
         if pos > 0 && bytes[pos - 1] == b'?' {
@@ -445,12 +445,7 @@ fn find_subject_start(content: &str, member_start: usize, is_static: bool) -> us
         }
         // Continue scanning backward for the identifier/expression
         // before the parenthesized part (e.g. `func()` or `$arr[]`).
-        while pos > 0
-            && (bytes[pos - 1].is_ascii_alphanumeric()
-                || bytes[pos - 1] == b'_'
-                || bytes[pos - 1] == b'$'
-                || bytes[pos - 1] == b'\\')
-        {
+        while pos > 0 && is_subject_name_byte(bytes[pos - 1]) {
             pos -= 1;
         }
         // Handle chained `->` / `?->` / `::` before the identifier.
@@ -458,29 +453,29 @@ fn find_subject_start(content: &str, member_start: usize, is_static: bool) -> us
         while chain_pos > 0 && bytes[chain_pos - 1].is_ascii_whitespace() {
             chain_pos -= 1;
         }
-        if chain_pos >= 2
-            && (&content[chain_pos - 2..chain_pos] == "->"
-                || &content[chain_pos - 2..chain_pos] == "::")
-        {
+        let before_chain = &bytes[..chain_pos];
+        if before_chain.ends_with(b"->") || before_chain.ends_with(b"::") {
             // There's a deeper chain — recurse from the current pos.
-            return find_subject_start(content, pos, false);
-        }
-        if chain_pos >= 3 && &content[chain_pos - 3..chain_pos] == "?->" {
             return find_subject_start(content, pos, false);
         }
     } else {
         // Simple identifier: `$var`, `self`, `static`, `ClassName`, etc.
-        while pos > 0
-            && (bytes[pos - 1].is_ascii_alphanumeric()
-                || bytes[pos - 1] == b'_'
-                || bytes[pos - 1] == b'$'
-                || bytes[pos - 1] == b'\\')
-        {
+        while pos > 0 && is_subject_name_byte(bytes[pos - 1]) {
             pos -= 1;
         }
     }
 
     pos
+}
+
+/// Whether `byte` can be part of the variable, function, or class name a
+/// subject starts with.
+///
+/// PHP names may contain any byte from 0x80 up, so a name written in a
+/// non-Latin script is scanned over whole instead of ending the scan in
+/// the middle of one of its characters.
+fn is_subject_name_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'$' | b'\\') || byte >= 0x80
 }
 
 /// Resolve a member access subject to a `ClassInfo`.
@@ -697,5 +692,31 @@ mod tests {
         let start = find_subject_start(content, 17, true);
         assert_eq!(start, 0);
         assert_eq!(&content[start..17], "App\\Models\\User::");
+    }
+
+    /// PHP names may be written in any script.  The scan has to step over
+    /// such a name whole: stopping inside it would cut a character in two,
+    /// and replace only the part of the subject after the stop.
+    #[test]
+    fn find_subject_start_spans_a_name_in_a_non_latin_script() {
+        for content in [
+            "$ユーザー[0]->legacy()",
+            "日本($x)->legacy()",
+            "$éé[0]->legacy()",
+            "$ユーザー->legacy()",
+        ] {
+            let member_start = content.find("legacy").unwrap();
+            let start = find_subject_start(content, member_start, false);
+            assert_eq!(
+                start, 0,
+                "the subject of {content} starts at its first byte"
+            );
+        }
+    }
+
+    #[test]
+    fn summarize_cuts_a_long_replacement_on_a_character_boundary() {
+        let replacement = format!("{}ユーザー", "a".repeat(56));
+        assert!(summarize_replacement(&replacement).ends_with("…`"));
     }
 }

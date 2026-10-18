@@ -399,42 +399,12 @@ impl Backend {
         // ── Phase 3: Try embedded PHP stubs ──
         // Stubs are bundled in the binary for built-in classes/interfaces
         // (e.g. UnitEnum, BackedEnum, BcMath\Number).  Parse on first
-        // access and cache in the uri_classes_index under a `phpantom-stub://` URI
-        // so subsequent lookups hit Phase 1 and skip parsing entirely.
-        //
-        // Two lookup strategies:
-        //
-        //   a) **FQN lookup** — when the caller requests a namespaced
-        //      name like `BcMath\Number`, look it up in the stub index
-        //      by the full name.  Many PHP extensions define classes
-        //      inside namespaces (Ds, BcMath, Random, Fiber, etc.).
-        //
-        //   b) **Short-name lookup** — when the caller requests an
-        //      unqualified name like `PDO`, look it up by the short
-        //      name.  This only fires when `expected_ns` is `None` to
-        //      avoid `Demo\PDO` matching the global `PDO` stub.
-        //
-        // Strategy (a) is tried first because it is more specific.
-        let stub_idx = self.stub_index.read();
-        let stub_lookup = if expected_ns.is_some() {
-            // Namespaced lookup — try the full FQN as a stub key.
-            stub_idx.get_key_value(class_name)
-        } else {
-            // Global-namespace lookup — match by short name only.
-            stub_idx.get_key_value(last_segment)
-        };
-        if let Some((canonical_name, &stub_content)) = stub_lookup {
-            // Key the stub URI by the stub index's spelling so that
-            // differently-cased lookups share one cache entry.
-            let stub_uri = format!("phpantom-stub://{}", canonical_name);
-            let ver = Some(self.php_version());
-            if let Some(classes) = self.parse_and_cache_stub(stub_content, &stub_uri, ver)
-                && let Some(cls) = classes
-                    .iter()
-                    .find(|c| c.name.eq_ignore_ascii_case(last_segment))
-            {
-                return Some(Arc::clone(cls));
-            }
+        // access and cache in the uri_classes_index under a stub URI so
+        // subsequent lookups hit Phase 0 and skip parsing entirely.  Phase
+        // 0.5 already covered global names; this is where a namespaced
+        // extension class (Ds, BcMath, Random, …) is found.
+        if let Some(cls) = self.load_stub_class(class_name) {
+            return Some(cls);
         }
 
         // Cache the negative result so subsequent lookups for the same

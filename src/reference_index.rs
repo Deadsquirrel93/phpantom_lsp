@@ -855,7 +855,7 @@ impl Backend {
     }
 
     fn is_reference_indexable_uri(&self, uri: &str) -> bool {
-        if uri.starts_with("phpantom-stub://") || uri.starts_with("phpantom-stub-fn://") {
+        if crate::stubs::is_stub_uri(uri) {
             return false;
         }
         !self

@@ -1062,8 +1062,7 @@ impl Backend {
         maps.keys()
             .filter(|uri| {
                 !open_uris.contains(uri.as_str())
-                    && !uri.starts_with("phpantom-stub://")
-                    && !uri.starts_with("phpantom-stub-fn://")
+                    && !crate::stubs::is_stub_uri(uri)
                     && !vendor_prefixes.iter().any(|p| uri.starts_with(p.as_str()))
             })
             .cloned()
@@ -1176,7 +1175,7 @@ impl Backend {
         }
         // Only user files participate in workspace diagnostics.
         let vendor_prefixes = self.workspace.vendor_uri_prefixes.lock().clone();
-        if uri.starts_with("phpantom-stub")
+        if crate::stubs::is_stub_uri(uri)
             || vendor_prefixes.iter().any(|p| uri.starts_with(p.as_str()))
         {
             return;

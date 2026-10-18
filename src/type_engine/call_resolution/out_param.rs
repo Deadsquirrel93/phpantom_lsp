@@ -123,7 +123,7 @@ impl OutParamCallee {
                     .get(fqn.as_str())
                     .map(|(uri, _)| uri.clone())?;
                 // An embedded stub has a synthetic URI and no body to read.
-                if uri.starts_with("phpantom-stub-fn://") {
+                if uri.starts_with(crate::stubs::STUB_FUNCTION_URI_PREFIX) {
                     return None;
                 }
                 (fi.name_offset != 0).then_some((uri, fi.name_offset))

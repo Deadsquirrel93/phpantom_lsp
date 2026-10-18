@@ -24,7 +24,7 @@ impl Backend {
     /// background pass excludes vendor files separately, via its own
     /// `vendor_uri_prefixes` filter.
     pub(super) fn should_skip_diagnostics(&self, uri_str: &str) -> bool {
-        uri_str.starts_with("phpantom-stub://") || uri_str.starts_with("phpantom-stub-fn://")
+        crate::stubs::is_stub_uri(uri_str)
     }
 
     /// Collect Phase 1 (fast) diagnostics: syntax errors, unused

@@ -39,35 +39,13 @@ impl Backend {
         None
     }
 
-    /// Get the content of a file by URI, trying open files first then disk.
+    /// Get the content of a file by URI, trying open files first, then the
+    /// embedded stubs, then disk.
     ///
-    /// This replaces the repeated pattern of locking `open_files`, looking
-    /// up the URI, and falling back to reading from disk via
-    /// `Url::to_file_path` + `std::fs::read_to_string`.  Three call sites
-    /// in the definition modules used this exact sequence.
+    /// An owned copy of [`get_file_content_arc`](Self::get_file_content_arc)'s
+    /// answer, for callers that need a `String`.
     pub(crate) fn get_file_content(&self, uri: &str) -> Option<String> {
-        if let Some(content) = self.open_files.read().get(uri) {
-            return Some(String::clone(content));
-        }
-
-        // Embedded class stubs live under synthetic `phpantom-stub://`
-        // URIs and have no on-disk file.  Retrieve the raw source from
-        // the stub_index keyed by the class short name (the URI path).
-        if let Some(class_name) = uri.strip_prefix("phpantom-stub://") {
-            let stub_idx = self.stub_index.read();
-            return stub_idx.get(class_name).map(|s| s.to_string());
-        }
-
-        // Embedded function stubs use `phpantom-stub-fn://` URIs.
-        // The path component is the function name used as key in
-        // stub_function_index.
-        if let Some(func_name) = uri.strip_prefix("phpantom-stub-fn://") {
-            let stub_fn_idx = self.stub_function_index.read();
-            return stub_fn_idx.get(func_name).map(|s| s.to_string());
-        }
-
-        let path = Url::parse(uri).ok()?.to_file_path().ok()?;
-        std::fs::read_to_string(path).ok()
+        self.get_file_content_arc(uri).map(Arc::unwrap_or_clone)
     }
 
     /// The text a request against `uri` analyses: the virtual PHP a
@@ -124,15 +102,14 @@ impl Backend {
             return Some(Arc::clone(content));
         }
 
-        // Embedded class stubs live under synthetic `phpantom-stub://`
-        // URIs and have no on-disk file.
-        if let Some(class_name) = uri.strip_prefix("phpantom-stub://") {
+        // Embedded stubs have no on-disk file.  A class stub's URI path is
+        // the key of its source in `stub_index`, and a function stub's the
+        // key in `stub_function_index`.
+        if let Some(class_name) = uri.strip_prefix(crate::stubs::STUB_URI_PREFIX) {
             let stub_idx = self.stub_index.read();
             return stub_idx.get(class_name).map(|s| Arc::new(s.to_string()));
         }
-
-        // Embedded function stubs use `phpantom-stub-fn://` URIs.
-        if let Some(func_name) = uri.strip_prefix("phpantom-stub-fn://") {
+        if let Some(func_name) = uri.strip_prefix(crate::stubs::STUB_FUNCTION_URI_PREFIX) {
             let stub_fn_idx = self.stub_function_index.read();
             return stub_fn_idx.get(func_name).map(|s| Arc::new(s.to_string()));
         }

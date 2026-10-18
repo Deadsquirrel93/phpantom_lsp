@@ -6,7 +6,6 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::{classify_class_origin, path_aliases};
 use crate::Backend;
@@ -14,16 +13,12 @@ use crate::classmap_scanner::{self, WorkspaceScanResult};
 use crate::composer;
 use crate::phar;
 
-/// Files claimed per work-stealing block when scanning a phar archive.
+/// Files claimed per block of work when scanning a phar archive.
 const PHAR_SCAN_BLOCK_FILES: usize = 32;
 
 /// A class found inside a phar: its FQN and the `phar://` URI of the
 /// entry declaring it.
 type PharClass = (String, String);
-
-/// A block of phar classes, tagged with the block index it was claimed
-/// under so results can be merged back in manifest order.
-type PharScannedBlock = (usize, Vec<PharClass>);
 
 /// Build the vendor URI prefixes (raw and canonicalized) for a vendor
 /// directory path, used to detect and skip vendor files.
@@ -374,67 +369,22 @@ impl Backend {
             .collect();
 
         // A tool phar is large (phpstan's is tens of megabytes of PHP), so
-        // the byte scan is spread over the cores.  Workers claim blocks
-        // from a shared cursor and their results are merged in manifest
-        // order, keeping the first-wins index inserts below identical to a
-        // sequential scan.
-        let mut scanned: Vec<PharScannedBlock> = {
-            let next_block = AtomicUsize::new(0);
-            let n_blocks = php_files.len().div_ceil(PHAR_SCAN_BLOCK_FILES);
-            let n_threads = std::thread::available_parallelism()
-                .map(|n| n.get())
-                .unwrap_or(4)
-                .min(n_blocks.max(1));
-            std::thread::scope(|s| {
-                let handles: Vec<_> = (0..n_threads)
-                    .map(|_| {
-                        let next_block = &next_block;
-                        let archive = &archive;
-                        let data = &data;
-                        let php_files = &php_files;
-                        s.spawn(move || {
-                            let mut out: Vec<PharScannedBlock> = Vec::new();
-                            loop {
-                                let b = next_block.fetch_add(1, Ordering::Relaxed);
-                                if b >= n_blocks {
-                                    break;
-                                }
-                                let start = b * PHAR_SCAN_BLOCK_FILES;
-                                let end = (start + PHAR_SCAN_BLOCK_FILES).min(php_files.len());
-                                let mut local: Vec<PharClass> = Vec::new();
-                                for internal_path in &php_files[start..end] {
-                                    let Some(range) = archive.file_range(internal_path) else {
-                                        continue;
-                                    };
-                                    let Some(content) = data.get(range) else {
-                                        continue;
-                                    };
-                                    for fqn in classmap_scanner::find_classes(content) {
-                                        let phar_uri =
-                                            crate::util::phar_entry_uri(phar_path, internal_path);
-                                        local.push((fqn, phar_uri));
-                                    }
-                                }
-                                if !local.is_empty() {
-                                    out.push((b, local));
-                                }
-                            }
-                            out
-                        })
-                    })
-                    .collect();
-                handles
+        // the byte scan is spread over the cores.  The classes come back in
+        // manifest order, keeping the first-wins index inserts below
+        // identical to a sequential scan.
+        let scanned: Vec<Vec<PharClass>> = crate::parallel::map_in_blocks(
+            "phar-scan",
+            &php_files,
+            PHAR_SCAN_BLOCK_FILES,
+            |internal_path| {
+                let content = data.get(archive.file_range(internal_path)?)?;
+                let classes: Vec<PharClass> = classmap_scanner::find_classes(content)
                     .into_iter()
-                    .flat_map(|h| {
-                        h.join().unwrap_or_else(|_| {
-                            tracing::error!("PHPantom: thread panic while scanning phar archive");
-                            Vec::new()
-                        })
-                    })
-                    .collect()
-            })
-        };
-        scanned.sort_unstable_by_key(|(b, _)| *b);
+                    .map(|fqn| (fqn, crate::util::phar_entry_uri(phar_path, internal_path)))
+                    .collect();
+                (!classes.is_empty()).then_some(classes)
+            },
+        );
 
         // The archive must be in place before its classes are published:
         // a lookup that finds a class in the index but cannot read its
@@ -446,11 +396,9 @@ impl Backend {
         let mut class_count = 0;
         {
             let mut idx = self.symbols.fqn_uri_index.write();
-            for (_, batch) in scanned {
-                for (fqn, uri) in batch {
-                    class_count += 1;
-                    idx.or_insert_with(fqn, || uri);
-                }
+            for (fqn, uri) in scanned.into_iter().flatten() {
+                class_count += 1;
+                idx.or_insert_with(fqn, || uri);
             }
         }
 

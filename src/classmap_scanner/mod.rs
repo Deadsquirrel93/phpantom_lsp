@@ -65,9 +65,13 @@
 //!
 //! - [`lexer`] — the SIMD byte-lexer fast path ([`find_classes`],
 //!   [`find_symbols`], and the state-machine helpers they share).
-//! - [`discovery`] — directory walking, PSR-4/vendor package
-//!   discovery, and parallel batch scanning built on top of the
+//! - [`discovery`] — PSR-4, workspace, include-path and Drupal
+//!   discovery, and the parallel batch scanning built on top of the
 //!   lexer.
+//! - [`vendor`] — the packages `installed.json` lists, and the autoload
+//!   sources each one declares.
+//! - [`walk`] — the `.gitignore`-aware directory walks.
+//! - [`filters`] — the compiled `[indexing]` filters every walk applies.
 
 use std::collections::HashMap;
 use std::ops::Deref;
@@ -78,16 +82,18 @@ use memmap2::Mmap;
 mod discovery;
 mod filters;
 mod lexer;
+mod vendor;
 mod walk;
 
-pub(crate) use discovery::{collect_include_files, vendor_package_roots};
+pub(crate) use discovery::collect_include_files;
 pub use discovery::{
     scan_directories, scan_drupal_directories, scan_include_paths, scan_psr4_directories,
-    scan_psr4_directories_with_skip, scan_vendor_packages, scan_vendor_packages_with_skip,
-    scan_workspace_fallback, scan_workspace_fallback_full,
+    scan_psr4_directories_with_skip, scan_workspace_fallback, scan_workspace_fallback_full,
 };
 pub use filters::{FollowedLinks, IndexFilters, LinkClaims, workspace_walk_builder};
 pub use lexer::{find_classes, find_symbols};
+pub(crate) use vendor::vendor_package_roots;
+pub use vendor::{scan_vendor_packages, scan_vendor_packages_with_skip};
 pub(crate) use walk::{
     collect_php_files_gitignore, collect_workspace_index_files_gitignore,
     visit_workspace_files_gitignore,

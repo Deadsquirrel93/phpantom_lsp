@@ -60,13 +60,13 @@ src/
 ├── symbol_map/             # Precomputed per-file symbol spans, definition sites, call sites
 ├── scope_collector/        # Variable scope-map construction
 ├── classmap_scanner/       # Byte-level PHP scanning for class discovery (no full parse)
-├── composer.rs             # composer.json / PSR-4 autoload parsing
+├── composer/               # composer.json, installed.json, the generated autoload maps, PSR-4 resolution
 ├── names/                  # Name resolution: written names via imports/namespace, docblock template/alias scoping, per-file resolved names
 ├── reference_index.rs      # Workspace-wide reference index for find-references / rename
 ├── reference_counts.rs     # Bounded exact member-reference cache for declaration hints and lenses
 │
 │   # Class & type resolution
-├── resolution/             # Multi-phase class/function lookup across files (find_or_load_class), lazy parsing, loader closures
+├── resolution/             # Multi-phase class/function/constant lookup across files (find_or_load_class), lazy parsing, loader closures
 ├── class_lookup.rs         # Class-lookup helpers; class_lookup/subtyping.rs holds the subtype checks (is_subtype_of_typed)
 ├── inheritance/            # Parent/trait/mixin member merging, generics substitution
 ├── virtual_members/        # Synthesized members: phpdoc.rs (@method/@property, phpdoc/mixins.rs for @mixin) + laravel/ (one file per Eloquent/framework feature)
@@ -834,7 +834,7 @@ At resolution time, `merge_traits_into` loads the `UnitEnum` or `BackedEnum` stu
 
 ### PSR-4 Autoloading
 
-`composer.rs` parses:
+`composer/` parses:
 
 - `composer.json` → `autoload.psr-4` and `autoload-dev.psr-4` mappings
 
@@ -881,7 +881,7 @@ In projects without `composer.json`, there is no `autoload_files.php` to consult
 
 When the workspace root has no `composer.json` but contains subdirectories that are independent Composer projects, PHPantom discovers and processes each subproject automatically. This is a best-effort mitigation for workspaces where the editor opens a monorepo root as a single folder. The monorepo path only activates when there is no root `composer.json`.
 
-**Discovery.** `discover_subproject_roots` in `composer.rs` walks the workspace using the `ignore` crate (`WalkBuilder`), respecting `.gitignore` at every level. Any directory containing a `composer.json` is recorded as a subproject root. Nested subprojects (a `composer.json` inside an already-accepted root) are filtered out. Each discovered `composer.json` is read to extract the `config.vendor-dir` setting.
+**Discovery.** `discover_subproject_roots` in `composer/mod.rs` walks the workspace using the `ignore` crate (`WalkBuilder`), respecting `.gitignore` at every level. Any directory containing a `composer.json` is recorded as a subproject root. Nested subprojects (a `composer.json` inside an already-accepted root) are filtered out. Each discovered `composer.json` is read to extract the `config.vendor-dir` setting.
 
 **Per-subproject processing.** For each discovered `(subproject_root, vendor_dir)`, the same Composer pipeline runs: PSR-4 mappings (with base paths resolved to absolute paths so `resolve_class_path` works regardless of workspace root), classmap parsing, vendor package scanning from `installed.json`, and autoload file indexing. Results are merged into the shared backend state with first-subproject-wins semantics for duplicate FQNs.
 

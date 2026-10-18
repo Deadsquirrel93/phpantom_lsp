@@ -461,7 +461,7 @@ impl Backend {
             // dropping e.g. `array_map`'s template parameters and
             // breaking closure parameter inference for the rest of the
             // session.
-            if uri.starts_with("phpantom-stub") {
+            if crate::stubs::is_embedded_stub_uri(uri) {
                 for func in &mut functions {
                     crate::stub_patches::apply_function_stub_patches(func);
                 }

@@ -16,7 +16,7 @@
 //! holds the shared Markdown builders.
 
 mod class;
-pub(crate) mod constants;
+mod constants;
 mod formatting;
 mod function;
 mod laravel;

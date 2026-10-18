@@ -258,8 +258,7 @@ impl Backend {
             .filter(|uri| {
                 !existing_uris.contains(*uri)
                     && !vendor_prefixes.iter().any(|p| uri.starts_with(p.as_str()))
-                    && !uri.starts_with("phpantom-stub://")
-                    && !uri.starts_with("phpantom-stub-fn://")
+                    && !crate::stubs::is_stub_uri(uri)
             })
             .collect();
 

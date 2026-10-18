@@ -118,8 +118,7 @@ impl Backend {
         maps.iter()
             .filter(|(uri, _)| {
                 candidate_uris.is_none_or(|uris| uris.contains(uri.as_str()))
-                    && !uri.starts_with("phpantom-stub://")
-                    && !uri.starts_with("phpantom-stub-fn://")
+                    && !crate::stubs::is_stub_uri(uri)
                     && !vendor_prefixes.iter().any(|p| uri.starts_with(p.as_str()))
             })
             .map(|(uri, map)| (uri.clone(), Arc::clone(map)))

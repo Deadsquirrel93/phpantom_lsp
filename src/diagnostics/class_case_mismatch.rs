@@ -162,9 +162,9 @@ impl Backend {
                 None => continue,
             };
             // Built-in classes (phpstorm-stubs) are case-insensitive and
-            // always available; they are indexed under a `phpantom-stub://`
-            // URI and never reach the PSR-4 autoloader.
-            if decl_uri.starts_with("phpantom-stub://") {
+            // always available; they are indexed under a stub URI and never
+            // reach the PSR-4 autoloader.
+            if crate::stubs::is_stub_uri(&decl_uri) {
                 continue;
             }
             // A class declared in the same file is already loaded, so its

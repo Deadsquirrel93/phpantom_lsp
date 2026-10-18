@@ -515,8 +515,7 @@ impl Backend {
         let mut files: Vec<(String, Arc<SymbolMap>)> = maps
             .iter()
             .filter(|(uri, map)| {
-                !uri.starts_with("phpantom-stub://")
-                    && !uri.starts_with("phpantom-stub-fn://")
+                !crate::stubs::is_stub_uri(uri)
                     && !vendor_prefixes.iter().any(|p| uri.starts_with(p.as_str()))
                     && (!map.view_receiver_sites.is_empty()
                         || map.spans.iter().any(|span| {

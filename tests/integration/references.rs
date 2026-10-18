@@ -5104,3 +5104,30 @@ fn references_on_crlf_file_with_multibyte_prefix_use_utf16_columns() {
         "the usage range must be in UTF-16 units on its own line, got: {results:#?}"
     );
 }
+
+// ─── Declarations in files that access nothing ───────────────────────────────
+
+/// A file is a candidate for declaring the member as much as for accessing
+/// it, and the access narrowing must not take the declaration with it.
+#[tokio::test]
+async fn find_references_still_reports_a_declaration_in_a_file_that_accesses_nothing() {
+    let backend = create_test_backend();
+    let base_uri = Url::parse("file:///Base.php").unwrap();
+    let child_uri = Url::parse("file:///Child.php").unwrap();
+    let base_text = "<?php\nclass Base {\n    public function save(): void {}\n}\n";
+    let child_text = "<?php\nclass Child extends Base {\n    public function store(): void {\n        $this->save();\n    }\n}\n";
+    open_php(&backend, &base_uri, base_text).await;
+    open_php(&backend, &child_uri, child_text).await;
+
+    let (line, character) = crate::common::line_char_of(child_text, "save();");
+    let locations = references_at(&backend, &child_uri, line, character, true).await;
+
+    assert!(
+        locations.iter().any(|loc| loc.uri == base_uri),
+        "the declaration in Base.php has to be reported: {locations:?}"
+    );
+    assert!(
+        locations.iter().any(|loc| loc.uri == child_uri),
+        "the call in Child.php has to be reported: {locations:?}"
+    );
+}

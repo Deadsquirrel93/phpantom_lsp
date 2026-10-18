@@ -113,7 +113,7 @@ impl Backend {
         // Stub functions don't have real file locations — skip
         // go-to-definition for them (they're still useful for return-type
         // resolution via the function_loader).
-        if file_uri.starts_with("phpantom-stub-fn://") {
+        if file_uri.starts_with(crate::stubs::STUB_FUNCTION_URI_PREFIX) {
             return None;
         }
 

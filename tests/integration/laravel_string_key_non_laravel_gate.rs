@@ -288,6 +288,32 @@ async fn non_laravel_project_references_does_not_fabricate_config_key_refs() {
 }
 
 #[tokio::test]
+async fn laravel_project_references_still_find_config_keys() {
+    let (backend, _dir, uri) = setup(COMPOSER_JSON_LARAVEL).await;
+
+    let result = backend
+        .references(ReferenceParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: KEY_POSITION,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: ReferenceContext {
+                include_declaration: true,
+            },
+        })
+        .await
+        .unwrap()
+        .unwrap_or_default();
+
+    assert!(
+        result.len() >= 2,
+        "a real Laravel project should find both config('app.name') calls, got {result:?}"
+    );
+}
+
+#[tokio::test]
 async fn non_laravel_project_prepare_rename_rejects_config_key() {
     let (backend, _dir, uri) = setup(COMPOSER_JSON_NON_LARAVEL).await;
 

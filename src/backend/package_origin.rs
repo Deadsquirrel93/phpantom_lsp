@@ -86,7 +86,7 @@ impl Backend {
         &self,
         uri: &str,
     ) -> (ClassCompletionOrigin, Option<String>) {
-        if uri.starts_with("phpantom-stub://") || uri.starts_with("phpantom-stub-fn://") {
+        if crate::stubs::is_embedded_stub_uri(uri) {
             return (ClassCompletionOrigin::CoreStub, None);
         }
         if let Ok(url) = tower_lsp::lsp_types::Url::parse(uri)

@@ -1022,6 +1022,30 @@ pub fn lsp_pos_to_offset(content: &str, pos: Position) -> usize {
     content.len()
 }
 
+/// Start a session rooted at `root`, with `initialization_options` as the
+/// client sends them in `initialize`, and run the `initialized` handshake,
+/// which indexes the workspace.
+///
+/// For the settings an editor forwards rather than `.phpantom.toml`
+/// declares, such as the file filters under `indexing`.
+pub async fn initialize_with_options(
+    backend: &Backend,
+    root: &std::path::Path,
+    initialization_options: Option<serde_json::Value>,
+) {
+    #[allow(deprecated)] // `root_uri` is what this generation of clients sends
+    let params = InitializeParams {
+        root_uri: Some(Url::from_file_path(root).unwrap()),
+        initialization_options,
+        ..Default::default()
+    };
+    backend
+        .initialize(params)
+        .await
+        .expect("initialize should succeed");
+    backend.initialized(InitializedParams {}).await;
+}
+
 // ── Shared rename test helpers ──────────────────────────────────────────────
 
 /// Tell the backend the client accepts `RenameFile` and `CreateFile`

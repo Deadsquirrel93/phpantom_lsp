@@ -236,6 +236,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Route files nothing visibly loads.** A route file in a subdirectory of `routes/` that no route file or service provider loads, as when `web.php` requires a whole directory through `glob()`, now has its routes completed and checked under their own names instead of reported as unknown.
 - **Edits to route files outside `routes/`.** Editing a route file loaded from elsewhere, such as a module's route file that a service provider loads, now updates route completion, diagnostics and go-to-definition right away.
 - **Completion below a `#` comment with an apostrophe.** A comment such as `# Don't call this twice` no longer stops completion in the code that follows it.
+- **"Replace deprecated call" on names in other scripts.** On a call such as `$ユーザー[0]->legacy()` the quick fix is now offered, and it replaces the whole call instead of leaving part of the subject's name in front of the replacement.
 
 ## [0.11.1] - 2026-10-07
 

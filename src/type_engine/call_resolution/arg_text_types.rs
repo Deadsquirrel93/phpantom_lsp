@@ -148,9 +148,7 @@ impl Backend {
                     )
                     .or_else(|| super::folded_global_constant_type(trimmed, &value, ctx))
                 }
-                Some(None) => {
-                    crate::hover::constants::unversioned_php_version_constant_type(trimmed)
-                }
+                Some(None) => crate::resolution::unversioned_php_version_constant_type(trimmed),
             }
         {
             return Some(ty);
