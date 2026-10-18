@@ -297,14 +297,23 @@ pub(crate) fn decode_php_string_literal(raw: &str) -> Option<Cow<'_, str>> {
 /// caller asking about many offsets in the same text should scan it once
 /// into [`NamespaceDecls`] instead.
 pub(crate) fn namespace_at_offset(content: &str, offset: usize) -> Option<&str> {
+    namespace_name_after(content, namespace_decl_at(content, offset)? + KEYWORD.len())
+}
+
+/// Return the offset of the `namespace` keyword whose declaration is in
+/// force at `offset`, found the way [`namespace_at_offset`] finds it, or
+/// `None` before the first declaration.
+///
+/// Every `namespace` block of a file starts at a different one, so this
+/// tells the blocks apart even where two of them declare the same name.
+pub(crate) fn namespace_decl_at(content: &str, offset: usize) -> Option<usize> {
     let bytes = content.as_bytes();
     let mut end = offset.min(bytes.len());
     while let Some(pos) = memchr::memmem::rfind(&bytes[..end], KEYWORD) {
         end = pos;
-        if !is_namespace_statement(bytes, pos, KEYWORD.len()) {
-            continue;
+        if is_namespace_statement(bytes, pos, KEYWORD.len()) {
+            return Some(pos);
         }
-        return namespace_name_after(content, pos + KEYWORD.len());
     }
     None
 }
@@ -341,14 +350,23 @@ impl NamespaceDecls {
     /// The namespace in force at `offset` in `content`, which must be the
     /// text these declarations were scanned from.
     pub(crate) fn at<'a>(&self, content: &'a str, offset: usize) -> Option<&'a str> {
-        let end = offset.min(content.len());
+        let (_, name) = self.decls[self.index_at(offset.min(content.len()))?];
+        name.map(|(start, end)| &content[start..end])
+    }
+
+    /// The offset of the `namespace` keyword whose declaration is in force
+    /// at `offset`; see [`namespace_decl_at`].
+    pub(crate) fn decl_at(&self, offset: usize) -> Option<usize> {
+        Some(self.decls[self.index_at(offset)?].0)
+    }
+
+    /// The index of the declaration in force at `offset`, if any.
+    fn index_at(&self, offset: usize) -> Option<usize> {
         // The backward scan only sees a keyword that ends at or before
         // `offset`.
-        let before = self
-            .decls
-            .partition_point(|&(pos, _)| pos + KEYWORD.len() <= end);
-        let (_, name) = self.decls.get(before.checked_sub(1)?)?;
-        name.map(|(start, end)| &content[start..end])
+        self.decls
+            .partition_point(|&(pos, _)| pos + KEYWORD.len() <= offset)
+            .checked_sub(1)
     }
 }
 

@@ -330,6 +330,20 @@ pub(crate) fn namespace_at_offset(content: &str, offset: usize) -> Option<&str> 
     }
 }
 
+/// The offset of the `namespace` keyword whose declaration is in force at
+/// `offset` in `content`, which tells the file's blocks apart, or `None`
+/// before the first one.  Answered the way [`namespace_at_offset`] is.
+pub(crate) fn namespace_decl_at(content: &str, offset: usize) -> Option<usize> {
+    let cached = PARSE_CACHE.with(|cell| cell.borrow().as_ref().and_then(|c| c.find(content)));
+    match cached {
+        Some(file) => file
+            .namespaces
+            .get_or_init(|| crate::text_scan::NamespaceDecls::scan(&file.content))
+            .decl_at(offset),
+        None => crate::text_scan::namespace_decl_at(content, offset),
+    }
+}
+
 /// Whether a docblock in `content` declares `name` as a template
 /// parameter or a type alias on a declaration overlapping `region`.
 ///

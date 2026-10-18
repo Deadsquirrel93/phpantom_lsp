@@ -204,7 +204,7 @@ impl Backend {
                             let access_kind = AccessKind::of_member_access(*is_static);
 
                             let cache_key = SubjectCacheKey::build(
-                                symbol_map,
+                                ctx,
                                 enclosing_class,
                                 subject_str.trim(),
                                 access_kind,

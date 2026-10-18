@@ -79,15 +79,47 @@ pub(super) struct ChainKey {
     /// Tells files apart: the same text can name different classes in two
     /// files (see `SpineKeys::new`).
     pub(super) file_id: usize,
+    /// Tells apart the places in one file where the same text names
+    /// different things.
+    pub(super) names: NameScope,
     /// The subject text, as numbered by [`ChainCache::intern`].
     pub(super) chain: u32,
     pub(super) site: ChainSite,
 }
 
+/// Where the names in a chain's text are read.
+///
+/// Inside a class, `self`, `static` and `parent` name that class and its
+/// parent; everywhere, a class or function name is read through the
+/// imports and namespace of the `namespace` block it is written in.  Code
+/// in one class always sits in one block, so the class alone settles both.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) enum NameScope {
+    /// Inside the class with this FQN.
+    Class(crate::atom::Atom),
+    /// Outside any class, in the `namespace` block declared at this offset
+    /// (`None` before the file's first declaration).
+    Block(Option<usize>),
+}
+
+impl NameScope {
+    /// Where the names of a chain resolved through `ctx` are read.
+    pub(super) fn of(ctx: &ResolutionCtx<'_>) -> Self {
+        match ctx.current_class {
+            // The stand-in class for code outside one has no name.
+            Some(cls) if !cls.name.is_empty() => NameScope::Class(cls.fqn()),
+            _ => NameScope::Block(crate::parser::namespace_decl_at(
+                ctx.content,
+                ctx.cursor_offset as usize,
+            )),
+        }
+    }
+}
+
 /// Which occurrences of a chain text share a cache entry.
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub(super) enum ChainSite {
-    /// Every occurrence in the file.
+    /// Every occurrence whose names read the same (see [`NameScope`]).
     Anywhere,
     /// Occurrences whose local variables hold these types.
     Typed(std::rc::Rc<str>),

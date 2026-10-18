@@ -79,30 +79,7 @@ No outstanding items.
 
 ## Name resolution
 
-### B631. Top-level code in two `namespace` blocks shares one cached subject type
-
-**Impact: Low · Complexity: Low**
-
-```php
-<?php
-namespace A {
-    use function Lib\make;   // returns Lib\Widget, which has spin()
-    make()->spin();
-}
-namespace B {
-    make()->spin();          // the global make() returns Gadget: not reported
-}
-```
-
-The unknown-member pass caches each subject's type under a
-`SubjectCacheKey` (`diagnostics/subject_cache.rs`), and top-level code gets
-the same scope, `ScopeKey::TopLevel { fn_scope_start: 0 }`, in every
-`namespace` block of the file. The first block to resolve `make()` answers
-for the same text in every later block, though the name means something
-else there, and a class subject such as `Foo::` is shared the same way
-between blocks that import different `Foo`s. Key top-level code by its
-namespace block as well (the start of the `NamespaceSpan` containing the
-access).
+No outstanding items.
 
 ## Miscellaneous
 
@@ -178,3 +155,29 @@ parser's recovery ends the argument list at the block's `}` instead of
 dropping the statement: upstream in `mago-syntax`, or by re-parsing with
 the call closed, as signature help's text fallback already does for the
 classes (`patch_content_for_signature`).
+
+### B633. Diagnostics forget top-level variables at a braced `namespace` block
+
+**Impact: Low · Complexity: Low**
+
+```php
+<?php
+namespace A {
+    $x = new \DateTime();
+    $x->nope();   // reported: no `nope()` on DateTime
+}
+namespace B {
+    $x->nope();   // not reported, though `$x` is still the DateTime
+}
+```
+
+PHP keeps one global variable scope across a file's `namespace` blocks, and
+hover follows it: `walk_body_forward` (`forward_walk/statements.rs`) walks
+each block's statements on the same scope, so hovering `$x` in block B shows
+`DateTime`. The diagnostic walk does not: `walk_top_level_statements`
+(`forward_walk/diagnostic_walk.rs`) recurses into each `Statement::Namespace`
+and starts it on a fresh `ScopeState`, so a variable assigned in one block
+is untyped in the next and nothing checks the members, arguments or types
+it is used with there. Carry the top-level scope from block to block,
+switching only the loaders and imports, as the recursion's `block_ctx`
+already does.

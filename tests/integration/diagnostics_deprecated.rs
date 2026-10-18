@@ -3394,6 +3394,58 @@ function demo(): void {
     );
 }
 
+/// The same call on a variable of the same class, written in two
+/// `namespace` blocks that import different classes, returns a different
+/// class in each.
+#[test]
+fn same_variable_chain_in_two_namespace_blocks_resolves_per_block() {
+    let backend = create_test_backend();
+    let uri = "file:///namespace_blocks.php";
+    let diags = deprecated_diagnostics(
+        &backend,
+        uri,
+        r#"<?php
+namespace X {
+    class Foo { public function old(): void {} }
+}
+namespace Y {
+    class Foo {
+        /** @deprecated Use something else */
+        public function old(): void {}
+    }
+}
+namespace Lib {
+    class Container {
+        /**
+         * @template T of object
+         * @param class-string<T> $class
+         * @return T
+         */
+        public function get(string $class): object { return new $class(); }
+    }
+}
+namespace A {
+    use X\Foo;
+    $c = new \Lib\Container();
+    $c->get(Foo::class)->old();
+}
+namespace B {
+    use Y\Foo;
+    $c = new \Lib\Container();
+    $c->get(Foo::class)->old();
+}
+"#,
+    );
+
+    let lines: Vec<u32> = diags.iter().map(|d| d.range.start.line).collect();
+    assert_eq!(
+        lines,
+        vec![28],
+        "Only block B's `Foo` is the deprecated one. Got: {:?}",
+        diags,
+    );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Deprecated-scope exemption (mirrors PHPStan's DefaultDeprecatedScopeResolver)
 // ═══════════════════════════════════════════════════════════════════════════

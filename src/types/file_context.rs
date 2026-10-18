@@ -124,6 +124,12 @@ impl FileContext {
             .map_or(&self.symbol_imports, |span| &span.symbol_imports)
     }
 
+    /// The start of the `namespace` block containing `offset`, which tells
+    /// a file's blocks apart: `0` throughout a file with only one.
+    pub fn block_start_at(&self, offset: u32) -> u32 {
+        self.span_at(offset).map_or(0, |span| span.start)
+    }
+
     /// The namespace block containing `offset`, when the file has several.
     fn span_at(&self, offset: u32) -> Option<&NamespaceSpan> {
         NamespaceSpan::containing(self.namespace_spans.as_ref()?, offset)

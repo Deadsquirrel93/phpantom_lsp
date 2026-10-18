@@ -292,6 +292,140 @@ namespace B {
     assert!(diags[0].message.contains("Gadget"), "got: {:?}", diags);
 }
 
+/// The same call written at the top level of several `namespace` blocks
+/// names a different function in each, so one block's answer must not
+/// stand in for another's.
+#[test]
+fn same_call_text_in_two_namespace_blocks_resolves_per_block() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+namespace Lib {
+    class Widget { public function spin(): void {} }
+    function make(): Widget { return new Widget(); }
+}
+namespace {
+    class Gadget { public function press(): void {} }
+    function make(): Gadget { return new Gadget(); }
+}
+namespace A {
+    use function Lib\make;
+    make()->spin();
+}
+namespace B {
+    make()->spin();
+}
+namespace C {
+    use function Lib\make;
+    make()->spin();
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    let lines: Vec<u32> = diags.iter().map(|d| d.range.start.line).collect();
+    assert_eq!(
+        lines,
+        vec![14],
+        "Only block B's `make()` is the global Gadget one, got: {:?}",
+        diags
+    );
+    assert!(diags[0].message.contains("Gadget"), "got: {:?}", diags);
+}
+
+/// A class name written at the top level of two `namespace` blocks is
+/// resolved through each block's own imports.
+#[test]
+fn same_class_subject_in_two_namespace_blocks_resolves_per_block() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+namespace X {
+    class Foo { public static function fromX(): void {} }
+}
+namespace Y {
+    class Foo { public static function fromY(): void {} }
+}
+namespace A {
+    use X\Foo;
+    Foo::fromX();
+}
+namespace B {
+    use Y\Foo;
+    Foo::fromY();
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "each block should resolve `Foo` through its own import, got: {:?}",
+        diags
+    );
+}
+
+/// `self::make()` names a different class in each class of a file, so what
+/// it returns in one class must not stand in for another's.
+#[test]
+fn same_self_call_in_two_classes_resolves_per_class() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class A {
+    public static function make(): static { return new static(); }
+    public function onlyA(): void {}
+    public function run(): void { self::make()->onlyA(); }
+}
+class B {
+    public static function make(): static { return new static(); }
+    public function onlyB(): void {}
+    public function run(): void { self::make()->onlyB(); }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "each class's `self::make()` should return that class, got: {:?}",
+        diags
+    );
+}
+
+/// A chain broken in one `namespace` block says nothing about the same text
+/// in another, where the call it starts from names a different function.
+#[test]
+fn a_broken_chain_in_one_namespace_block_does_not_hide_one_in_another() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+namespace Lib {
+    class Widget { public function spin(): Widget { return $this; } }
+    function make(): Widget { return new Widget(); }
+}
+namespace {
+    class Gadget { public function press(): Gadget { return $this; } }
+    function make(): Gadget { return new Gadget(); }
+}
+namespace A {
+    make()->spin()->press();
+}
+namespace B {
+    use function Lib\make;
+    make()->spin()->press();
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    let reported: Vec<(u32, &str)> = diags
+        .iter()
+        .map(|d| (d.range.start.line, d.message.as_str()))
+        .collect();
+    assert_eq!(
+        reported,
+        vec![
+            (10, "Method 'spin' not found on class 'Gadget'"),
+            (14, "Method 'press' not found on class 'Lib\\Widget'"),
+        ],
+        "got: {:?}",
+        diags
+    );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Basic detection — instance properties
 // ═══════════════════════════════════════════════════════════════════════════

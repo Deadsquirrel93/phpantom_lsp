@@ -6,7 +6,7 @@ use crate::type_engine::subject_expr::{BracketSegment, SubjectExpr};
 use crate::types::*;
 
 use super::ResolutionCtx;
-use super::context::{CHAIN_CACHE, ChainKey, ChainSite};
+use super::context::{CHAIN_CACHE, ChainKey, ChainSite, NameScope};
 
 /// The cached result of a chain link, when the chain cache holds one.
 pub(super) fn lookup_chain_cache(cache_key: &ChainKey) -> Option<Vec<ResolvedType>> {
@@ -232,6 +232,14 @@ impl SpineKeys {
         // within-file sharing (the cache's actual purpose) is unaffected.
         let file_id = ctx.content.as_ptr() as usize;
 
+        // Within one file the same text still means different things where
+        // its names are read differently: `self::make()` in two classes,
+        // or `make()` in two `namespace` blocks that import different
+        // functions.  An entry shared across positions is shared only
+        // where the names read the same.  Worked out on the first link
+        // that is cached at all.
+        let mut names = None;
+
         // A chain that references a local variable (as receiver or as a
         // call argument) can resolve to different types at call sites
         // where the variable holds a different type — e.g.
@@ -289,6 +297,7 @@ impl SpineKeys {
             };
             keys[index] = Some(ChainKey {
                 file_id,
+                names: *names.get_or_insert_with(|| NameScope::of(ctx)),
                 chain: chains[index],
                 site,
             });

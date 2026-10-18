@@ -2,7 +2,7 @@
 //! and the top-level scanners.
 
 use super::{
-    NamespaceDecls, ScanStep, find_semicolon_balanced, namespace_at_offset,
+    NamespaceDecls, ScanStep, find_semicolon_balanced, namespace_at_offset, namespace_decl_at,
     scan_top_level_backward, split_top_level_commas, top_level_commas,
 };
 
@@ -20,6 +20,11 @@ fn ns_at_marker(src: &str) -> Option<String> {
             decls.at(&stripped, at),
             namespace_at_offset(&stripped, at),
             "index and scan disagree at offset {at}"
+        );
+        assert_eq!(
+            decls.decl_at(at),
+            namespace_decl_at(&stripped, at),
+            "index and scan disagree on the declaration at offset {at}"
         );
     }
     namespace_at_offset(&stripped, offset).map(str::to_string)
@@ -110,6 +115,19 @@ fn the_namespace_operator_is_not_a_declaration() {
 fn an_identifier_starting_with_the_keyword_is_not_a_declaration() {
     let src = "<?php\nnamespace App;\n$namespaced = 1;\nfunction t() { | }\n";
     assert_eq!(ns_at_marker(src).as_deref(), Some("App"));
+}
+
+#[test]
+fn two_blocks_declaring_the_same_namespace_are_told_apart() {
+    let src = "<?php\nnamespace {\n    f();\n}\nnamespace {\n    f();\n}\n";
+    let first = src.find("f()").unwrap();
+    let second = src.rfind("f()").unwrap();
+    assert_eq!(namespace_decl_at(src, 0), None);
+    assert_eq!(namespace_decl_at(src, first), Some(6));
+    assert_eq!(
+        namespace_decl_at(src, second),
+        Some(src.rfind("namespace").unwrap())
+    );
 }
 
 #[test]

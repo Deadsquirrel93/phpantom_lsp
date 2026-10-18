@@ -92,7 +92,7 @@ use super::member_lookup::{
     member_is_public,
 };
 use super::member_visibility::{INVALID_MEMBER_ACCESS_CODE, inaccessible_member_message};
-use super::subject_cache::SubjectCacheKey;
+use super::subject_cache::{ScopeKey, SubjectCacheKey};
 
 /// Diagnostic code used for unknown-member diagnostics so that code
 /// actions can match on it.
@@ -218,11 +218,11 @@ impl Backend {
         // in the same fluent chain are suppressed because their failure
         // is a direct consequence of the first break.  We record
         // "broken chain prefixes" and skip any span whose subject_text
-        // starts with one of them.  Each prefix is keyed by the function
-        // scope it was flagged in: the same text in another function can
-        // be a different value, and that access has to be judged on its
-        // own.
-        let mut broken_chain_prefixes: Vec<(u32, String)> = Vec::new();
+        // starts with one of them.  Each prefix is keyed by the scope it
+        // was flagged in: the same text in another function, or at the top
+        // level of another `namespace` block, can be a different value,
+        // and that access has to be judged on its own.
+        let mut broken_chain_prefixes: Vec<(ScopeKey, String)> = Vec::new();
 
         // ── Walk every symbol span ──────────────────────────────────────
         for span in &symbol_map.spans {
@@ -345,13 +345,9 @@ impl Backend {
             let is_narrowable_subject = subject_text.starts_with('$');
 
             // ── Look up or populate the subject cache ───────────────────
-            let cache_key = SubjectCacheKey::build(
-                symbol_map,
-                current_class,
-                subject_text,
-                access_kind,
-                span.start,
-            );
+            let cache_key =
+                SubjectCacheKey::build(ctx, current_class, subject_text, access_kind, span.start);
+            let scope = cache_key.scope();
 
             let outcome = subject_cache
                 .entry(cache_key)
@@ -369,7 +365,6 @@ impl Backend {
             // already-flagged broken chain, skip it entirely.  The
             // original broken prefix propagates to all further links
             // naturally (it is a prefix of every subsequent subject).
-            let scope = symbol_map.find_enclosing_scope(span.start);
             if is_downstream_of_broken_chain(subject_text, scope, &broken_chain_prefixes) {
                 continue;
             }
@@ -883,14 +878,14 @@ fn broken_chain_prefix(
 }
 
 /// Check whether `subject_text` is downstream of a broken chain
-/// expression previously flagged in the same function `scope`.
+/// expression previously flagged in the same `scope`.
 ///
 /// Normalises null-safe operators (`?->` → `->`) so that chains mixing
 /// `->` and `?->` are handled correctly.
 fn is_downstream_of_broken_chain(
     subject_text: &str,
-    scope: u32,
-    broken_prefixes: &[(u32, String)],
+    scope: ScopeKey,
+    broken_prefixes: &[(ScopeKey, String)],
 ) -> bool {
     if broken_prefixes.is_empty() {
         return false;
