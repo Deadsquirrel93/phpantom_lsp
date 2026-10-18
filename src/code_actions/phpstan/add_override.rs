@@ -26,7 +26,7 @@ use crate::code_actions::{CodeActionData, make_code_action_data};
 use crate::completion::use_edit::{
     analyze_use_block_in, build_use_edit, short_name_needs_import, use_import_conflicts,
 };
-use crate::text_position::offset_to_position;
+use crate::text_position::{line_ending, offset_to_position};
 
 /// The PHPStan identifier we match on.
 const MISSING_OVERRIDE_ID: &str = "method.missingOverride";
@@ -139,10 +139,10 @@ impl Backend {
             "#[Override]"
         };
 
-        // Build the text edit: insert `#[Override]\n<indent>` at the
-        // start of the method declaration line (before any existing
-        // attributes or modifiers).
-        let insert_text = format!("{}{}\n", method.indent, attr_text);
+        // Build the text edit: insert `<indent>#[Override]` on a line of
+        // its own at the start of the method declaration line (before any
+        // existing attributes or modifiers).
+        let insert_text = format!("{}{}{}", method.indent, attr_text, line_ending(content));
 
         let insert_pos = offset_to_position(content, method.line_start);
 

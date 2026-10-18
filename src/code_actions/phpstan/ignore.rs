@@ -20,6 +20,7 @@ use tower_lsp::lsp_types::*;
 use crate::Backend;
 use crate::code_actions::phpstan::phpstan_identifier;
 use crate::code_actions::{CodeActionData, make_code_action_data};
+use crate::text_position::byte_offset_to_utf16_col;
 
 /// PHPStan identifier prefix for unmatched ignore errors.
 ///
@@ -239,7 +240,7 @@ fn build_add_ignore_edit(content: &str, line: u32, line_text: &str, identifier: 
         // offset is in bytes; LSP positions are UTF-16 code units, so convert
         // before emitting the edit.
         let insert_byte = ids_start + ids_offset + ids_end;
-        let insert_col = crate::text_position::byte_offset_to_utf16_col(line_text, insert_byte);
+        let insert_col = byte_offset_to_utf16_col(line_text, insert_byte);
 
         let separator = if existing_ids.is_empty() { "" } else { ", " };
 
@@ -266,7 +267,7 @@ fn build_add_ignore_edit(content: &str, line: u32, line_text: &str, identifier: 
 fn build_eol_comment(_content: &str, line: u32, line_text: &str, identifier: &str) -> TextEdit {
     // LSP positions are UTF-16 code units, not bytes: convert the end-of-line
     // byte offset so the comment lands correctly on multibyte lines.
-    let end_col = crate::text_position::byte_offset_to_utf16_col(line_text, line_text.len());
+    let end_col = byte_offset_to_utf16_col(line_text, line_text.len());
     TextEdit {
         range: Range {
             start: Position {
@@ -386,11 +387,14 @@ fn build_remove_whole_ignore(
                     range: Range {
                         start: Position {
                             line: line - 1,
-                            character: prev_line_text.len() as u32,
+                            character: byte_offset_to_utf16_col(
+                                prev_line_text,
+                                prev_line_text.len(),
+                            ),
                         },
                         end: Position {
                             line,
-                            character: line_text.len() as u32,
+                            character: byte_offset_to_utf16_col(line_text, line_text.len()),
                         },
                     },
                     new_text: String::new(),
@@ -401,7 +405,7 @@ fn build_remove_whole_ignore(
                         start: Position { line, character: 0 },
                         end: Position {
                             line,
-                            character: line_text.len() as u32,
+                            character: byte_offset_to_utf16_col(line_text, line_text.len()),
                         },
                     },
                     new_text: String::new(),
@@ -430,11 +434,11 @@ fn build_remove_whole_ignore(
             range: Range {
                 start: Position {
                     line,
-                    character: trim_start as u32,
+                    character: byte_offset_to_utf16_col(line_text, trim_start),
                 },
                 end: Position {
                     line,
-                    character: end_col as u32,
+                    character: byte_offset_to_utf16_col(line_text, end_col),
                 },
             },
             new_text: String::new(),
@@ -485,8 +489,8 @@ fn build_remove_single_id(
     let new_ids_str = new_ids.join(", ");
 
     // Reconstruct: replace the identifier list portion.
-    let abs_ids_start = (ids_start + ids_offset) as u32;
-    let abs_ids_end = (ids_start + ids_offset + ids_end) as u32;
+    let abs_ids_start = byte_offset_to_utf16_col(line_text, ids_start + ids_offset);
+    let abs_ids_end = byte_offset_to_utf16_col(line_text, ids_start + ids_offset + ids_end);
 
     Some(TextEdit {
         range: Range {
@@ -548,7 +552,7 @@ fn is_ignorable(diag: &Diagnostic) -> bool {
 #[allow(clippy::bool_assert_comparison)]
 mod tests {
     use super::*;
-    use crate::text_position::ranges_overlap;
+    use crate::text_position::{apply_text_edits, ranges_overlap};
     use serde_json::json;
 
     // ── parse_unmatched_identifier ──────────────────────────────────
@@ -727,6 +731,22 @@ mod tests {
         let edit = build_remove_ignore_edit(content, 1, 1, Some("argument.type"));
         let edit = edit.unwrap();
         assert_eq!(edit.new_text, "variable.undefined");
+    }
+
+    #[test]
+    fn removal_columns_are_utf16_after_multibyte_code() {
+        // "é" is two bytes but one UTF-16 code unit, so a byte offset
+        // would land the edit one column too far right.
+        let content = "<?php\necho \"é\"; // @phpstan-ignore variable.undefined, argument.type\n";
+        let edit = build_remove_ignore_edit(content, 1, 1, Some("argument.type")).unwrap();
+        assert_eq!(
+            apply_text_edits(content, &[edit]),
+            "<?php\necho \"é\"; // @phpstan-ignore variable.undefined\n"
+        );
+
+        let content = "<?php\necho \"é\"; // @phpstan-ignore variable.undefined\n";
+        let edit = build_remove_ignore_edit(content, 1, 1, None).unwrap();
+        assert_eq!(apply_text_edits(content, &[edit]), "<?php\necho \"é\";\n");
     }
 
     #[test]

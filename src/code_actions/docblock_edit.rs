@@ -21,7 +21,8 @@ use crate::docblock::strip_docblock_line_delimiters;
 use crate::docblock::type_strings::split_type_token;
 use crate::php_type::PhpType;
 use crate::text_position::{
-    byte_range_to_lsp_range, line_start_byte_offset, lines_with_offsets, offset_to_position,
+    byte_range_to_lsp_range, line_ending, line_start_byte_offset, lines_with_offsets,
+    offset_to_position,
 };
 
 /// Information about a docblock found above a given line.
@@ -59,12 +60,13 @@ impl DocblockAbove {
         lines_with_offsets(&self.text).map(|(at, line)| (self.start + at, line))
     }
 
-    /// A `TextEdit` that replaces this docblock with `lines`, keeping its
-    /// trailing newline.
+    /// A `TextEdit` that replaces this docblock with `lines`, joined by the
+    /// file's line terminator, keeping its trailing newline.
     pub(crate) fn rewrite_edit<S: Borrow<str>>(&self, content: &str, lines: &[S]) -> TextEdit {
-        let mut new_text = lines.join("\n");
+        let eol = line_ending(content);
+        let mut new_text = lines.join(eol);
         if self.text.ends_with('\n') && !new_text.ends_with('\n') {
-            new_text.push('\n');
+            new_text.push_str(eol);
         }
         self.replace_edit(content, new_text)
     }
@@ -255,11 +257,12 @@ impl DocblockPlacement {
         joins: &[&str],
     ) -> TextEdit {
         let indent = &self.indent;
+        let eol = line_ending(content);
         let Some(docblock) = docblock else {
             return insert_edit(
                 content,
                 self.insert_at,
-                format!("{indent}/**\n{indent} * {tag}\n{indent} */\n"),
+                format!("{indent}/**{eol}{indent} * {tag}{eol}{indent} */{eol}"),
             );
         };
 
@@ -272,11 +275,11 @@ impl DocblockPlacement {
                 .and_then(|s| s.strip_suffix("*/"))
                 .map(str::trim)
                 .unwrap_or("");
-            let mut new_doc = format!("{indent}/**\n");
+            let mut new_doc = format!("{indent}/**{eol}");
             if !inner.is_empty() {
-                new_doc.push_str(&format!("{indent} * {inner}\n{indent} *\n"));
+                new_doc.push_str(&format!("{indent} * {inner}{eol}{indent} *{eol}"));
             }
-            new_doc.push_str(&format!("{indent} * {tag}\n{indent} */"));
+            new_doc.push_str(&format!("{indent} * {tag}{eol}{indent} */"));
             return TextEdit {
                 range: byte_range_to_lsp_range(
                     content,
@@ -296,9 +299,9 @@ impl DocblockPlacement {
             previous.starts_with('@') && !joins.iter().any(|join| previous.starts_with(join));
         let mut insert_text = String::new();
         if needs_separator {
-            insert_text.push_str(&format!("{indent} *\n"));
+            insert_text.push_str(&format!("{indent} *{eol}"));
         }
-        insert_text.push_str(&format!("{indent} * {tag}\n"));
+        insert_text.push_str(&format!("{indent} * {tag}{eol}"));
         insert_edit(content, close_start, insert_text)
     }
 }

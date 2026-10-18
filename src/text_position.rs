@@ -184,6 +184,20 @@ pub(crate) fn lines_with_offsets(content: &str) -> impl Iterator<Item = (usize, 
     })
 }
 
+/// The line terminator `content` is written with: `"\r\n"` when it has a
+/// CRLF line break, `"\n"` otherwise.
+///
+/// For an edit that writes line breaks of its own, so the lines it adds end
+/// the way the file's do. A line read with [`str::lines`] has lost its
+/// terminator, so text rebuilt from such lines needs this too.
+pub(crate) fn line_ending(content: &str) -> &'static str {
+    if content.contains("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    }
+}
+
 /// [`LineIndex::position`] over a table built by [`line_starts`] for the
 /// same `content`.
 pub(crate) fn position_in(content: &str, line_starts: &[usize], offset: usize) -> Position {
@@ -524,6 +538,13 @@ mod tests {
             lines.iter().map(|(_, line)| *line).collect::<Vec<_>>(),
             content.lines().collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn line_ending_follows_the_content() {
+        assert_eq!(line_ending("<?php\r\necho 1;\r\n"), "\r\n");
+        assert_eq!(line_ending("<?php\necho 1;\n"), "\n");
+        assert_eq!(line_ending("<?php echo 1;"), "\n");
     }
 
     #[test]

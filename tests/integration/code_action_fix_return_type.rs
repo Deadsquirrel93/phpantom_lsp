@@ -1663,3 +1663,33 @@ fn return_void_strips_expression_in_a_crlf_file() {
         "first() should be untouched:\n{result:?}"
     );
 }
+
+#[test]
+fn return_void_keeps_a_bare_return_in_a_crlf_file() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = "<?php\r\nclass Foo {\r\n    public function run(): void {\r\n        if (rand(0, 1)) {\r\n            return $this->doWork();\r\n        }\r\n        echo 'done';\r\n    }\r\n}\r\n";
+    backend.update_ast(uri, content);
+
+    inject_phpstan_diag(
+        &backend,
+        uri,
+        4,
+        "Method Foo::run() with return type void returns void but should not return anything.",
+        "return.void",
+    );
+
+    let actions = get_code_actions_on_line(&backend, uri, content, 4);
+    let action = find_action(&actions, "Remove return statement")
+        .expect("should offer 'Remove return statement'");
+    let resolved = resolve_action(&backend, uri, content, action);
+    let result = apply_edits(content, &extract_edits(&resolved));
+
+    assert_eq!(
+        result,
+        content.replace(
+            "return $this->doWork();\r\n",
+            "$this->doWork();\r\n            return;\r\n"
+        )
+    );
+}

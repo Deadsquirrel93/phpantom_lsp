@@ -678,22 +678,13 @@ fn adds_throws_in_a_crlf_file() {
     let resolved = resolve_action(&backend, uri, content, action);
     let result = apply_edits(content, &extract_edits(&resolved));
 
-    let lines: Vec<&str> = result.lines().collect();
-    let throws_line = lines
-        .iter()
-        .position(|l| l.contains("@throws RuntimeException"))
-        .unwrap_or_else(|| panic!("should insert @throws:\n{result:?}"));
-    let second_line = lines
-        .iter()
-        .position(|l| l.contains("function second"))
-        .unwrap();
-    let first_line = lines
-        .iter()
-        .position(|l| l.contains("function first"))
-        .unwrap();
-    assert!(
-        first_line < throws_line && throws_line < second_line,
-        "@throws should land in second()'s docblock:\n{result:?}"
+    assert_eq!(
+        result,
+        content.replace(
+            "     * Second.\r\n",
+            "     * Second.\r\n     * @throws RuntimeException\r\n"
+        ),
+        "@throws should land in second()'s docblock"
     );
 }
 

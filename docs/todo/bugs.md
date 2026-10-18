@@ -61,21 +61,6 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B616. PHPStan quick fixes write `\n` line endings into `\r\n` files
-
-**Impact: Low · Complexity: Low**
-
-In a file saved with `\r\n` line endings, the text a PHPStan quick fix
-inserts (an `#[Override]` line, an `@throws` or `@return` tag, a whole new
-docblock) ends its lines with `\n`, and a docblock the fix rewrites comes
-back with all of its lines ending in `\n`. The file is left with mixed line
-endings. `sort_use_statements` and `insert_translation_key` already use the
-file's own terminator (`content.contains("\r\n")`, each with its own copy
-of the check); the actions in `code_actions/phpstan/` and the shared edits
-in `code_actions/docblock_edit.rs` write a literal `\n`. One
-`line_ending(content)` helper in `text_position.rs` would serve all of
-them.
-
 ### B618. "Update return type" on a closure writes the enclosing method's type
 
 **Impact: Medium · Complexity: Medium-High**
@@ -159,3 +144,24 @@ is untyped in the next and nothing checks the members, arguments or types
 it is used with there. Carry the top-level scope from block to block,
 switching only the loaders and imports, as the recursion's `block_ctx`
 already does.
+
+### B634. Edits outside the PHPStan quick fixes write `\n` line endings into `\r\n` files
+
+**Impact: Low · Complexity: Medium**
+
+In a file saved with `\r\n` line endings, most edits other than the PHPStan
+quick fixes end the lines they add with `\n`: the `use` line an import adds
+(from completion, "Import class", or the `use Override;` of "Add
+`#[Override]`"), a generated constructor, getter, setter or property hook,
+implemented methods, an extracted function, constant or interface, "Update
+docblock", the docblock generated on `/**`, and an override completion,
+among others. The file is left with mixed line endings. Each builder writes a literal
+`\n` (`build_constructor` in `generate_constructor.rs`,
+`extract_function/codegen.rs`, `update_docblock/rewrite.rs`, …) where it
+should write `line_ending(content)` from `text_position.rs`, as the PHPStan
+quick fixes and `sort_use_statements` do. Imports need the terminator
+carried in: `UseBlockInfo::import_text` (`completion/use_edit.rs`) and the
+template's `@use` writer (`blade/use_block.rs`) build their line without
+the file's content, so `analyze_use_block_in` and
+`analyze_template_use_block` would record it in the `UseBlockInfo`, and
+`drop_repeated_separator` would strip that terminator instead of `\n`.

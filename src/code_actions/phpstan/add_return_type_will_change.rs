@@ -24,7 +24,7 @@ use super::attributes::attributed_member_at;
 use crate::Backend;
 use crate::code_actions::phpstan::phpstan_identifier;
 use crate::code_actions::{CodeActionData, make_code_action_data};
-use crate::text_position::offset_to_position;
+use crate::text_position::{line_ending, offset_to_position};
 
 /// The PHPStan identifier we match on.
 const TENTATIVE_RETURN_TYPE_ID: &str = "method.tentativeReturnType";
@@ -119,10 +119,15 @@ impl Backend {
             return None;
         }
 
-        // Build the text edit: insert `#[\ReturnTypeWillChange]\n<indent>`
-        // at the insertion point (before any existing attributes or
-        // modifiers).
-        let insert_text = format!("{}{}\n", method.indent, ATTRIBUTE_TEXT);
+        // Build the text edit: insert `<indent>#[\ReturnTypeWillChange]` on
+        // a line of its own at the insertion point (before any existing
+        // attributes or modifiers).
+        let insert_text = format!(
+            "{}{}{}",
+            method.indent,
+            ATTRIBUTE_TEXT,
+            line_ending(content)
+        );
         let insert_pos = offset_to_position(content, method.line_start);
 
         let edits = vec![TextEdit {

@@ -7,7 +7,7 @@ use tower_lsp::lsp_types::{Position, Range, TextEdit};
 use crate::code_actions::cursor_context::FunctionKinds;
 use crate::code_actions::{FunctionDocblock, function_docblock_at};
 use crate::php_type::PhpType;
-use crate::text_position::line_start_byte_offset;
+use crate::text_position::{line_ending, line_start_byte_offset};
 use crate::text_scan::find_semicolon_balanced;
 
 use super::inference::InferredReturnType;
@@ -96,7 +96,7 @@ pub(super) fn build_strip_return_expr_edit(content: &str, diag_line: usize) -> O
     let needs_bare_return = !is_last_statement_in_function(content, stmt_end_byte);
 
     let new_text = if needs_bare_return {
-        format!("{};\n{}return;", expr_text, indent)
+        format!("{};{}{}return;", expr_text, line_ending(content), indent)
     } else {
         format!("{};", expr_text)
     };

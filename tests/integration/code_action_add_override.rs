@@ -1051,16 +1051,7 @@ fn adds_override_in_a_crlf_file() {
     let result = apply_edits(content, &extract_edits(&resolved));
 
     assert_eq!(
-        result.lines().collect::<Vec<_>>(),
-        vec![
-            "<?php",
-            "class Child extends Base {",
-            "    public function bar(): void {}",
-            "",
-            "    #[Override]",
-            "    public function foo(): void {}",
-            "}",
-        ],
-        "got:\n{result:?}"
+        result,
+        "<?php\r\nclass Child extends Base {\r\n    public function bar(): void {}\r\n\r\n    #[Override]\r\n    public function foo(): void {}\r\n}\r\n"
     );
 }

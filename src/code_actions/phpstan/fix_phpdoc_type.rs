@@ -819,6 +819,28 @@ mod tests {
         }
     }
 
+    #[test]
+    fn keeps_crlf_line_endings() {
+        let content = "<?php\r\n/**\r\n * Summary.\r\n *\r\n * @param int $a\r\n * @return int\r\n */\r\nfunction foo(string $a): string {}";
+        let db = find_docblock_above_line(content, 7).unwrap();
+        let mismatch = PhpDocMismatch {
+            tag: "@return",
+            phpdoc_type: "int".to_string(),
+            native_type: "string".to_string(),
+            param_name: None,
+        };
+        let edit = build_update_tag_edit(content, &db, &mismatch).unwrap();
+        assert_eq!(
+            edit.new_text,
+            "/**\r\n * Summary.\r\n *\r\n * @param int $a\r\n * @return string\r\n */\r\n"
+        );
+        let edit = build_remove_tag_edit(content, &db, &mismatch).unwrap();
+        assert_eq!(
+            edit.new_text,
+            "/**\r\n * Summary.\r\n *\r\n * @param int $a\r\n */\r\n"
+        );
+    }
+
     // ── Stale detection ─────────────────────────────────────────────
 
     #[test]

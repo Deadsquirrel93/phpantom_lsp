@@ -531,6 +531,36 @@ mod tests {
         );
     }
 
+    #[test]
+    fn keeps_crlf_line_endings() {
+        // A new docblock, a one-line docblock spread over several lines,
+        // and a tag set apart from the one before it.
+        let cases = [
+            (
+                "<?php\nclass Foo {\n    public function bar(): void {\n        throw new \\RuntimeException();\n    }\n}\n",
+                3,
+                "<?php\nclass Foo {\n    /**\n     * @throws RuntimeException\n     */\n    public function bar(): void {\n        throw new \\RuntimeException();\n    }\n}\n",
+            ),
+            (
+                "<?php\nclass Foo {\n    /** Summary. */\n    public function bar(): void {\n        throw new \\RuntimeException();\n    }\n}\n",
+                4,
+                "<?php\nclass Foo {\n    /**\n     * Summary.\n     *\n     * @throws RuntimeException\n     */\n    public function bar(): void {\n        throw new \\RuntimeException();\n    }\n}\n",
+            ),
+            (
+                "<?php\nclass Foo {\n    /**\n     * @return Response\n     */\n    public function clientside(): Response {\n        throw new \\RuntimeException();\n    }\n}\n",
+                6,
+                "<?php\nclass Foo {\n    /**\n     * @return Response\n     *\n     * @throws RuntimeException\n     */\n    public function clientside(): Response {\n        throw new \\RuntimeException();\n    }\n}\n",
+            ),
+        ];
+        for (php, line, expected) in cases {
+            let php = php.replace('\n', "\r\n");
+            assert_eq!(
+                with_throws(&php, line, "RuntimeException"),
+                expected.replace('\n', "\r\n")
+            );
+        }
+    }
+
     // ── find_enclosing_function_line_range ───────────────────────────
 
     #[test]
