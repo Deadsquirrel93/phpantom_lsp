@@ -87,6 +87,10 @@ pub(crate) struct ResolvedViewCall {
 
 /// The variables injected into one template's virtual-PHP prologue:
 /// (name without `$`, docblock type string).
+///
+/// The prologue's `@var` lines are parsed again, so each type is spelled by
+/// [`PhpType::to_reparseable_string`]: a value that is benevolent where it
+/// was resolved stays benevolent in the template.
 pub(crate) type InjectedVars = Vec<(String, String)>;
 
 /// What a template's virtual PHP is seeded with beyond the template's own
@@ -467,7 +471,7 @@ impl Backend {
 
         let mut result: Vec<(String, String)> = merged
             .into_iter()
-            .map(|(name, types)| (name, join_call_site_types(types).to_string()))
+            .map(|(name, types)| (name, join_call_site_types(types).to_reparseable_string()))
             .collect();
         // Deterministic prologue ordering so re-preprocessing an
         // unchanged template produces identical virtual PHP.

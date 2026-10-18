@@ -249,7 +249,7 @@ impl Backend {
                         Some(class) => format!("\\{}", class.fqn()),
                         None => name.to_string(),
                     });
-                    (offset, ty.to_string())
+                    (offset, ty.to_reparseable_string())
                 })
                 .collect()
         })

@@ -6,7 +6,8 @@
 #[cfg(test)]
 mod tests {
     use crate::common::{
-        APP_PSR4_COMPOSER, create_psr4_workspace, open_document, workspace_path, workspace_uri,
+        APP_PSR4_COMPOSER, create_psr4_workspace, open_document, with_code, workspace_path,
+        workspace_uri,
     };
     use tower_lsp::LanguageServer;
     use tower_lsp::lsp_types::*;
@@ -1451,6 +1452,65 @@ mod tests {
             hover.contains("int") || hover.contains("10"),
             "$limit should be typed by App\\LIMIT, got: {}",
             hover
+        );
+    }
+
+    /// A translation whose key the controller only knows at runtime may be
+    /// a line or a group, and the controller itself may pass it on wherever
+    /// a string is expected. The template it reaches accepts it the same
+    /// way, while a value that is never a string is still reported.
+    #[tokio::test]
+    async fn a_translation_with_a_runtime_key_is_accepted_where_a_string_is() {
+        let (backend, _dir) = create_psr4_workspace(
+            APP_PSR4_COMPOSER,
+            &[
+                (
+                    "app/helpers.php",
+                    "<?php\nfunction e(string|int|float|null $value, $doubleEncode = true): string { return ''; }\n",
+                ),
+                (
+                    "app/Controller.php",
+                    "<?php\nnamespace App;\nclass Controller {\n    public function show(string $key): mixed {\n        return view('shop', ['line' => __($key), 'tags' => ['a', 'b']]);\n    }\n}\n",
+                ),
+                (
+                    "resources/views/shop.blade.php",
+                    "{{ $line }}\n{{ $tags }}\n",
+                ),
+            ],
+        );
+
+        backend.initialized(InitializedParams {}).await;
+        let helpers_uri = workspace_uri(&backend, "app/helpers.php");
+        let controller_uri = workspace_uri(&backend, "app/Controller.php");
+        let blade_uri = workspace_uri(&backend, "resources/views/shop.blade.php");
+
+        for (uri, path, language) in [
+            (&helpers_uri, "app/helpers.php", "php"),
+            (&controller_uri, "app/Controller.php", "php"),
+            (&blade_uri, "resources/views/shop.blade.php", "blade"),
+        ] {
+            open_document(
+                &backend,
+                uri,
+                language,
+                &std::fs::read_to_string(workspace_path(&backend, path)).unwrap(),
+            )
+            .await;
+        }
+
+        let virtual_php = backend
+            .blade_virtual_php(blade_uri.as_str())
+            .expect("blade virtual content");
+        let mut diags = Vec::new();
+        backend.collect_slow_diagnostics(blade_uri.as_str(), &virtual_php, &mut diags);
+        let reported: Vec<u32> = with_code(diags, "type_mismatch_argument")
+            .iter()
+            .map(|d| d.range.start.line)
+            .collect();
+        assert_eq!(
+            reported,
+            vec![1],
+            "only echoing the array is reported, not the translation"
         );
     }
 }

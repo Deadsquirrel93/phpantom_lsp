@@ -45,29 +45,7 @@ No outstanding items.
 
 ## Laravel
 
-### B632. A view composer's `__()` value reaches the template as `array|string`
-
-**Impact: Medium · Complexity: Low**
-
-```php
-// DemoServiceProvider::boot()
-View::composer('emails.*', function (View $view) {
-    $view->with('mailFooter', __('messages.welcome'));   // a string translation
-});
-```
-
-```blade
-{{-- resources/views/emails/blog_published.blade.php --}}
-<p>{{ $mailFooter }}</p>   {{-- type_mismatch_argument: got array|string --}}
-```
-
-`messages.welcome` is a plain string in `lang/en/messages.php`, so the value
-is a `string`, but the composer variable arrives in the template typed by
-`__()`'s declared `array|string`. `examples/laravel` reports it at
-`blog_published.blade.php:29` on HEAD (`0a7bfad3c`), which also breaks the
-CI check that expects exactly three errors there. The root cause is not
-traced yet: start from where composer data is typed for the template and
-whether `__()` with a key the catalog knows is narrowed at all there.
+No outstanding items.
 
 ## Blade
 
