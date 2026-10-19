@@ -695,6 +695,37 @@ async fn generates_docblock_with_autoclosed_block() {
     );
 }
 
+/// The return type is inferred from the body however far the parameter
+/// list pushes the opening brace down.
+#[tokio::test]
+async fn infers_return_below_long_parameter_list() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///gen_long_params.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "/** */\n",
+        "function ids(\n",
+        "    int $a,\n",
+        "    int $b,\n",
+        "    int $c,\n",
+        "    int $d,\n",
+        "    int $e,\n",
+        "    int $f,\n",
+        "): array {\n",
+        "    return [1, 2];\n",
+        "}\n",
+    );
+    let items = complete_at(&backend, &uri, text, 1, 3).await;
+    let item = find_docblock_item(&items).expect("Should produce a docblock generation item");
+
+    let snippet = snippet_text(item);
+    assert!(
+        snippet.contains("array{1, 2}"),
+        "Should infer the return type from the body, got:\n{}",
+        snippet
+    );
+}
+
 /// When `/** */` is auto-closed, the text_edit range covers the full `/** */`.
 #[tokio::test]
 async fn text_edit_covers_autoclosed_block() {

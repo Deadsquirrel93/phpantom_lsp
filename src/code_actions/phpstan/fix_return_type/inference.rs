@@ -10,7 +10,6 @@ use std::sync::Arc;
 use mago_span::HasSpan;
 use mago_syntax::cst::expression::Expression;
 use mago_syntax::cst::variable::Variable;
-use tower_lsp::lsp_types::Position;
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
@@ -18,7 +17,6 @@ use crate::code_actions::cursor_context::{FunctionKinds, FunctionLike, find_encl
 use crate::parser::with_parsed_program;
 use crate::php_type::PhpType;
 use crate::return_collection::collect_returns;
-use crate::text_position::line_start_byte_offset;
 use crate::type_engine::resolver::{Loaders, SourceImports, VarResolutionCtx};
 use crate::type_engine::variable::foreach_resolution::resolve_expression_type;
 use crate::types::{ClassInfo, FunctionLoader};
@@ -102,20 +100,6 @@ impl Backend {
 }
 
 // ── Shared return-type inference ────────────────────────────────────────────
-
-/// The offset of the opening brace of the declaration on `func_line`, which
-/// falls inside the body however it is formatted.
-fn body_brace_offset(content: &str, func_line: usize) -> Option<u32> {
-    let lines: Vec<&str> = content.lines().collect();
-    if func_line >= lines.len() {
-        return None;
-    }
-    // The brace is on the declaration line or one of the five after it.
-    let end = (func_line + 6).min(lines.len());
-    let brace_line = (func_line..end).find(|&i| lines[i].contains('{'))?;
-    let brace_col = lines[brace_line].find('{')?;
-    Some((line_start_byte_offset(content, brace_line) + brace_col) as u32)
-}
 
 /// Infer the return type of a function by walking all `return`
 /// statements reachable from its body (not crossing into nested
@@ -315,36 +299,27 @@ fn is_this_variable(expr: &Expression<'_>) -> bool {
     matches!(expr, Expression::Variable(Variable::Direct(dv)) if bytes_to_str(dv.name) == "$this")
 }
 
-/// Infer a `@return` type string for a function whose signature is
-/// at `position` in `content`.
+/// Infer a `@return` type string for the function whose declaration
+/// contains `decl_offset` (the start of its declaration will do).
 ///
 /// Returns `Some("list<string>")` when the body analysis produces a
 /// type richer than the native hint, or `None` when inference fails
 /// or the native type already captures the full information.
 ///
 /// This is the entry point for docblock generation (`enrichment_plain`
-/// replacement for `@return`) — it finds the function line from the
-/// position and delegates to [`infer_return_type_at`].
+/// replacement for `@return`); it delegates to [`infer_return_type_at`].
 pub(crate) fn enrichment_return_type(
     content: &str,
-    position: Position,
+    decl_offset: u32,
     local_classes: &[Arc<ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     source_imports: SourceImports<'_>,
     backend: Option<&Backend>,
     function_loader: FunctionLoader<'_>,
 ) -> Option<PhpType> {
-    // The position is on or near the docblock / function signature.
-    // Search forward from that line to find the `function` keyword.
-    let lines: Vec<&str> = content.lines().collect();
-    let start = position.line as usize;
-    let end = (start + 10).min(lines.len());
-    let func_line =
-        (start..end).find(|&i| lines[i].contains("function ") || lines[i].contains("function("))?;
-
     let inferred = infer_return_type_at(
         content,
-        body_brace_offset(content, func_line)?,
+        decl_offset,
         local_classes,
         class_loader,
         source_imports,

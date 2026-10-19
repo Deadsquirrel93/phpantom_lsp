@@ -81,6 +81,7 @@ pub fn try_generate_docblock(
 
     // Find the declaration below and classify it.
     let remaining = trigger::get_text_after_trigger(content, position);
+    let decl_offset = trigger::declaration_offset(content, Position::new(position.line + 1, 0));
     let context = parse_decl::classify_declaration(&remaining);
 
     // Inside a function body (Inline / Unknown) we don't generate a
@@ -104,6 +105,7 @@ pub fn try_generate_docblock(
         &mut build::DocForm::snippet(),
         content,
         position,
+        decl_offset,
         use_map,
         file_namespace,
         local_classes,
@@ -185,6 +187,7 @@ pub fn try_generate_docblock_on_enter(
     // wrong indent level inside constructor parameter lists.  The
     // declaration line is always at the correct level.
     let indent = trigger::declaration_indent(&after_block);
+    let decl_offset = trigger::declaration_offset(content, block_range.end);
 
     let context = parse_decl::classify_declaration(&after_block);
 
@@ -209,6 +212,7 @@ pub fn try_generate_docblock_on_enter(
         &mut build::DocForm::Plain { indent: &indent },
         content,
         position,
+        decl_offset,
         use_map,
         file_namespace,
         local_classes,

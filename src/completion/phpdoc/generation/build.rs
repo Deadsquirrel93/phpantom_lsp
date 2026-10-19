@@ -285,6 +285,7 @@ pub(super) fn build_docblock(
     form: &mut DocForm<'_>,
     content: &str,
     position: Position,
+    decl_offset: u32,
     use_map: &HashMap<String, String>,
     file_namespace: &Option<String>,
     local_classes: &[Arc<ClassInfo>],
@@ -298,6 +299,7 @@ pub(super) fn build_docblock(
             form,
             content,
             position,
+            decl_offset,
             use_map,
             file_namespace,
             local_classes,
@@ -325,6 +327,7 @@ fn build_function(
     form: &mut DocForm<'_>,
     content: &str,
     position: Position,
+    decl_offset: u32,
     use_map: &HashMap<String, String>,
     file_namespace: &Option<String>,
     local_classes: &[Arc<ClassInfo>],
@@ -370,7 +373,7 @@ fn build_function(
         // `list<string>` instead of `array<mixed>`).
         let body_inferred = crate::code_actions::phpstan::fix_return_type::enrichment_return_type(
             content,
-            position,
+            decl_offset,
             local_classes,
             class_loader,
             Some(use_map),

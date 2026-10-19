@@ -53,7 +53,7 @@ pub(super) fn analyse_body(
         {
             enrichment_return_type(
                 content,
-                info.docblock_position,
+                info.decl_offset,
                 local_classes,
                 class_loader,
                 Some(use_map),

@@ -61,33 +61,25 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B636. A docblock that mentions "function" loses its inferred `@return`
+### B646. Typing `/**` without auto-close infers no `@return` from the body
 
 **Impact: Low · Complexity: Low**
 
 ```php
-class Foo {
-    /**
-     * Builds the function map. {@see Bar}
-     */
-    public function ids(): array {
-        return [1, 2];
-    }
+/**
+function ids(): array {
+    return [1, 2];
 }
 ```
 
-"Update docblock" adds no `@return array{1, 2}` here, as it would under
-another summary. `enrichment_return_type`
-(`code_actions/phpstan/fix_return_type/inference.rs`) finds the function
-from the docblock's position by text: the first line holding `function `
-within ten lines, then the first `{` within six lines of that. The summary
-line matches both, so the inference reads from an offset inside the
-docblock, where no function is declared. Both callers know the declaration
-they are documenting: `analyse_body` (`update_docblock/changes.rs`) built
-its `FunctionWithDocblock` from the method's node, and `build_docblock`
-(`completion/phpdoc/generation/build.rs`) has the declaration text right
-after the trigger. Pass the declaration's offset in and let
-`infer_return_type_at` find the function there.
+Docblock completion here offers `@return array<mixed>` rather than
+`@return array{1, 2}`, which it does give once the editor has closed the
+block as `/** */`. The still-open `/**` swallows the rest of the file, so
+`enrichment_return_type` (`code_actions/phpstan/fix_return_type/inference.rs`)
+parses text in which the function does not exist. The throws analysis
+avoids this by blanking the open docblock first
+(`with_open_docblock_blanked` in `completion/source/throws_analysis/uncaught.rs`);
+return inference should parse the same blanked text.
 
 ### B637. An import used only by a call still missing its `)` is reported unused
 

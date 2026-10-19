@@ -89,6 +89,8 @@ struct FunctionWithDocblock {
     indent: String,
     /// LSP position of the docblock start (for throws analysis).
     docblock_position: Position,
+    /// Byte offset of the start of the declaration the docblock documents.
+    decl_offset: u32,
 }
 
 impl DocParam {
