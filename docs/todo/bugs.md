@@ -61,32 +61,6 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B633. Diagnostics forget top-level variables at a braced `namespace` block
-
-**Impact: Low · Complexity: Low**
-
-```php
-<?php
-namespace A {
-    $x = new \DateTime();
-    $x->nope();   // reported: no `nope()` on DateTime
-}
-namespace B {
-    $x->nope();   // not reported, though `$x` is still the DateTime
-}
-```
-
-PHP keeps one global variable scope across a file's `namespace` blocks, and
-hover follows it: `walk_body_forward` (`forward_walk/statements.rs`) walks
-each block's statements on the same scope, so hovering `$x` in block B shows
-`DateTime`. The diagnostic walk does not: `walk_top_level_statements`
-(`forward_walk/diagnostic_walk.rs`) recurses into each `Statement::Namespace`
-and starts it on a fresh `ScopeState`, so a variable assigned in one block
-is untyped in the next and nothing checks the members, arguments or types
-it is used with there. Carry the top-level scope from block to block,
-switching only the loaders and imports, as the recursion's `block_ctx`
-already does.
-
 ### B634. Edits outside the PHPStan quick fixes write `\n` line endings into `\r\n` files
 
 **Impact: Low · Complexity: Medium**

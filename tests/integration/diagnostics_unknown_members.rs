@@ -292,6 +292,34 @@ namespace B {
     assert!(diags[0].message.contains("Gadget"), "got: {:?}", diags);
 }
 
+/// PHP shares one global variable scope across a file's `namespace`
+/// blocks, so a variable assigned in one block keeps its type in the next.
+#[test]
+fn top_level_variable_carries_across_namespace_blocks() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+namespace A {
+    class Widget { public function spin(): void {} }
+    $x = new Widget();
+    $x->nope();
+}
+namespace B {
+    $x->spin();
+    $x->gone();
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    let lines: Vec<u32> = diags.iter().map(|d| d.range.start.line).collect();
+    assert_eq!(
+        lines,
+        vec![4, 8],
+        "`$x` is still the Widget in block B, got: {:?}",
+        diags
+    );
+    assert!(diags[1].message.contains("gone"), "got: {:?}", diags);
+}
+
 /// The same call written at the top level of several `namespace` blocks
 /// names a different function in each, so one block's answer must not
 /// stand in for another's.

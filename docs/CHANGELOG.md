@@ -45,6 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Existence checks and attributes written in strings.** A `function_exists()`, `class_exists()` or `method_exists()` check, or a `#[`, that appears inside a string or comment no longer silences unknown-function, unknown-class or unknown-member diagnostics. A check in an `elseif` condition now covers its branch.
 - **Closure types in `@var`.** `@var Closure(int $x): void $cb` no longer counts `$x` as defined.
 - **Go-to-definition on `@property` and `@method` members.** Jumps to the tag in the docblock of the class that declares the member, not to the first tag of that name in the file, and to the key of an Eloquent `$casts` entry rather than a cast type spelled the same.
+- **Variables shared between `namespace { }` blocks.** A variable assigned at the top of one braced `namespace` block keeps its type in the blocks after it in diagnostics too, as it already did in hover, so its members and arguments are checked there.
 - **A namespace declared on the `<?php` line.** `<?php namespace App\Models;` is no longer reported as a namespace mismatch, and the fix no longer offers to add a second declaration.
 - **Deleted files in workspace diagnostics.** A file deleted while workspace diagnostics are on no longer keeps reporting its problems.
 - **Non-ASCII variable names before `->can()`.** Such a variable no longer stops the file from being indexed.

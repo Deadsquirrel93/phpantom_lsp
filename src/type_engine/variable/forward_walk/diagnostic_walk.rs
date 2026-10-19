@@ -220,19 +220,31 @@ pub(crate) fn walk_top_level_statements<'a, 'b: 'a>(
         }
         None => diag_ctx,
     };
-    let ctx = diag_ctx.forward_walk_ctx(default_class);
 
     let mut top_level_scope = ScopeState::new();
 
     // Seed superglobals for top-level code.
     seed_superglobals(&mut top_level_scope);
 
+    walk_top_level_block(statements, default_class, diag_ctx, &mut top_level_scope);
+}
+
+/// Walk one run of top-level statements (the file's, or one braced
+/// `namespace` block's) on the file's global scope, which PHP shares
+/// across every `namespace` block in the file.
+fn walk_top_level_block<'b>(
+    statements: Vec<&'b Statement<'b>>,
+    default_class: &ClassInfo,
+    diag_ctx: &DiagnosticWalkCtx<'_>,
+    top_level_scope: &mut ScopeState,
+) {
+    let ctx = diag_ctx.forward_walk_ctx(default_class);
     let last_target = diag_ctx.last_target();
 
     for stmt in statements {
         match stmt {
             Statement::Namespace(ns) => {
-                // Recurse into namespace body with a fresh scope.  The
+                // Recurse into the namespace body on the same scope.  The
                 // stand-in class carries the block's namespace so that
                 // source-level class references inside a plain function
                 // resolve against it, the way they do inside a method.
@@ -246,7 +258,12 @@ pub(crate) fn walk_top_level_statements<'a, 'b: 'a>(
                     source_imports: diag_ctx.block_imports.at(ns.span().start.offset),
                     ..*diag_ctx
                 };
-                walk_top_level_statements(ns.statements().iter(), &ns_class, &block_ctx);
+                walk_top_level_block(
+                    ns.statements().iter().collect(),
+                    &ns_class,
+                    &block_ctx,
+                    top_level_scope,
+                );
             }
             _ if let Some(body) = crate::parser::class_like_body(stmt) => {
                 if !diag_ctx.wants(stmt.span()) {
@@ -281,11 +298,11 @@ pub(crate) fn walk_top_level_statements<'a, 'b: 'a>(
             Statement::If(_) => {
                 if stmt.span().start.offset <= last_target {
                     diag_ctx.mark_walked(stmt.span());
-                    record_scope_snapshot(stmt.span().start.offset, &top_level_scope);
+                    record_scope_snapshot(stmt.span().start.offset, top_level_scope);
                     let pre_stmt_scope = top_level_scope.clone();
-                    process_statement(stmt, &mut top_level_scope, &ctx);
-                    walk_closures_in_statement(stmt, &pre_stmt_scope, &top_level_scope, &ctx);
-                    record_scope_snapshot(stmt.span().end.offset, &top_level_scope);
+                    process_statement(stmt, top_level_scope, &ctx);
+                    walk_closures_in_statement(stmt, &pre_stmt_scope, top_level_scope, &ctx);
+                    record_scope_snapshot(stmt.span().end.offset, top_level_scope);
                 }
                 if diag_ctx.wants(stmt.span()) {
                     walk_functions_in_if(stmt, default_class, diag_ctx);
@@ -304,11 +321,11 @@ pub(crate) fn walk_top_level_statements<'a, 'b: 'a>(
                     continue;
                 }
                 diag_ctx.mark_walked(stmt.span());
-                record_scope_snapshot(stmt.span().start.offset, &top_level_scope);
+                record_scope_snapshot(stmt.span().start.offset, top_level_scope);
                 let pre_stmt_scope = top_level_scope.clone();
-                process_statement(stmt, &mut top_level_scope, &ctx);
-                walk_closures_in_statement(stmt, &pre_stmt_scope, &top_level_scope, &ctx);
-                record_scope_snapshot(stmt.span().end.offset, &top_level_scope);
+                process_statement(stmt, top_level_scope, &ctx);
+                walk_closures_in_statement(stmt, &pre_stmt_scope, top_level_scope, &ctx);
+                record_scope_snapshot(stmt.span().end.offset, top_level_scope);
             }
         }
     }
