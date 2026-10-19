@@ -18,14 +18,6 @@ use mago_span::HasSpan;
 use mago_syntax::cst::{Program, Trivia};
 use mago_syntax::parser::parse_file_content;
 
-/// Parse `content`, keeping the braced `namespace` blocks the parser would
-/// drop whole (see [`reparse_dropped_namespace_blocks`]).
-pub(crate) fn parse_program<'a>(arena: &'a LocalArena, content: &'a str) -> &'a Program<'a> {
-    let file_id = mago_database::file::FileId::new(b"input.php");
-    let program = parse_file_content(arena, file_id, content.as_bytes());
-    reparse_dropped_namespace_blocks(arena, program, content).unwrap_or(program)
-}
-
 /// Parse `content` again with each braced `namespace` block its parse,
 /// `program`, dropped whole opened unbraced, or `None` when it dropped
 /// none.
@@ -148,6 +140,12 @@ mod tests {
     use mago_syntax::cst::Statement;
 
     use super::*;
+
+    fn parse_program<'a>(arena: &'a LocalArena, content: &'a str) -> &'a Program<'a> {
+        let file_id = mago_database::file::FileId::new(b"input.php");
+        let program = parse_file_content(arena, file_id, content.as_bytes());
+        reparse_dropped_namespace_blocks(arena, program, content).unwrap_or(program)
+    }
 
     /// The name of each top-level `namespace` block the parse keeps, with
     /// the text of the statements in it.

@@ -37,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A call still missing its `)`.** While you type a call or array whose closing bracket is not there yet, the rest of the class or function it is in keeps working: its imports are no longer reported as unused, and its members still complete, hover and resolve.
 - **Removing a `return` from a braceless `if` or loop.** The quick fix for a value returned from a `void` function now puts braces around the kept statement and its `return;` when the `return` was the whole body of an `if`, `else` or loop, so the function no longer returns there unconditionally. Inside a loop, the `return;` is also kept when nothing follows the loop.
 - **Inferred `@return` in docblocks that mention "function".** "Update docblock" now adds the `@return` type inferred from the body when the docblock's summary contains the word "function", and docblock generation infers it for a function whose parameter list runs over several lines, or one documented by a `/**` the editor has not closed yet.
 - **Line endings of generated code.** Imports, generated methods and docblocks, extracted code and other edits now end their lines with `\r\n` in a file saved that way, instead of leaving it with mixed line endings.

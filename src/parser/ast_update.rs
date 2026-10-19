@@ -419,13 +419,11 @@ impl Backend {
                 })
                 .collect();
 
-            // Everything else is read from a parse that keeps the braced
-            // `namespace` blocks this one dropped whole.  The errors above
-            // stay those of the text as written.
-            let program = super::namespace_recovery::reparse_dropped_namespace_blocks(
-                arena, program, content,
-            )
-            .unwrap_or(program);
+            // Everything else is read from a parse that keeps the code
+            // this one dropped.  The errors above stay those of the text as
+            // written.
+            let program =
+                super::recovery::reparse_dropped_code(arena, program, content).unwrap_or(program);
 
             // Run mago-names resolver while the arena is still alive.
             // This produces a `ResolvedNames` that maps every identifier's

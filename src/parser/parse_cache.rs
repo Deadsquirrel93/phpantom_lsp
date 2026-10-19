@@ -93,7 +93,7 @@ impl CachedFile {
     fn program(&self) -> &Program<'_> {
         let (_, program_ptr) = self.parsed.get_or_init(|| {
             let arena = mago_allocator::LocalArena::new();
-            let program = super::namespace_recovery::parse_program(&arena, &self.content);
+            let program = super::recovery::parse_program(&arena, &self.content);
             // The arena's chunks are heap-allocated and do not move when
             // the arena itself does, so the pointer outlives this move.
             let program_ptr: *const () = (program as *const Program<'_>).cast();
@@ -261,7 +261,7 @@ fn install_parse_cache<'a>(
 /// `Program` (plus the content string) to `f`.
 ///
 /// A braced `namespace` block the parser would drop whole is kept (see
-/// [`parse_program`](super::namespace_recovery::parse_program)).
+/// [`parse_program`](super::recovery::parse_program)).
 ///
 /// Handles the boilerplate that every parse entry-point needs:
 /// allocating a `LocalArena` arena, creating a `FileId`, calling
@@ -293,7 +293,7 @@ pub(crate) fn with_parsed_program<T: Default>(
     let content_owned = content.to_string();
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let arena = mago_allocator::LocalArena::new();
-        let program = super::namespace_recovery::parse_program(&arena, &content_owned);
+        let program = super::recovery::parse_program(&arena, &content_owned);
         f(program, &content_owned)
     }));
 

@@ -61,35 +61,29 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B637. An import used only by a call still missing its `)` is reported unused
+### B637. An import used only by a call at the end of the file still missing its `)` is reported unused
 
 **Impact: Low · Complexity: Medium**
 
 ```php
 <?php
 namespace App;
-use Lib\Widget;   // reported unused until the `)` is typed
-class Shop {
-    public function make() {
-        $w = new Widget(
-    }
-}
+use App\Http\Controllers\HomeController;   // reported unused until the `)` is typed
+Route::get('/', [HomeController::class, 'index']
 ```
 
-mago's argument-list recovery takes the method's `}` for an argument, so the
-braces stop balancing: the method body closes on the class's `}`, the class
-runs to the end of the file, and the parser drops it whole. Nothing in it
-reaches the symbol map, and `collect_unused_import_diagnostics`
-(`diagnostics/unused_imports.rs`) counts an import as used only when a span
-there names it, so every import the class uses is reported until the call is
-closed. A call at the top level of the file's last `namespace` block drops
-just its own statement, with the same result. Signature help and
-named-argument completion work around the dropped class by re-parsing with
-`);` at the cursor (`patch_content_for_signature`), which diagnostics have
-no cursor for. The parser's recovery has to end the argument list at the
-`}` instead, upstream in `mago-syntax` or by a same-length reparse such as
-the one `parser/namespace_recovery.rs` makes for a dropped `namespace`
-block.
+mago drops a top-level statement that the end of the file cuts off, and it
+does so even once its brackets are closed if the `;` is missing too. Nothing
+in the statement reaches the symbol map, so `collect_unused_import_diagnostics`
+(`diagnostics/unused_imports.rs`) reports every import it names. This is
+typical of a routes file, where the newest statement is the last one.
+`parser/bracket_recovery.rs` closes the brackets a call leaves open before a
+`}` by writing them over the whitespace in front of it. At the end of the
+file that needs room for the closers and a `;`, but a file usually ends in
+a single newline after the text being typed. Fixing it needs either
+recovery upstream in `mago-syntax` or a reparse that may append text past the
+end, with every consumer kept from reading a span beyond the caller's
+content.
 
 ### B638. A monorepo's subprojects miss path repositories and are never rescanned after `composer update`
 

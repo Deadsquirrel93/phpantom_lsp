@@ -225,6 +225,28 @@ fn an_import_used_only_in_another_namespace_block_is_unused() {
     assert_eq!(lines, [2], "only block A's import is unused: {diags:?}");
 }
 
+/// A call whose `)` has not been typed yet still uses the imports it names,
+/// and so does the rest of the class it is in.
+#[test]
+fn an_import_used_by_a_call_missing_its_closing_paren_is_used() {
+    let content = r#"<?php
+namespace App;
+
+use Lib\Gadget;
+use Lib\Unused;
+use Lib\Widget;
+
+class Shop {
+    public function make() {
+        $w = new Widget(
+    }
+
+    public function gadget(): Gadget {}
+}
+"#;
+    assert_eq!(unused_imports(content), ["Unused import 'Lib\\Unused'"]);
+}
+
 /// The `Unused import '…'` messages for `content`.
 fn unused_imports(content: &str) -> Vec<String> {
     let backend = create_test_backend();

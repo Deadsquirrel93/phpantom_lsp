@@ -20,6 +20,9 @@
 //! - [`name_resolution`]: Qualifying the names a parsed declaration spells
 //! - [`initializers`]: Qualifying the classes a constant initializer names
 //! - [`parse_cache`]: The thread-local cache that shares one parse per pass
+//! - [`recovery`]: Parsing again the code the parser drops mid-edit
+//! - [`bracket_recovery`]: Closing the brackets an unfinished expression
+//!   leaves open before a `}`
 //! - [`namespace_recovery`]: Keeping the braced `namespace` blocks the
 //!   parser drops whole
 //! - [`ast_helpers`]: Small helpers for walking the AST
@@ -32,6 +35,7 @@ mod ast_helpers;
 mod ast_publish;
 mod ast_update;
 mod attributes;
+mod bracket_recovery;
 mod classes;
 pub(crate) mod error_format;
 mod functions;
@@ -40,6 +44,7 @@ mod name_resolution;
 mod namespace_recovery;
 mod params;
 mod parse_cache;
+mod recovery;
 mod signature;
 mod stub_attributes;
 mod use_statements;
