@@ -25,11 +25,95 @@ No outstanding items.
 
 ## Type comparison
 
-No outstanding items.
+### B650. A refinement type accepts the base type it refines
+
+**Impact: High · Complexity: Medium**
+
+```php
+/** @param non-empty-string $s */
+function takesNonEmpty(string $s): void {}
+function f(string $s): void { takesNonEmpty($s); }   // not reported
+
+function takesFalse(false $v): void {}
+function g(bool $b): void { takesFalse($b); }        // not reported
+
+/** @param positive-int $n */
+function takesPos(int $n): void {}
+function h(int $n): void { takesPos($n); }           // not reported
+```
+
+A refinement of a scalar — `non-empty-string`, `positive-int`,
+`int<1, 100>`, the `true`/`false` literals — is enforced against a
+*literal* argument (`takesNonEmpty('')` and `takesFalse(true)` are both
+reported) but not against the base type it refines. `string` reaching a
+`non-empty-string`, `bool` reaching a `false`, `int` reaching a
+`positive-int`: every one is accepted. The compatibility check treats the
+pair as related and stops there instead of asking which of the two is the
+subtype, so the widening direction passes.
+
+PHPStan reports this as `argument.type`, Psalm as `ArgumentTypeCoercion`.
+It is the only thing standing between us and two conformance rows, and
+both of them are about the *unguarded* control rather than the narrowing
+they probe: `regressions_string_narrowing_assert_if_true.php` (a plain
+`string` handed to a `non-empty-string` parameter outside the guard) and
+`regressions_ternary_exact_narrowing.php` (a `bool` handed to a `false`
+parameter after the `if`).
 
 ## Standard-library return types
 
-No outstanding items.
+### B652. Arithmetic on `BcMath\Number` and `GMP` is typed `int|float`
+
+**Impact: Medium · Complexity: Medium**
+
+```php
+use BcMath\Number;
+
+function takesNumber(Number $v): void {}
+function takesGmp(\GMP $v): void {}
+
+function f(Number $price, int $qty): void {
+    takesNumber($price * $qty);   // reported: expects BcMath\Number, got int|float
+}
+function g(\GMP $l, \GMP $r): void {
+    takesGmp($l + $r);            // reported: expects GMP, got int|float
+}
+```
+
+PHP 8.4 overloads `+`, `-`, `*`, `/`, `%` and `**` on `BcMath\Number`, and
+`GMP` has overloaded the same set for much longer. In both cases an
+operation on two operands of the class, or the class and an `int`, produces
+an instance of the class. The binary-arithmetic result type is computed
+from the numeric promotion rules alone and answers `int|float` whatever the
+operands were, so every such expression is a false positive at the next
+parameter that wants the class. Special-case the two classes in the
+arithmetic result rule: `GMP` with `GMP|int` gives `GMP`, `BcMath\Number`
+with `BcMath\Number|int|string` gives `BcMath\Number`, and division by the
+same operand types follows. Conformance row
+`native_types_overloaded_number_operators.php`.
+
+### B653. `Closure::fromCallable()` loses the callee's signature
+
+**Impact: Medium · Complexity: Medium**
+
+```php
+final class Repo { public function find(): User { return new User(); } }
+
+function f(Repo $r): void {
+    $c = \Closure::fromCallable([$r, 'find']);
+    $c()->name();   // Cannot verify method 'name' — type of '$c()' could not be resolved
+}
+```
+
+`Closure::fromCallable()` is typed as a bare `Closure` with no parameter or
+return types, so invoking the result resolves to nothing. The first-class
+callable form of the same thing (`$r->find(...)`) already carries the
+method's return type through, so the information is available — the stub's
+return type just discards it. Give `fromCallable()` a return type derived
+from its argument, the same way the first-class callable syntax is handled.
+See also [B661](#b661-invoking-an-array-callable-has-no-return-type), which
+is the other half of the same hole, and
+[B663](#b663-a-bare-closure-in-one-function-body-makes-f-unresolvable-in-the-others),
+which is what makes this one spread.
 
 ## Reachability
 
@@ -41,11 +125,54 @@ No outstanding items.
 
 ## Array types
 
-No outstanding items.
+### B654. Array shapes are unsealed: an undeclared key is admitted
+
+**Impact: Medium · Complexity: Medium**
+
+```php
+/** @param array{foo: int} $shape */
+function takesShape(array $shape): void {}
+
+takesShape([]);                            // reported: missing required key 'foo'
+takesShape(['foo' => 'one']);              // reported: foo is int, not string
+takesShape(['foo' => 2, 'buz' => 42.0]);   // not reported: buz is undeclared
+
+/** @param array{foo: int, buz: float} $wider */
+function passAlong(array $wider): void {
+    takesShape($wider);                    // not reported: wider shape is not a subtype
+}
+```
+
+A shape written without a trailing `...` declares exactly the keys it
+handles; `array{foo: int, ...}` is the opt-in for anything else. The
+required-key and value-type halves of the check are already there, so what
+is missing is the third question: a candidate shape whose key set is not a
+subset of the declared one does not satisfy it. That holds both for a
+literal at the call site and for a value whose extra key comes from a
+declaration. PHPStan, Psalm and Mago all seal by default; conformance row
+`arrays_shape_sealed_by_default.php`.
 
 ## Laravel
 
-No outstanding items.
+### B655. An unknown config key is not reported
+
+**Impact: Low-Medium · Complexity: Low**
+
+```php
+config('app.name');       // fine
+config('gate.missing');   // not reported
+view('missing.page');     // reported: Unknown view
+route('gate.missing');    // reported: Unknown route
+__('boards.missing');     // reported: Unknown translation key
+```
+
+Views, routes and translation keys all have a string-key diagnostic, and
+`config()` already resolves far enough to hover a key and name the file it
+came from, so the index that would answer this is built. The diagnostic
+itself is simply absent. Add it alongside the other three, with the same
+conservative stance they take when the index is incomplete. Conformance row
+`framework.config-diagnostic` in the language-server probes, the only
+non-green framework cell for our column.
 
 ## Blade
 
@@ -53,11 +180,100 @@ No outstanding items.
 
 ## Templates
 
-No outstanding items.
+### B656. A nested conditional return type tests its inner condition against the unnarrowed parameter
+
+**Impact: Medium · Complexity: Medium-High**
+
+```php
+/**
+ * @return ($key is Model ? TModel|null : ($key is Arrayable ? static : TModel|null))
+ */
+public function find(mixed $key): mixed { /* … */ }
+
+function f(Collection $collection, ?User $user): void {
+    takesUserOrNull($collection->find($user));
+    // reported: got User|Collection<User>|null
+}
+```
+
+`?User` takes the outer `$key is Model` branch for its `User` part, so the
+inner condition only ever sees what the outer one rejected — `null`, which
+is not `Arrayable`. We evaluate the inner `$key is Arrayable` against the
+whole `?User` instead, `User` matches, and `static` joins a return type it
+cannot be part of. Each nested arm has to be resolved against the subject
+the enclosing condition left for it, not against the argument as written.
+This was PHPStan's own bug until 2.2.16 (phpstan-src#6586); conformance row
+`regressions_nested_param_conditional.php`.
 
 ## Name resolution
 
-No outstanding items.
+### B657. `new (<expression>)` is not resolved
+
+**Impact: Medium · Complexity: Medium**
+
+```php
+$a = new (User::class)();        // unresolved
+$b = new ('App\\User')();        // unresolved
+$c = new ($factory->class)();    // unresolved, even with @var class-string<User>
+$d = new $someClassString();     // resolves
+```
+
+PHP 8.0 allows an arbitrary parenthesised expression as the operand of
+`new`. The resolver handles the bare-variable spelling (`new $c()`) and
+nothing else: with parentheses around the operand the whole `new` resolves
+to nothing, so every member access on the instance is an
+`unresolved_member_access` false positive. The parenthesised operand should
+go through the same class-string resolution the bare variable already uses.
+Conformance row `generics_class_string_property_new.php`.
+
+### B658. A member access written directly on `new $var` resolves the variable, not the instance
+
+**Impact: High · Complexity: Medium**
+
+```php
+function f(Customer $c): void {
+    $class = $c::class;
+    $copy = new $class();
+    $copy->name();                 // resolves to Customer
+
+    echo (new $class())->name();   // Cannot verify method 'name' — type of
+                                   // '$class' could not be resolved
+}
+
+function g(): void {
+    $class = 'App\\Customer';
+    echo (new $class())->name();   // Cannot access method 'name' on type
+                                   // ''App\Customer''        [scalar_member_access]
+}
+```
+
+Two resolution paths answer "what does `new $var` produce", and they
+disagree. The assignment handler gets it right for every class-string
+flavour — `$obj::class`, a literal string, `get_class()`, a
+`class-string<T>` docblock. The member-access subject resolver only handles
+`class-string<T>`; for anything else it either gives up or, worse, hands
+back the *operand's* type, so a literal class name is reported as a method
+call on a string. That is the parallel-resolution-path anti-pattern:
+whichever of the two paths is right, there should be one. Conformance row
+`objects_class_constant_on_instance.php`.
+
+### B659. `new $classString` skips the class-kind and constructor checks
+
+**Impact: Low-Medium · Complexity: Low**
+
+```php
+new \Countable();                           // reported: Cannot instantiate interface
+function f(): void { $c = 'Countable';  new $c(); }   // not reported
+function g(): void { $c = '\\Countable'; new $c(); }  // not reported
+```
+
+`invalid_class_kind` (and the argument-count check on the constructor) only
+runs when `new` names a class syntactically. Once the class comes from a
+class-string the checks are skipped entirely, even though the resolver
+knows which class it is — including the leading-backslash spelling, which
+names the same class as the slash-free one. Run the same checks on the
+resolved class whatever syntax named it. Conformance row
+`regressions_new_class_string_leading_backslash.php`.
 
 ## Code actions
 
@@ -65,4 +281,109 @@ No outstanding items.
 
 ## Miscellaneous
 
-No outstanding items.
+### B660. A return type is inferred from an untyped body only for methods
+
+**Impact: High · Complexity: Medium**
+
+```php
+function makeUser() { return new User(); }
+final class Repo { public function find() { return new User(); } }
+
+function f(Repo $r): void {
+    makeUser()->name();        // Cannot verify method 'name' — type of
+                               // 'makeUser()' could not be resolved
+    $r->find()->name();        // resolves to User
+}
+```
+
+A method with neither a native return type nor `@return` gets its return
+type read off its body; a free function with the same shape gets nothing.
+Closures and arrow functions do infer, so the method path is the rule and
+the free function is the exception. The result is an
+`unresolved_member_access` false positive on every call to an unannotated
+function — common in legacy code, which is where a language server is worth
+the most. Route free functions through the same body inference the method
+path uses. Conformance row `native_types_untyped_return_inferred.php`, and
+the `inferred-return` hover probe, which shows no type for the same reason.
+
+### B661. Invoking an array callable has no return type
+
+**Impact: Medium · Complexity: Medium**
+
+```php
+function f(Repo $r): void {
+    $find = [$r, 'find'];
+    $find()->name();               // type of '$find()' could not be resolved
+}
+function g(Repo $r): void {
+    $f = $r->find(...);
+    $f()->name();                  // resolves to User
+}
+```
+
+`[$object, 'method']` and `[Repo::class, 'method']` name their target
+exactly, so invoking one is the same call as `$object->method()`. We type
+the array as an array and the invocation as nothing, which makes the member
+access on the result a false positive. First-class callable syntax and
+closures both resolve, so the gap is the array spelling alone —
+`call_user_func([$r, 'find'])` is `mixed` for the same reason. Conformance
+row `callables_array_callable_invocation.php`; the sibling stub gap is
+[B653](#b653-closurefromcallable-loses-the-callees-signature).
+
+### B662. Property assignment type checks only cover `$this->prop` and `self::$prop`
+
+**Impact: Medium-High · Complexity: Medium**
+
+```php
+final class Holder { public static int $count = 1; public int $n = 1; }
+
+function f(Holder $h): void { $h->n = 'no'; }        // not reported
+function g(): void { Holder::$count = 'no'; }        // not reported
+function h(Holder $h): void { $h->n = 1; }           // correct, and silent
+
+/** @param class-string<Holder> $c */
+function i(string $c): void { $c::$count = 'no'; }   // not reported
+```
+
+`check_expression_for_property_assignment` in
+`diagnostics/property_type_errors.rs` returns early unless the instance
+assignment's object is literally `$this`, or the static assignment's class
+is `self`/`static`. Every write through another object, through a named
+class, or through a class-string goes unchecked — which is most writes in
+real code. The property's declared type and the RHS type are both already
+resolved for the `$this` case; the subject just has to be resolved the same
+way the member-access checks resolve theirs rather than pattern-matched.
+Conformance row `regressions_variable_class_static_property.php` (the
+private-read half of that test already passes, so only the write check is
+missing).
+
+### B663. A bare `Closure` in one function body makes `$f()` unresolvable in the others
+
+**Impact: High · Complexity: Medium**
+
+```php
+function poison(Repo $r): void {
+    $f = \Closure::fromCallable([$r, 'find']);
+    $f()->name();   // unresolved — expected, see B653
+}
+
+function clean(Repo $r): void {
+    $f = $r->find(...);
+    $f()->name();   // ALSO unresolved; resolves to User if `poison` is deleted,
+                    // or if either function renames its variable
+}
+```
+
+A variable that holds a signature-less `Closure` in one function body
+leaks that reading into every other body in the file that invokes a
+variable of the same name. Renaming either `$f` fixes it, deleting the
+first function fixes it, and no other unresolvable binding does it — an
+array callable or a `mixed` in the first body leaves the second alone, so
+it is specific to the bare `Closure`. A per-file map keyed by variable name
+is reaching across scopes it should not see; find it and key it by the
+function/closure body as well. This is the mechanism that turns one real
+gap ([B653](#b653-closurefromcallable-loses-the-callees-signature)) into a
+false positive on every other call of a same-named callable in the file,
+and it will do the same to any file with a `$callback` or `$fn` in more
+than one function. Found while reducing the php-typing-conformance
+callable rows, not by a row of its own.
