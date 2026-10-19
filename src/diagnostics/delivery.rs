@@ -53,7 +53,12 @@ impl Backend {
             let content = Arc::clone(content);
             crate::server::run_blocking_cancel_safe("fast diagnostics", move || {
                 let mut out = Vec::new();
-                let effective = backend.analysable_content_or(&uri, &content);
+                let effective = backend
+                    .blade_virtual_php_arc(&uri)
+                    .unwrap_or_else(|| Arc::clone(&content));
+                // Hand the parse cache the shared buffer, so the collector's
+                // own guard finds it instead of copying the file.
+                let _parse_guard = crate::parser::with_parse_cache_arc(Arc::clone(&effective));
                 backend.collect_fast_diagnostics(&uri, &effective, &mut out);
                 out
             })

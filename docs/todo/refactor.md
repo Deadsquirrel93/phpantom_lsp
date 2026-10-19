@@ -218,16 +218,6 @@ sweep found are filed in `bugs.md` (B642 to B645), not here.
 
 ## Blocks a Sprint 8 task
 
-### Share the phpstorm-stubs map parser between `build.rs` and the server
-
-E1 has to parse `PhpStormStubsMap.php` at runtime, and the parser
-(`parse_section`, `parse_map_entry`, `php_unescape_single_quoted`) only
-exists inside `build.rs`. Move those three functions into a new
-`src/stub_map.rs` that `build.rs` pulls in with `#[path = "src/stub_map.rs"] mod stub_map;`
-and the crate declares in `src/lib.rs`, so both sides use one copy.
-
-Files: `build.rs`, `src/stub_map.rs` (new), `src/lib.rs`.
-
 ### Split `src/config.rs`
 
 2048 lines: about 1000 of config types and loading, plus a 1042-line
@@ -281,18 +271,6 @@ are missing to `src/util.rs` and send every site through them, so F20
 changes one module instead of ninety.
 
 Files: `src/util.rs` plus the call sites (`grep -rnE 'Url::(parse|from_file_path|from_directory_path)|\.to_file_path\(\)' src`).
-
-### Extract the progress-reporting request wrapper in `src/server.rs`
-
-`goto_implementation`, `references` and `subtypes` each repeat the same
-~30 lines: take or create a work-done token, `progress_begin`, attach a
-`ScanProgress` poller to a blocking clone, run the request in
-`run_blocking_cancel_safe`, finish the poller, `progress_end`. F20
-rewrites every handler signature in this file. Add one
-`run_with_progress(name, title, message, token, f)` helper next to
-`run_position_request` and use it in all three.
-
-Files: `src/server.rs`, `src/progress.rs`.
 
 ### Make the code-action collector list declarative
 
@@ -373,18 +351,6 @@ Taking `eol` there is most of B634 for these actions.
 
 Files: those under `src/code_actions/`.
 
-### Use the existing text utilities
-
-- `src/code_actions/phpstan/remove_assert.rs` re-implements paren
-  matching in about 45 lines, without skipping comments; use
-  `text_scan::find_matching_forward`.
-- `rsplit('\\').next()` in place of `util::short_name`:
-  `code_actions/extract_function/naming.rs` (four),
-  `code_actions/extract_variable.rs`, `diagnostics/use_statements.rs`,
-  `diagnostics/existence_guards.rs`, `diagnostics/type_errors/arguments.rs`.
-- A hand-stripped leading `\` in place of `util::strip_fqn_prefix`:
-  `code_actions/phpstan/remove_throws.rs`, `add_throws.rs`.
-
 ### Replace hand-built LSP params in the integration tests
 
 `tests/integration/` builds `DidOpenTextDocumentParams { … }` by hand
@@ -432,15 +398,6 @@ Files: as listed.
 
 Files: as listed.
 
-### Evict one file from `morph_column_spans_cache`, not all of it
-
-`clear_file_maps` (`src/backend/file_access.rs`) clears the whole
-`morph_column_spans_cache` whenever any file is closed or removed.
-Remove only that URI's entry, unless an entry depends on other files, in
-which case document why the whole cache goes.
-
-Files: `src/backend/file_access.rs`.
-
 ### Measure the parse and copy costs the sweep found
 
 None of these has been measured, so check each against the performance
@@ -465,11 +422,6 @@ bar before doing it, and file the ones that clear it in
   of the largest file each worker ever parsed, and `Atom` (`ustr`) never
   frees, so every partial identifier interned mid-edit stays for the
   session.
-
-Two are trivial and need no measurement: `diagnostics/collect.rs` should
-use `with_parse_cache_arc` instead of copying the content, and the
-cross-file parse cache (`parser/parse_cache.rs`) should move an entry to
-the back on a hit so it behaves as an LRU.
 
 ### Split the largest Laravel modules
 

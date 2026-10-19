@@ -144,8 +144,9 @@ fn build_remove_assert_edit(content: &str, diag_line: usize) -> Option<TextEdit>
 
     // Walk forward from `assert(` to find the matching `)` respecting
     // nesting (assert can contain function calls, ternaries, etc.).
-    let after_paren = assert_byte + "assert(".len();
-    let close_paren_byte = find_matching_close_paren(content, after_paren)?;
+    let open_paren_byte = assert_byte + "assert".len();
+    let close_paren_byte =
+        crate::text_scan::find_matching_forward(content, open_paren_byte, b'(', b')')?;
 
     // After the closing `)` there should be a `;`.  Skip optional
     // whitespace between `)` and `;`.
@@ -271,52 +272,6 @@ fn build_remove_assert_edit(content: &str, diag_line: usize) -> Option<TextEdit>
     }
 }
 
-/// Find the byte offset of the closing `)` that matches the opening
-/// paren whose content starts at `start_byte`.
-///
-/// Respects nesting of parentheses and skips string literals (single
-/// and double quoted) so that parentheses inside strings are ignored.
-fn find_matching_close_paren(content: &str, start_byte: usize) -> Option<usize> {
-    let bytes = content.as_bytes();
-    let mut depth: u32 = 1;
-    let mut i = start_byte;
-
-    while i < bytes.len() && depth > 0 {
-        match bytes[i] {
-            b'(' => {
-                depth += 1;
-                i += 1;
-            }
-            b')' => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(i);
-                }
-                i += 1;
-            }
-            b'\'' | b'"' => {
-                let quote = bytes[i];
-                i += 1;
-                while i < bytes.len() {
-                    if bytes[i] == b'\\' {
-                        i += 2; // skip escaped character
-                    } else if bytes[i] == quote {
-                        i += 1;
-                        break;
-                    } else {
-                        i += 1;
-                    }
-                }
-            }
-            _ => {
-                i += 1;
-            }
-        }
-    }
-
-    None
-}
-
 /// Check whether a `function.alreadyNarrowedType` diagnostic for
 /// `assert()` is stale.
 ///
@@ -336,45 +291,6 @@ pub(crate) fn is_remove_assert_stale(content: &str, diag_line: usize) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // ── find_matching_close_paren ───────────────────────────────────
-
-    #[test]
-    fn simple_paren() {
-        let s = "true);";
-        // content starts after `assert(`, so index 0 = 't'
-        assert_eq!(find_matching_close_paren(s, 0), Some(4));
-    }
-
-    #[test]
-    fn nested_parens() {
-        let s = "is_string($x));";
-        assert_eq!(find_matching_close_paren(s, 0), Some(13));
-    }
-
-    #[test]
-    fn string_with_parens() {
-        let s = r#""foo(bar)" !== null);"#;
-        assert_eq!(find_matching_close_paren(s, 0), Some(19));
-    }
-
-    #[test]
-    fn single_quoted_string() {
-        let s = "'a)b' === true);";
-        assert_eq!(find_matching_close_paren(s, 0), Some(14));
-    }
-
-    #[test]
-    fn escaped_quote_in_string() {
-        let s = r#""foo\")" !== null);"#;
-        assert_eq!(find_matching_close_paren(s, 0), Some(17));
-    }
-
-    #[test]
-    fn unmatched_returns_none() {
-        let s = "true";
-        assert_eq!(find_matching_close_paren(s, 0), None);
-    }
 
     // ── build_remove_assert_edit ────────────────────────────────────
 
@@ -403,6 +319,14 @@ mod tests {
         assert_eq!(edit.range.start, Position::new(1, 0));
         assert_eq!(edit.range.end, Position::new(2, 0));
         assert_eq!(edit.new_text, "");
+    }
+
+    #[test]
+    fn removes_assert_with_parens_in_strings_and_comments() {
+        let content = "<?php\n    assert($x !== ')' /* ) */\n        && $y);\n    echo 'ok';\n";
+        let edit = build_remove_assert_edit(content, 1).unwrap();
+        assert_eq!(edit.range.start, Position::new(1, 0));
+        assert_eq!(edit.range.end, Position::new(3, 0));
     }
 
     #[test]

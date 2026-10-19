@@ -125,6 +125,54 @@ impl Backend {
             .unwrap_or(Ok(None))
     }
 
+    /// Run `body` on the blocking pool behind a work-done progress report.
+    ///
+    /// Reports through the client's `token`, or one created under `name`
+    /// when the client sent none, and polls the [`ScanProgress`] the backend
+    /// clone handed to `body` reports into. Running off the async runtime is
+    /// what leaves it free to flush those notifications while `body` works.
+    ///
+    /// [`ScanProgress`]: crate::progress::ScanProgress
+    async fn run_with_progress<R, F>(
+        &self,
+        name: &'static str,
+        title: &str,
+        message: &str,
+        token: Option<NumberOrString>,
+        body: F,
+    ) -> Option<R>
+    where
+        R: Send + 'static,
+        F: FnOnce(&Backend) -> R + Send + 'static,
+    {
+        let token = match token {
+            Some(t) => Some(t),
+            None => self.progress_create(name).await,
+        };
+
+        if let Some(ref tok) = token {
+            self.progress_begin(tok, title, Some(message.to_string()))
+                .await;
+        }
+
+        let mut backend = self.clone_for_blocking();
+        let poller = token.as_ref().map(|tok| {
+            let state = crate::progress::ScanProgress::new();
+            backend.request_progress = Some(Arc::clone(&state));
+            self.spawn_progress_poller(tok.clone(), state)
+        });
+        let result = run_blocking_cancel_safe(name, move || body(&backend)).await;
+
+        if let Some(poller) = poller {
+            poller.finish().await;
+        }
+        if let Some(ref tok) = token {
+            self.progress_end(tok, Some("Done".to_string())).await;
+        }
+
+        result
+    }
+
     /// Format a document, or with `range` only the lines it selects.
     ///
     /// Every formatter works on a whole file, so a range request formats
@@ -374,53 +422,31 @@ impl LanguageServer for Backend {
             .uri
             .to_string();
         let position = params.text_document_position_params.position;
-        let token = match params.work_done_progress_params.work_done_token {
-            Some(t) => Some(t),
-            None => self.progress_create("goto_implementation").await,
-        };
-
-        if let Some(ref tok) = token {
-            self.progress_begin(tok, "Go to Implementation", Some("Resolving…".to_string()))
-                .await;
-        }
-
-        // Run on a blocking thread so the async runtime stays free to
-        // flush progress notifications to the client.
-        let mut backend = self.clone_for_blocking();
-        let poller = token.as_ref().map(|tok| {
-            let state = crate::progress::ScanProgress::new();
-            backend.request_progress = Some(Arc::clone(&state));
-            self.spawn_progress_poller(tok.clone(), state)
-        });
-        let uri_clone = uri.clone();
-        let result = run_blocking_cancel_safe("goto_implementation", move || {
-            backend.handle_with_position(
-                "goto_implementation",
-                &uri_clone,
-                position,
-                |content, pos| {
-                    backend
-                        .resolve_implementation(&uri_clone, content, pos)
-                        .map(|locs| {
-                            locs.into_iter()
-                                .map(|l| backend.translate_location(l))
-                                .collect()
-                        })
-                        .and_then(wrap_locations)
-                },
-            )
-        })
+        self.run_with_progress(
+            "goto_implementation",
+            "Go to Implementation",
+            "Resolving…",
+            params.work_done_progress_params.work_done_token,
+            move |backend| {
+                backend.handle_with_position(
+                    "goto_implementation",
+                    &uri,
+                    position,
+                    |content, pos| {
+                        backend
+                            .resolve_implementation(&uri, content, pos)
+                            .map(|locs| {
+                                locs.into_iter()
+                                    .map(|l| backend.translate_location(l))
+                                    .collect()
+                            })
+                            .and_then(wrap_locations)
+                    },
+                )
+            },
+        )
         .await
-        .unwrap_or(Ok(None));
-
-        if let Some(poller) = poller {
-            poller.finish().await;
-        }
-        if let Some(ref tok) = token {
-            self.progress_end(tok, Some("Done".to_string())).await;
-        }
-
-        result
+        .unwrap_or(Ok(None))
     }
 
     async fn goto_type_definition(
@@ -541,50 +567,28 @@ impl LanguageServer for Backend {
         let uri = params.text_document_position.text_document.uri.to_string();
         let position = params.text_document_position.position;
         let include_declaration = params.context.include_declaration;
-        let token = match params.work_done_progress_params.work_done_token {
-            Some(t) => Some(t),
-            None => self.progress_create("find_references").await,
-        };
-
-        if let Some(ref tok) = token {
-            self.progress_begin(tok, "Find References", Some("Scanning…".to_string()))
-                .await;
-        }
-
-        // Run on a blocking thread so the async runtime stays free to
-        // flush progress notifications to the client.
-        let mut backend = self.clone_for_blocking();
-        let poller = token.as_ref().map(|tok| {
-            let state = crate::progress::ScanProgress::new();
-            backend.request_progress = Some(Arc::clone(&state));
-            self.spawn_progress_poller(tok.clone(), state)
-        });
-        let uri_clone = uri.clone();
-        let result = run_blocking_cancel_safe("references", move || {
-            // Ahead of reading the file: a refresh that parses new files can
-            // rewrite a template's virtual PHP (see `Backend::find_references`).
-            backend.ensure_workspace_indexed_for_request();
-            backend.handle_with_position("references", &uri_clone, position, |content, pos| {
-                backend
-                    .find_references(&uri_clone, content, pos, include_declaration)
-                    .map(|locs| {
-                        locs.into_iter()
-                            .filter_map(|l| backend.try_translate_location(l))
-                            .collect()
-                    })
-            })
-        })
+        self.run_with_progress(
+            "find_references",
+            "Find References",
+            "Scanning…",
+            params.work_done_progress_params.work_done_token,
+            move |backend| {
+                // Ahead of reading the file: a refresh that parses new files can
+                // rewrite a template's virtual PHP (see `Backend::find_references`).
+                backend.ensure_workspace_indexed_for_request();
+                backend.handle_with_position("references", &uri, position, |content, pos| {
+                    backend
+                        .find_references(&uri, content, pos, include_declaration)
+                        .map(|locs| {
+                            locs.into_iter()
+                                .filter_map(|l| backend.try_translate_location(l))
+                                .collect()
+                        })
+                })
+            },
+        )
         .await
-        .unwrap_or(Ok(None));
-
-        if let Some(poller) = poller {
-            poller.finish().await;
-        }
-        if let Some(ref tok) = token {
-            self.progress_end(tok, Some("Done".to_string())).await;
-        }
-
-        result
+        .unwrap_or(Ok(None))
     }
 
     async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
@@ -1037,35 +1041,17 @@ impl LanguageServer for Backend {
         &self,
         params: TypeHierarchySubtypesParams,
     ) -> Result<Option<Vec<TypeHierarchyItem>>> {
-        let mut backend = self.clone_for_blocking();
         let item = params.item;
-        let token = match params.work_done_progress_params.work_done_token {
-            Some(t) => Some(t),
-            None => self.progress_create("type_hierarchy_subtypes").await,
-        };
-
-        if let Some(ref tok) = token {
-            self.progress_begin(tok, "Type Hierarchy", Some("Scanning…".to_string()))
-                .await;
-        }
-        let poller = token.as_ref().map(|tok| {
-            let state = crate::progress::ScanProgress::new();
-            backend.request_progress = Some(Arc::clone(&state));
-            self.spawn_progress_poller(tok.clone(), state)
-        });
-
-        let result = run_blocking_cancel_safe("subtypes", move || backend.subtypes_impl(&item))
+        Ok(self
+            .run_with_progress(
+                "type_hierarchy_subtypes",
+                "Type Hierarchy",
+                "Scanning…",
+                params.work_done_progress_params.work_done_token,
+                move |backend| backend.subtypes_impl(&item),
+            )
             .await
-            .flatten();
-
-        if let Some(poller) = poller {
-            poller.finish().await;
-        }
-        if let Some(ref tok) = token {
-            self.progress_end(tok, Some("Done".to_string())).await;
-        }
-
-        Ok(result)
+            .flatten())
     }
 
     async fn on_type_formatting(

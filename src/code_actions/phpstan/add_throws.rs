@@ -228,10 +228,7 @@ fn docblock_already_has_throws(
         None => return false,
     };
     // PHPStan already reports FQNs — just normalise.
-    let target_fqn = exception_fqn
-        .strip_prefix('\\')
-        .unwrap_or(exception_fqn)
-        .to_lowercase();
+    let target_fqn = strip_fqn_prefix(exception_fqn).to_lowercase();
     for tag in parsed.tags_by_kind(crate::docblock::TagKind::Throws) {
         let rest = tag.description.trim();
         if let Some(type_name) = rest.split_whitespace().next() {

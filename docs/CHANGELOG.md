@@ -55,6 +55,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Hover on `model-property` arguments passed by name.** `where(column: 'email')` now hovers as the model property, like the positional form.
 - **Arrow functions that yield.** `fn () => yield $x` is now typed as a `Generator`.
 - **Enum backing types after a comment.** `enum Ratio /* exact */ : float` now reports the invalid backing type.
+- **"Remove assert" with a parenthesis in a comment.** The quick fix is now offered for an `assert()` call with a `)` inside a comment.
 - **Method calls typed in more places.** Some calls were only typed when assigned straight to a variable, and are now typed wherever they appear, such as in an argument, an array or a `return`: calls on a `$this` narrowed by `assert($this instanceof TestCase)` in a test closure, static calls on a variable holding a class name such as `$class = 'App\Stamp'`, and calls to an override without a docblock whose parent declares a conditional `@return`.
 - **Variables holding a class name follow the code's branches.** After `if (…) { $class = Apple::class; } else { $class = Pear::class; }`, a call such as `$class::make()`, `new $class`, and completion after `$class::` now cover both classes, not only the one assigned last in the file.
 - **The pipe operator with methods and closures.** `$input |> $formatter->format(...)`, `$input |> Stamp::fromString(...)`, and a closure or a variable holding one on the right of `|>` now give the callable's return type, as a function such as `trim(...)` already did.

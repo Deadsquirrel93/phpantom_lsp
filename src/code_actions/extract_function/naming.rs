@@ -192,14 +192,14 @@ pub(crate) fn detect_factory_pattern(body: &str) -> Option<String> {
         }
         // Short variable — prefer the class name.
         if let Some(ref name) = assigned_class {
-            let short = name.rsplit('\\').next().unwrap_or(name);
+            let short = crate::util::short_name(name);
             return Some(short.to_string());
         }
     }
 
     // `return new ClassName(…)` — use the class name.
     if let Some(name) = returned_class {
-        let short = name.rsplit('\\').next().unwrap_or(&name);
+        let short = crate::util::short_name(&name);
         return Some(short.to_string());
     }
 
@@ -212,7 +212,7 @@ pub(crate) fn detect_factory_pattern(body: &str) -> Option<String> {
         }
     }
     if let Some(name) = assigned_class {
-        let short = name.rsplit('\\').next().unwrap_or(&name);
+        let short = crate::util::short_name(&name);
         return Some(short.to_string());
     }
 
@@ -385,7 +385,7 @@ pub(crate) fn detect_single_call(body: &str) -> Option<String> {
         && line[name.len()..].starts_with('(')
     {
         // Use the short name (after last backslash).
-        let short = name.rsplit('\\').next().unwrap_or(&name);
+        let short = crate::util::short_name(&name);
         return Some(short.to_string());
     }
 

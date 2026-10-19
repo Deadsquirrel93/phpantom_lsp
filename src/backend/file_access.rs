@@ -453,7 +453,10 @@ impl Backend {
         self.symbols.uri_classes_index.write().remove(uri);
         self.symbol_maps.write().remove(uri);
         self.evict_typed_receiver_view_spans(uri);
-        self.morph_column_spans_cache.write().clear();
+        // Another file's entry is stamped with the class-lookup generation,
+        // which a class this file withdraws bumps, so only this file's own
+        // entry goes stale here.
+        self.evict_morph_column_spans(uri);
         self.evict_reference_index_uri(uri);
         self.file_imports.write().remove(uri);
         self.file_symbol_imports.write().remove(uri);

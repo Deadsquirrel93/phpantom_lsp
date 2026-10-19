@@ -816,7 +816,7 @@ impl ArgumentCheck<'_> {
                     format!(
                         "'{}' is not a known property of {}",
                         lit,
-                        model_fqn.rsplit('\\').next().unwrap_or(&model_fqn),
+                        crate::util::short_name(&model_fqn),
                     ),
                 ));
             }

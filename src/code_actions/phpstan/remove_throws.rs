@@ -26,7 +26,7 @@ use crate::code_actions::phpstan::phpstan_identifier;
 use crate::code_actions::{DocblockAbove, find_docblock_above_line};
 use crate::docblock::strip_docblock_line_delimiters;
 use crate::php_type::PhpType;
-use crate::util::short_name;
+use crate::util::{short_name, strip_fqn_prefix};
 
 /// PHPStan identifiers we match on.
 const UNUSED_TYPE_ID: &str = "throws.unusedType";
@@ -203,10 +203,7 @@ fn build_remove_throws_edit(
 ) -> Option<TextEdit> {
     // PHPStan reports FQNs already (e.g. `App\Http\Controllers\Ex`),
     // so just normalise — don't resolve through the use-map.
-    let target_fqn = type_name
-        .strip_prefix('\\')
-        .unwrap_or(type_name)
-        .to_lowercase();
+    let target_fqn = strip_fqn_prefix(type_name).to_lowercase();
 
     let doc_lines: Vec<&str> = docblock.text.lines().collect();
 
