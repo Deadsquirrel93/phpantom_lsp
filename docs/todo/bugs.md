@@ -61,21 +61,6 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B639. A `Pest.php` changed outside the editor is never re-read
-
-**Impact: Low · Complexity: Low**
-
-The `->in(…)` bindings a test file's closures are typed from come from the
-`Pest.php` files above it, cached per directory in
-`Backend::pest_configs` (`pest.rs`), including the directories found to
-have none. The cache is only dropped when a file ending in `/Pest.php` is
-saved in the editor (`on_did_save`, `backend/documents.rs`). One created by
-`pest --init`, edited by another tool, or changed by a branch switch reaches
-the server as a watched-file event, which `apply_watched_file_changes`
-(`indexing/watch.rs`) re-indexes without touching that cache, so test
-closures keep the old binding, or none, until a restart. Invalidate it there
-as well.
-
 ### B641. "Generate promoted constructor" orphans each property's `@var` docblock
 
 **Impact: Low · Complexity: Low**

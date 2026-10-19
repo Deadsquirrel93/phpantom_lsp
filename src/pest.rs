@@ -199,6 +199,28 @@ impl Backend {
         *self.pest_configs.write() = None;
     }
 
+    /// The directory of the `Pest.php` at `uri` when a lookup has looked
+    /// there, so a change to it on disk has a cached answer to forget.
+    pub(crate) fn looked_up_pest_dir<'a>(&self, uri: &'a str) -> Option<&'a str> {
+        let dir = uri.strip_suffix("Pest.php")?;
+        if !dir.ends_with('/') {
+            return None;
+        }
+        let configs = self.pest_configs.read();
+        configs
+            .as_ref()
+            .is_some_and(|configs| configs.dirs.contains_key(dir))
+            .then_some(dir)
+    }
+
+    /// Forget what the directory at `dir` was found to have, so the next
+    /// lookup through it reads its `Pest.php` again.
+    pub(crate) fn forget_pest_dir(&self, dir: &str) {
+        if let Some(configs) = self.pest_configs.write().as_mut() {
+            configs.dirs.remove(dir);
+        }
+    }
+
     /// Point the `@param-closure-this` of Pest's test functions at the
     /// test case the closure is bound to in this file: the class among
     /// `uses` (what is bound here), or PHPUnit's base test case when none

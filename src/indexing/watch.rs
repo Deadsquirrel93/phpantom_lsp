@@ -38,6 +38,8 @@ struct WatchedChangeBatch {
     migration_changes: Vec<(PathBuf, FileChangeType)>,
     php_changes: Vec<(String, PathBuf, FileChangeType)>,
     resource_changes: Vec<(String, PathBuf, FileChangeType)>,
+    /// The directories whose cached `Pest.php` lookup the batch made stale.
+    pest_dirs: Vec<String>,
 }
 
 impl WatchedChangeBatch {
@@ -50,6 +52,7 @@ impl WatchedChangeBatch {
             && !self.config_changed
             && !self.schema_full_rebuild
             && self.migration_changes.is_empty()
+            && self.pest_dirs.is_empty()
     }
 }
 
@@ -101,6 +104,10 @@ impl Backend {
             if is_laravel {
                 batch.schema_full_rebuild = true;
             }
+        }
+
+        for dir in &batch.pest_dirs {
+            self.forget_pest_dir(dir);
         }
 
         if !batch.php_changes.is_empty() {
@@ -160,6 +167,25 @@ impl Backend {
             if crate::util::url_to_path(&change.uri).is_some_and(|p| p == config_path) {
                 batch.config_changed = true;
                 continue;
+            }
+            // Test closures are typed from the `Pest.php` above them, read
+            // once per directory.  Only one a lookup has read (or found
+            // missing) has a cached answer to drop, which keeps the
+            // whole-workspace report of a refocus from doing anything for
+            // the rest.  The file still goes on to be indexed as PHP below.
+            if path_str.ends_with("/Pest.php") {
+                let uri_str = change.uri.to_string();
+                let dir = self
+                    .looked_up_pest_dir(&uri_str)
+                    .map(str::to_owned)
+                    .or_else(|| {
+                        let canonical =
+                            crate::util::path_to_uri(&crate::util::url_to_path(&change.uri)?);
+                        self.looked_up_pest_dir(&canonical).map(str::to_owned)
+                    });
+                if let Some(dir) = dir {
+                    batch.pest_dirs.push(dir);
+                }
             }
             // A running Laravel application churns its own cache
             // artifacts: every request can compile a Blade template
