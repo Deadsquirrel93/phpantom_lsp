@@ -100,6 +100,50 @@ async fn imported_function_shadows_a_global_one() {
     assert_eq!(sig_label(&sh), "(string $name): void");
 }
 
+/// Until its `)` is typed, a call swallows the `}` of the braced block it is
+/// in.  It still resolves against that block's imports, not the namespace
+/// of the block before it.
+#[tokio::test]
+async fn unclosed_call_resolves_through_its_braced_blocks_imports() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///sig_unclosed_braced_import.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace Lib {\n",
+        "    function greet(string $name): void {}\n",
+        "}\n",
+        "namespace Other {\n",
+        "    function greet(int $count): void {}\n",
+        "}\n",
+        "namespace App {\n",
+        "    use function Lib\\greet;\n",
+        "    greet(\n",
+        "}\n",
+    );
+
+    let sh = sig_help_at(&backend, &uri, text, 9, 10).await.unwrap();
+    assert_eq!(sig_label(&sh), "(string $name): void");
+}
+
+#[tokio::test]
+async fn unclosed_call_to_a_function_its_braced_block_declares() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///sig_unclosed_braced_local.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace Other {\n",
+        "    function greet(int $count): void {}\n",
+        "}\n",
+        "namespace App {\n",
+        "    function greet(string $name): void {}\n",
+        "    greet(\n",
+        "}\n",
+    );
+
+    let sh = sig_help_at(&backend, &uri, text, 6, 10).await.unwrap();
+    assert_eq!(sig_label(&sh), "(string $name): void");
+}
+
 #[tokio::test]
 async fn qualified_function_expands_through_a_class_import() {
     let backend = create_test_backend();

@@ -93,9 +93,7 @@ impl CachedFile {
     fn program(&self) -> &Program<'_> {
         let (_, program_ptr) = self.parsed.get_or_init(|| {
             let arena = mago_allocator::LocalArena::new();
-            let file_id = mago_database::file::FileId::new(b"input.php");
-            let program =
-                mago_syntax::parser::parse_file_content(&arena, file_id, self.content.as_bytes());
+            let program = super::namespace_recovery::parse_program(&arena, &self.content);
             // The arena's chunks are heap-allocated and do not move when
             // the arena itself does, so the pointer outlives this move.
             let program_ptr: *const () = (program as *const Program<'_>).cast();
@@ -248,6 +246,9 @@ fn install_parse_cache<'a>(
 /// Parse `content` with the mago-syntax parser and pass the resulting
 /// `Program` (plus the content string) to `f`.
 ///
+/// A braced `namespace` block the parser would drop whole is kept (see
+/// [`parse_program`](super::namespace_recovery::parse_program)).
+///
 /// Handles the boilerplate that every parse entry-point needs:
 /// allocating a `LocalArena` arena, creating a `FileId`, calling
 /// `parse_file_content`, and wrapping the whole thing in
@@ -278,9 +279,7 @@ pub(crate) fn with_parsed_program<T: Default>(
     let content_owned = content.to_string();
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let arena = mago_allocator::LocalArena::new();
-        let file_id = mago_database::file::FileId::new(b"input.php");
-        let program =
-            mago_syntax::parser::parse_file_content(&arena, file_id, content_owned.as_bytes());
+        let program = super::namespace_recovery::parse_program(&arena, &content_owned);
         f(program, &content_owned)
     }));
 

@@ -406,15 +406,6 @@ impl Backend {
             let file_id = mago_database::file::FileId::new(b"input.php");
             let program = parse_file_content(arena, file_id, content.as_bytes());
 
-            // Run mago-names resolver while the arena is still alive.
-            // This produces a `ResolvedNames` that maps every identifier's
-            // byte offset to its fully-qualified name.  We immediately copy
-            // the data into an owned `OwnedResolvedNames` so it survives
-            // the arena drop.
-            let name_resolver = mago_names::resolver::NameResolver::new(arena);
-            let mago_resolved = name_resolver.resolve(program);
-            let owned_resolved = OwnedResolvedNames::from_resolved(&mago_resolved);
-
             let parse_errors: Vec<ParseErrorEntry> = program
                 .errors
                 .iter()
@@ -427,6 +418,23 @@ impl Backend {
                     )
                 })
                 .collect();
+
+            // Everything else is read from a parse that keeps the braced
+            // `namespace` blocks this one dropped whole.  The errors above
+            // stay those of the text as written.
+            let program = super::namespace_recovery::reparse_dropped_namespace_blocks(
+                arena, program, content,
+            )
+            .unwrap_or(program);
+
+            // Run mago-names resolver while the arena is still alive.
+            // This produces a `ResolvedNames` that maps every identifier's
+            // byte offset to its fully-qualified name.  We immediately copy
+            // the data into an owned `OwnedResolvedNames` so it survives
+            // the arena drop.
+            let name_resolver = mago_names::resolver::NameResolver::new(arena);
+            let mago_resolved = name_resolver.resolve(program);
+            let owned_resolved = OwnedResolvedNames::from_resolved(&mago_resolved);
 
             let doc_ctx = DocblockCtx {
                 trivias: program.trivia.as_slice(),
@@ -1507,6 +1515,66 @@ class User extends Model {
             !gti.get("Vendor\\Rich")
                 .is_some_and(|kids| kids.iter().any(|k| k == "Vendor\\Variant")),
             "the withdrawn declaration's parent must not still list it"
+        );
+    }
+
+    /// An unclosed call swallows the `}` of the braced `namespace` block it
+    /// is in, which the parser then drops whole.  The block's namespace,
+    /// imports and declarations are still indexed, and the syntax errors
+    /// reported are those of the text as written.
+    #[test]
+    fn an_unclosed_call_keeps_its_braced_namespace_block_indexed() {
+        let backend = Backend::new_test();
+        let uri = "file:///blocks.php";
+        backend.update_ast(
+            uri,
+            concat!(
+                "<?php\n",
+                "namespace Lib {\n",
+                "    function greet(string $name): void {}\n",
+                "}\n",
+                "namespace App {\n",
+                "    use function Lib\\greet;\n",
+                "    class Widget {}\n",
+                "    function wave(): void {}\n",
+                "    greet(\n",
+                "}\n",
+            ),
+        );
+
+        let spans = backend.file_namespaces.read().get(uri).cloned().unwrap();
+        let names: Vec<_> = spans.iter().map(|s| s.namespace.as_deref()).collect();
+        assert_eq!(names, [Some("Lib"), Some("App")]);
+        assert_eq!(
+            spans[1]
+                .symbol_imports
+                .functions
+                .get("greet")
+                .map(String::as_str),
+            Some("Lib\\greet")
+        );
+
+        let classes = backend.symbols.uri_classes_index.read();
+        let widget = classes
+            .get(uri)
+            .and_then(|c| c.iter().find(|c| c.name == "Widget"))
+            .expect("Widget is indexed");
+        assert_eq!(widget.file_namespace.as_deref(), Some("App"));
+        drop(classes);
+        assert!(
+            backend
+                .symbols
+                .global_functions
+                .read()
+                .contains_key("App\\wave")
+        );
+
+        let errors = backend.parse_errors.read().get(uri).cloned().unwrap();
+        assert!(
+            errors
+                .iter()
+                .any(|(message, _, _)| message.ends_with("unexpected end of file, expected `}`")),
+            "the block's missing `}}` is still reported: {errors:?}"
         );
     }
 

@@ -238,6 +238,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Completion below a `#` comment with an apostrophe.** A comment such as `# Don't call this twice` no longer stops completion in the code that follows it.
 - **"Replace deprecated call" on names in other scripts.** On a call such as `$ユーザー[0]->legacy()` the quick fix is now offered, and it replaces the whole call instead of leaving part of the subject's name in front of the replacement.
 - **Return-type quick fixes edit the closure they were offered for.** On a PHPStan error inside a closure or arrow function, "Update return type" and the other return-type fixes now change that function's own return type, instead of writing the enclosing method's type onto it and adding a docblock above it. "Remove return statement" also no longer adds a `return;` at the end of a method that another method follows.
+- **Typing in a `namespace { }` block.** While a call in a braced `namespace` block is still missing its `)`, or the block its closing `}`, signature help and completion use the block's own namespace and imports instead of an earlier block's, and the classes and functions it declares stay available to other files.
 
 ## [0.11.1] - 2026-10-07
 

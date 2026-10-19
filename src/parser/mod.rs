@@ -20,6 +20,8 @@
 //! - [`name_resolution`]: Qualifying the names a parsed declaration spells
 //! - [`initializers`]: Qualifying the classes a constant initializer names
 //! - [`parse_cache`]: The thread-local cache that shares one parse per pass
+//! - [`namespace_recovery`]: Keeping the braced `namespace` blocks the
+//!   parser drops whole
 //! - [`ast_helpers`]: Small helpers for walking the AST
 //! - [`error_format`]: Human-readable formatting for Mago parse errors
 
@@ -35,6 +37,7 @@ pub(crate) mod error_format;
 mod functions;
 mod initializers;
 mod name_resolution;
+mod namespace_recovery;
 mod params;
 mod parse_cache;
 mod signature;

@@ -61,35 +61,6 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B630. An unclosed call inside a braced `namespace` block drops the block
-
-**Impact: Low · Complexity: Medium**
-
-```php
-<?php
-namespace Lib {
-    function greet(string $name): void {}
-}
-namespace App {
-    use function Lib\greet;
-    greet(   // until the `)` is typed, this line reads as `namespace Lib`
-}
-```
-
-While a call inside a braced `namespace App { … }` block is missing its
-`)`, mago's parser leaves the whole block out of `program.statements`, so
-`update_ast` (`parser/ast_update.rs`) records no `NamespaceSpan` for it and
-indexes none of its imports, classes or functions. An offset in it falls
-into the last block the parse kept (`NamespaceSpan::containing`), and
-every name typed there resolves against that block's namespace and imports
-until the call is closed. Signature help runs on exactly this text, so it
-shows the wrong function or none. A file that declares its blocks as
-`namespace App;` keeps every block. The block survives only if the
-parser's recovery ends the argument list at the block's `}` instead of
-dropping the statement: upstream in `mago-syntax`, or by re-parsing with
-the call closed, as signature help's text fallback already does for the
-classes (`patch_content_for_signature`).
-
 ### B633. Diagnostics forget top-level variables at a braced `namespace` block
 
 **Impact: Low · Complexity: Low**
@@ -189,3 +160,33 @@ its `FunctionWithDocblock` from the method's node, and `build_docblock`
 (`completion/phpdoc/generation/build.rs`) has the declaration text right
 after the trigger. Pass the declaration's offset in and let
 `infer_return_type_at` find the function there.
+
+### B637. An import used only by a call still missing its `)` is reported unused
+
+**Impact: Low · Complexity: Medium**
+
+```php
+<?php
+namespace App;
+use Lib\Widget;   // reported unused until the `)` is typed
+class Shop {
+    public function make() {
+        $w = new Widget(
+    }
+}
+```
+
+mago's argument-list recovery takes the method's `}` for an argument, so the
+braces stop balancing: the method body closes on the class's `}`, the class
+runs to the end of the file, and the parser drops it whole. Nothing in it
+reaches the symbol map, and `collect_unused_import_diagnostics`
+(`diagnostics/unused_imports.rs`) counts an import as used only when a span
+there names it, so every import the class uses is reported until the call is
+closed. A call at the top level of the file's last `namespace` block drops
+just its own statement, with the same result. Signature help and
+named-argument completion work around the dropped class by re-parsing with
+`);` at the cursor (`patch_content_for_signature`), which diagnostics have
+no cursor for. The parser's recovery has to end the argument list at the
+`}` instead, upstream in `mago-syntax` or by a same-length reparse such as
+the one `parser/namespace_recovery.rs` makes for a dropped `namespace`
+block.
