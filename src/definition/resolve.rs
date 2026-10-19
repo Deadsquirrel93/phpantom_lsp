@@ -15,17 +15,18 @@
 //! variable-definition index.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::symbol_map::VarDefKind;
 use tower_lsp::lsp_types::*;
 
 use super::member::{MemberAccessHint, MemberDefinitionCtx, MemberKind};
-use super::point_location;
+use super::{class_keyword_location, point_location};
 use crate::Backend;
 use crate::composer;
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind};
 use crate::text_position::position_to_offset;
-use crate::types::AccessKind;
+use crate::types::{AccessKind, ClassInfo};
 use crate::util::short_name;
 use crate::virtual_members::laravel;
 
@@ -625,8 +626,6 @@ impl Backend {
         fqn: &str,
         target_uri: &str,
     ) -> Option<Location> {
-        let sn = short_name(fqn);
-
         // Look up classes from uri_classes_index first, then fall back
         // to fqn_class_index and disk.  Each lock is dropped before
         // calling parse_and_cache_file (which takes write locks).
@@ -645,25 +644,9 @@ impl Backend {
             },
         };
 
-        // Match by short name + namespace, same logic as
-        // `find_definition_in_uri_classes_index`.
-        let class_info = classes.iter().find(|c| {
-            if c.name != sn {
-                return false;
-            }
-            c.fqn() == fqn
-        })?;
-
+        let class_info = find_class_by_fqn(&classes, fqn)?;
         let content = self.get_file_content(target_uri)?;
-        let parsed_uri = crate::util::parse_url(target_uri)?;
-
-        if class_info.keyword_offset == 0 {
-            return None;
-        }
-        let position =
-            crate::text_position::offset_to_position(&content, class_info.keyword_offset as usize);
-
-        Some(point_location(parsed_uri, position))
+        class_keyword_location(class_info, target_uri, &content)
     }
 
     /// Try to find the definition of a class in the current file by checking
@@ -674,34 +657,8 @@ impl Backend {
         content: &str,
         uri: &str,
     ) -> Option<Location> {
-        let short_name = short_name(fqn);
-
         let classes = self.symbols.uri_classes_index.read().get(uri).cloned()?;
-
-        let class_info = classes.iter().find(|c| {
-            if c.name != short_name {
-                return false;
-            }
-            // Build the FQN of this class in the current file and compare
-            // against the requested FQN to avoid false matches when two
-            // namespaces contain classes with the same short name.
-            let class_fqn = match &c.file_namespace {
-                Some(ns) if !ns.is_empty() => format!("{}\\{}", ns, c.name),
-                _ => c.name.to_string(),
-            };
-            class_fqn == fqn
-        })?;
-
-        if class_info.keyword_offset == 0 {
-            return None;
-        }
-        let position =
-            crate::text_position::offset_to_position(content, class_info.keyword_offset as usize);
-
-        // Build a file URI from the current URI string.
-        let parsed_uri = crate::util::parse_url(uri)?;
-
-        Some(point_location(parsed_uri, position))
+        class_keyword_location(find_class_by_fqn(&classes, fqn)?, uri, content)
     }
 
     /// Resolve `self`, `static`, or `parent` keywords to a class definition.
@@ -740,21 +697,25 @@ impl Backend {
             }
 
             // Jump to the enclosing class definition in the current file.
-            if current_class.keyword_offset == 0 {
-                return None;
-            }
-            let target_position = crate::text_position::offset_to_position(
-                content,
-                current_class.keyword_offset as usize,
-            );
-            let parsed_uri = crate::util::parse_url(uri)?;
-            return Some(point_location(parsed_uri, target_position));
+            return class_keyword_location(&current_class, uri, content);
         }
 
         // The parser has already resolved `parent_class` to an FQN.
         let parent_name = current_class.parent_class?;
         self.resolve_class_reference(uri, content, &parent_name, true, cursor_offset)
     }
+}
+
+/// The class named `fqn` in a file's class list.
+///
+/// Matches on the full FQN so two namespaces declaring the same short
+/// name in one file never shadow each other.
+fn find_class_by_fqn<'a>(classes: &'a [Arc<ClassInfo>], fqn: &str) -> Option<&'a ClassInfo> {
+    let sn = short_name(fqn);
+    classes
+        .iter()
+        .find(|c| c.name == sn && c.fqn() == fqn)
+        .map(|c| &**c)
 }
 
 /// The location of a `@template` parameter's name in its declaring tag.

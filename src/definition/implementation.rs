@@ -37,7 +37,7 @@ use std::sync::atomic::Ordering;
 use tower_lsp::lsp_types::*;
 
 use super::member::MemberKind;
-use super::point_location;
+use super::{class_keyword_location, point_location};
 use crate::Backend;
 use crate::atom::Atom;
 use crate::class_lookup::find_class_at_offset;
@@ -1058,18 +1058,9 @@ impl Backend {
         current_uri: &str,
         current_content: &str,
     ) -> Option<Location> {
-        let cls_fqn = crate::util::build_fqn(&cls.name, cls.file_namespace.as_deref());
         let (class_uri, class_content) =
-            self.find_class_file_content(&cls_fqn, current_uri, current_content)?;
-
-        if cls.keyword_offset == 0 {
-            return None;
-        }
-        let position =
-            crate::text_position::offset_to_position(&class_content, cls.keyword_offset as usize);
-        let parsed_uri = crate::util::parse_url(&class_uri)?;
-
-        Some(point_location(parsed_uri, position))
+            self.find_class_file_content(&cls.fqn(), current_uri, current_content)?;
+        class_keyword_location(cls, &class_uri, &class_content)
     }
 }
 
