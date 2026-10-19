@@ -17,7 +17,7 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::diagnostics::offset_range_to_lsp_range;
+use crate::diagnostics::checked_byte_range_to_lsp_range;
 use crate::symbol_map::SymbolKind;
 use crate::types::ClassInfo;
 use crate::virtual_members::resolve_class_fully_cached;
@@ -213,7 +213,7 @@ fn replacement_target(
         .call_sites
         .iter()
         .find(|cs| cs.args_start > span_start && cs.args_start <= span_end + 2)?;
-    let range = offset_range_to_lsp_range(content, range_start, call_site.args_end as usize)?;
+    let range = checked_byte_range_to_lsp_range(content, range_start, call_site.args_end as usize)?;
     Some((
         range,
         extract_arguments(content, call_site.args_start, call_site.args_end),

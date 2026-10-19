@@ -49,30 +49,7 @@ No outstanding items.
 
 ## Blade
 
-### B649. A template's diagnostics are filtered against the wrong ranges
-
-**Impact: Medium · Complexity: Low**
-
-```blade
-@php($user = null)
-@if (false)
-    {{ $user->name }}   {{-- still reported, though this branch never runs --}}
-@endif
-```
-
-After the slow collectors run, `collect_slow_diagnostics_scoped`
-(`diagnostics/collect.rs`) drops every diagnostic that starts inside a
-branch the forward walk found unreachable. The unreachable ranges are
-converted with the free `offset_range_to_lsp_range`, which stays in the
-coordinates of the PHP the template lowers to, while the collectors built
-their diagnostics with `Backend::offset_range_to_lsp_range`, which maps them
-back into the template. The two sets of positions are compared directly, so
-in a template the filter keeps diagnostics from dead branches and can drop
-live ones that happen to line up. Convert the dead ranges with the Backend
-method, or compare in virtual-PHP coordinates before translating. The two
-functions sharing one name in `diagnostics/mod.rs` is what makes this easy
-to get wrong. Rename the free one (e.g. `checked_byte_range_to_lsp_range`)
-so a call site has to choose deliberately.
+No outstanding items.
 
 ## Templates
 

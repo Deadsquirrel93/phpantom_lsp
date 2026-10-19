@@ -6,7 +6,7 @@ use tower_lsp::lsp_types::*;
 use crate::Backend;
 use crate::type_engine::resolver::LendsLoaders;
 
-use super::{helpers, incremental, offset_range_to_lsp_range};
+use super::{helpers, incremental};
 
 /// A slow diagnostic collector: appends what it finds in the file to the
 /// list.
@@ -279,13 +279,14 @@ impl Backend {
         // control flow, so they judge a branch a decidable guard rules
         // out exactly as readily as live code.  The walk that built the
         // scope cache recorded those branches; nothing inside one is a
-        // finding.
+        // finding.  The collectors' ranges are already mapped back into a
+        // template's own coordinates, so the dead ranges must be too.
         let unreachable = crate::type_engine::variable::forward_walk::scope_unreachable_ranges();
         if !unreachable.is_empty() {
             let dead: Vec<Range> = unreachable
                 .iter()
                 .filter_map(|&(start, end)| {
-                    offset_range_to_lsp_range(content, start as usize, end as usize)
+                    self.offset_range_to_lsp_range(uri_str, content, start as usize, end as usize)
                 })
                 .collect();
             let mut index = 0;

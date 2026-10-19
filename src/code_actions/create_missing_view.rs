@@ -12,8 +12,8 @@ use std::path::PathBuf;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::diagnostics::checked_byte_range_to_lsp_range;
 use crate::diagnostics::helpers::make_diagnostic;
-use crate::diagnostics::offset_range_to_lsp_range;
 use crate::symbol_map::{LaravelStringKind, SymbolKind};
 use crate::text_position::ranges_overlap;
 
@@ -54,7 +54,7 @@ impl Backend {
             };
 
             let Some(range) =
-                offset_range_to_lsp_range(content, span.start as usize, span.end as usize)
+                checked_byte_range_to_lsp_range(content, span.start as usize, span.end as usize)
             else {
                 continue;
             };

@@ -352,7 +352,11 @@ impl Backend {
 /// This thin wrapper around [`crate::text_position::byte_range_to_lsp_range`] adds
 /// a bounds check so that stale byte offsets (e.g. from a previous AST
 /// after an edit) are rejected instead of silently clamped to EOF.
-pub(crate) fn offset_range_to_lsp_range(
+///
+/// The range stays in the coordinates of `content`: for a Blade template
+/// that is the virtual PHP, not the template. A diagnostic range the
+/// editor shows must go through [`Backend::offset_range_to_lsp_range`].
+pub(crate) fn checked_byte_range_to_lsp_range(
     content: &str,
     start_byte: usize,
     end_byte: usize,

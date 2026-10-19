@@ -37,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Dead branches in Blade templates.** A mistake inside a branch the template can never take, such as `@if (false)`, is no longer reported, and diagnostics in live code are no longer dropped by mistake.
 - **Imports used by an unfinished `::` access.** An import named only by a `Mailer::` still waiting for its member at the end of the file is no longer reported unused.
 - **Classes in files that are not UTF-8.** A class, function or constant declared in a Latin-1 or Windows-1252 file now resolves, instead of showing up in workspace symbols but being reported as unknown wherever it is used.
 - **Inherited constants that read `parent::` after an edit.** A constant whose initializer reads `parent::X`, used through a subclass, no longer takes the subclass's parent's value once the file has been edited.
