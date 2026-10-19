@@ -195,6 +195,31 @@ pub struct WorkspaceScanResult {
 }
 
 impl WorkspaceScanResult {
+    /// A result holding only `classmap`, with no origins.
+    pub(crate) fn from_classmap(classmap: HashMap<String, PathBuf>) -> Self {
+        Self {
+            classmap,
+            ..Default::default()
+        }
+    }
+
+    /// The symbols one scanned file declares, all at `path`, with no
+    /// origins.
+    pub(crate) fn from_file(scan: ScanResult, path: &Path) -> Self {
+        let at_path = |names: Vec<String>| {
+            names
+                .into_iter()
+                .map(|name| (name, path.to_path_buf()))
+                .collect()
+        };
+        Self {
+            classmap: at_path(scan.classes),
+            function_index: at_path(scan.functions),
+            constant_index: at_path(scan.constants),
+            ..Default::default()
+        }
+    }
+
     /// Fold `other`'s classes, functions and constants into `self`,
     /// keeping `self`'s entry when both define the same name.
     ///

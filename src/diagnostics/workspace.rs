@@ -1112,11 +1112,7 @@ impl Backend {
     /// matching `[[diagnostics.ignore]]` path globs and for naming a file in
     /// hover text.
     pub(crate) fn workspace_relative_path(&self, uri: &str) -> Option<String> {
-        let path = uri
-            .parse::<tower_lsp::lsp_types::Url>()
-            .ok()?
-            .to_file_path()
-            .ok()?;
+        let path = crate::util::uri_to_path(uri)?;
         let root = self.workspace.workspace_root.read().clone()?;
         Some(
             path.strip_prefix(&root)

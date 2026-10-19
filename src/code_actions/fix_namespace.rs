@@ -25,7 +25,7 @@ impl Backend {
         let Ok(url) = Url::parse(uri) else {
             return;
         };
-        let Ok(file_path) = url.to_file_path() else {
+        let Some(file_path) = crate::util::url_to_path(&url) else {
             return;
         };
         let mappings = self.psr4_mappings().read().clone();

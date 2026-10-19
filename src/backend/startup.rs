@@ -16,10 +16,7 @@ use crate::server::{run_blocking_cancel_safe, type_hierarchy_registration};
 
 impl Backend {
     pub(crate) async fn on_initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
-        let workspace_root = params
-            .root_uri
-            .as_ref()
-            .and_then(|uri| uri.to_file_path().ok());
+        let workspace_root = params.root_uri.as_ref().and_then(crate::util::url_to_path);
 
         if let Some(root) = workspace_root {
             *self.workspace.workspace_root.write() = Some(root);

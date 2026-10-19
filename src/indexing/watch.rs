@@ -79,7 +79,7 @@ impl Backend {
                     composer_changed = true;
                     continue;
                 }
-                if change.uri.to_file_path().is_ok_and(|p| p == config_path) {
+                if crate::util::url_to_path(&change.uri).is_some_and(|p| p == config_path) {
                     config_changed = true;
                     continue;
                 }
@@ -99,7 +99,7 @@ impl Backend {
                     continue;
                 }
                 if is_laravel
-                    && let Ok(file_path) = change.uri.to_file_path()
+                    && let Some(file_path) = crate::util::url_to_path(&change.uri)
                     && crate::virtual_members::laravel::database_schema::SchemaIndex::watched_path_affects_schema(
                         root,
                         &laravel_config,
@@ -138,10 +138,8 @@ impl Backend {
                         || translations
                             .as_ref()
                             .is_some_and(|catalog| catalog.contains_uri(&uri_str)))
-                    && change
-                        .uri
-                        .to_file_path()
-                        .is_ok_and(|path| !filters.is_excluded_path(&path, false))
+                    && crate::util::url_to_path(&change.uri)
+                        .is_some_and(|path| !filters.is_excluded_path(&path, false))
                 {
                     translations_changed = true;
                 }
@@ -149,7 +147,7 @@ impl Backend {
                     if is_open(&uri_str) {
                         continue;
                     }
-                    let Ok(file_path) = change.uri.to_file_path() else {
+                    let Some(file_path) = crate::util::url_to_path(&change.uri) else {
                         continue;
                     };
                     // An excluded path is invisible to the workspace walk,
@@ -181,7 +179,7 @@ impl Backend {
                 if is_open(&uri_str) {
                     continue;
                 }
-                let Ok(file_path) = change.uri.to_file_path() else {
+                let Some(file_path) = crate::util::url_to_path(&change.uri) else {
                     continue;
                 };
 
@@ -381,9 +379,9 @@ impl Backend {
         }
         let mut spelled = changes.to_vec();
         for change in &mut spelled {
-            if let Ok(path) = change.uri.to_file_path()
+            if let Some(path) = crate::util::url_to_path(&change.uri)
                 && let Some(as_indexed) = links.to_link_spelling(&path)
-                && let Ok(uri) = Url::from_file_path(as_indexed)
+                && let Some(uri) = crate::util::path_to_url(&as_indexed)
             {
                 change.uri = uri;
             }
@@ -450,7 +448,7 @@ impl Backend {
         // framework, or a file created there by another tool.
         let followed_links = self.watchable_followed_links();
         for link in &followed_links {
-            let Ok(base) = Url::from_file_path(link) else {
+            let Some(base) = crate::util::path_to_url(link) else {
                 continue;
             };
             watchers.extend(patterns.iter().map(|(pattern, kind)| FileSystemWatcher {

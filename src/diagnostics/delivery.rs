@@ -307,7 +307,7 @@ impl Backend {
                 &self.workspace.config.lock().diagnostics.ignore,
             );
             if !rules.is_empty()
-                && let Ok(file_path) = uri.to_file_path()
+                && let Some(file_path) = crate::util::url_to_path(&uri)
                 && let Some(root) = self.workspace.workspace_root.read().clone()
             {
                 let relative_path = file_path

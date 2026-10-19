@@ -13,8 +13,6 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
-use tower_lsp::lsp_types::Url;
-
 use crate::Backend;
 
 impl Backend {
@@ -572,9 +570,7 @@ impl Backend {
         if let Some(content) = self.open_files.read().get(uri) {
             return (content.len() as u64).max(1);
         }
-        Url::parse(uri)
-            .ok()
-            .and_then(|url| url.to_file_path().ok())
+        crate::util::uri_to_path(uri)
             .map(|path| index_progress_weight_for_path(&path))
             .unwrap_or(1)
     }

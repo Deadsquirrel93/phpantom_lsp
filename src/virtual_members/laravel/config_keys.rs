@@ -384,7 +384,7 @@ fn resolve_config_key_declaration_inner(
 
     let mut fallback = None;
     for (prefix, path) in candidates {
-        let Ok(target_uri) = Url::from_file_path(&path) else {
+        let Some(target_uri) = crate::util::path_to_url(&path) else {
             continue;
         };
         let Some(target_content) = backend.get_file_content_arc(target_uri.as_str()) else {

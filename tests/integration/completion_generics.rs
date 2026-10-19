@@ -1,4 +1,4 @@
-use crate::common::{create_psr4_workspace, create_test_backend};
+use crate::common::{create_psr4_workspace, create_test_backend, position_of};
 use phpantom_lsp::Backend;
 use std::collections::HashMap;
 use tower_lsp::LanguageServer;
@@ -9108,12 +9108,7 @@ function demo() {
     (new NamedBox(value: new NamedProduct()))->get()->§
 }
 "#;
-    let cursor = marked.find('§').expect("test source needs a cursor");
-    let before = &marked[..cursor];
-    let position = Position {
-        line: before.matches('\n').count() as u32,
-        character: before.rsplit('\n').next().unwrap_or("").chars().count() as u32,
-    };
+    let position = position_of(marked, "§");
     let text = marked.replace('§', "");
 
     backend

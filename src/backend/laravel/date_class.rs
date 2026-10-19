@@ -31,7 +31,7 @@ impl Backend {
             let Ok(url) = tower_lsp::lsp_types::Url::parse(&uri) else {
                 continue;
             };
-            let Ok(path) = url.to_file_path() else {
+            let Some(path) = crate::util::url_to_path(&url) else {
                 continue;
             };
             if self.is_in_vendor_dir(&path) {

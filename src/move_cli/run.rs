@@ -166,7 +166,7 @@ pub(super) fn relative_display(root: &Path, path: &Path) -> String {
 /// The file a class is declared in, as far as the index knows.
 fn class_definition_path(backend: &Backend, fqn: &str) -> Option<PathBuf> {
     let uri = backend.symbols.fqn_uri_index.read().get(fqn).cloned()?;
-    Url::parse(&uri).ok()?.to_file_path().ok()
+    crate::util::uri_to_path(&uri)
 }
 
 fn resolve_source(backend: &Backend, root: &Path, value: &str) -> Result<MoveTarget, String> {
@@ -337,9 +337,8 @@ fn build_plan(root: &Path, edit: WorkspaceEdit) -> Result<MovePlan, String> {
 }
 
 fn uri_path(uri: &Url, root: &Path) -> Result<PathBuf, String> {
-    let path = uri
-        .to_file_path()
-        .map_err(|_| format!("unsupported non-file URI: {uri}"))?;
+    let path =
+        crate::util::url_to_path(uri).ok_or_else(|| format!("unsupported non-file URI: {uri}"))?;
     if !path.starts_with(root) {
         return Err(format!(
             "move would modify a path outside the project: {}",

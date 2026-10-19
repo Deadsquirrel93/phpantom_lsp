@@ -31,8 +31,6 @@
 use crate::atom::atom;
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::Url;
-
 use crate::Backend;
 use crate::php_type::PhpType;
 use crate::types::ClassInfo;
@@ -220,7 +218,7 @@ fn read_auth_config(backend: &Backend) -> Option<String> {
     // Prefer an open editor buffer (keyed by an absolute file URI); fall back
     // to disk.  `Url::from_file_path` requires an absolute path, so relative
     // workspace roots (e.g. `analyze --project-root`) go straight to disk.
-    if let Ok(uri) = Url::from_file_path(&path)
+    if let Some(uri) = crate::util::path_to_url(&path)
         && let Some(content) = backend.get_file_content(uri.as_ref())
     {
         return Some(content);

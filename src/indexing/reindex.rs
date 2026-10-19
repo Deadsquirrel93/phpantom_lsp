@@ -9,6 +9,7 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::FileChangeType;
 
 use crate::Backend;
+use crate::classmap_scanner::{ScanResult, WorkspaceScanResult};
 use crate::types::ClassInfo;
 
 impl Backend {
@@ -180,19 +181,13 @@ impl Backend {
             // one fallback pass per still-missing name.
             functions_retired = true;
 
-            let scan = crate::classmap_scanner::scan_file_full(path);
-            {
-                let mut fi = self.symbols.autoload_function_index.write();
-                for fqn in scan.functions {
-                    fi.or_insert_with(fqn, || path.clone());
-                }
-            }
-            {
-                let mut ci = self.symbols.autoload_constant_index.write();
-                for name in scan.constants {
-                    ci.entry(name).or_insert_with(|| path.clone());
-                }
-            }
+            // The classes were noted above, under the editor's URI.
+            let scan = ScanResult {
+                classes: Vec::new(),
+                ..crate::classmap_scanner::scan_file_full(path)
+            };
+            self.symbols
+                .merge_scan(WorkspaceScanResult::from_file(scan, path));
         }
 
         self.symbols.prune_orphaned_origins();

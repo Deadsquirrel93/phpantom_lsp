@@ -181,7 +181,7 @@ impl Backend {
             ..Default::default()
         };
         for (view, path) in &views.views {
-            let Ok(uri) = Url::from_file_path(path) else {
+            let Some(uri) = crate::util::path_to_url(path) else {
                 continue;
             };
             let uri = uri.to_string();

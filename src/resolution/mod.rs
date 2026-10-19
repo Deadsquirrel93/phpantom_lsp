@@ -32,7 +32,9 @@
 //! ## Constant resolution ([`Backend::lookup_global_constant`](crate::Backend::lookup_global_constant))
 //!
 //!   The same order as functions: parsed defines, the autoload constant
-//!   index, the remaining autoload files, then the embedded stubs.
+//!   index, the remaining autoload files, then the embedded stubs.  The
+//!   first three are [`Backend::find_or_load_define`](crate::Backend::find_or_load_define),
+//!   which go-to-definition shares.
 //!
 //! ## Name resolution ([`Backend::class_loader_with`](crate::Backend::class_loader_with), [`Backend::resolve_function_name`](crate::Backend::resolve_function_name))
 //!
@@ -68,7 +70,7 @@ mod lazy_parse;
 mod loaders;
 
 pub(crate) use classes::needs_linking;
-pub(crate) use constants::unversioned_php_version_constant_type;
+pub(crate) use constants::{DefineSearch, unversioned_php_version_constant_type};
 pub(crate) use inflight::ParseInflight;
 pub(crate) use loaders::FileLoaders;
 

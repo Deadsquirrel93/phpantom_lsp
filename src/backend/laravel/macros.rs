@@ -410,10 +410,10 @@ impl Backend {
         let Ok(helper_url) = tower_lsp::lsp_types::Url::parse(helper_uri) else {
             return false;
         };
-        let Ok(provider_path) = provider_url.to_file_path() else {
+        let Some(provider_path) = crate::util::url_to_path(&provider_url) else {
             return false;
         };
-        let Ok(helper_path) = helper_url.to_file_path() else {
+        let Some(helper_path) = crate::util::url_to_path(&helper_url) else {
             return false;
         };
 

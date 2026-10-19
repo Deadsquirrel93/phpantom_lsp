@@ -530,9 +530,7 @@ impl MacroScope {
         if let Some(cached) = self.sources.borrow().get(uri) {
             return cached.clone();
         }
-        let loaded = Url::parse(uri)
-            .ok()
-            .and_then(|url| url.to_file_path().ok())
+        let loaded = crate::util::uri_to_path(uri)
             .and_then(|path| std::fs::read_to_string(path).ok())
             .map(Arc::<str>::from);
         self.sources
@@ -575,7 +573,7 @@ fn open_route_macro<'a>(scope: &'a MacroScope, method: &[u8]) -> Option<OpenMacr
     let name = std::str::from_utf8(method).ok()?.to_ascii_lowercase();
     let (uri, offset) = scope.bodies.get(&name)?;
     let url = Url::parse(uri).ok()?;
-    let path = url.to_file_path().ok()?;
+    let path = crate::util::url_to_path(&url)?;
     if !scope.expanding.borrow_mut().insert(name.clone()) {
         return None;
     }
@@ -762,16 +760,13 @@ pub(crate) fn find_route_registration_references(
     use crate::symbol_map::LaravelStringKind;
 
     let is_route_file = uri.contains("/routes/")
-        || Url::parse(uri)
-            .ok()
-            .and_then(|u| u.to_file_path().ok())
-            .is_some_and(|path| {
-                backend
-                    .laravel_provider_resources
-                    .read()
-                    .route_files
-                    .contains(&path)
-            });
+        || crate::util::uri_to_path(uri).is_some_and(|path| {
+            backend
+                .laravel_provider_resources
+                .read()
+                .route_files
+                .contains(&path)
+        });
     if !is_route_file {
         return None;
     }
@@ -941,7 +936,7 @@ impl RouteDiscovery {
     /// Whether the scan read the file `uri`, so that an edit to it can change
     /// the routes.
     pub(crate) fn reads(&self, uri: &str) -> bool {
-        let Some(path) = Url::parse(uri).ok().and_then(|url| url.to_file_path().ok()) else {
+        let Some(path) = crate::util::uri_to_path(uri) else {
             return false;
         };
         if self.sources.binary_search(&path).is_ok() {
@@ -1318,7 +1313,7 @@ pub(crate) fn enumerate_all_routes(backend: &Backend) -> RouteDiscovery {
             continue;
         }
         if let Ok(content) = std::fs::read_to_string(route_path)
-            && let Ok(uri) = Url::from_file_path(route_path)
+            && let Some(uri) = crate::util::path_to_url(route_path)
         {
             collector.sources.push(canonical);
             let before = collector.routes.len();
@@ -1344,13 +1339,10 @@ pub(crate) fn enumerate_all_routes(backend: &Backend) -> RouteDiscovery {
     // its own rather than dropped.
     subdirectory_files.sort();
     for file_uri in subdirectory_files {
-        let loaded = Url::parse(&file_uri)
-            .ok()
-            .and_then(|uri| uri.to_file_path().ok())
-            .is_some_and(|path| {
-                let canonical = path.canonicalize().unwrap_or(path);
-                collector.sources.contains(&canonical)
-            });
+        let loaded = crate::util::uri_to_path(&file_uri).is_some_and(|path| {
+            let canonical = path.canonicalize().unwrap_or(path);
+            collector.sources.contains(&canonical)
+        });
         if !loaded {
             walk_workspace_route_file(
                 backend,
@@ -1390,7 +1382,7 @@ fn walk_workspace_route_file(
     let Ok(uri) = Url::parse(file_uri) else {
         return;
     };
-    let path = uri.to_file_path().ok();
+    let path = crate::util::url_to_path(&uri);
     if let Some(ref p) = path {
         let canonical = p.canonicalize().unwrap_or_else(|_| p.clone());
         scanned.insert(canonical.clone());
@@ -1937,9 +1929,9 @@ fn walk_included_file(
     let Some(included) = open_included_file(file, content, paths) else {
         return;
     };
-    let sub_uri = Url::from_file_path(&included.path)
+    let sub_uri = crate::util::path_to_url(&included.path)
         .map(Arc::new)
-        .unwrap_or_else(|()| Arc::clone(paths.uri));
+        .unwrap_or_else(|| Arc::clone(paths.uri));
     // Already canonical: the include stack holds each file by that spelling.
     sink.sources.push(included.path.clone());
 

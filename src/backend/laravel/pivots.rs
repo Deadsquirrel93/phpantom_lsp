@@ -1,7 +1,5 @@
 //! The many-to-many relationship sources behind the reverse pivot index.
 
-use tower_lsp::lsp_types::Url;
-
 use crate::Backend;
 use crate::virtual_members::laravel::source_may_declare_pivot_relationship;
 
@@ -37,7 +35,7 @@ impl Backend {
 
         let mut loaded = 0usize;
         for uri in &candidates {
-            let Some(path) = Url::parse(uri).ok().and_then(|u| u.to_file_path().ok()) else {
+            let Some(path) = crate::util::uri_to_path(uri) else {
                 continue;
             };
             let Ok(content) = std::fs::read(&path) else {

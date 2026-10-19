@@ -339,7 +339,7 @@ impl Backend {
     /// For example, `file:///home/user/Test.php` returns `Some("Test")`.
     fn filename_class_name(uri: &str) -> Option<String> {
         let url = Url::parse(uri).ok()?;
-        let file_path = url.to_file_path().ok()?;
+        let file_path = crate::util::url_to_path(&url)?;
         let stem = file_path.file_stem()?;
         let name = stem.to_string_lossy();
         if name.is_empty() {

@@ -1,6 +1,6 @@
 use super::*;
 use crate::test_fixtures::make_backend;
-use tower_lsp::lsp_types::Range;
+use tower_lsp::lsp_types::{Range, Url};
 
 #[test]
 fn json_translation_declarations_preserve_source_ranges_and_values() {

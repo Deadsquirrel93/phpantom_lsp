@@ -1,4 +1,4 @@
-//! Looking up a global constant's value, the constant counterpart of
+//! Looking up a global constant, the constant counterpart of
 //! [`Backend::find_or_load_class`] and [`Backend::find_or_load_function`].
 //!
 //! Resolves a constant through the parsed defines, the autoload constant
@@ -7,18 +7,104 @@
 
 use crate::Backend;
 use crate::php_type::PhpType;
+use crate::types::DefineInfo;
+
+/// How far [`Backend::find_or_load_define`] looks for a declaration.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DefineSearch {
+    /// The parsed defines, and the one file the autoload constant index
+    /// names for each candidate.
+    Indexed,
+    /// Those, then every known autoload file not parsed yet, for a
+    /// `define()` the byte-level scan skipped inside an
+    /// `if (!defined(…))` guard.
+    Exhaustive,
+}
 
 impl Backend {
+    /// Find the `define()` or top-level `const` declaring one of
+    /// `candidates` in project or vendor code, and return what `read`
+    /// takes from it.
+    ///
+    /// Searches in order, lazily parsing files as needed:
+    /// 1. `global_defines` — constants already parsed.
+    /// 2. `autoload_constant_index` — the file the byte-level scan found
+    ///    the constant in.
+    /// 3. With [`DefineSearch::Exhaustive`], `autoload_file_paths` — every
+    ///    known autoload file not parsed yet.
+    ///
+    /// The candidates are names in the order PHP would try them (see
+    /// [`Self::lookup_global_constant_candidates`]), and each phase is
+    /// tried for every candidate before the next, more expensive one runs.
+    /// The embedded stubs are not searched: what they declare has no file
+    /// a declaration can be read back out of.
+    pub(crate) fn find_or_load_define<T>(
+        &self,
+        candidates: &[&str],
+        search: DefineSearch,
+        read: impl Fn(&DefineInfo) -> T,
+    ) -> Option<T> {
+        let find_parsed = || {
+            let dmap = self.symbols.global_defines.read();
+            candidates
+                .iter()
+                .find_map(|name| dmap.get(*name).map(&read))
+        };
+
+        // Phase 1: already-parsed constants.
+        if let Some(found) = find_parsed() {
+            return Some(found);
+        }
+
+        // Phase 2: autoload constant index — lazily parse the file.
+        for name in candidates {
+            let path = self
+                .symbols
+                .autoload_constant_index
+                .read()
+                .get(*name)
+                .cloned();
+            if let Some(path) = path
+                && let Ok(content) = std::fs::read_to_string(&path)
+            {
+                self.update_ast(&crate::util::path_to_uri(&path), &content);
+                if let Some(found) = self.symbols.global_defines.read().get(*name).map(&read) {
+                    return Some(found);
+                }
+            }
+        }
+
+        if search == DefineSearch::Indexed {
+            return None;
+        }
+
+        // Phase 3: lazily parse known autoload files for constants the
+        // byte-level scanner missed (e.g. inside `if (!defined(...))`
+        // guards).  Each file is parsed at most once: later lookups are
+        // answered by Phase 1.
+        let paths = self.symbols.autoload_file_paths.read().clone();
+        for path in &paths {
+            let uri = crate::util::path_to_uri(path);
+            if self.parsed_uris.read().contains(&uri) {
+                continue;
+            }
+            if let Ok(content) = std::fs::read_to_string(path) {
+                self.update_ast(&uri, &content);
+                if let Some(found) = find_parsed() {
+                    return Some(found);
+                }
+            }
+        }
+        None
+    }
+
     /// Look up a global constant by name, returning its value if found.
     ///
-    /// Searches in order:
-    /// 1. `global_defines` — constants already parsed from user files.
-    /// 2. `autoload_constant_index` — lazily parses the defining file.
-    /// 3. `autoload_file_paths` — last-resort lazy parse of known
-    ///    autoload files for constants the byte-level scanner missed.
-    /// 4. `stub_constant_index` — built-in PHP constants from stubs.
-    ///    Lazily parses the stub file via `update_ast` (which populates
-    ///    `global_defines`), then re-checks.
+    /// Searches project and vendor code the way
+    /// [`Self::find_or_load_define`] does, exhaustively, then
+    /// `stub_constant_index` (built-in PHP constants from stubs), lazily
+    /// parsing the stub file via `update_ast` (which populates
+    /// `global_defines`) and re-checking.
     ///
     /// Returns `Some(Some(val))` when the constant exists with a known
     /// value, `Some(None)` when it exists but the value is unknown, and
@@ -59,67 +145,18 @@ impl Backend {
             }
         }
 
-        // Phase 1: already-parsed constants.
+        if let Some(value) =
+            self.find_or_load_define(candidates, DefineSearch::Exhaustive, |info| {
+                info.value.clone()
+            })
         {
-            let dmap = self.symbols.global_defines.read();
-            for name in candidates {
-                if let Some(info) = dmap.get(*name) {
-                    return Some(info.value.clone());
-                }
-            }
+            return Some(value);
         }
 
-        // Phase 2: autoload constant index — lazily parse the file.
-        for name in candidates {
-            let path = self
-                .symbols
-                .autoload_constant_index
-                .read()
-                .get(*name)
-                .cloned();
-            if let Some(path) = path
-                && let Ok(content) = std::fs::read_to_string(&path)
-            {
-                let file_uri = crate::util::path_to_uri(&path);
-                self.update_ast(&file_uri, &content);
-                let lookup = self
-                    .symbols
-                    .global_defines
-                    .read()
-                    .get(*name)
-                    .map(|info| info.value.clone());
-                if lookup.is_some() {
-                    return lookup;
-                }
-            }
-        }
-
-        // Phase 3: lazily parse known autoload files for constants
-        // the byte-level scanner missed (e.g. inside
-        // `if (!defined(...))` guards).
-        {
-            let paths = self.symbols.autoload_file_paths.read().clone();
-            for path in &paths {
-                let uri = crate::util::path_to_uri(path);
-                if self.parsed_uris.read().contains(&uri) {
-                    continue;
-                }
-                if let Ok(content) = std::fs::read_to_string(path) {
-                    self.update_ast(&uri, &content);
-                    let dmap = self.symbols.global_defines.read();
-                    for name in candidates {
-                        if let Some(info) = dmap.get(*name) {
-                            return Some(info.value.clone());
-                        }
-                    }
-                }
-            }
-        }
-
-        // Phase 4: built-in PHP constants from embedded stubs.
-        // Parse the stub via update_ast (which populates global_defines),
-        // then re-check.  This is the same lazy-parse pattern as Phases
-        // 2 and 3 — no special raw-source scanning needed.
+        // Built-in PHP constants from embedded stubs.  Parse the stub via
+        // update_ast (which populates global_defines), then re-check.  This
+        // is the same lazy-parse pattern as the project files above — no
+        // special raw-source scanning needed.
         for name in candidates {
             let stub_source = self.stub_constant_index.read().get(*name).copied();
             if let Some(stub_source) = stub_source {
@@ -170,29 +207,7 @@ impl Backend {
     /// (`key-of<X>`, `X[K]`), where `X` is usually a template parameter and
     /// every miss would charge the whole autoload set.
     pub(crate) fn lookup_indexed_global_constant(&self, name: &str) -> Option<String> {
-        if let Some(value) = self
-            .symbols
-            .global_defines
-            .read()
-            .get(name)
-            .and_then(|info| info.value.clone())
-        {
-            return Some(value);
-        }
-
-        let path = self
-            .symbols
-            .autoload_constant_index
-            .read()
-            .get(name)
-            .cloned()?;
-        let content = std::fs::read_to_string(&path).ok()?;
-        self.update_ast(&crate::util::path_to_uri(&path), &content);
-        self.symbols
-            .global_defines
-            .read()
-            .get(name)
-            .and_then(|info| info.value.clone())
+        self.find_or_load_define(&[name], DefineSearch::Indexed, |info| info.value.clone())?
     }
 }
 

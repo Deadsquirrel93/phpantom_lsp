@@ -4,14 +4,14 @@
 //! the initial symbol indexes for the three workspace shapes (single
 //! Composer project, monorepo, and no-Composer).
 
-use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 
 use tower_lsp::lsp_types::*;
 
 use super::{classify_class_origin, path_aliases};
 use crate::Backend;
-use crate::classmap_scanner;
+use crate::classmap_scanner::{self, WorkspaceScanResult};
 use crate::composer;
 use crate::config::IndexingStrategy;
 
@@ -29,7 +29,7 @@ impl Backend {
     /// makes a second pass safe to run over a populated index.
     pub(crate) async fn discover_workspace_symbols(
         &self,
-        root: &std::path::Path,
+        root: &Path,
         php_version: crate::types::PhpVersion,
         composer_package: Option<composer::ComposerPackage>,
         progress: Option<&crate::progress::ScanProgress>,
@@ -59,7 +59,7 @@ impl Backend {
     /// without paying for a class index it never consults.
     pub(crate) fn init_autoload_paths(
         &self,
-        root: &std::path::Path,
+        root: &Path,
         composer_json: Option<&composer::ComposerPackage>,
     ) -> (String, PathBuf) {
         let (mappings, vendor_dir) = match composer_json {
@@ -95,7 +95,7 @@ impl Backend {
     /// classmap, scan autoload files.
     pub(crate) async fn init_single_project(
         &self,
-        root: &std::path::Path,
+        root: &Path,
         php_version: crate::types::PhpVersion,
         composer_json: Option<composer::ComposerPackage>,
         progress: Option<&crate::progress::ScanProgress>,
@@ -153,12 +153,18 @@ impl Backend {
             .map(crate::composer::explicit_dependency_names)
             .unwrap_or_default();
 
-        let (classmap, source_label, class_origins, package_roots) = match strategy {
+        let (mut scan, source_label) = match strategy {
             IndexingStrategy::None => {
-                let cm = composer::parse_autoload_classmap(root, &vendor_dir);
-                let roots =
-                    classmap_scanner::vendor_package_roots(root, &vendor_dir, &explicit_deps);
-                (cm, "composer", HashMap::new(), roots)
+                let scan = WorkspaceScanResult {
+                    classmap: composer::parse_autoload_classmap(root, &vendor_dir),
+                    package_roots: classmap_scanner::vendor_package_roots(
+                        root,
+                        &vendor_dir,
+                        &explicit_deps,
+                    ),
+                    ..Default::default()
+                };
+                (scan, "composer")
             }
             IndexingStrategy::SelfScan | IndexingStrategy::Full => {
                 // "self" strategy: scan every PHP file under the
@@ -199,66 +205,41 @@ impl Backend {
                     progress,
                     Some(self.followed_links()),
                 );
-                let package_roots = std::mem::take(&mut vendor_scan.package_roots);
-
+                scan.package_roots = std::mem::take(&mut vendor_scan.package_roots);
                 scan.absorb_missing(vendor_scan);
-
-                self.populate_autoload_indices(&scan);
-                (
-                    scan.classmap,
-                    "self-scan",
-                    scan.class_origins,
-                    package_roots,
-                )
+                (scan, "self-scan")
             }
             IndexingStrategy::Composer => {
                 // ── Merged classmap + self-scan pipeline ─────────────
+                // The Composer classmap wins every name it lists, so a
+                // self-scan entry for one of them keeps neither its path
+                // nor its origin.
                 let composer_cm = composer::parse_autoload_classmap(root, &vendor_dir);
                 let skip_paths: HashSet<PathBuf> = composer_cm.values().cloned().collect();
-                let scan = self.build_self_scan_composer(
+                let mut self_scan = self.build_self_scan_composer(
                     root,
                     &vendor_dir,
                     composer_json.as_ref(),
                     &skip_paths,
                     progress,
                 );
-                self.populate_autoload_indices(&scan);
-                let mut class_origins = scan.class_origins;
-                let mut merged = composer_cm;
-                for (fqcn, path) in scan.classmap {
-                    match merged.entry(fqcn.clone()) {
-                        std::collections::hash_map::Entry::Vacant(e) => {
-                            e.insert(path);
-                        }
-                        std::collections::hash_map::Entry::Occupied(_) => {
-                            // The composer classmap already provides this
-                            // FQN and wins the merge below, so classify
-                            // its origin from the path prefix like the
-                            // rest of the composer-only entries instead
-                            // of keeping the scan's (losing) origin.
-                            class_origins.remove(&fqcn);
-                        }
-                    }
-                }
-                (merged, "composer+scan", class_origins, scan.package_roots)
+                let mut scan = WorkspaceScanResult::from_classmap(composer_cm);
+                scan.package_roots = std::mem::take(&mut self_scan.package_roots);
+                scan.absorb_missing(self_scan);
+                (scan, "composer+scan")
             }
         };
 
-        let class_entries: Vec<(String, PathBuf)> = classmap.into_iter().collect();
-        let symbol_count = class_entries.len();
-        {
-            let mut idx = self.symbols.fqn_uri_index.write();
-            let mut origins = self.symbols.fqn_origin_index.write();
-            origins.clear();
-            for (fqn, path) in class_entries {
-                let origin = class_origins
-                    .get(&fqn)
-                    .copied()
-                    .unwrap_or_else(|| classify_class_origin(&path, &vendor_paths, &package_roots));
-                origins.insert(fqn.clone(), origin);
-                idx.or_insert_with(fqn, || crate::util::path_to_uri(&path));
+        // The classes no scan labelled (Composer's classmap, the project's
+        // PSR-4 sources) are classified by where their file lives.
+        let package_roots = std::mem::take(&mut scan.package_roots);
+        for (fqn, path) in &scan.classmap {
+            if !scan.class_origins.contains_key(fqn) {
+                let origin = classify_class_origin(path, &vendor_paths, &package_roots);
+                scan.class_origins.insert(fqn.clone(), origin);
             }
         }
+        self.symbols.merge_scan(scan);
         // Cache the package roots so path-based origin lookups
         // (functions, constants) can classify lazily parsed symbols.
         *self.workspace.vendor_package_origin_roots.write() = package_roots;
@@ -283,24 +264,7 @@ impl Backend {
             let drupal_count = drupal_result.classmap.len()
                 + drupal_result.function_index.len()
                 + drupal_result.constant_index.len();
-            {
-                let mut idx = self.symbols.fqn_uri_index.write();
-                for (fqn, path) in drupal_result.classmap {
-                    idx.or_insert_with(fqn, || crate::util::path_to_uri(&path));
-                }
-            }
-            {
-                let mut fi = self.symbols.autoload_function_index.write();
-                for (fqn, path) in drupal_result.function_index {
-                    fi.or_insert_with(fqn, || path);
-                }
-            }
-            {
-                let mut ci = self.symbols.autoload_constant_index.write();
-                for (name, path) in drupal_result.constant_index {
-                    ci.entry(name).or_insert(path);
-                }
-            }
+            self.symbols.merge_scan(drupal_result);
             tracing::info!(
                 "PHPantom: Drupal web root {:?}, {} symbols indexed",
                 drupal_web_root,
@@ -316,10 +280,8 @@ impl Backend {
         let psr0_cm = composer::parse_autoload_namespaces(root, &vendor_dir);
         if !psr0_cm.is_empty() {
             let count = psr0_cm.len();
-            let mut idx = self.symbols.fqn_uri_index.write();
-            for (fqn, path) in psr0_cm {
-                idx.or_insert_with(fqn, || crate::util::path_to_uri(&path));
-            }
+            self.symbols
+                .merge_scan(WorkspaceScanResult::from_classmap(psr0_cm));
             tracing::info!("PSR-0: {} classes from autoload_namespaces.php", count);
         }
 
@@ -332,10 +294,8 @@ impl Backend {
         let bootstrap_cm = composer::scan_composer_bootstrap_classes(root, &vendor_dir);
         if !bootstrap_cm.is_empty() {
             let count = bootstrap_cm.len();
-            let mut idx = self.symbols.fqn_uri_index.write();
-            for (fqn, path) in bootstrap_cm {
-                idx.or_insert_with(fqn, || crate::util::path_to_uri(&path));
-            }
+            self.symbols
+                .merge_scan(WorkspaceScanResult::from_classmap(bootstrap_cm));
             tracing::info!("Composer bootstrap: {count} classes from vendor/composer");
         }
 
@@ -346,26 +306,8 @@ impl Backend {
 
         self.scan_autoload_files(root, &vendor_dir, progress);
 
-        // Runs for every strategy, including `none`: an explicit
-        // `include` entry is a direct instruction, not a fallback.
-        self.scan_configured_include_paths(root, progress);
-
-        let symbol_count = symbol_count
-            + self.symbols.autoload_function_index.read().len()
-            + self.symbols.autoload_constant_index.read().len();
-
-        self.log(
-            MessageType::INFO,
-            format!(
-                "PHPantom v{}: PHP {}, {} symbols from {}, stubs {}",
-                self.version,
-                php_version,
-                symbol_count,
-                source_label,
-                crate::stubs::STUBS_VERSION
-            ),
-        )
-        .await;
+        self.finish_discovery(root, php_version, source_label, progress)
+            .await;
     }
 
     /// Initialize a monorepo workspace (no root `composer.json`, but
@@ -377,7 +319,7 @@ impl Backend {
     /// outside any subproject directory.
     pub(crate) async fn init_monorepo(
         &self,
-        root: &std::path::Path,
+        root: &Path,
         subprojects: &[(PathBuf, String)],
         php_version: crate::types::PhpVersion,
         progress: Option<&crate::progress::ScanProgress>,
@@ -501,16 +443,9 @@ impl Backend {
             }
             let scan =
                 self.build_self_scan_composer(sub_root, vendor_dir, None, &sub_skip, progress);
-            self.populate_autoload_indices(&scan);
-            {
-                let mut idx = self.symbols.fqn_uri_index.write();
-                for (fqcn, path) in sub_cm {
-                    idx.or_insert_with(fqcn, || crate::util::path_to_uri(&path));
-                }
-                for (fqcn, path) in scan.classmap {
-                    idx.or_insert_with(fqcn, || crate::util::path_to_uri(&path));
-                }
-            }
+            self.symbols
+                .merge_scan(WorkspaceScanResult::from_classmap(sub_cm));
+            self.symbols.merge_scan(scan);
         }
 
         self.resolved_class_cache.write().set_laravel(any_laravel);
@@ -546,30 +481,13 @@ impl Backend {
             progress,
             Some(self.followed_links()),
         );
-        self.populate_autoload_indices(&scan);
-        {
-            let mut idx = self.symbols.fqn_uri_index.write();
-            for (fqcn, path) in scan.classmap {
-                idx.or_insert_with(fqcn, || crate::util::path_to_uri(&path));
-            }
-        }
+        self.symbols.merge_scan(scan);
 
-        self.scan_configured_include_paths(root, progress);
-
-        let symbol_count = self.symbols.fqn_uri_index.read().len()
-            + self.symbols.autoload_function_index.read().len()
-            + self.symbols.autoload_constant_index.read().len();
-
-        self.log(
-            MessageType::INFO,
-            format!(
-                "PHPantom v{}: PHP {}, {} symbols from {} subprojects, stubs {}",
-                self.version,
-                php_version,
-                symbol_count,
-                subprojects.len(),
-                crate::stubs::STUBS_VERSION
-            ),
+        self.finish_discovery(
+            root,
+            php_version,
+            &format!("{} subprojects", subprojects.len()),
+            progress,
         )
         .await;
     }
@@ -578,7 +496,7 @@ impl Backend {
     /// anywhere).  Full-scans all PHP files in the workspace.
     pub(crate) async fn init_no_composer(
         &self,
-        root: &std::path::Path,
+        root: &Path,
         php_version: crate::types::PhpVersion,
         progress: Option<&crate::progress::ScanProgress>,
     ) {
@@ -604,29 +522,38 @@ impl Backend {
             progress,
             Some(self.followed_links()),
         );
-        self.populate_autoload_indices(&scan);
+        self.symbols.merge_scan(scan);
 
-        let symbol_count = scan.classmap.len();
-        {
-            let mut idx = self.symbols.fqn_uri_index.write();
-            for (fqn, path) in scan.classmap {
-                idx.or_insert_with(fqn, || crate::util::path_to_uri(&path));
-            }
-        }
+        self.finish_discovery(root, php_version, "workspace scan", progress)
+            .await;
+    }
 
+    /// End a discovery pass the way every pipeline does: index the
+    /// `[indexing] include` paths, then log what the pass found, with
+    /// `source` saying where it came from.
+    async fn finish_discovery(
+        &self,
+        root: &Path,
+        php_version: crate::types::PhpVersion,
+        source: &str,
+        progress: Option<&crate::progress::ScanProgress>,
+    ) {
+        // Runs for every pipeline and strategy, including `none`: an
+        // explicit `include` entry is a direct instruction, not a fallback.
         self.scan_configured_include_paths(root, progress);
 
-        let symbol_count = symbol_count
+        let symbol_count = self.symbols.fqn_uri_index.read().len()
             + self.symbols.autoload_function_index.read().len()
             + self.symbols.autoload_constant_index.read().len();
 
         self.log(
             MessageType::INFO,
             format!(
-                "PHPantom v{}: PHP {}, {} symbols from workspace scan, stubs {}",
+                "PHPantom v{}: PHP {}, {} symbols from {}, stubs {}",
                 self.version,
                 php_version,
                 symbol_count,
+                source,
                 crate::stubs::STUBS_VERSION
             ),
         )

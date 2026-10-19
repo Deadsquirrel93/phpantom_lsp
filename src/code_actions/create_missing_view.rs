@@ -82,7 +82,7 @@ impl Backend {
             if file_path.exists() {
                 continue;
             }
-            let Ok(new_file_uri) = Url::from_file_path(&file_path) else {
+            let Some(new_file_uri) = crate::util::path_to_url(&file_path) else {
                 continue;
             };
 

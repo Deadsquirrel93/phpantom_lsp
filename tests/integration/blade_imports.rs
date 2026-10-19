@@ -8,7 +8,9 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::common::{APP_PSR4_COMPOSER, create_psr4_workspace, open_document, workspace_uri};
+    use crate::common::{
+        APP_PSR4_COMPOSER, create_psr4_workspace, open_document, position_of, workspace_uri,
+    };
     use tower_lsp::LanguageServer;
     use tower_lsp::lsp_types::*;
 
@@ -190,12 +192,10 @@ class CurrencyHelper {\n\
     /// The template's range of the first occurrence of `text` in `view`,
     /// which sits on a single line.
     fn range_of(view: &str, text: &str) -> Range {
-        let at = view.find(text).expect("the text is in the view");
-        let line = view[..at].matches('\n').count() as u32;
-        let character = (at - view[..at].rfind('\n').map_or(0, |newline| newline + 1)) as u32;
+        let start = position_of(view, text);
         Range::new(
-            Position::new(line, character),
-            Position::new(line, character + text.len() as u32),
+            start,
+            Position::new(start.line, start.character + text.len() as u32),
         )
     }
 

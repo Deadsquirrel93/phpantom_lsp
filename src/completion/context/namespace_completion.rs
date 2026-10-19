@@ -147,7 +147,7 @@ impl Backend {
             let mappings = self.workspace.psr4_mappings.read();
             if let Some(ref root) = *ws {
                 if let Ok(url) = Url::parse(uri) {
-                    if let Ok(file_path) = url.to_file_path() {
+                    if let Some(file_path) = crate::util::url_to_path(&url) {
                         infer_namespaces_from_path(&file_path, root, &mappings)
                     } else {
                         Vec::new()

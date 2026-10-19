@@ -4,8 +4,6 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::Url;
-
 use crate::Backend;
 use crate::types::{ClassInfo, PhpVersion};
 use crate::util::short_name;
@@ -71,7 +69,7 @@ impl Backend {
         if uri.starts_with("phar://") {
             return self.parse_and_cache_phar_entry(uri);
         }
-        let file_path = Url::parse(uri).ok()?.to_file_path().ok()?;
+        let file_path = crate::util::uri_to_path(uri)?;
         self.parse_and_cache_file(&file_path)
     }
 

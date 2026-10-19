@@ -170,9 +170,7 @@ impl Backend {
         let Some(uri) = self.resolve_class_uri(fqn) else {
             return Vec::new();
         };
-        let path = tower_lsp::lsp_types::Url::parse(&uri)
-            .ok()
-            .and_then(|url| url.to_file_path().ok());
+        let path = crate::util::uri_to_path(&uri);
         let (Some(path), Some(content)) = (path, self.get_file_content(&uri)) else {
             return Vec::new();
         };

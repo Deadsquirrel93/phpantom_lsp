@@ -279,6 +279,17 @@ Finding the exact line within the stub file can reuse the existing
 member-lookup logic in `definition/member/file_lookup.rs` (read the
 file, parse it, find the symbol by name/offset).
 
+### Keeping the map current
+
+`composer update` can upgrade `jetbrains/phpstorm-stubs` or `composer
+remove` can drop it mid-session, and a map read once at startup would
+keep go-to-definition pointing at the old files, or at files that no
+longer exist. `rescan_composer_indexes` (`src/indexing/scan.rs`) runs on
+a `composer.lock` change; detect the package again there, from the same
+`installed.json` read, and rebuild the map from its current
+`PhpStormStubsMap.php`, or drop it when the package is gone, the way E2's
+"Keeping the indices current" does for its indices.
+
 ### What this does NOT change
 
 - Type resolution still uses the embedded stubs. The on-disk stubs

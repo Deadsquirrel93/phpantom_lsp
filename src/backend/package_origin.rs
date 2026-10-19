@@ -90,7 +90,7 @@ impl Backend {
             return (ClassCompletionOrigin::CoreStub, None);
         }
         if let Ok(url) = tower_lsp::lsp_types::Url::parse(uri)
-            && let Ok(path) = url.to_file_path()
+            && let Some(path) = crate::util::url_to_path(&url)
         {
             return self.package_info_for_path(&path);
         }

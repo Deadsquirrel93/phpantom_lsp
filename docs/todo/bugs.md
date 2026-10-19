@@ -190,3 +190,80 @@ no cursor for. The parser's recovery has to end the argument list at the
 `}` instead, upstream in `mago-syntax` or by a same-length reparse such as
 the one `parser/namespace_recovery.rs` makes for a dropped `namespace`
 block.
+
+### B638. A monorepo's subprojects miss path repositories and are never rescanned after `composer update`
+
+**Impact: Low-Medium · Complexity: Medium**
+
+A workspace with no root `composer.json` goes through `init_monorepo`
+(`indexing/init.rs`), which sets up each subproject with its own copy of the
+Composer steps. That copy leaves out the PSR-4 mappings of path-repository
+packages (`composer::extract_path_repo_psr4_mappings`), which
+`init_autoload_paths` adds for a single project, so a class in a local
+module that the classmap does not list yet never resolves. After startup a
+`composer.json` or `composer.lock` change runs `rescan_composer_indexes`
+(`indexing/scan.rs`) on the workspace root only. It reads the root's
+`composer.json`, finds none, and just clears the caches, so a subproject's
+vendor classes, autoload functions and constants stay as they were at
+startup until a restart. The copy also never classifies the classes the
+subproject's Composer classmap lists, which a single project does with
+`classify_class_origin`, so where an optimized autoloader lists every
+vendor class, completion ranks all of them as project code. Run the
+single-project Composer setup per subproject root, and rescan the
+subproject whose Composer files changed.
+
+### B639. A `Pest.php` changed outside the editor is never re-read
+
+**Impact: Low · Complexity: Low**
+
+The `->in(…)` bindings a test file's closures are typed from come from the
+`Pest.php` files above it, cached per directory in
+`Backend::pest_configs` (`pest.rs`), including the directories found to
+have none. The cache is only dropped when a file ending in `/Pest.php` is
+saved in the editor (`on_did_save`, `backend/documents.rs`). One created by
+`pest --init`, edited by another tool, or changed by a branch switch reaches
+the server as a watched-file event, which `apply_watched_file_changes`
+(`indexing/watch.rs`) re-indexes without touching that cache, so test
+closures keep the old binding, or none, until a restart. Invalidate it there
+as well.
+
+### B640. Two edits count columns in bytes, so they land too far right after non-ASCII text
+
+**Impact: Low · Complexity: Low**
+
+```php
+/** @var object{größe: int, name: string} $item */
+echo $item->name;
+```
+
+An LSP column counts UTF-16 code units, but two places still turn a byte
+offset into a column by hand and report the byte count. Any non-ASCII
+character earlier on the line pushes the result right by its extra bytes:
+go-to-definition on `name` above lands two columns into the key instead of
+on its first letter. The hand-rolled conversions are object-shape key
+go-to-definition (`definition/member/shape_keys.rs`, which returns the
+key's byte index within its line as the `character`) and the ranges
+"Remove assert" deletes (`code_actions/phpstan/remove_assert.rs`). Convert
+an absolute byte offset through `offset_to_position` (`text_position.rs`)
+instead.
+
+### B641. "Generate promoted constructor" orphans each property's `@var` docblock
+
+**Impact: Low · Complexity: Low**
+
+```php
+class Order {
+    /** @var list<Item> */
+    private array $items;
+    public static int $count = 0;
+}
+```
+
+The action deletes each property's declaration and re-declares it as a
+promoted parameter, but the deleted span (`declaration_span` in
+`generate_constructor.rs`, from `find_line_start` of the member) stops at
+the declaration, so the `/** @var list<Item> */` above it stays. It then
+documents whatever follows, here the static `$count`, whose type it now
+claims is `list<Item>`. "Promote constructor parameter" deletes the docblock
+with the property (`docblock_start_above_offset`,
+`promote_constructor_param.rs`); this action should too.

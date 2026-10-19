@@ -68,7 +68,7 @@ impl TranslationCatalog {
         namespace: &str,
         group: Option<&str>,
     ) {
-        let Ok(uri) = Url::from_file_path(path) else {
+        let Some(uri) = crate::util::path_to_url(path) else {
             return;
         };
         let Some(content) = backend.get_file_content(uri.as_str()) else {
@@ -200,7 +200,7 @@ impl TranslationCatalog {
         let Ok(parsed_uri) = Url::parse(uri) else {
             return;
         };
-        let Ok(path) = parsed_uri.to_file_path() else {
+        let Some(path) = crate::util::url_to_path(&parsed_uri) else {
             return;
         };
         self.locales.insert(locale.to_string());

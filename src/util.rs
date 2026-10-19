@@ -19,7 +19,7 @@
 //! find variables, call expressions, balanced parentheses, `new`
 //! expressions, etc.) live in [`crate::type_engine::subject_extraction`].
 use std::panic::{self, AssertUnwindSafe, UnwindSafe};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use tower_lsp::lsp_types::*;
 
@@ -107,9 +107,34 @@ pub(crate) fn path_to_uri(path: &Path) -> String {
     } else {
         path
     };
-    Url::from_file_path(effective)
+    path_to_url(effective)
         .map(|u| u.to_string())
-        .unwrap_or_else(|()| format!("file://{}", effective.display()))
+        .unwrap_or_else(|| format!("file://{}", effective.display()))
+}
+
+/// The `file://` URL of `path`, or `None` when the path is not absolute.
+///
+/// This, [`url_to_path`] and [`uri_to_path`] are the only places that
+/// convert between file paths and URLs, so a change of URL type touches
+/// these three functions rather than every caller.
+pub(crate) fn path_to_url(path: &Path) -> Option<Url> {
+    Url::from_file_path(path).ok()
+}
+
+/// The file a URL names, or `None` when it is not a `file://` URL.
+pub(crate) fn url_to_path(url: &Url) -> Option<PathBuf> {
+    url.to_file_path().ok()
+}
+
+/// The file a URI string names, or `None` when it does not parse or is
+/// not a `file://` URI.
+pub(crate) fn uri_to_path(uri: &str) -> Option<PathBuf> {
+    url_to_path(&Url::parse(uri).ok()?)
+}
+
+/// The URI prefix every file under the directory `dir` starts with.
+pub(crate) fn dir_uri_prefix(dir: &Path) -> String {
+    format!("{}/", path_to_uri(dir))
 }
 
 /// The canonical spelling of `path`, for comparing against paths recorded
@@ -133,8 +158,8 @@ pub(crate) fn canonical_path_for_comparison(path: &Path) -> std::path::PathBuf {
 
 /// The URI of the file at `internal_path` inside the phar at `phar_path`,
 /// e.g. `phar:///path/to/phpstan.phar/src/Type/Type.php`.
-pub(crate) fn phar_entry_uri(phar_path: &Path, internal_path: &str) -> String {
-    format!("phar://{}/{}", phar_path.display(), internal_path)
+pub(crate) fn phar_entry_uri(phar_path: &Path, internal_path: &Path) -> String {
+    format!("phar://{}/{}", phar_path.display(), internal_path.display())
 }
 
 /// Drop the entries `keep` marks `false`, in place.

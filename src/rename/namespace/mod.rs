@@ -115,7 +115,7 @@ impl Backend {
                     &self.index_filters(),
                     Some(self.followed_links()),
                 ) {
-                    if let Ok(uri) = Url::from_file_path(&path) {
+                    if let Some(uri) = crate::util::path_to_url(&path) {
                         uris.insert(uri.to_string());
                     }
                 }

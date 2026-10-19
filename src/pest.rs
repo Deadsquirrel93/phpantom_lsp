@@ -26,7 +26,6 @@ use mago_database::file::FileId;
 use mago_names::resolver::NameResolver;
 use mago_syntax::cst::*;
 use mago_syntax::parser::parse_file_content;
-use tower_lsp::lsp_types::Url;
 
 use crate::Backend;
 use crate::atom::{atom, bytes_to_str, literal_bytes_to_str};
@@ -126,7 +125,7 @@ impl PestConfig {
     /// live under it, so the nearest one above a test file is it.
     fn load(backend: &Backend, dir_uri: &str) -> Option<Self> {
         let content = backend.get_file_content(&format!("{dir_uri}Pest.php"))?;
-        let tests_dir = Url::parse(dir_uri).ok()?.to_file_path().ok()?;
+        let tests_dir = crate::util::uri_to_path(dir_uri)?;
         Some(Self {
             bindings: parse_bindings(&content, &tests_dir),
         })
@@ -138,7 +137,7 @@ impl PestConfig {
         if self.bindings.is_empty() {
             return;
         }
-        let Some(path) = Url::parse(uri).ok().and_then(|url| url.to_file_path().ok()) else {
+        let Some(path) = crate::util::uri_to_path(uri) else {
             return;
         };
         out.extend(

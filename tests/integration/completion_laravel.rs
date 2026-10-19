@@ -1,4 +1,6 @@
-use crate::common::{create_psr4_workspace, create_test_backend, method_names, property_names};
+use crate::common::{
+    create_psr4_workspace, create_test_backend, method_names, position_after, property_names,
+};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -16370,10 +16372,16 @@ class User extends Model {
     ]);
 
     for (needle, expected) in [("$q->", "userOnly"), ("$f->", "factoryOnly")] {
-        let offset = user.find(needle).unwrap() + needle.len();
-        let line = user[..offset].matches('\n').count() as u32;
-        let character = (offset - user[..offset].rfind('\n').map_or(0, |i| i + 1)) as u32;
-        let items = complete_at(&backend, &dir, "src/Models/User.php", user, line, character).await;
+        let at = position_after(user, needle);
+        let items = complete_at(
+            &backend,
+            &dir,
+            "src/Models/User.php",
+            user,
+            at.line,
+            at.character,
+        )
+        .await;
         assert!(
             method_names(&items).contains(&expected),
             "{needle} should offer {expected}, got: {:?}",
@@ -16460,16 +16468,8 @@ final class DivisionFactory
         ("src/Models/DivisionFactory.php", caller),
     ]);
 
-    let position_after = |needle: &str| {
-        let offset = caller.find(needle).unwrap() + needle.len();
-        Position {
-            line: caller[..offset].matches('\n').count() as u32,
-            character: (offset - caller[..offset].rfind('\n').map_or(0, |i| i + 1)) as u32,
-        }
-    };
-
     for (needle, expected) in [("$q->", "eagleOnly"), ("$f->", "factoryOnly")] {
-        let at = position_after(needle);
+        let at = position_after(caller, needle);
         let items = complete_at(
             &backend,
             &dir,
@@ -16490,7 +16490,7 @@ final class DivisionFactory
     // same binding has to carry hover and go-to-definition, not just the
     // completion list.
     let uri = Url::from_file_path(dir.path().join("src/Models/DivisionFactory.php")).unwrap();
-    let on_method = position_after("$q->eagle");
+    let on_method = position_after(caller, "$q->eagle");
     let targets = crate::common::definition_locations(
         crate::common::goto_definition_at(&backend, &uri, on_method.line, on_method.character)
             .await,
@@ -16504,7 +16504,7 @@ final class DivisionFactory
 
     // On the variable itself, in the body — not the parameter it was
     // declared as.
-    let on_var = position_after("return $");
+    let on_var = position_after(caller, "return $");
     let hover = backend
         .hover(HoverParams {
             text_document_position_params: TextDocumentPositionParams {

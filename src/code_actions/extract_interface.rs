@@ -152,10 +152,10 @@ impl Backend {
 
         // Determine new file path (same directory as original).
         let doc_url = Url::parse(uri).ok()?;
-        let file_path = doc_url.to_file_path().ok()?;
+        let file_path = crate::util::url_to_path(&doc_url)?;
         let dir = file_path.parent()?;
         let new_file_path = dir.join(format!("{}.php", interface_name));
-        let new_file_uri = Url::from_file_path(&new_file_path).ok()?;
+        let new_file_uri = crate::util::path_to_url(&new_file_path)?;
 
         let implements_edit = build_implements_edit(content, current_class, &interface_name)?;
 

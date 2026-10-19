@@ -654,7 +654,7 @@ impl Backend {
             .read()
             .values()
             .filter(|uri| !(project_only && uri.contains("/vendor/")))
-            .filter_map(|uri| Url::parse(uri).ok().and_then(|u| u.to_file_path().ok()))
+            .filter_map(|uri| crate::util::uri_to_path(uri))
             .collect();
         let mut pending_files: Vec<PathBuf> = index_paths
             .iter()

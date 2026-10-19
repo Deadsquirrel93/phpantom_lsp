@@ -1249,6 +1249,15 @@ pub fn position_of(content: &str, needle: &str) -> Position {
     offset_position(content, offset)
 }
 
+/// The position of the last occurrence of `needle` in `content`, in LSP
+/// coordinates.
+pub fn position_of_last(content: &str, needle: &str) -> Position {
+    let offset = content
+        .rfind(needle)
+        .unwrap_or_else(|| panic!("needle not found: {needle}"));
+    offset_position(content, offset)
+}
+
 fn offset_position(content: &str, offset: usize) -> Position {
     let before = &content[..offset];
     let line = before.matches('\n').count() as u32;
@@ -1282,6 +1291,21 @@ pub fn hover_text(hover: &Hover) -> &str {
         HoverContents::Markup(markup) => &markup.value,
         other => panic!("expected markup hover, got {other:?}"),
     }
+}
+
+/// Parse `content` as `file:///test.php` and return the markdown of the
+/// hover at the last occurrence of `needle`, which must hover.
+pub fn hover_last(backend: &Backend, content: &str, needle: &str) -> String {
+    let position = position_of_last(content, needle);
+    let hover = hover_at(
+        backend,
+        "file:///test.php",
+        content,
+        position.line,
+        position.character,
+    )
+    .expect("expected hover");
+    hover_text(&hover).to_string()
 }
 
 /// Send a `textDocument/hover` request for a document that is already
@@ -1476,6 +1500,18 @@ pub async fn definitions_at(
     definition_locations(
         goto_definition_at(backend, uri, position.line, position.character + 2).await,
     )
+}
+
+/// Assert that a go-to-definition response is a single location in `uri`
+/// starting on `line`.
+pub fn assert_location(response: GotoDefinitionResponse, uri: &Url, line: u32) {
+    match response {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(&location.uri, uri, "jumped to the wrong file");
+            assert_eq!(location.range.start.line, line, "jumped to the wrong line");
+        }
+        other => panic!("expected a single location, got: {other:?}"),
+    }
 }
 
 /// The URI of the first target of a go-to-definition response.

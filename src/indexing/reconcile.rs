@@ -21,7 +21,7 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use tower_lsp::lsp_types::{FileChangeType, Url};
+use tower_lsp::lsp_types::FileChangeType;
 
 use crate::Backend;
 use crate::classmap_scanner::IndexFilters;
@@ -269,7 +269,7 @@ fn note_if_newly_filtered(
     if filtered.contains_key(uri) {
         return;
     }
-    let Some(path) = Url::parse(uri).ok().and_then(|u| u.to_file_path().ok()) else {
+    let Some(path) = crate::util::uri_to_path(uri) else {
         return;
     };
     if is_out_of_scope(current, &path) && !is_out_of_scope(previous, &path) {

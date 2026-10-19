@@ -35,7 +35,6 @@ use mago_database::file::FileId;
 use mago_names::resolver::NameResolver;
 use mago_syntax::cst::*;
 use mago_syntax::parser::parse_file_content;
-use tower_lsp::lsp_types::Url;
 
 use crate::Backend;
 use crate::atom::{atom, bytes_to_str};
@@ -413,7 +412,7 @@ fn read_source_by_fqn(backend: &Backend, fqn: &str) -> Option<String> {
     if let Some(content) = backend.get_file_content(&uri) {
         return Some(content);
     }
-    let path = Url::parse(&uri).ok()?.to_file_path().ok()?;
+    let path = crate::util::uri_to_path(&uri)?;
     std::fs::read_to_string(&path).ok()
 }
 
@@ -425,7 +424,7 @@ fn read_project_config(backend: &Backend, file_name: &str) -> Option<String> {
     if !path.is_file() {
         return None;
     }
-    if let Ok(uri) = Url::from_file_path(&path)
+    if let Some(uri) = crate::util::path_to_url(&path)
         && let Some(content) = backend.get_file_content(uri.as_ref())
     {
         return Some(content);

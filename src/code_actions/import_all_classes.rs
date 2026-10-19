@@ -11,14 +11,14 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::backend::file_access::ImportBlock;
-use crate::class_lookup::is_class_keyword;
 use crate::completion::use_edit::{build_use_edit, use_import_conflicts};
 use crate::diagnostics::helpers::is_offset_in_ranges;
 use crate::diagnostics::use_statements::compute_use_line_ranges;
-use crate::symbol_map::{ClassRefContext, SymbolKind};
+use crate::symbol_map::ClassRefContext;
 use crate::util::short_name;
 
-use super::make_code_action_data;
+use super::import_class::unqualified_class_name;
+use super::{make_code_action_data, span_overlaps_request};
 
 impl Backend {
     /// Collect a bulk "Import all missing classes" code action.
@@ -139,45 +139,17 @@ impl Backend {
             return false;
         };
 
-        for span in &symbol_map.spans {
-            if span.start as usize >= request_end || span.end as usize <= request_start {
-                continue;
-            }
-
-            let ref_name = match &span.kind {
-                SymbolKind::ClassReference {
-                    name,
-                    is_fqn: false,
-                    ..
-                } if !name.contains('\\') => name.as_str(),
-                SymbolKind::MemberAccess {
-                    subject_text,
-                    is_static: true,
-                    ..
-                } if {
-                    let s = subject_text.as_str(source);
-                    !s.starts_with('$') && !s.contains('\\') && !is_class_keyword(s)
-                } =>
-                {
-                    subject_text.as_str(source)
-                }
-                _ => continue,
-            };
-
-            if !self.class_name_needs_import(
-                ref_name,
-                &block.use_map,
-                &local_classes,
-                &block.namespace,
-            ) {
-                continue;
-            }
-
-            // Found an unresolved name at the cursor.
-            return true;
-        }
-
-        false
+        symbol_map.spans.iter().any(|span| {
+            span_overlaps_request(span, request_start, request_end)
+                && unqualified_class_name(span, source).is_some_and(|(ref_name, _)| {
+                    self.class_name_needs_import(
+                        ref_name,
+                        &block.use_map,
+                        &local_classes,
+                        &block.namespace,
+                    )
+                })
+        })
     }
 
     /// Resolve a deferred "Import all missing classes" code action.
@@ -343,24 +315,8 @@ impl Backend {
                 continue;
             }
 
-            let (ref_name, ref_context) = match &span.kind {
-                SymbolKind::ClassReference {
-                    name,
-                    is_fqn: false,
-                    context,
-                } if !name.contains('\\') => (name.as_str(), *context),
-                SymbolKind::MemberAccess {
-                    subject_text,
-                    is_static: true,
-                    ..
-                } if {
-                    let s = subject_text.as_str(source);
-                    !s.starts_with('$') && !s.contains('\\') && !is_class_keyword(s)
-                } =>
-                {
-                    (subject_text.as_str(source), ClassRefContext::Other)
-                }
-                _ => continue,
+            let Some((ref_name, ref_context)) = unqualified_class_name(span, source) else {
+                continue;
             };
 
             let index = ImportBlock::index_at(&blocks, span.start as usize);

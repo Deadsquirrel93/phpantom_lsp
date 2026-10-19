@@ -440,7 +440,7 @@ pub struct Backend {
     ///
     /// Used as a lightweight "has this file been parsed?" check by
     /// consumers that need to skip redundant re-parsing (e.g.
-    /// `find_or_load_function`, `resolve_constant_definition`,
+    /// `find_or_load_function`, `find_or_load_define`,
     /// `find_implementors`).  Populated in `update_ast_inner` and
     /// `parse_and_cache_content_versioned`.
     pub(crate) parsed_uris: Arc<RwLock<HashSet<String>>>,

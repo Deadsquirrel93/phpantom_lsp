@@ -73,9 +73,7 @@ impl Backend {
                 &owned
             }
         };
-        let file_path = tower_lsp::lsp_types::Url::parse(uri)
-            .ok()
-            .and_then(|u| u.to_file_path().ok())?;
+        let file_path = crate::util::uri_to_path(uri)?;
         let workspace_root = self
             .workspace
             .workspace_root

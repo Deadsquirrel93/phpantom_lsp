@@ -138,7 +138,7 @@ impl Backend {
         let uri = uri.to_string();
 
         // External tools discover their config from the file's real path.
-        let Some(file_path) = Url::parse(&uri).ok().and_then(|u| u.to_file_path().ok()) else {
+        let Some(file_path) = crate::util::uri_to_path(&uri) else {
             return Ok(None);
         };
         let Some(content) = self.get_file_content(&uri) else {

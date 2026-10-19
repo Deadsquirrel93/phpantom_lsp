@@ -1,64 +1,44 @@
-//! Autoload and vendor scanning.
+//! Vendor registration and the Composer-derived scans.
 //!
 //! These `impl Backend` methods register vendor directories, (re)build
-//! the Composer-derived indexes, scan autoload files and PHAR archives,
-//! and populate the function/constant indices from a workspace scan.
+//! the Composer-derived indexes, scan autoload files, and self-scan a
+//! Composer project's autoload directories.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use super::{classify_class_origin, path_aliases};
+use super::path_aliases;
 use crate::Backend;
 use crate::classmap_scanner::{self, WorkspaceScanResult};
 use crate::composer;
-use crate::phar;
-
-/// Files claimed per block of work when scanning a phar archive.
-const PHAR_SCAN_BLOCK_FILES: usize = 32;
-
-/// A class found inside a phar: its FQN and the `phar://` URI of the
-/// entry declaring it.
-type PharClass = (String, String);
-
-/// Build the vendor URI prefixes (raw and canonicalized) for a vendor
-/// directory path, used to detect and skip vendor files.
-fn vendor_uri_prefixes_for_path(vendor_path: &std::path::Path) -> Vec<String> {
-    path_aliases(vendor_path)
-        .iter()
-        .map(|path| format!("{}/", crate::util::path_to_uri(path)))
-        .collect()
-}
 
 impl Backend {
     /// Register a vendor directory path and its URI prefix for
     /// vendor-file detection.
-    pub(crate) fn add_vendor_dir(&self, vendor_path: &std::path::Path) {
+    pub(crate) fn add_vendor_dir(&self, vendor_path: &Path) {
         // Keep both filesystem spellings. Walkers normally yield the raw
         // workspace spelling, while Composer package discovery canonicalizes
         // its files; on macOS those can be `/var` and `/private/var` for the
         // same vendor tree. Caching both here keeps the hot lookup paths free
         // of filesystem calls.
-        {
-            let mut paths = self.workspace.vendor_dir_paths.lock();
-            for path in path_aliases(vendor_path) {
-                if !paths.contains(&path) {
-                    paths.push(path);
-                }
-            }
-        }
-        // Store URI prefixes for URI-level skip logic (diagnostics, find
-        // references, rename).  Keep both raw and canonical forms so macOS
-        // `/tmp` vs `/private/tmp` style aliases do not leak vendor files into
-        // workspace indexing.
-        let new_prefixes = vendor_uri_prefixes_for_path(vendor_path);
-        {
-            let mut prefixes = self.workspace.vendor_uri_prefixes.lock();
-            for prefix in new_prefixes {
-                if !prefixes.contains(&prefix) {
-                    prefixes.push(prefix);
-                }
-            }
-        }
+        //
+        // The URI prefixes serve the URI-level skip logic (diagnostics, find
+        // references, rename), and keep both forms for the same reason, so
+        // macOS `/tmp` vs `/private/tmp` style aliases do not leak vendor
+        // files into workspace indexing.
+        let aliases = path_aliases(vendor_path);
+        let uri_prefixes = aliases
+            .iter()
+            .map(|path| crate::util::dir_uri_prefix(path))
+            .collect();
+        self.register_vendor_location(aliases, uri_prefixes);
+    }
+
+    /// Record the spellings of a vendor location and the URI prefixes that
+    /// mark a file under it, skipping any already registered.
+    pub(super) fn register_vendor_location(&self, paths: Vec<PathBuf>, uri_prefixes: Vec<String>) {
+        push_new(&mut self.workspace.vendor_dir_paths.lock(), paths);
+        push_new(&mut self.workspace.vendor_uri_prefixes.lock(), uri_prefixes);
     }
 
     /// Rebuild the vendor-derived indexes after a `composer.json` /
@@ -70,7 +50,7 @@ impl Backend {
     /// linger.  This is the synchronous body of
     /// [`did_change_watched_files`](Self::did_change_watched_files)'s
     /// composer branch, factored out so it can run on a blocking thread.
-    pub(crate) fn rescan_composer_indexes(&self, root: &std::path::Path) {
+    pub(crate) fn rescan_composer_indexes(&self, root: &Path) {
         if let Some(pkg) = composer::read_composer_package(root) {
             let mut mappings = composer::extract_psr4_mappings_from_package(&pkg);
             let vendor_dir = composer::get_vendor_dir(&pkg);
@@ -85,7 +65,6 @@ impl Backend {
             // clone before `composer install`). Register it again now so the
             // shared vendor filters cache both raw and canonical spellings.
             self.add_vendor_dir(&vendor_path);
-            let vendor_paths = path_aliases(&vendor_path);
 
             // Rebuild vendor classmap, tracking dependency provenance so
             // completion ranking stays accurate after a composer change.
@@ -103,64 +82,11 @@ impl Backend {
             // `scan_vendor_packages_with_skip` already did; no need to
             // re-read and re-parse the file a second time here.
             let vendor_package_roots = std::mem::take(&mut vendor_scan.package_roots);
-            {
-                let vendor_uri_prefixes = vendor_uri_prefixes_for_path(&vendor_path);
 
-                // Remove old vendor entries and insert new ones.
-                let mut idx = self.symbols.fqn_uri_index.write();
-                let mut origins = self.symbols.fqn_origin_index.write();
-                idx.retain(|_, v| {
-                    !vendor_uri_prefixes
-                        .iter()
-                        .any(|prefix| v.starts_with(prefix.as_str()))
-                });
-                for (fqn, path) in vendor_scan.classmap {
-                    let origin =
-                        vendor_scan
-                            .class_origins
-                            .get(&fqn)
-                            .copied()
-                            .unwrap_or_else(|| {
-                                classify_class_origin(&path, &vendor_paths, &vendor_package_roots)
-                            });
-                    origins.insert(fqn.clone(), origin);
-                    idx.insert(fqn, crate::util::path_to_uri(&path));
-                }
-            }
-            {
-                let mut fi = self.symbols.autoload_function_index.write();
-                let mut origins = self.symbols.autoload_function_origin_index.write();
-                // Purge functions that pointed into the old vendor tree
-                // before re-inserting, so symbols removed by a
-                // `composer update` no longer resolve.
-                fi.retain(|_, v| !vendor_paths.iter().any(|vendor| v.starts_with(vendor)));
-                for (fqn, path) in vendor_scan.function_index {
-                    let origin = vendor_scan
-                        .function_origins
-                        .get(&fqn)
-                        .copied()
-                        .unwrap_or(crate::ClassCompletionOrigin::Project);
-                    origins.insert(fqn.clone(), origin);
-                    fi.insert(fqn, path);
-                }
-            }
-            {
-                let mut ci = self.symbols.autoload_constant_index.write();
-                let mut origins = self.symbols.autoload_constant_origin_index.write();
-                // Same for constants from the old vendor tree.
-                ci.retain(|_, v| !vendor_paths.iter().any(|vendor| v.starts_with(vendor)));
-                for (name, path) in vendor_scan.constant_index {
-                    let origin = vendor_scan
-                        .constant_origins
-                        .get(&name)
-                        .copied()
-                        .unwrap_or(crate::ClassCompletionOrigin::Project);
-                    origins.insert(name.clone(), origin);
-                    ci.insert(name, path);
-                }
-            }
-
-            self.symbols.prune_orphaned_origins();
+            // Everything the old vendor tree contributed goes, so symbols
+            // removed by a `composer update` no longer resolve.
+            self.symbols
+                .replace_tree(&path_aliases(&vendor_path), vendor_scan);
 
             // Refresh the cached package roots for path-based lookups.
             *self.workspace.vendor_package_origin_roots.write() = vendor_package_roots;
@@ -195,7 +121,7 @@ impl Backend {
     /// found.
     pub(crate) fn scan_autoload_files(
         &self,
-        project_root: &std::path::Path,
+        project_root: &Path,
         vendor_dir: &str,
         progress: Option<&crate::progress::ScanProgress>,
     ) -> usize {
@@ -235,34 +161,13 @@ impl Backend {
             }
 
             if let Ok(content) = std::fs::read(&canonical) {
-                let uri = crate::util::path_to_uri(&canonical);
-
                 // Lightweight byte-level scan: extract symbol names
-                // without building a full AST.
+                // without building a full AST.  The classes go into
+                // `fqn_uri_index` so find_or_load_class can lazily parse
+                // them later.
                 let scan = classmap_scanner::find_symbols(&content);
-
-                {
-                    let mut idx = self.symbols.autoload_function_index.write();
-                    for fqn in &scan.functions {
-                        idx.or_insert_with(fqn.as_str(), || canonical.clone());
-                    }
-                }
-
-                {
-                    let mut idx = self.symbols.autoload_constant_index.write();
-                    for name in &scan.constants {
-                        idx.entry(name.clone()).or_insert_with(|| canonical.clone());
-                    }
-                }
-
-                // Populate fqn_uri_index so find_or_load_class can
-                // lazily parse these classes later.
-                {
-                    let mut idx = self.symbols.fqn_uri_index.write();
-                    for fqn in &scan.classes {
-                        idx.or_insert_with(fqn.as_str(), || uri.clone());
-                    }
-                }
+                self.symbols
+                    .merge_scan(WorkspaceScanResult::from_file(scan, &canonical));
 
                 let content_str = String::from_utf8_lossy(&content);
 
@@ -326,97 +231,6 @@ impl Backend {
         autoload_count
     }
 
-    /// Parse a `.phar` archive and register its PHP classes in the
-    /// fqn_uri_index for lazy loading.
-    ///
-    /// The phar's raw bytes are read from disk, parsed by
-    /// [`phar::PharArchive`], and stored in
-    /// [`phar_archives`](crate::Backend::phar_archives).  Each `.php`
-    /// file inside the archive is scanned with the lightweight
-    /// [`find_classes`](classmap_scanner::find_classes) byte scanner,
-    /// and discovered classes are registered in `fqn_uri_index` under a
-    /// URI like `phar:///path/to/phpstan.phar/src/Type/Type.php`, the
-    /// same URI a parse of the entry caches its classes under.
-    /// [`parse_and_cache_uri`](crate::Backend::parse_and_cache_uri)
-    /// reads such a URI back out of the archive.
-    fn scan_phar_archive(&self, phar_path: &Path) {
-        // Avoid scanning the same phar twice.
-        if self.phar_archives.read().contains_key(phar_path) {
-            return;
-        }
-
-        // Map the archive rather than copying it onto the heap: the scan
-        // below only touches the pages of the `.php` entries it reads, and
-        // the map is dropped when this function returns.
-        let data = match classmap_scanner::read_for_scan(phar_path) {
-            Ok(d) => d,
-            Err(_) => return,
-        };
-        let archive = match phar::PharArchive::parse(phar_path, &data) {
-            Some(a) => a,
-            None => {
-                tracing::warn!("failed to parse phar archive: {}", phar_path.display());
-                return;
-            }
-        };
-
-        // Collect PHP file paths first so we can iterate while
-        // holding the archive reference.
-        let php_files: Vec<String> = archive
-            .file_paths()
-            .filter(|p| p.ends_with(".php"))
-            .map(String::from)
-            .collect();
-
-        // A tool phar is large (phpstan's is tens of megabytes of PHP), so
-        // the byte scan is spread over the cores.  The classes come back in
-        // manifest order, keeping the first-wins index inserts below
-        // identical to a sequential scan.
-        let scanned: Vec<Vec<PharClass>> = crate::parallel::map_in_blocks(
-            "phar-scan",
-            &php_files,
-            PHAR_SCAN_BLOCK_FILES,
-            |internal_path| {
-                let content = data.get(archive.file_range(internal_path)?)?;
-                let classes: Vec<PharClass> = classmap_scanner::find_classes(content)
-                    .into_iter()
-                    .map(|fqn| (fqn, crate::util::phar_entry_uri(phar_path, internal_path)))
-                    .collect();
-                (!classes.is_empty()).then_some(classes)
-            },
-        );
-
-        // The archive must be in place before its classes are published:
-        // a lookup that finds a class in the index but cannot read its
-        // source caches the class as not found.
-        self.phar_archives
-            .write()
-            .insert(phar_path.to_owned(), archive);
-
-        let mut class_count = 0;
-        {
-            let mut idx = self.symbols.fqn_uri_index.write();
-            for (fqn, uri) in scanned.into_iter().flatten() {
-                class_count += 1;
-                idx.or_insert_with(fqn, || uri);
-            }
-        }
-
-        // Clear the negative class cache so that classes previously
-        // looked up (and cached as "not found") before the phar was
-        // scanned can now be resolved.
-        if class_count > 0 {
-            self.clear_not_found_caches();
-        }
-
-        tracing::info!(
-            "scanned phar {}: {} PHP files, {} classes",
-            phar_path.display(),
-            php_files.len(),
-            class_count,
-        );
-    }
-
     /// Build a workspace scan by self-scanning a Composer project's
     /// autoload directories (PSR-4 + classmap + vendor packages).
     ///
@@ -432,7 +246,7 @@ impl Backend {
     /// scan everything.
     pub(crate) fn build_self_scan_composer(
         &self,
-        project_root: &std::path::Path,
+        project_root: &Path,
         vendor_dir: &str,
         preloaded_package: Option<&composer::ComposerPackage>,
         skip_paths: &HashSet<PathBuf>,
@@ -521,154 +335,13 @@ impl Backend {
 
         result
     }
+}
 
-    /// Store the function and constant indices from a workspace scan
-    /// into the backend's shared maps.
-    ///
-    /// Only has an effect for non-Composer projects (the "no
-    /// `composer.json`" scenario) where the full-scan populates
-    /// function and constant entries.  For Composer projects the scan
-    /// result's function and constant indices are empty because those
-    /// symbols are discovered via the `autoload_files.php` scan loop
-    /// in `initialized()` instead.
-    pub(crate) fn populate_autoload_indices(&self, scan: &WorkspaceScanResult) {
-        if !scan.function_index.is_empty() {
-            let mut idx = self.symbols.autoload_function_index.write();
-            let mut origins = self.symbols.autoload_function_origin_index.write();
-            for (fqn, path) in &scan.function_index {
-                idx.or_insert_with(fqn.as_str(), || path.clone());
-                let origin = scan
-                    .function_origins
-                    .get(fqn)
-                    .copied()
-                    .unwrap_or(crate::ClassCompletionOrigin::Project);
-                origins.insert(fqn.clone(), origin);
-            }
-        }
-        if !scan.constant_index.is_empty() {
-            let mut idx = self.symbols.autoload_constant_index.write();
-            let mut origins = self.symbols.autoload_constant_origin_index.write();
-            for (name, path) in &scan.constant_index {
-                idx.entry(name.clone()).or_insert_with(|| path.clone());
-                let origin = scan
-                    .constant_origins
-                    .get(name)
-                    .copied()
-                    .unwrap_or(crate::ClassCompletionOrigin::Project);
-                origins.insert(name.clone(), origin);
-            }
-        }
-    }
-
-    /// Index the extra paths named by `[indexing] include`.
-    ///
-    /// Runs last in every discovery pipeline so the entries it adds lose
-    /// every first-wins merge: an included path fills the gaps the
-    /// workspace scan left, it does not shadow what that scan found. An
-    /// origin is recorded only alongside a path that wins, so a symbol's
-    /// origin always describes the file it resolves to. A no-op when the
-    /// option is unset, which is the default.
-    ///
-    /// A path inside the workspace is project code. One outside it is a
-    /// library, registered the way a vendor directory is, so it resolves
-    /// but is never reported on, renamed into, or searched for references.
-    pub(crate) fn scan_configured_include_paths(
-        &self,
-        root: &std::path::Path,
-        progress: Option<&crate::progress::ScanProgress>,
-    ) {
-        let paths = self.config().indexing.include_paths(root);
-        if paths.is_empty() {
-            return;
-        }
-
-        let (project, library): (Vec<PathBuf>, Vec<PathBuf>) = paths
-            .iter()
-            .cloned()
-            .partition(|path| path.starts_with(root));
-        for path in &library {
-            self.add_library_path(path);
-        }
-
-        let filters = self.index_filters();
-        let mut symbol_count = 0;
-        for (paths, origin) in [
-            (project, crate::ClassCompletionOrigin::Project),
-            (library, crate::ClassCompletionOrigin::VendorExplicit),
-        ] {
-            if paths.is_empty() {
-                continue;
-            }
-            let scan = classmap_scanner::scan_include_paths(&paths, origin, &filters, progress);
-            symbol_count +=
-                scan.classmap.len() + scan.function_index.len() + scan.constant_index.len();
-            self.merge_include_scan(scan, origin);
-        }
-
-        tracing::info!(
-            "PHPantom: indexing.include, {} symbols from {} configured path(s)",
-            symbol_count,
-            paths.len()
-        );
-    }
-
-    /// Register an `[indexing] include` path outside the workspace as
-    /// library code. A directory is registered exactly like a vendor
-    /// directory; a file gets its own URI as the prefix, since the
-    /// vendor prefixes end in `/`.
-    fn add_library_path(&self, path: &Path) {
-        if !path.is_file() {
-            self.add_vendor_dir(path);
-            return;
-        }
-        let aliases = path_aliases(path);
-        {
-            let mut prefixes = self.workspace.vendor_uri_prefixes.lock();
-            for alias in &aliases {
-                let uri = crate::util::path_to_uri(alias);
-                if !prefixes.contains(&uri) {
-                    prefixes.push(uri);
-                }
-            }
-        }
-        let mut paths = self.workspace.vendor_dir_paths.lock();
-        for alias in aliases {
-            if !paths.contains(&alias) {
-                paths.push(alias);
-            }
-        }
-    }
-
-    /// Add what an include scan found to the symbol indexes, keeping every
-    /// entry an earlier pipeline already made.
-    fn merge_include_scan(&self, scan: WorkspaceScanResult, origin: crate::ClassCompletionOrigin) {
-        {
-            let mut idx = self.symbols.fqn_uri_index.write();
-            let mut origins = self.symbols.fqn_origin_index.write();
-            for (fqn, path) in scan.classmap {
-                if !idx.contains_key(&fqn) {
-                    origins.insert(fqn.as_str(), origin);
-                    idx.insert(fqn, crate::util::path_to_uri(&path));
-                }
-            }
-        }
-        {
-            let mut idx = self.symbols.autoload_function_index.write();
-            let mut origins = self.symbols.autoload_function_origin_index.write();
-            for (fqn, path) in scan.function_index {
-                if !idx.contains_key(&fqn) {
-                    origins.insert(fqn.as_str(), origin);
-                    idx.insert(fqn, path);
-                }
-            }
-        }
-        let mut idx = self.symbols.autoload_constant_index.write();
-        let mut origins = self.symbols.autoload_constant_origin_index.write();
-        for (name, path) in scan.constant_index {
-            if let std::collections::hash_map::Entry::Vacant(e) = idx.entry(name) {
-                origins.insert(e.key().clone(), origin);
-                e.insert(path);
-            }
+/// Append each of `items` that `list` does not already hold.
+fn push_new<T: PartialEq>(list: &mut Vec<T>, items: Vec<T>) {
+    for item in items {
+        if !list.contains(&item) {
+            list.push(item);
         }
     }
 }

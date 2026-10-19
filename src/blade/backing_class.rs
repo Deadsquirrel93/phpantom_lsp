@@ -335,9 +335,8 @@ impl Backend {
             return LIVEWIRE_DEFAULT_NAMESPACE.to_string();
         };
         let path = root.join("config").join("livewire.php");
-        let content = tower_lsp::lsp_types::Url::from_file_path(&path)
-            .ok()
-            .and_then(|uri| self.get_file_content(uri.as_str()));
+        let content =
+            crate::util::path_to_url(&path).and_then(|uri| self.get_file_content(uri.as_str()));
         let namespace = content
             .as_deref()
             .and_then(parse_config_tree)

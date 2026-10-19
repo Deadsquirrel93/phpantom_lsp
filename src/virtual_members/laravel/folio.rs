@@ -34,7 +34,6 @@ use mago_database::file::FileId;
 use mago_names::resolver::NameResolver;
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
-use tower_lsp::lsp_types::Url;
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
@@ -288,7 +287,7 @@ pub(crate) fn enumerate_folio_routes(backend: &Backend) -> Vec<(RouteEntry, Path
             let Some((page_name, offset)) = extract_page_route_name(&content) else {
                 continue;
             };
-            let declarations = Url::from_file_path(&path)
+            let declarations = crate::util::path_to_url(&path)
                 .map(|file| RouteDeclaration {
                     file: Arc::new(file),
                     position: offset_to_position(&content, offset),

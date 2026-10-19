@@ -10,7 +10,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::{Position, Url};
+use tower_lsp::lsp_types::Position;
 
 use crate::Backend;
 use crate::types::{ClassInfo, FileContext, NamespaceSpan};
@@ -114,7 +114,7 @@ impl Backend {
             return stub_fn_idx.get(func_name).map(|s| Arc::new(s.to_string()));
         }
 
-        let path = Url::parse(uri).ok()?.to_file_path().ok()?;
+        let path = crate::util::uri_to_path(uri)?;
         std::fs::read_to_string(path).ok().map(Arc::new)
     }
 
@@ -515,7 +515,7 @@ impl Backend {
     /// or not it is open, and the completed workspace index is never walked
     /// again to put it back.
     pub(crate) fn workspace_index_path(&self, uri: &str) -> Option<std::path::PathBuf> {
-        let path = Url::parse(uri).ok()?.to_file_path().ok()?;
+        let path = crate::util::uri_to_path(uri)?;
         let root = self.workspace.workspace_root.read().clone()?;
         if !path.starts_with(&root) {
             return None;

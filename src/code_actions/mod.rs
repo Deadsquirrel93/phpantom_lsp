@@ -143,7 +143,7 @@ pub(crate) use helpers::{
     extract_wants_all_occurrences, indent_of_line_at, indent_unit, make_code_action_data,
     multi_file_edit, occurrence_replacement_edit, push_extract_actions, replace_spans_edits,
     rewrite_action, selected_byte_range, selection_and_identical_occurrences, single_edit,
-    single_file_edit, sort_edits_by_position,
+    single_file_edit, sort_edits_by_position, span_overlaps_request,
 };
 
 /// When the request range starts in whitespace, return a copy of `params`

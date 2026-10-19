@@ -1,4 +1,4 @@
-use tower_lsp::lsp_types::{Location, Position, Url};
+use tower_lsp::lsp_types::{Location, Position};
 
 use crate::Backend;
 
@@ -40,7 +40,7 @@ pub(crate) fn resolve_view_definitions(backend: &Backend, name: &str) -> Vec<Loc
     // any edit invalidates the index.
     if let Some(path) = backend.blade_view_path(name)
         && path.is_file()
-        && let Ok(uri) = Url::from_file_path(&path)
+        && let Some(uri) = crate::util::path_to_url(&path)
     {
         return vec![crate::definition::point_location(uri, Position::new(0, 0))];
     }
@@ -54,7 +54,7 @@ pub(crate) fn resolve_view_definitions(backend: &Backend, name: &str) -> Vec<Loc
             for suffix in &[".blade.php", ".php"] {
                 let candidate = res.path.join(format!("{rel}{suffix}"));
                 if candidate.is_file()
-                    && let Ok(uri) = Url::from_file_path(&candidate)
+                    && let Some(uri) = crate::util::path_to_url(&candidate)
                 {
                     results.push(crate::definition::point_location(uri, Position::new(0, 0)));
                 }
@@ -73,7 +73,7 @@ pub(crate) fn resolve_view_definitions(backend: &Backend, name: &str) -> Vec<Loc
         for suffix in &[".blade.php", ".php"] {
             let candidate = root.path.join(format!("{rel}{suffix}"));
             if candidate.is_file()
-                && let Ok(uri) = Url::from_file_path(&candidate)
+                && let Some(uri) = crate::util::path_to_url(&candidate)
             {
                 results.push(crate::definition::point_location(uri, Position::new(0, 0)));
             }

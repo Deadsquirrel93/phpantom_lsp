@@ -1,6 +1,7 @@
 //! Helpers every code action shares: the `WorkspaceEdit` builders, the
-//! indentation probes, the opaque `data` payload of a deferred action, and
-//! the occurrence search the extract actions use.
+//! indentation probes, the opaque `data` payload of a deferred action, the
+//! test for which symbol-map spans a request covers, and the occurrence
+//! search the extract actions use.
 
 use std::collections::HashMap;
 
@@ -9,6 +10,8 @@ use mago_syntax::cst::class_like::member::ClassLikeMember;
 use mago_syntax::cst::sequence::Sequence;
 use serde::{Deserialize, Serialize};
 use tower_lsp::lsp_types::*;
+
+use crate::symbol_map::SymbolSpan;
 
 // ─── Shared edit builders ─────────────────────────────────────────────────────
 
@@ -335,6 +338,23 @@ pub(crate) fn selected_byte_range(content: &str, range: Range) -> Option<(usize,
     let start = crate::text_position::position_to_byte_offset(content, range.start);
     let end = crate::text_position::position_to_byte_offset(content, range.end);
     (start < end && end <= content.len()).then_some((start, end))
+}
+
+/// Whether a code action requested over the byte range
+/// `[request_start, request_end)` is about `span`: a bare cursor anywhere
+/// from its first character up to its end, or a selection that intersects
+/// it.
+pub(crate) fn span_overlaps_request(
+    span: &SymbolSpan,
+    request_start: usize,
+    request_end: usize,
+) -> bool {
+    let (start, end) = (span.start as usize, span.end as usize);
+    if request_start == request_end {
+        start <= request_start && request_start < end
+    } else {
+        start < request_end && end > request_start
+    }
 }
 
 /// The selection `[start, end)` and every textually identical expression
