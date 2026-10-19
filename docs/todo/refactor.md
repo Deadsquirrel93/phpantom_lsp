@@ -211,4 +211,276 @@ Each item must include:
 
 # Outstanding items
 
-No outstanding items.
+From a broad sweep on 2026-10-19 of everything changed since 0.11.1,
+read against the Sprint 8 tasks. The first group blocks a Sprint 8
+task; the second is accumulated friction found on the way. Bugs the
+sweep found are filed in `bugs.md` (B642 to B645), not here.
+
+## Blocks a Sprint 8 task
+
+### Share the phpstorm-stubs map parser between `build.rs` and the server
+
+E1 has to parse `PhpStormStubsMap.php` at runtime, and the parser
+(`parse_section`, `parse_map_entry`, `php_unescape_single_quoted`) only
+exists inside `build.rs`. Move those three functions into a new
+`src/stub_map.rs` that `build.rs` pulls in with `#[path = "src/stub_map.rs"] mod stub_map;`
+and the crate declares in `src/lib.rs`, so both sides use one copy.
+
+Files: `build.rs`, `src/stub_map.rs` (new), `src/lib.rs`.
+
+### Split `src/config.rs`
+
+2048 lines: about 1000 of config types and loading, plus a 1042-line
+inline test module. X17 adds `extra_roots` to `ClientIndexingOptions`,
+and E3 adds a `[stubs]` section, both to this file. Make it a
+`src/config/` directory: `mod.rs` (`Config`, `merge_toml`,
+`load_config_from`, the create/write helpers, `ConfigError`),
+`diagnostics.rs` (`DiagnosticsConfig`, `IgnoreRule`), `tools.rs`
+(`FormattingConfig`, `PhpStanConfig`, `MagoConfig`, `PhpcsConfig`,
+`PhpmdConfig`), `indexing.rs` (`IndexingConfig`, `ClientIndexingOptions`,
+`IndexingStrategy`), `laravel.rs` (the `Laravel*Config` types) and
+`tests.rs` for the test module. Re-export from `mod.rs` so callers keep
+`crate::config::X`.
+
+Files: `src/config.rs` → `src/config/*.rs`.
+
+### Split `apply_watched_file_changes` and move its tests out of `src/indexing/watch.rs`
+
+`apply_watched_file_changes` (`src/indexing/watch.rs`) is a single
+267-line function, and the file carries 777 lines of inline tests that
+build a `Backend` 23 times. X17 has to add re-registration when the
+extra roots change, which lands in this file. Break the function into
+steps (classify the events, config and composer reloads, the re-index,
+cache invalidation) and move the test module to
+`src/indexing/watch_tests.rs`.
+
+Files: `src/indexing/watch.rs`, `src/indexing/watch_tests.rs` (new).
+
+### Split `find_implementors` into its phases
+
+`Backend::find_implementors` (`src/definition/implementation.rs`) is a
+316-line function with three commented phases (index lookup, collecting
+unparsed sources, parsing sources that name a subtype). X17's "switch
+every walker together" goes through go-to-implementation's walk. Give
+each phase its own method, and move the 738-line inline test module to
+`src/definition/implementation_tests.rs`.
+
+Files: `src/definition/implementation.rs`,
+`src/definition/implementation_tests.rs` (new).
+
+### Route URI and path conversion through `util`
+
+F20 replaces `url::Url` with a `fluent_uri`-based `Uri`. Non-test code
+calls `Url::parse`, `Url::from_file_path`, `Url::from_directory_path` or
+`.to_file_path()` directly at 95 sites, while `util::path_to_uri` and
+`util::uri_to_path` already exist. The biggest offenders are
+`definition/implementation.rs` (15), `virtual_members/laravel/config_keys.rs`
+(9), `definition/resolve.rs` (8), `virtual_members/laravel/string_keys.rs`
+(6) and `indexing/watch.rs` (6). Add the `Url`-returning variants that
+are missing to `src/util.rs` and send every site through them, so F20
+changes one module instead of ninety.
+
+Files: `src/util.rs` plus the call sites (`grep -rnE 'Url::(parse|from_file_path|from_directory_path)|\.to_file_path\(\)' src`).
+
+### Extract the progress-reporting request wrapper in `src/server.rs`
+
+`goto_implementation`, `references` and `subtypes` each repeat the same
+~30 lines: take or create a work-done token, `progress_begin`, attach a
+`ScanProgress` poller to a blocking clone, run the request in
+`run_blocking_cancel_safe`, finish the poller, `progress_end`. F20
+rewrites every handler signature in this file. Add one
+`run_with_progress(name, title, message, token, f)` helper next to
+`run_position_request` and use it in all three.
+
+Files: `src/server.rs`, `src/progress.rs`.
+
+### Make the code-action collector list declarative
+
+`handle_code_action` (`src/code_actions/mod.rs`) calls 30 collectors
+one after another by hand. BL1 needs a per-collector policy for
+templates (drop PHPStan and Mago fixes, resolve deferred actions before
+offering, reject partially translated edits). Turn the sequence into a
+static table of collectors, each with its template policy, so BL1 adds
+a field instead of an `if is_blade_file` beside each call.
+
+Files: `src/code_actions/mod.rs`.
+
+## Accumulated friction
+
+### Convert byte ranges through `byte_range_to_lsp_range`
+
+About 25 places call `offset_to_position` twice to build a `Range` by
+hand, where `byte_range_to_lsp_range` (`src/text_position.rs`) does it in
+one cached step: `code_actions/helpers.rs` (two), `docblock_edit.rs`,
+`convert_to_instance_variable.rs`, `use_line_deletion.rs` (two),
+`phpstan/remove_unreachable.rs`, `phpstan/attributes.rs`,
+`insert_translation_key.rs` (three), `change_visibility.rs` (two),
+`generate_property_hooks.rs`, `generate_constructor.rs`, `mago.rs`,
+`update_docblock/mod.rs`, `diagnostics/class_name_mismatch.rs` and
+`definition/resolve.rs` (two). Delete the private copies too:
+`byte_deletion_edit` and `line_start_offset` in `use_line_deletion.rs`
+(use the helper and `text_position::line_start_byte_offset`). B640's
+`remove_assert.rs` fix is the hand-rolled case that is also wrong.
+
+Files: the ones listed, all under `src/`.
+
+### One `@phpstan-ignore` identifier parser
+
+The identifier list of an ignore comment is parsed in five places:
+`src/phpstan_ignore.rs` and `src/diagnostics/stale.rs` (each with its own
+depth-aware scan) and three naive copies in
+`src/code_actions/phpstan/ignore.rs` (B644). Add one
+`parse_ignore_ids(line)` to `phpstan_ignore.rs` that returns each id with
+its span and the span of the whole list, and use it at all five sites.
+
+Files: `src/phpstan_ignore.rs`, `src/diagnostics/stale.rs`,
+`src/code_actions/phpstan/ignore.rs`.
+
+### Merge "Add `#[Override]`" and "Add `#[ReturnTypeWillChange]`"
+
+`src/code_actions/phpstan/add_override.rs` and
+`add_return_type_will_change.rs` are about 90 lines of the same
+collect/resolve code, differing in the identifier, the attribute name
+and the import policy, and they have already drifted (only one has a
+staleness check). `extract_method_name` is in both, and the same parsing
+is inlined in `remove_override.rs`. Write one "add attribute for
+identifier" collector and resolver parameterised by those three things,
+and one shared `phpstan_member_name(message)`.
+
+Files: `src/code_actions/phpstan/add_override.rs`,
+`add_return_type_will_change.rs`, `remove_override.rs`.
+
+### A `deferred_quickfix` helper for PHPStan actions
+
+Ten deferred PHPStan quick fixes each build the
+`diagnostic_message`/`diagnostic_line`/`diagnostic_code` JSON, call
+`make_code_action_data` and assemble a `QUICKFIX` `CodeAction` with no
+edit, about 20 lines each: `fix_phpdoc_type.rs`, `fix_prefixed_class.rs`,
+`ignore.rs`, `add_override.rs`, `remove_throws.rs`, `add_throws.rs`,
+`new_static.rs` (three) and `add_return_type_will_change.rs`. Add
+`deferred_quickfix(title, kind, uri, diag, extra)` to
+`src/code_actions/helpers.rs` beside `rewrite_action`.
+
+Files: `src/code_actions/helpers.rs`, `src/code_actions/phpstan/*.rs`.
+
+### One docblock renderer for generated code
+
+New docblocks are assembled by hand in `generate_getter_setter.rs` (two),
+`extract_interface.rs` (two), `extract_function/codegen.rs` and
+`docblock_edit.rs` (two). Add `render_docblock(indent, lines, eol)` to
+`src/code_actions/docblock_edit.rs` and route all of them through it.
+Taking `eol` there is most of B634 for these actions.
+
+Files: those under `src/code_actions/`.
+
+### Use the existing text utilities
+
+- `src/code_actions/phpstan/remove_assert.rs` re-implements paren
+  matching in about 45 lines, without skipping comments; use
+  `text_scan::find_matching_forward`.
+- `rsplit('\\').next()` in place of `util::short_name`:
+  `code_actions/extract_function/naming.rs` (four),
+  `code_actions/extract_variable.rs`, `diagnostics/use_statements.rs`,
+  `diagnostics/existence_guards.rs`, `diagnostics/type_errors/arguments.rs`.
+- A hand-stripped leading `\` in place of `util::strip_fqn_prefix`:
+  `code_actions/phpstan/remove_throws.rs`, `add_throws.rs`.
+
+### Replace hand-built LSP params in the integration tests
+
+`tests/integration/` builds `DidOpenTextDocumentParams { … }` by hand
+1445 times across 77 files and `TextDocumentPositionParams { … }` 1459
+times across 102, although `common/mod.rs` has `open_php`,
+`complete_at`, `hover_at`, `goto_definition_at` and friends. The worst
+are `completion_variables.rs` (291), `completion_generics.rs` (111),
+`completion_array_shapes.rs` (89), `definition_members.rs` (85) and
+`definition_variables.rs` (63). Convert file by file; it is mechanical
+but large, so do it in the main session in batches of files, not as one
+rewrite.
+
+Files: `tests/integration/*.rs`.
+
+### Report failures the user can act on
+
+- `composer/mod.rs`'s `read_composer_package` turns a missing, unreadable
+  and malformed `composer.json` into the same `None` (16 callers), so a
+  syntax error silently drops PSR-4 mappings and the PHP version. Return
+  a `Result` and have startup (`backend/startup.rs`) send a warning
+  through `self.log` for a parse error.
+- A `.phpantom.toml` that fails to reload (`indexing/watch.rs`
+  `reload_config`), a phar that fails to read or parse
+  (`indexing/phar.rs`) and a schema or migration reload failure
+  (`backend/laravel/schema.rs`) only reach `tracing::warn!`, which the
+  default filter hides. Send them through `self.log` the way the initial
+  config load does.
+- `composer/installed.rs` and `composer/autoload_files.rs` treat a
+  corrupt file like a missing one; log the parse error.
+
+Files: as listed.
+
+### Shorten lock scopes that span file IO or long walks
+
+- `references/variables.rs` holds the `symbol_maps` read guard for the
+  whole reference walk (which also takes `uri_classes_index`); clone the
+  map's `Arc` and drop the guard.
+- `virtual_members/laravel/config_keys.rs`, `route_names.rs`
+  (`enumerate_all_routes`) and `backend/laravel/mod.rs` read files while
+  holding `laravel_provider_resources` or `vendor_dir_paths`; copy the
+  path list first.
+- `backend/laravel/schema.rs` holds the `schema_index` write guard
+  across migration reads and `clear_resolved_class_cache()`; read first,
+  then swap the index in.
+
+Files: as listed.
+
+### Evict one file from `morph_column_spans_cache`, not all of it
+
+`clear_file_maps` (`src/backend/file_access.rs`) clears the whole
+`morph_column_spans_cache` whenever any file is closed or removed.
+Remove only that URI's entry, unless an entry depends on other files, in
+which case document why the whole cache goes.
+
+Files: `src/backend/file_access.rs`.
+
+### Measure the parse and copy costs the sweep found
+
+None of these has been measured, so check each against the performance
+bar before doing it, and file the ones that clear it in
+`performance.md`:
+
+- One keystroke parses an open file three or more times: `update_ast`
+  (`parser/ast_update.rs`) discards its tree, then fast diagnostics
+  (`diagnostics/collect.rs`) and slow diagnostics
+  (`diagnostics/incremental/mod.rs`) each parse under their own cache,
+  and every request parses once more.
+- The Laravel refreshers `update_ast` calls (macros, morph map, gates,
+  provider resources, commands) each parse the same content again, up to
+  six times for a service provider.
+- `find_or_load_class_typed` (`resolution/classes.rs`) re-applies the
+  auth, storage, macro and pivot patches on every lookup, copying the
+  whole `ClassInfo` and handing out a new `Arc` each time, which also
+  defeats the pointer-identity shortcut in
+  `forward_walk/scope_state/merge.rs`. A memo keyed on the class and an
+  index generation would fix it.
+- The per-thread parse arena (`parser/ast_update.rs`) keeps the peak size
+  of the largest file each worker ever parsed, and `Atom` (`ustr`) never
+  frees, so every partial identifier interned mid-edit stays for the
+  session.
+
+Two are trivial and need no measurement: `diagnostics/collect.rs` should
+use `with_parse_cache_arc` instead of copying the content, and the
+cross-file parse cache (`parser/parse_cache.rs`) should move an entry to
+the back on a hit so it behaves as an LRU.
+
+### Split the largest Laravel modules
+
+Not touched by Sprint 8, but each does several jobs:
+`virtual_members/laravel/database_schema.rs` (1826 lines of code: file
+discovery, SQL dump parsing, and migration interpretation, which should
+be three files), `virtual_members/laravel/route_names.rs` (1958:
+resource registration, macro and include traversal, and route discovery)
+and `virtual_members/laravel/model_extraction.rs` (1425).
+`symbol_map/mod.rs` (1202) holds the `SymbolMap` type and its whole
+`impl`; move those to `symbol_map/map.rs` and keep `mod.rs` a re-export
+layer.
+
+Files: as listed.

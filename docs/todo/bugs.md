@@ -241,3 +241,68 @@ documents whatever follows, here the static `$count`, whose type it now
 claims is `list<Item>`. "Promote constructor parameter" deletes the docblock
 with the property (`docblock_start_above_offset`,
 `promote_constructor_param.rs`); this action should too.
+
+### B642. Completion reads the cursor column as a character count, so it misfires after an emoji
+
+**Impact: Low · Complexity: Low**
+
+```php
+$label = '🎉'; $order->
+```
+
+An LSP column counts UTF-16 code units, and a character outside the Basic
+Multilingual Plane (most emoji) is two of them. Several completion paths
+look the column up with `char_indices().nth(position.character)`, which
+counts characters, so after such a character the cursor lands one character
+too far right. The `_x;` that `patch_incomplete_member_access` splices in to
+let the parser recover goes in the wrong place, and member completion after
+`->` on that line comes back empty. The same lookup is in
+`completion/handler/patching.rs` (both patchers), `completion/target.rs`,
+`completion/array_shape.rs` (two sites) and
+`completion/variable/completion.rs`. Convert through
+`position_to_byte_offset` or `utf16_col_to_byte_offset`
+(`text_position.rs`) instead.
+
+### B643. A pull racing a diagnostics run can answer `Unchanged` and keep stale diagnostics
+
+**Impact: Low · Complexity: Low**
+
+In pull mode, a diagnostics run stores the new set in `last_full`, releases
+that lock, and only then bumps the URI's `resultId`
+(`diagnostics/delivery.rs`). A `textDocument/diagnostic` request landing in
+that gap (`diagnostics/pull.rs`) finds the cache present and the client's
+`previousResultId` still equal to the current one, and answers `Unchanged`
+for a set that just changed. The editor keeps the old diagnostics until
+something else triggers a refresh. Store the set and bump the id as one
+step: under one guard, or bump the id before publishing the set.
+
+### B644. "Ignore with `@phpstan-ignore`" corrupts a comment whose reason contains a comma
+
+**Impact: Low · Complexity: Low**
+
+```php
+// @phpstan-ignore argument.type (legacy, see #12)
+```
+
+Adding a second identifier to this line, or removing one from it, splits the
+list on `,` and stops it at the first ` (`, so a reason with a comma or with
+nested parentheses is cut into pieces and treated as identifiers. The three
+hand-rolled scans are in `code_actions/phpstan/ignore.rs`. The ignore-comment
+parser in `phpstan_ignore.rs` and the stale-ignore check in
+`diagnostics/stale.rs` already track parenthesis depth; the code actions
+should parse through the same function (see the shared-parser item in
+`docs/todo/refactor.md`).
+
+### B645. A class in a non-UTF-8 file is indexed but never loads
+
+**Impact: Low · Complexity: Low**
+
+The workspace scan reads every file as bytes and decodes it with
+`from_utf8_lossy` (`indexing/scan.rs`), so a class in a Latin-1 or
+Windows-1252 file shows up in workspace symbols. Loading it on demand reads
+the file with `read_to_string(...).ok()` (`resolution/lazy_parse.rs`), which
+fails on invalid UTF-8 and is dropped without a log, so every use of the
+class is reported as unknown and go-to-definition finds nothing. The same
+read appears in `backend/file_access.rs`, `resolution/functions.rs` (two
+sites) and `resolution/constants.rs` (two sites). Read bytes and decode
+them the way the scan does, and log a read failure once per file.
