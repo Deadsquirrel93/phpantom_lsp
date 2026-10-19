@@ -61,29 +61,6 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B637. An import used only by an empty call at the end of the file is reported unused
-
-**Impact: Low · Complexity: Medium**
-
-```php
-<?php
-namespace App;
-use App\Services\Mailer;   // reported unused until the `)` is typed
-$mailer = new Mailer(
-```
-
-mago drops a top-level statement that the end of the file cuts off. Nothing
-in it reaches the symbol map, so `collect_unused_import_diagnostics`
-(`diagnostics/unused_imports.rs`) reports every import it names.
-`parser/bracket_recovery.rs` keeps the statement by writing the closers and
-a `;` over the whitespace the file ends in. A file usually ends in a single
-newline, which has room for the `;` alone, and the parser takes a `;` for
-the closers only when the call or array already holds an argument. So a call
-whose `(` is the last thing typed, or a file with no whitespace after the
-statement at all, still loses it. Fixing it needs either recovery upstream
-in `mago-syntax` or a reparse that may append text past the end, with every
-consumer kept from reading a span beyond the caller's content.
-
 ### B638. A monorepo's subprojects miss path repositories and are never rescanned after `composer update`
 
 **Impact: Low-Medium · Complexity: Medium**
@@ -188,3 +165,20 @@ class is reported as unknown and go-to-definition finds nothing. The same
 read appears in `backend/file_access.rs`, `resolution/functions.rs` (two
 sites) and `resolution/constants.rs` (two sites). Read bytes and decode
 them the way the scan does, and log a read failure once per file.
+
+### B646. An import used only by a `::` access at the end of the file is reported unused
+
+**Impact: Low · Complexity: Medium**
+
+```php
+<?php
+namespace App;
+use App\Services\Mailer;   // reported unused until the member is typed
+$mailer = Mailer::
+```
+
+The recovery reparse in `parser/recovery.rs` keeps a statement the end of
+the file cuts off when it is only missing its closers or `;`. A `::` with
+nothing after it is missing an operand instead, and the parser drops the
+whole statement, so `collect_unused_import_diagnostics`
+(`diagnostics/unused_imports.rs`) never sees the class it names.

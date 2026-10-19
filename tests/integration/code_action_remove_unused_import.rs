@@ -265,6 +265,21 @@ Route::get('/', [HomeController::class, 'index']
     );
 }
 
+/// A call cut off right after its `(`, with or without a newline after
+/// it, uses the imports it names.
+#[test]
+fn an_import_used_by_an_empty_call_at_the_end_of_the_file_is_used() {
+    let head =
+        "<?php\nnamespace App;\n\nuse App\\Services\\Mailer;\nuse App\\Services\\Unused;\n\n";
+    for last in ["$mailer = new Mailer(\n", "$mailer = new Mailer("] {
+        assert_eq!(
+            unused_imports(&format!("{head}{last}")),
+            ["Unused import 'App\\Services\\Unused'"],
+            "{last:?}"
+        );
+    }
+}
+
 /// The `Unused import '…'` messages for `content`.
 fn unused_imports(content: &str) -> Vec<String> {
     let backend = create_test_backend();

@@ -16,7 +16,6 @@
 use mago_allocator::{Arena, LocalArena};
 use mago_span::HasSpan;
 use mago_syntax::cst::{Program, Trivia};
-use mago_syntax::parser::parse_file_content;
 
 /// Parse `content` again with each braced `namespace` block its parse,
 /// `program`, dropped whole opened unbraced, or `None` when it dropped
@@ -43,9 +42,8 @@ pub(crate) fn reparse_dropped_namespace_blocks<'a>(
         let source: &str = arena.alloc_str(&text);
         // The text is still malformed, and the parser panics on some
         // malformed text.  A parse that got through stands then.
-        let Ok(reparsed) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            parse_file_content(arena, program.file_id, source.as_bytes())
-        })) else {
+        let Some(reparsed) = super::recovery::parse_keeping_end(arena, program.file_id, source)
+        else {
             return kept;
         };
         kept = Some(reparsed);
@@ -138,14 +136,11 @@ fn is_name_byte(b: u8) -> bool {
 #[cfg(test)]
 mod tests {
     use mago_syntax::cst::Statement;
+    use mago_syntax::parser::parse_file_content;
 
     use super::*;
 
-    fn parse_program<'a>(arena: &'a LocalArena, content: &'a str) -> &'a Program<'a> {
-        let file_id = mago_database::file::FileId::new(b"input.php");
-        let program = parse_file_content(arena, file_id, content.as_bytes());
-        reparse_dropped_namespace_blocks(arena, program, content).unwrap_or(program)
-    }
+    use crate::parser::recovery::parse_program;
 
     /// The name of each top-level `namespace` block the parse keeps, with
     /// the text of the statements in it.
