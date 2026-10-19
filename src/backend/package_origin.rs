@@ -89,7 +89,7 @@ impl Backend {
         if crate::stubs::is_embedded_stub_uri(uri) {
             return (ClassCompletionOrigin::CoreStub, None);
         }
-        if let Ok(url) = tower_lsp::lsp_types::Url::parse(uri)
+        if let Some(url) = crate::util::parse_url(uri)
             && let Some(path) = crate::util::url_to_path(&url)
         {
             return self.package_info_for_path(&path);

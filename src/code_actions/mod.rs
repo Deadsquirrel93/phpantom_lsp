@@ -137,13 +137,14 @@ use crate::Backend;
 
 pub(crate) use docblock_edit::{
     DocblockAbove, FunctionDocblock, find_docblock_above_line, function_docblock_at_line,
+    render_docblock,
 };
 pub(crate) use helpers::{
-    CodeActionData, create_file_edit, detect_indent_from_members, document_changes_edit,
-    extract_wants_all_occurrences, indent_of_line_at, indent_unit, make_code_action_data,
-    multi_file_edit, occurrence_replacement_edit, push_extract_actions, replace_spans_edits,
-    rewrite_action, selected_byte_range, selection_and_identical_occurrences, single_edit,
-    single_file_edit, sort_edits_by_position, span_overlaps_request,
+    CodeActionData, create_file_edit, deferred_quickfix, detect_indent_from_members,
+    document_changes_edit, extract_wants_all_occurrences, indent_of_line_at, indent_unit,
+    make_code_action_data, multi_file_edit, occurrence_replacement_edit, push_extract_actions,
+    replace_spans_edits, rewrite_action, selected_byte_range, selection_and_identical_occurrences,
+    single_edit, single_file_edit, sort_edits_by_position, span_overlaps_request,
 };
 
 /// When the request range starts in whitespace, return a copy of `params`
@@ -177,6 +178,77 @@ fn skip_leading_whitespace(content: &str, params: &CodeActionParams) -> Option<C
     Some(adjusted)
 }
 
+/// A code-action collector: appends the actions it offers for the
+/// request to the list.
+type CollectFn = fn(&Backend, &str, &str, &CodeActionParams, &mut Vec<CodeActionOrCommand>);
+
+/// Whether a collector's actions are offered for a Blade template, whose
+/// edits are planned against the PHP it lowers to.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TemplatePolicy {
+    /// Offer the actions, translated back into the template.
+    Offer,
+    /// Never offer the actions in a template: they are planned against the
+    /// raw file (the external tools' fixes), are about class files (fix
+    /// namespace, fix class name), or place code in the wrapper the
+    /// preprocessor generates (extract function).
+    Skip,
+}
+
+struct Collector {
+    collect: CollectFn,
+    template: TemplatePolicy,
+}
+
+const fn offer(collect: CollectFn) -> Collector {
+    Collector {
+        collect,
+        template: TemplatePolicy::Offer,
+    }
+}
+
+const fn skip_in_template(collect: CollectFn) -> Collector {
+    Collector {
+        collect,
+        template: TemplatePolicy::Skip,
+    }
+}
+
+/// Every code-action collector, in the order their actions are listed.
+static COLLECTORS: &[Collector] = &[
+    offer(Backend::collect_import_class_actions),
+    offer(Backend::collect_replace_fqcn_actions),
+    offer(Backend::collect_import_all_classes_action),
+    offer(Backend::collect_remove_unused_import_actions),
+    offer(Backend::collect_sort_use_statements_action),
+    offer(Backend::collect_implement_methods_actions),
+    offer(Backend::collect_replace_deprecated_actions),
+    skip_in_template(Backend::collect_phpstan_actions),
+    skip_in_template(Backend::collect_mago_fix_actions),
+    offer(Backend::collect_change_visibility_actions),
+    offer(Backend::collect_update_docblock_actions),
+    offer(Backend::collect_promote_constructor_param_actions),
+    offer(Backend::collect_generate_constructor_actions),
+    offer(Backend::collect_generate_getter_setter_actions),
+    offer(Backend::collect_generate_property_hook_actions),
+    offer(Backend::collect_extract_constant_actions),
+    offer(Backend::collect_extract_variable_actions),
+    skip_in_template(Backend::collect_extract_function_actions),
+    offer(Backend::collect_inline_variable_actions),
+    offer(Backend::collect_convert_to_instance_variable_actions),
+    offer(Backend::collect_simplify_null_actions),
+    offer(Backend::collect_convert_to_arrow_function_actions),
+    offer(Backend::collect_convert_to_closure_actions),
+    offer(Backend::collect_convert_switch_to_match_actions),
+    offer(Backend::collect_convert_to_interpolation_actions),
+    skip_in_template(Backend::collect_fix_namespace_actions),
+    skip_in_template(Backend::collect_fix_class_name_actions),
+    offer(Backend::collect_fix_class_case_actions),
+    offer(Backend::collect_extract_interface_actions),
+    offer(Backend::collect_create_missing_view_actions),
+    offer(Backend::collect_insert_translation_key_actions),
+];
+
 impl Backend {
     /// Handle a `textDocument/codeAction` request.
     ///
@@ -201,94 +273,13 @@ impl Backend {
         // they would each re-parse the same file from scratch.
         let _parse_guard = crate::parser::with_parse_cache(content);
 
-        // ── Import class ────────────────────────────────────────────────
-        self.collect_import_class_actions(uri, content, params, &mut actions);
-
-        // ── Import qualified symbol and shorten usages ─────────────────
-        self.collect_replace_fqcn_actions(uri, content, params, &mut actions);
-
-        // ── Import all missing classes (bulk) ───────────────────────────
-        self.collect_import_all_classes_action(uri, content, params, &mut actions);
-
-        // ── Remove unused imports ───────────────────────────────────────
-        self.collect_remove_unused_import_actions(uri, content, params, &mut actions);
-
-        // ── Sort use statements ─────────────────────────────────────────
-        self.collect_sort_use_statements_action(uri, content, params, &mut actions);
-
-        // ── Implement missing methods ───────────────────────────────────
-        self.collect_implement_methods_actions(uri, content, params, &mut actions);
-
-        // ── Replace deprecated call ─────────────────────────────────────
-        self.collect_replace_deprecated_actions(uri, content, params, &mut actions);
-
-        // ── PHPStan-specific quickfixes (deferred) ──────────────────────
-        self.collect_phpstan_actions(uri, content, params, &mut actions);
-
-        // ── Mago quick-fix code actions ─────────────────────────────────
-        self.collect_mago_fix_actions(uri, content, params, &mut actions);
-
-        // ── Change visibility ───────────────────────────────────────────
-        self.collect_change_visibility_actions(uri, content, params, &mut actions);
-
-        // ── Update docblock to match signature ──────────────────────────
-        self.collect_update_docblock_actions(uri, content, params, &mut actions);
-
-        // ── Promote constructor parameter ───────────────────────────────────
-        self.collect_promote_constructor_param_actions(uri, content, params, &mut actions);
-
-        // ── Generate constructor ────────────────────────────────────────────
-        self.collect_generate_constructor_actions(uri, content, params, &mut actions);
-
-        // ── Generate getter/setter ──────────────────────────────────────────
-        self.collect_generate_getter_setter_actions(uri, content, params, &mut actions);
-
-        // ── Generate property hooks (PHP 8.4+) ─────────────────────────────
-        self.collect_generate_property_hook_actions(uri, content, params, &mut actions);
-
-        // ── Extract constant (deferred) ─────────────────────────────────
-        self.collect_extract_constant_actions(uri, content, params, &mut actions);
-
-        // ── Extract variable (deferred) ─────────────────────────────────
-        self.collect_extract_variable_actions(uri, content, params, &mut actions);
-
-        // ── Extract function / method (deferred) ────────────────────────
-        self.collect_extract_function_actions(uri, content, params, &mut actions);
-
-        // ── Inline variable (deferred) ──────────────────────────────
-        self.collect_inline_variable_actions(uri, content, params, &mut actions);
-
-        // ── Convert to instance variable (deferred) ─────────────────
-        self.collect_convert_to_instance_variable_actions(uri, content, params, &mut actions);
-
-        // ── Simplify with null coalescing / null-safe operator ──────────
-        self.collect_simplify_null_actions(uri, content, params, &mut actions);
-
-        // ── Convert to arrow function / closure ─────────────────────────
-        self.collect_convert_to_arrow_function_actions(uri, content, params, &mut actions);
-        self.collect_convert_to_closure_actions(uri, content, params, &mut actions);
-
-        // ── Convert switch to match expression ──────────────────────────
-        self.collect_convert_switch_to_match_actions(uri, content, params, &mut actions);
-
-        // ── Convert concatenation to string interpolation ───────────────
-        self.collect_convert_to_interpolation_actions(uri, content, params, &mut actions);
-
-        // ── Fix namespace (PSR-4 mismatch) ──────────────────────────────
-        self.collect_fix_namespace_actions(uri, content, params, &mut actions);
-
-        // ── Fix class name (filename mismatch) ──────────────────────────
-        self.collect_fix_class_name_actions(uri, content, params, &mut actions);
-
-        // ── Fix class-reference case (PSR-4 autoload safety) ────────────
-        self.collect_fix_class_case_actions(uri, content, params, &mut actions);
-
-        // ── Extract interface ────────────────────────────────────────────
-        self.collect_extract_interface_actions(uri, content, params, &mut actions);
-
-        // ── Create missing view ─────────────────────────────────────────
-        self.collect_create_missing_view_actions(uri, content, params, &mut actions);
-        self.collect_insert_translation_key_actions(uri, content, params, &mut actions);
+        let is_template = self.is_blade_file(uri);
+        for collector in COLLECTORS {
+            if is_template && collector.template == TemplatePolicy::Skip {
+                continue;
+            }
+            (collector.collect)(self, uri, content, params, &mut actions);
+        }
 
         // Every collector plans its edits against the PHP a template lowers
         // to; the editor applies them to the template itself.
@@ -438,13 +429,12 @@ impl Backend {
                 edit
             }
             "phpstan.removeThrows" => self.resolve_remove_throws(data, content),
-            "phpstan.addOverride" => self.resolve_add_override(data, content),
+            "phpstan.addOverride" | "phpstan.addReturnTypeWillChange" => {
+                self.resolve_add_attribute(data, content)
+            }
             "phpstan.addIgnore" => self.resolve_add_ignore(data, content),
             "phpstan.removeIgnore" => self.resolve_remove_ignore(data, content),
             "phpstan.removeOverride" => self.resolve_remove_override(data, content),
-            "phpstan.addReturnTypeWillChange" => {
-                self.resolve_add_return_type_will_change(data, content)
-            }
             "phpstan.fixPhpDocType.update" | "phpstan.fixPhpDocType.remove" => {
                 self.resolve_fix_phpdoc_type(data, content)
             }

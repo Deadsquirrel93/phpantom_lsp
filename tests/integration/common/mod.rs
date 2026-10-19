@@ -52,7 +52,7 @@ pub async fn open_php_at(
 
 /// Send a `textDocument/completion` request for a document that is already
 /// open.  The one place these helpers build `CompletionParams`.
-async fn completion_response(
+pub async fn completion_response(
     backend: &Backend,
     uri: &Url,
     line: u32,
@@ -1309,15 +1309,14 @@ pub fn hover_last(backend: &Backend, content: &str, needle: &str) -> String {
 }
 
 /// Send a `textDocument/hover` request for a document that is already
-/// open and return its text, whichever content kind it came as.  `None`
-/// when nothing hovers.
-pub async fn hover_text_at(
+/// open.  The one place these helpers build `HoverParams`.
+pub async fn hover_response(
     backend: &Backend,
     uri: &Url,
     line: u32,
     character: u32,
-) -> Option<String> {
-    let hover = backend
+) -> Option<Hover> {
+    backend
         .hover(HoverParams {
             text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: uri.clone() },
@@ -1326,7 +1325,19 @@ pub async fn hover_text_at(
             work_done_progress_params: WorkDoneProgressParams::default(),
         })
         .await
-        .unwrap()?;
+        .unwrap()
+}
+
+/// Send a `textDocument/hover` request for a document that is already
+/// open and return its text, whichever content kind it came as.  `None`
+/// when nothing hovers.
+pub async fn hover_text_at(
+    backend: &Backend,
+    uri: &Url,
+    line: u32,
+    character: u32,
+) -> Option<String> {
+    let hover = hover_response(backend, uri, line, character).await?;
     Some(match hover.contents {
         HoverContents::Markup(markup) => markup.value,
         HoverContents::Scalar(MarkedString::String(s)) => s,
@@ -1404,6 +1415,19 @@ pub async fn find_references(
     position: Position,
     include_declaration: bool,
 ) -> Vec<Location> {
+    references_response(backend, uri, position, include_declaration)
+        .await
+        .unwrap_or_default()
+}
+
+/// [`find_references`] that keeps "the server answered with nothing"
+/// (`None`) apart from an empty list.
+pub async fn references_response(
+    backend: &Backend,
+    uri: &Url,
+    position: Position,
+    include_declaration: bool,
+) -> Option<Vec<Location>> {
     backend
         .references(ReferenceParams {
             text_document_position: TextDocumentPositionParams {
@@ -1418,7 +1442,6 @@ pub async fn find_references(
         })
         .await
         .unwrap()
-        .unwrap_or_default()
 }
 
 /// The messages of the syntax, argument-count, and slow diagnostics

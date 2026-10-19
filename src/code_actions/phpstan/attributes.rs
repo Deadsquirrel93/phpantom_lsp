@@ -9,11 +9,11 @@ use mago_span::HasSpan;
 use mago_syntax::cst::attribute::AttributeList;
 use mago_syntax::cst::sequence::Sequence;
 use mago_syntax::cst::*;
-use tower_lsp::lsp_types::{Range, TextEdit};
+use tower_lsp::lsp_types::TextEdit;
 
 use crate::atom::{bytes_to_str, last_segment};
 use crate::code_actions::indent_of_line_at;
-use crate::text_position::{line_start_byte_offset, offset_to_position};
+use crate::text_position::{byte_range_to_lsp_range, line_start_byte_offset};
 
 /// One `#[…]` list on a member.
 struct WrittenList {
@@ -80,10 +80,7 @@ impl AttributedMember {
             (list.attributes[index - 1].2, list.attributes[index].2)
         };
         Some(TextEdit {
-            range: Range {
-                start: offset_to_position(content, start),
-                end: offset_to_position(content, end),
-            },
+            range: byte_range_to_lsp_range(content, start, end),
             new_text: String::new(),
         })
     }

@@ -35,7 +35,7 @@ use super::cursor_context::{CursorContext, MemberContext, find_cursor_context};
 use crate::Backend;
 use crate::atom::bytes_to_str;
 use crate::code_actions::{CodeActionData, make_code_action_data};
-use crate::text_position::offset_to_position;
+use crate::text_position::{byte_range_to_lsp_range, offset_to_position};
 use crate::types::{ClassInfo, Visibility};
 
 /// The action kind used for the deferred resolve dispatch.
@@ -218,16 +218,10 @@ impl Backend {
             return None;
         }
 
-        let start_pos = offset_to_position(content, vis_start);
-        let end_pos = offset_to_position(content, vis_end);
-
         let doc_uri: Url = uri.parse().ok()?;
         Some(crate::code_actions::single_edit(
             doc_uri,
-            Range {
-                start: start_pos,
-                end: end_pos,
-            },
+            byte_range_to_lsp_range(content, vis_start, vis_end),
             target_vis.to_string(),
         ))
     }

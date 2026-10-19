@@ -223,7 +223,17 @@ impl Backend {
             .as_ref()
             .map(|tok| self.spawn_progress_poller(tok.clone(), Arc::clone(&progress)));
 
-        let composer_package = crate::composer::read_composer_package(&root);
+        let composer_package = match crate::composer::try_read_composer_package(&root) {
+            Ok(package) => package,
+            Err(e) => {
+                self.log(
+                    tower_lsp::lsp_types::MessageType::WARNING,
+                    format!("{e}; PSR-4 mappings from it are ignored"),
+                )
+                .await;
+                None
+            }
+        };
         self.discover_workspace_symbols(
             &root,
             self.php_version(),

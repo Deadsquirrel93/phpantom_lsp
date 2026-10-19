@@ -28,7 +28,7 @@ impl Backend {
             let Some(uri) = self.resolve_class_uri(fqn) else {
                 continue;
             };
-            let Ok(url) = tower_lsp::lsp_types::Url::parse(&uri) else {
+            let Some(url) = crate::util::parse_url(&uri) else {
                 continue;
             };
             let Some(path) = crate::util::url_to_path(&url) else {

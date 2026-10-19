@@ -146,7 +146,7 @@ impl Backend {
             let ws = self.workspace.workspace_root.read();
             let mappings = self.workspace.psr4_mappings.read();
             if let Some(ref root) = *ws {
-                if let Ok(url) = Url::parse(uri) {
+                if let Some(url) = crate::util::parse_url(uri) {
                     if let Some(file_path) = crate::util::url_to_path(&url) {
                         infer_namespaces_from_path(&file_path, root, &mappings)
                     } else {

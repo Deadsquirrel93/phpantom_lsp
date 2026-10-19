@@ -39,12 +39,21 @@ impl Backend {
         // the map is dropped when this function returns.
         let data = match classmap_scanner::read_for_scan(phar_path) {
             Ok(d) => d,
-            Err(_) => return,
+            Err(e) => {
+                self.log_detached(
+                    tower_lsp::lsp_types::MessageType::WARNING,
+                    format!("Failed to read phar archive {}: {e}", phar_path.display()),
+                );
+                return;
+            }
         };
         let archive = match phar::PharArchive::parse(phar_path, &data) {
             Some(a) => a,
             None => {
-                tracing::warn!("failed to parse phar archive: {}", phar_path.display());
+                self.log_detached(
+                    tower_lsp::lsp_types::MessageType::WARNING,
+                    format!("Failed to parse phar archive {}", phar_path.display()),
+                );
                 return;
             }
         };

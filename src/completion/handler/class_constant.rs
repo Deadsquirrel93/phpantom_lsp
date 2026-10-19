@@ -338,7 +338,7 @@ impl Backend {
     ///
     /// For example, `file:///home/user/Test.php` returns `Some("Test")`.
     fn filename_class_name(uri: &str) -> Option<String> {
-        let url = Url::parse(uri).ok()?;
+        let url = crate::util::parse_url(uri)?;
         let file_path = crate::util::url_to_path(&url)?;
         let stem = file_path.file_stem()?;
         let name = stem.to_string_lossy();

@@ -344,7 +344,17 @@ impl Backend {
             // Parse composer.json once up front.  The result is used for
             // PHP version detection and passed into init_single_project
             // so the file is never re-read during startup.
-            let composer_package = composer::read_composer_package(&root);
+            let composer_package = match composer::try_read_composer_package(&root) {
+                Ok(package) => package,
+                Err(e) => {
+                    self.log(
+                        MessageType::WARNING,
+                        format!("{e}; PSR-4 mappings and the PHP version from it are ignored"),
+                    )
+                    .await;
+                    None
+                }
+            };
 
             // Detect the target PHP version.  The config file override
             // takes precedence; otherwise fall back to composer.json.

@@ -27,11 +27,9 @@
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::code_actions::CodeActionData;
-use crate::code_actions::FunctionDocblock;
-use crate::code_actions::make_code_action_data;
 use crate::code_actions::phpstan::fix_return_type::{Anchor, target_function};
 use crate::code_actions::phpstan::phpstan_identifier;
+use crate::code_actions::{CodeActionData, FunctionDocblock, deferred_quickfix};
 use crate::php_type::{PhpType, TypeKind};
 
 // ── Constants ───────────────────────────────────────────────────────────────
@@ -140,23 +138,19 @@ impl Backend {
             let title = "Add @return type".to_string();
 
             let extra = serde_json::json!({
-                "diagnostic_line": diag_line,
                 "iterable_type": &iterable_type,
                 "message": &diag.message,
             });
 
-            let data = make_code_action_data(ACTION_KIND, uri, &params.range, extra);
-
-            out.push(CodeActionOrCommand::CodeAction(CodeAction {
+            out.push(deferred_quickfix(
                 title,
-                kind: Some(CodeActionKind::QUICKFIX),
-                diagnostics: Some(vec![diag.clone()]),
-                edit: None,
-                command: None,
-                is_preferred: Some(true),
-                disabled: None,
-                data: Some(data),
-            }));
+                ACTION_KIND,
+                uri,
+                &params.range,
+                vec![diag.clone()],
+                true,
+                extra,
+            ));
         }
     }
 

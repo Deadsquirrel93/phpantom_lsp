@@ -21,7 +21,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use parking_lot::RwLock;
-use tower_lsp::lsp_types::{Location, Url};
+use tower_lsp::lsp_types::Location;
 
 use crate::Backend;
 
@@ -539,7 +539,7 @@ impl Backend {
         if spans.is_empty() {
             return;
         }
-        let Ok(url) = Url::parse(&entry.uri) else {
+        let Some(url) = crate::util::parse_url(&entry.uri) else {
             return;
         };
         let Some(content) = self.get_file_content(&entry.uri) else {

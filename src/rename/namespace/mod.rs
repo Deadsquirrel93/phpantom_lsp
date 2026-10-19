@@ -239,7 +239,7 @@ impl Backend {
                         if !rest.is_empty() && !rest.starts_with('/') {
                             return None;
                         }
-                        Url::parse(&format!("{}{}", new_u.as_str(), rest)).ok()
+                        crate::util::parse_url(&format!("{}{}", new_u.as_str(), rest))
                     })
                     .unwrap_or(uri);
                 (target_uri, edits)

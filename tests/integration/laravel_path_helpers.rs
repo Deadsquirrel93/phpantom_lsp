@@ -7,7 +7,8 @@
 //! the next segment of the path can be typed against a real listing.
 
 use crate::common::{
-    LARAVEL_SRC_COMPOSER, create_psr4_workspace, goto_definition_at, position_after, position_of,
+    LARAVEL_SRC_COMPOSER, completion_response, create_psr4_workspace, goto_definition_at, open_php,
+    position_after, position_of,
 };
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
@@ -35,16 +36,7 @@ async fn workspace(
     backend.initialized(InitializedParams {}).await;
 
     let uri = Url::from_file_path(dir.path().join("src/Paths.php")).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: consumer.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, consumer).await;
     (backend, dir, uri)
 }
 
@@ -235,18 +227,7 @@ async fn completion_at(
 ) -> Vec<CompletionItem> {
     let position = position_after(consumer, marker);
 
-    let response = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri: uri.clone() },
-                position,
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let response = completion_response(backend, uri, position.line, position.character, None).await;
 
     match response {
         Some(CompletionResponse::Array(items)) => items,

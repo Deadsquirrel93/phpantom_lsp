@@ -453,7 +453,7 @@ impl Backend {
             self.find_class_file_content(declaring_fqn, uri, content)?;
         let member_position =
             Self::find_member_position(&class_content, search_name, member_kind, declaring_class)?;
-        let parsed_uri = Url::parse(&class_uri).ok()?;
+        let parsed_uri = crate::util::parse_url(&class_uri)?;
         Some(point_location(parsed_uri, member_position))
     }
 
@@ -471,7 +471,7 @@ impl Backend {
             search_name,
             Some(cursor_offset as usize),
         )?;
-        let parsed_uri = Url::parse(uri).ok()?;
+        let parsed_uri = crate::util::parse_url(uri)?;
         Some(point_location(parsed_uri, position))
     }
 

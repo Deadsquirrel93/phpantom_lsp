@@ -404,10 +404,10 @@ impl Backend {
     }
 
     fn is_macro_helper_uri_allowed(&self, provider_uri: &str, helper_uri: &str) -> bool {
-        let Ok(provider_url) = tower_lsp::lsp_types::Url::parse(provider_uri) else {
+        let Some(provider_url) = crate::util::parse_url(provider_uri) else {
             return false;
         };
-        let Ok(helper_url) = tower_lsp::lsp_types::Url::parse(helper_uri) else {
+        let Some(helper_url) = crate::util::parse_url(helper_uri) else {
             return false;
         };
         let Some(provider_path) = crate::util::url_to_path(&provider_url) else {

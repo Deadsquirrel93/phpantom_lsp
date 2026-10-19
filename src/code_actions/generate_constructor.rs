@@ -27,7 +27,7 @@ use crate::atom::bytes_to_str;
 use crate::docblock::{extract_var_type, get_docblock_text_for_node};
 use crate::parser::extract_hint_type;
 use crate::php_type::{PhpType, TypeKind};
-use crate::text_position::offset_to_position;
+use crate::text_position::{byte_range_to_lsp_range, offset_to_position};
 
 // ── Data types ──────────────────────────────────────────────────────────────
 
@@ -155,10 +155,12 @@ impl Backend {
             let mut edits: Vec<TextEdit> = Vec::new();
 
             for prop in props.iter().rev() {
-                let start = offset_to_position(content, prop.declaration_span.0);
-                let end = offset_to_position(content, prop.declaration_span.1);
                 edits.push(TextEdit {
-                    range: Range { start, end },
+                    range: byte_range_to_lsp_range(
+                        content,
+                        prop.declaration_span.0,
+                        prop.declaration_span.1,
+                    ),
                     new_text: String::new(),
                 });
             }

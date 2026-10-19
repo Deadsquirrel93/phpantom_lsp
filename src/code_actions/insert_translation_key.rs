@@ -6,7 +6,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::symbol_map::{LaravelStringKind, SymbolKind};
-use crate::text_position::{line_ending, offset_to_position, ranges_overlap};
+use crate::text_position::{byte_range_to_lsp_range, line_ending, ranges_overlap};
 
 impl Backend {
     /// Offer one insertion per existing locale file for an unknown translation.
@@ -42,10 +42,7 @@ impl Backend {
             else {
                 continue;
             };
-            let range = Range::new(
-                offset_to_position(content, span.start as usize),
-                offset_to_position(content, span.end as usize),
-            );
+            let range = byte_range_to_lsp_range(content, span.start as usize, span.end as usize);
             let Some(diagnostic) = diagnostics
                 .iter()
                 .find(|diagnostic| ranges_overlap(&range, &diagnostic.range))
@@ -159,10 +156,7 @@ fn insert_into_array(
         && !elements.has_trailing_token()
     {
         edits.push(TextEdit {
-            range: Range::new(
-                offset_to_position(content, last_end),
-                offset_to_position(content, last_end),
-            ),
+            range: byte_range_to_lsp_range(content, last_end, last_end),
             new_text: ",".to_string(),
         });
     }
@@ -191,10 +185,7 @@ fn insert_into_array(
         )
     };
     edits.push(TextEdit {
-        range: Range::new(
-            offset_to_position(content, offset),
-            offset_to_position(content, offset),
-        ),
+        range: byte_range_to_lsp_range(content, offset, offset),
         new_text: text,
     });
     Some(edits)

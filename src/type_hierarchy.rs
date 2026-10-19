@@ -197,7 +197,7 @@ fn build_type_hierarchy_item(
     uri: &str,
     content: &str,
 ) -> TypeHierarchyItem {
-    let parsed_uri = Url::parse(uri).unwrap_or_else(|_| Url::parse("file:///unknown").unwrap());
+    let parsed_uri = crate::util::parse_url(uri).unwrap_or_else(crate::util::unknown_url);
 
     let kind = class_like_kind_to_symbol_kind(class_info.kind);
 

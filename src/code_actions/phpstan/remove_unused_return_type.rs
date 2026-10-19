@@ -23,7 +23,7 @@ use tower_lsp::lsp_types::*;
 use crate::Backend;
 use crate::code_actions::phpstan::fix_return_type::{Anchor, target_function};
 use crate::code_actions::phpstan::phpstan_identifier;
-use crate::code_actions::{CodeActionData, make_code_action_data};
+use crate::code_actions::{CodeActionData, deferred_quickfix};
 use crate::php_type::{PhpType, TypeKind};
 
 // ── PHPStan identifier ──────────────────────────────────────────────────────
@@ -190,26 +190,19 @@ impl Backend {
             }
 
             let extra = serde_json::json!({
-                "diagnostic_line": diag_line,
                 "unused_type": unused_type,
                 "message": &diag.message,
             });
 
-            out.push(CodeActionOrCommand::CodeAction(CodeAction {
-                title: format!("Remove '{}' from return type", unused_type),
-                kind: Some(CodeActionKind::QUICKFIX),
-                diagnostics: Some(vec![diag.clone()]),
-                edit: None,
-                command: None,
-                is_preferred: Some(true),
-                disabled: None,
-                data: Some(make_code_action_data(
-                    ACTION_KIND,
-                    uri,
-                    &params.range,
-                    extra,
-                )),
-            }));
+            out.push(deferred_quickfix(
+                format!("Remove '{}' from return type", unused_type),
+                ACTION_KIND,
+                uri,
+                &params.range,
+                vec![diag.clone()],
+                true,
+                extra,
+            ));
         }
     }
 

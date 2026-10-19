@@ -42,7 +42,7 @@ use crate::parser::with_parsed_program;
 use crate::scope_collector::{
     AccessRole, ClosureUseList, Frame, FrameKind, ScopeMap, collect_function_scope,
 };
-use crate::text_position::{offset_to_position, position_to_byte_offset};
+use crate::text_position::{byte_range_to_lsp_range, offset_to_position, position_to_byte_offset};
 use crate::types::{ClassInfo, Visibility};
 use crate::virtual_members::resolve_class_fully_cached;
 
@@ -460,10 +460,7 @@ impl Backend {
                     }
                 }
                 Rewrite::Delete(start, end) => edits.push(TextEdit {
-                    range: Range {
-                        start: offset_to_position(content, start as usize),
-                        end: offset_to_position(content, end as usize),
-                    },
+                    range: byte_range_to_lsp_range(content, start as usize, end as usize),
                     new_text: String::new(),
                 }),
             }

@@ -29,7 +29,7 @@ use super::cursor_context::{
 use super::detect_indent_from_members;
 use crate::Backend;
 use crate::atom::bytes_to_str;
-use crate::text_position::offset_to_position;
+use crate::text_position::byte_range_to_lsp_range;
 
 // ── Data types ──────────────────────────────────────────────────────────────
 
@@ -320,12 +320,7 @@ impl Backend {
 
         let original_text = &content[prop_start..prop_end];
 
-        let start_pos = offset_to_position(content, prop_start);
-        let end_pos = offset_to_position(content, prop_end);
-        let replace_range = Range {
-            start: start_pos,
-            end: end_pos,
-        };
+        let replace_range = byte_range_to_lsp_range(content, prop_start, prop_end);
 
         // Hooked properties carry their existing hooks forward.
         let existing_hooks_text = if is_hooked { Some(original_text) } else { None };

@@ -121,26 +121,6 @@ the server as a watched-file event, which `apply_watched_file_changes`
 closures keep the old binding, or none, until a restart. Invalidate it there
 as well.
 
-### B640. Two edits count columns in bytes, so they land too far right after non-ASCII text
-
-**Impact: Low · Complexity: Low**
-
-```php
-/** @var object{größe: int, name: string} $item */
-echo $item->name;
-```
-
-An LSP column counts UTF-16 code units, but two places still turn a byte
-offset into a column by hand and report the byte count. Any non-ASCII
-character earlier on the line pushes the result right by its extra bytes:
-go-to-definition on `name` above lands two columns into the key instead of
-on its first letter. The hand-rolled conversions are object-shape key
-go-to-definition (`definition/member/shape_keys.rs`, which returns the
-key's byte index within its line as the `character`) and the ranges
-"Remove assert" deletes (`code_actions/phpstan/remove_assert.rs`). Convert
-an absolute byte offset through `offset_to_position` (`text_position.rs`)
-instead.
-
 ### B641. "Generate promoted constructor" orphans each property's `@var` docblock
 
 **Impact: Low · Complexity: Low**
@@ -195,23 +175,6 @@ that gap (`diagnostics/pull.rs`) finds the cache present and the client's
 for a set that just changed. The editor keeps the old diagnostics until
 something else triggers a refresh. Store the set and bump the id as one
 step: under one guard, or bump the id before publishing the set.
-
-### B644. "Ignore with `@phpstan-ignore`" corrupts a comment whose reason contains a comma
-
-**Impact: Low · Complexity: Low**
-
-```php
-// @phpstan-ignore argument.type (legacy, see #12)
-```
-
-Adding a second identifier to this line, or removing one from it, splits the
-list on `,` and stops it at the first ` (`, so a reason with a comma or with
-nested parentheses is cut into pieces and treated as identifiers. The three
-hand-rolled scans are in `code_actions/phpstan/ignore.rs`. The ignore-comment
-parser in `phpstan_ignore.rs` and the stale-ignore check in
-`diagnostics/stale.rs` already track parenthesis depth; the code actions
-should parse through the same function (see the shared-parser item in
-`docs/todo/refactor.md`).
 
 ### B645. A class in a non-UTF-8 file is indexed but never loads
 

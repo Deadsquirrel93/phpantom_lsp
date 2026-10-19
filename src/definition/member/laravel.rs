@@ -55,7 +55,7 @@ impl Backend {
         let class_bounds = (class.start_offset as usize, class.end_offset as usize);
         let entry_position =
             Self::find_eloquent_array_entry(&class_content, entry_name, Some(class_bounds))?;
-        let parsed_uri = Url::parse(&class_uri).ok()?;
+        let parsed_uri = crate::util::parse_url(&class_uri)?;
         Some(point_location(parsed_uri, entry_position))
     }
 
@@ -103,7 +103,7 @@ impl Backend {
         };
         let content = self.get_file_content(&uri)?;
         let position = crate::text_position::offset_to_position(&content, offset as usize + 1);
-        let parsed_uri = Url::parse(&uri).ok()?;
+        let parsed_uri = crate::util::parse_url(&uri)?;
         Some(point_location(parsed_uri, position))
     }
 

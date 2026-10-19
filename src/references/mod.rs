@@ -485,7 +485,9 @@ impl<'a> CandidateFile<'a> {
     /// The file's URI as a location carries it, or `None` when it does not
     /// parse.
     pub(super) fn url(&self) -> Option<Url> {
-        self.url.get_or_init(|| Url::parse(self.uri).ok()).clone()
+        self.url
+            .get_or_init(|| crate::util::parse_url(self.uri))
+            .clone()
     }
 
     /// The location between two byte offsets in [`Self::content`], or

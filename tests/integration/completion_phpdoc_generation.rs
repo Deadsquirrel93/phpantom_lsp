@@ -1,4 +1,4 @@
-use crate::common::{complete_at, create_test_backend};
+use crate::common::{complete_at, create_test_backend, open_php};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -1406,15 +1406,7 @@ async fn format_on_enter(
     line: u32,
     character: u32,
 ) -> Vec<TextEdit> {
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(backend, uri, text).await;
 
     let params = DocumentOnTypeFormattingParams {
         text_document_position: TextDocumentPositionParams {

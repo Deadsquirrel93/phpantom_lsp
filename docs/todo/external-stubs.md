@@ -502,7 +502,7 @@ external sources.
 IDE extensions that bundle PHPantom can pass a stubs directory in the
 LSP `initialize` request. PHPantom reads the path from
 `initializationOptions.stubs.path` (alongside the `indexing` options
-already read from there, `ClientIndexingOptions` in `src/config.rs`)
+already read from there, `ClientIndexingOptions` in `src/config/indexing.rs`)
 and scans it at init. The user never sees or configures this.
 
 This enables a distribution model where the IDE extension:

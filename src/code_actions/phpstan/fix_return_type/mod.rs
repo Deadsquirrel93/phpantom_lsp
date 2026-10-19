@@ -52,7 +52,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::code_actions::phpstan::phpstan_identifier;
-use crate::code_actions::{CodeActionData, make_code_action_data};
+use crate::code_actions::{CodeActionData, deferred_quickfix};
 use crate::php_type::PhpType;
 
 use edits::{
@@ -133,26 +133,19 @@ impl Backend {
                     // An arrow function has no `return` to strip.
                     if build_strip_return_expr_edit(content, &target).is_some() {
                         let extra = serde_json::json!({
-                            "diagnostic_line": diag_line,
                             "identifier": RETURN_VOID_ID,
                             "message": &diag.message,
                         });
 
-                        out.push(CodeActionOrCommand::CodeAction(CodeAction {
-                            title: "Remove return statement".to_string(),
-                            kind: Some(CodeActionKind::QUICKFIX),
-                            diagnostics: Some(vec![diag.clone()]),
-                            edit: None,
-                            command: None,
-                            is_preferred: Some(false),
-                            disabled: None,
-                            data: Some(make_code_action_data(
-                                ACTION_KIND_STRIP_EXPR,
-                                uri,
-                                &params.range,
-                                extra,
-                            )),
-                        }));
+                        out.push(deferred_quickfix(
+                            "Remove return statement".to_string(),
+                            ACTION_KIND_STRIP_EXPR,
+                            uri,
+                            &params.range,
+                            vec![diag.clone()],
+                            false,
+                            extra,
+                        ));
                     }
 
                     // ── Fix 2: Change return type to match actual ───
@@ -172,27 +165,20 @@ impl Backend {
                         {
                             let actual_str = actual_type.to_string();
                             let extra = serde_json::json!({
-                                "diagnostic_line": diag_line,
                                 "identifier": RETURN_VOID_ID,
                                 "message": &diag.message,
                                 "actual_type": actual_str,
                             });
 
-                            out.push(CodeActionOrCommand::CodeAction(CodeAction {
-                                title: format!("Change return type to {}", actual_str),
-                                kind: Some(CodeActionKind::QUICKFIX),
-                                diagnostics: Some(vec![diag.clone()]),
-                                edit: None,
-                                command: None,
-                                is_preferred: Some(true),
-                                disabled: None,
-                                data: Some(make_code_action_data(
-                                    ACTION_KIND_CHANGE_TYPE_TO_ACTUAL,
-                                    uri,
-                                    &params.range,
-                                    extra,
-                                )),
-                            }));
+                            out.push(deferred_quickfix(
+                                format!("Change return type to {}", actual_str),
+                                ACTION_KIND_CHANGE_TYPE_TO_ACTUAL,
+                                uri,
+                                &params.range,
+                                vec![diag.clone()],
+                                true,
+                                extra,
+                            ));
                         }
                     }
                 }
@@ -219,24 +205,19 @@ impl Backend {
                     let title = "Change return type to void".to_string();
 
                     let extra = serde_json::json!({
-                        "diagnostic_line": diag_line,
                         "identifier": RETURN_EMPTY_ID,
                         "message": &diag.message,
                     });
 
-                    let data =
-                        make_code_action_data(ACTION_KIND_CHANGE_TYPE, uri, &params.range, extra);
-
-                    out.push(CodeActionOrCommand::CodeAction(CodeAction {
+                    out.push(deferred_quickfix(
                         title,
-                        kind: Some(CodeActionKind::QUICKFIX),
-                        diagnostics: Some(vec![diag.clone()]),
-                        edit: None,
-                        command: None,
-                        is_preferred: Some(true),
-                        disabled: None,
-                        data: Some(data),
-                    }));
+                        ACTION_KIND_CHANGE_TYPE,
+                        uri,
+                        &params.range,
+                        vec![diag.clone()],
+                        true,
+                        extra,
+                    ));
                 }
                 RETURN_TYPE_ID => {
                     // "Method Foo::bar() should return {expected} but returns {actual}."
@@ -251,26 +232,19 @@ impl Backend {
                     }
 
                     let extra = serde_json::json!({
-                        "diagnostic_line": diag_line,
                         "identifier": RETURN_TYPE_ID,
                         "message": &diag.message,
                     });
 
-                    out.push(CodeActionOrCommand::CodeAction(CodeAction {
-                        title: "Update return type".to_string(),
-                        kind: Some(CodeActionKind::QUICKFIX),
-                        diagnostics: Some(vec![diag.clone()]),
-                        edit: None,
-                        command: None,
-                        is_preferred: Some(false),
-                        disabled: None,
-                        data: Some(make_code_action_data(
-                            ACTION_KIND_UPDATE_RETURN_TYPE,
-                            uri,
-                            &params.range,
-                            extra,
-                        )),
-                    }));
+                    out.push(deferred_quickfix(
+                        "Update return type".to_string(),
+                        ACTION_KIND_UPDATE_RETURN_TYPE,
+                        uri,
+                        &params.range,
+                        vec![diag.clone()],
+                        false,
+                        extra,
+                    ));
                 }
                 MISSING_TYPE_RETURN_ID => {
                     // "Method Foo::bar() has no return type specified."
@@ -288,26 +262,19 @@ impl Backend {
                     }
 
                     let extra = serde_json::json!({
-                        "diagnostic_line": diag_line,
                         "identifier": MISSING_TYPE_RETURN_ID,
                         "message": &diag.message,
                     });
 
-                    out.push(CodeActionOrCommand::CodeAction(CodeAction {
-                        title: "Add return type".to_string(),
-                        kind: Some(CodeActionKind::QUICKFIX),
-                        diagnostics: Some(vec![diag.clone()]),
-                        edit: None,
-                        command: None,
-                        is_preferred: Some(true),
-                        disabled: None,
-                        data: Some(make_code_action_data(
-                            ACTION_KIND_ADD_TYPE,
-                            uri,
-                            &params.range,
-                            extra,
-                        )),
-                    }));
+                    out.push(deferred_quickfix(
+                        "Add return type".to_string(),
+                        ACTION_KIND_ADD_TYPE,
+                        uri,
+                        &params.range,
+                        vec![diag.clone()],
+                        true,
+                        extra,
+                    ));
                 }
                 _ => continue,
             }

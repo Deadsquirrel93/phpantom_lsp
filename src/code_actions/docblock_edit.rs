@@ -14,7 +14,7 @@ use std::borrow::Borrow;
 
 use mago_span::HasSpan;
 use mago_syntax::cst::{Class, Program};
-use tower_lsp::lsp_types::{Range, TextEdit};
+use tower_lsp::lsp_types::TextEdit;
 
 use crate::code_actions::cursor_context::{FunctionKinds, find_enclosing_function};
 use crate::docblock::strip_docblock_line_delimiters;
@@ -22,7 +22,6 @@ use crate::docblock::type_strings::split_type_token;
 use crate::php_type::PhpType;
 use crate::text_position::{
     byte_range_to_lsp_range, line_ending, line_start_byte_offset, lines_with_offsets,
-    offset_to_position,
 };
 
 /// Information about a docblock found above a given line.
@@ -95,10 +94,7 @@ impl DocblockAbove {
 
     fn replace_edit(&self, content: &str, new_text: String) -> TextEdit {
         TextEdit {
-            range: Range {
-                start: offset_to_position(content, self.start),
-                end: offset_to_position(content, self.end),
-            },
+            range: byte_range_to_lsp_range(content, self.start, self.end),
             new_text,
         }
     }
@@ -109,6 +105,23 @@ impl DocblockAbove {
 /// The diagnostic line is the function/method/property signature.  The
 /// docblock (if any) sits directly above it, possibly separated by blank
 /// lines or attribute (`#[…]`) lines.
+/// A new docblock at `indent` holding `lines`, each written as ` * line`
+/// (a bare ` *` for an empty one), every line ending with `eol`.
+pub(crate) fn render_docblock<S: AsRef<str>>(indent: &str, lines: &[S], eol: &str) -> String {
+    let mut doc = format!("{indent}/**{eol}");
+    for line in lines {
+        let line = line.as_ref();
+        doc.push_str(indent);
+        doc.push_str(if line.is_empty() { " *" } else { " * " });
+        doc.push_str(line);
+        doc.push_str(eol);
+    }
+    doc.push_str(indent);
+    doc.push_str(" */");
+    doc.push_str(eol);
+    doc
+}
+
 pub(crate) fn find_docblock_above_line(content: &str, line: usize) -> Option<DocblockAbove> {
     let lines: Vec<&str> = content.lines().collect();
     if line == 0 || line > lines.len() {
@@ -262,7 +275,7 @@ impl DocblockPlacement {
             return insert_edit(
                 content,
                 self.insert_at,
-                format!("{indent}/**{eol}{indent} * {tag}{eol}{indent} */{eol}"),
+                render_docblock(indent, &[tag], eol),
             );
         };
 
@@ -275,11 +288,15 @@ impl DocblockPlacement {
                 .and_then(|s| s.strip_suffix("*/"))
                 .map(str::trim)
                 .unwrap_or("");
-            let mut new_doc = format!("{indent}/**{eol}");
-            if !inner.is_empty() {
-                new_doc.push_str(&format!("{indent} * {inner}{eol}{indent} *{eol}"));
-            }
-            new_doc.push_str(&format!("{indent} * {tag}{eol}{indent} */"));
+            let lines: &[&str] = if inner.is_empty() {
+                &[tag]
+            } else {
+                &[inner, "", tag]
+            };
+            // The rewritten docblock replaces the closing line, whose
+            // line break stays.
+            let mut new_doc = render_docblock(indent, lines, eol);
+            new_doc.truncate(new_doc.len() - eol.len());
             return TextEdit {
                 range: byte_range_to_lsp_range(
                     content,

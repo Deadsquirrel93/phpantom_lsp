@@ -3,7 +3,8 @@
 use crate::common::{
     create_psr4_workspace, create_test_backend, create_test_backend_with_closure_stub,
     create_test_backend_with_full_stubs, create_test_backend_with_function_stubs,
-    create_test_backend_with_stdclass_stub, hover_at, hover_text, markup_hover_at, open_php,
+    create_test_backend_with_stdclass_stub, hover_at, hover_response, hover_text, markup_hover_at,
+    open_php,
 };
 use phpantom_lsp::Backend;
 use tower_lsp::lsp_types::*;
@@ -1902,8 +1903,6 @@ class Product {
 /// The answer must not depend on how far indexing has got.
 #[tokio::test]
 async fn hover_answers_a_file_that_was_never_opened_or_indexed() {
-    use tower_lsp::LanguageServer;
-
     let (backend, dir) = create_psr4_workspace(
         r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
         &[(
@@ -1933,19 +1932,8 @@ $product->saleMinor();
     // only on disk, exactly as it does for a request that beats the
     // index to it.
     let uri = Url::from_file_path(dir.path().join("src/Product.php")).unwrap();
-    let hover = backend
-        .hover(HoverParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 16,
-                    character: 14,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-        })
+    let hover = hover_response(&backend, &uri, 16, 14)
         .await
-        .unwrap()
         .expect("hover on a file the server has not parsed yet");
 
     let text = hover_text(&hover);

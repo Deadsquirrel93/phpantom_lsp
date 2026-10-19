@@ -22,7 +22,7 @@ pub(crate) struct ConfigKeyMatch {
 /// For example, `file:///path/to/project/config/app.php` returns `Some("app")`.
 /// Supports nested directories: `config/api/keys.php` returns `Some("api.keys")`.
 pub(crate) fn laravel_config_prefix_from_uri(uri: &str) -> Option<String> {
-    let parsed = Url::parse(uri).ok()?;
+    let parsed = crate::util::parse_url(uri)?;
     // Match the nearest `config` directory to the file path. This avoids
     // false negatives when an ancestor directory is also named `config`.
     let relative = parsed.path().rsplit_once("/config/")?.1;
@@ -231,7 +231,9 @@ impl Backend {
             }
         }
 
-        for res in &self.laravel_provider_resources.read().config_files {
+        // Copied out so the lock is not held across the file reads.
+        let provider_config_files = self.laravel_provider_resources.read().config_files.clone();
+        for res in &provider_config_files {
             if let Ok(content) = std::fs::read_to_string(&res.path) {
                 visit(&res.namespace, ConfigSourceKind::Package, &content);
             }
@@ -367,7 +369,12 @@ fn resolve_config_key_declaration_inner(
             candidates.push((file_parts.join("."), path));
         }
     }
-    for res in &backend.laravel_provider_resources.read().config_files {
+    let provider_config_files = backend
+        .laravel_provider_resources
+        .read()
+        .config_files
+        .clone();
+    for res in &provider_config_files {
         let covers = key
             .strip_prefix(res.namespace.as_str())
             .is_some_and(|rest| rest.is_empty() || rest.starts_with('.'));
@@ -436,9 +443,8 @@ pub(crate) fn find_all_config_references(
 
     // Usages: walk pre-built symbol spans — no file re-parse needed.
     for (file_uri, symbol_map) in snapshot {
-        let parsed_uri = match Url::parse(file_uri) {
-            Ok(u) => u,
-            Err(_) => continue,
+        let Some(parsed_uri) = crate::util::parse_url(file_uri) else {
+            continue;
         };
         // Read only once a span matches, and convert every match through
         // one line table rather than rescanning the file per hit.
@@ -542,7 +548,7 @@ pub(crate) fn resolve_config_key_definition_fallback(
         .into_iter()
         .find(|d| cursor_offset >= d.start && cursor_offset <= d.end)?;
 
-    let target_uri = Url::parse(uri).ok()?;
+    let target_uri = crate::util::parse_url(uri)?;
     let pos = crate::text_position::offset_to_position(content, match_.start);
     Some(crate::definition::point_location(target_uri, pos))
 }

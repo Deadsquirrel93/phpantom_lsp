@@ -1,4 +1,5 @@
 use super::*;
+use crate::code_actions::render_docblock;
 use crate::php_type::TypeKind;
 
 // ─── Code generation ────────────────────────────────────────────────────────
@@ -122,38 +123,21 @@ pub(crate) fn build_docblock_for_extraction(
 
     let max_type_len = param_tags.iter().map(|(t, _)| t.len()).max().unwrap_or(0);
 
-    let mut out = String::new();
-    out.push_str(member_indent);
-    out.push_str("/**\n");
+    let lines: Vec<String> = tags
+        .iter()
+        .map(|tag| {
+            let Some((type_str, name_str)) = tag.strip_prefix("@param ").and_then(|rest| {
+                let dollar_pos = rest.find('$')?;
+                Some((rest[..dollar_pos].trim_end(), &rest[dollar_pos..]))
+            }) else {
+                return tag.to_string();
+            };
+            // Pad to align parameter names.
+            format!("@param {type_str:<max_type_len$} {name_str}")
+        })
+        .collect();
 
-    for tag in &tags {
-        out.push_str(member_indent);
-        out.push_str(" * ");
-        if let Some(rest) = tag.strip_prefix("@param ") {
-            if let Some(dollar_pos) = rest.find('$') {
-                let type_str = rest[..dollar_pos].trim_end();
-                let name_str = &rest[dollar_pos..];
-                out.push_str("@param ");
-                out.push_str(type_str);
-                // Pad to align parameter names.
-                for _ in 0..(max_type_len.saturating_sub(type_str.len())) {
-                    out.push(' ');
-                }
-                out.push(' ');
-                out.push_str(name_str);
-            } else {
-                out.push_str(tag);
-            }
-        } else {
-            out.push_str(tag);
-        }
-        out.push('\n');
-    }
-
-    out.push_str(member_indent);
-    out.push_str(" */\n");
-
-    out
+    render_docblock(member_indent, &lines, "\n")
 }
 
 /// Build the definition text of the extracted function or method.

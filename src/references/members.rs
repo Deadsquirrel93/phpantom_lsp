@@ -166,7 +166,7 @@ impl Backend {
             let Some(content) = self.get_file_content_arc(uri) else {
                 continue;
             };
-            let Ok(parsed_uri) = Url::parse(uri) else {
+            let Some(parsed_uri) = crate::util::parse_url(uri) else {
                 continue;
             };
             let start = offset_to_position(&content, offset as usize + 1);
@@ -187,7 +187,7 @@ impl Backend {
         let Some(content) = self.get_file_content_arc(uri) else {
             return;
         };
-        let Ok(parsed_uri) = Url::parse(uri) else {
+        let Some(parsed_uri) = crate::util::parse_url(uri) else {
             return;
         };
         let start = offset_to_position(&content, offset as usize + 1);

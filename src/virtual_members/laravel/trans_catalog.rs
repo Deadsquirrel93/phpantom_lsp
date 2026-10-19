@@ -197,7 +197,7 @@ impl TranslationCatalog {
         if self.files.iter().any(|file| file.uri.as_str() == uri) {
             return;
         }
-        let Ok(parsed_uri) = Url::parse(uri) else {
+        let Some(parsed_uri) = crate::util::parse_url(uri) else {
             return;
         };
         let Some(path) = crate::util::url_to_path(&parsed_uri) else {
@@ -253,7 +253,7 @@ impl Backend {
         roots.dedup();
         let mut catalog = TranslationCatalog::default();
         for root in roots {
-            if let Ok(uri) = Url::from_directory_path(&root.path) {
+            if let Some(uri) = crate::util::dir_path_to_url(&root.path) {
                 catalog.roots.push(uri.to_string());
             }
             let Ok(entries) = std::fs::read_dir(&root.path) else {

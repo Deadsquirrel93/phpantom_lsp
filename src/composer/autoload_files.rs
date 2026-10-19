@@ -65,9 +65,8 @@ pub fn parse_autoload_classmap(
         .join("composer")
         .join("autoload_classmap.php");
 
-    let content = match fs::read_to_string(&autoload_path) {
-        Ok(c) => c,
-        Err(_) => return HashMap::new(),
+    let Some(content) = super::read_composer_file(&autoload_path) else {
+        return HashMap::new();
     };
 
     let mut classmap = HashMap::new();
@@ -141,9 +140,8 @@ pub fn parse_autoload_files(workspace_root: &Path, vendor_dir: &str) -> Vec<Path
         .join("composer")
         .join("autoload_files.php");
 
-    let content = match fs::read_to_string(&autoload_path) {
-        Ok(c) => c,
-        Err(_) => return Vec::new(),
+    let Some(content) = super::read_composer_file(&autoload_path) else {
+        return Vec::new();
     };
 
     let mut files = Vec::new();
@@ -333,9 +331,8 @@ pub fn parse_autoload_namespaces(
         .join("composer")
         .join("autoload_namespaces.php");
 
-    let content = match fs::read_to_string(&autoload_path) {
-        Ok(c) => c,
-        Err(_) => return HashMap::new(),
+    let Some(content) = super::read_composer_file(&autoload_path) else {
+        return HashMap::new();
     };
 
     // Collect all base directories listed in the PSR-0 map.

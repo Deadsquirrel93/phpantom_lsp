@@ -268,7 +268,7 @@ impl Backend {
         }
 
         let candidate_count = self.indexed_reference_count(key)?;
-        let origin_url = Url::parse(origin_uri).ok()?;
+        let origin_url = crate::util::parse_url(origin_uri)?;
         let position = index.position(declaration_offset as usize);
         let range = Range::new(
             Position::new(position.line, 0),
@@ -316,7 +316,7 @@ impl Backend {
         {
             candidate_count += self.indexed_member_reference_count(&magic.use_name)?;
         }
-        let origin_url = Url::parse(origin_uri).ok()?;
+        let origin_url = crate::util::parse_url(origin_uri)?;
         let position = index.position(declaration_offset as usize);
         let range = Range::new(
             Position::new(position.line, 0),
@@ -493,7 +493,7 @@ impl Backend {
             return Some(CodeLens {
                 range,
                 command: Some(Self::implementation_lens_command(
-                    Url::parse(origin_uri).ok()?,
+                    crate::util::parse_url(origin_uri)?,
                     position,
                     Vec::new(),
                 )),
@@ -600,7 +600,7 @@ impl Backend {
         let Some(locations) = locations.flatten() else {
             return lens;
         };
-        let Ok(origin_uri) = Url::parse(uri) else {
+        let Some(origin_uri) = crate::util::parse_url(uri) else {
             return lens;
         };
 

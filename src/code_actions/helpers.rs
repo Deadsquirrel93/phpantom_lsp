@@ -56,10 +56,7 @@ pub(crate) fn occurrence_replacement_edit(
         return None;
     }
     Some(TextEdit {
-        range: Range {
-            start: crate::text_position::offset_to_position(content, offset),
-            end: crate::text_position::offset_to_position(content, end),
-        },
+        range: crate::text_position::byte_range_to_lsp_range(content, offset, end),
         new_text: replacement.to_string(),
     })
 }
@@ -243,6 +240,49 @@ pub(crate) fn make_code_action_data(
     .unwrap_or_default()
 }
 
+/// A deferred `quickfix` for `diagnostics`: no edit, and a `data` payload
+/// the resolve recomputes the edit from.  The payload carries `extra`'s
+/// own fields plus the first diagnostic's message, line and code, as
+/// `diagnostic_message`, `diagnostic_line` and `diagnostic_code`.
+pub(crate) fn deferred_quickfix(
+    title: String,
+    action_kind: &str,
+    uri: &str,
+    range: &Range,
+    diagnostics: Vec<Diagnostic>,
+    is_preferred: bool,
+    extra: serde_json::Value,
+) -> CodeActionOrCommand {
+    let mut extra = match extra {
+        serde_json::Value::Object(fields) => fields,
+        _ => serde_json::Map::new(),
+    };
+    if let Some(diag) = diagnostics.first() {
+        let code = match &diag.code {
+            Some(NumberOrString::String(code)) => code.as_str(),
+            _ => "",
+        };
+        extra.insert("diagnostic_message".into(), diag.message.clone().into());
+        extra.insert("diagnostic_line".into(), diag.range.start.line.into());
+        extra.insert("diagnostic_code".into(), code.into());
+    }
+    CodeActionOrCommand::CodeAction(CodeAction {
+        title,
+        kind: Some(CodeActionKind::QUICKFIX),
+        diagnostics: Some(diagnostics),
+        edit: None,
+        command: None,
+        is_preferred: Some(is_preferred),
+        disabled: None,
+        data: Some(make_code_action_data(
+            action_kind,
+            uri,
+            range,
+            serde_json::Value::Object(extra),
+        )),
+    })
+}
+
 /// A `refactor.rewrite` action that replaces the bytes `[start, end)` of
 /// the document `uri` holding `content` with `replacement`.
 pub(crate) fn rewrite_action(
@@ -391,10 +431,7 @@ pub(crate) fn replace_spans_edits<'a>(
     replacement: &'a str,
 ) -> impl Iterator<Item = TextEdit> + 'a {
     spans.iter().map(move |&(start, end)| TextEdit {
-        range: Range {
-            start: crate::text_position::offset_to_position(content, start),
-            end: crate::text_position::offset_to_position(content, end),
-        },
+        range: crate::text_position::byte_range_to_lsp_range(content, start, end),
         new_text: replacement.to_string(),
     })
 }

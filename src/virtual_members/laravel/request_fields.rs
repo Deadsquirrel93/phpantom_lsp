@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::{Location, Position, Url};
+use tower_lsp::lsp_types::{Location, Position};
 
 use crate::Backend;
 use crate::class_lookup::find_class_at_offset;
@@ -335,7 +335,7 @@ pub(crate) fn resolve_request_field_definition(
 
     let position = crate::text_position::offset_to_position(target_content, key_start);
     Some(crate::definition::point_location(
-        Url::parse(target_uri).ok()?,
+        crate::util::parse_url(target_uri)?,
         position,
     ))
 }

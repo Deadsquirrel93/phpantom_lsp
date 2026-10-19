@@ -48,7 +48,7 @@ src/
 ├── main.rs                 # Entry point (stdin/stdout LSP transport, CLI dispatch)
 ├── server.rs               # LSP protocol handlers (initialize, didOpen, completion, …), each delegating to its module
 ├── backend.rs, backend/    # Backend construction, file access, workspace startup (startup.rs), document lifecycle (documents.rs)
-├── config.rs               # .phpantom.toml / workspace configuration
+├── config/                 # .phpantom.toml / workspace configuration, one file per section group
 │
 │   # Data model
 ├── types/                  # Core structures (ClassInfo, MethodInfo, ResolvedType, SubjectExpr, …)

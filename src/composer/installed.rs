@@ -1,7 +1,6 @@
 //! `vendor/composer/installed.json`: the packages Composer installed and
 //! where each one lives on disk.
 
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::psr4::{Psr4Mapping, normalise_prefix};
@@ -42,7 +41,7 @@ impl InstalledPackages {
 ///
 /// The file has two formats: Composer 1 writes a top-level array of
 /// packages, Composer 2 writes `{ "packages": [...] }`. Returns an empty
-/// list for anything else, including unparseable JSON.
+/// list for anything else, and logs unparseable JSON.
 pub(crate) fn parse_installed_packages(content: &str) -> Vec<serde_json::Value> {
     match serde_json::from_str::<serde_json::Value>(content) {
         Ok(serde_json::Value::Array(packages)) => packages,
@@ -50,7 +49,11 @@ pub(crate) fn parse_installed_packages(content: &str) -> Vec<serde_json::Value> 
             Some(serde_json::Value::Array(packages)) => packages,
             _ => Vec::new(),
         },
-        _ => Vec::new(),
+        Ok(_) => Vec::new(),
+        Err(e) => {
+            tracing::warn!("Failed to parse Composer's installed.json: {e}");
+            Vec::new()
+        }
     }
 }
 
@@ -64,7 +67,7 @@ pub(crate) fn read_installed_packages(
 ) -> Option<InstalledPackages> {
     let vendor_path = workspace_root.join(vendor_dir);
     let composer_dir = vendor_path.join("composer");
-    let content = fs::read_to_string(composer_dir.join("installed.json")).ok()?;
+    let content = super::read_composer_file(&composer_dir.join("installed.json"))?;
     Some(InstalledPackages {
         packages: parse_installed_packages(&content),
         composer_dir,

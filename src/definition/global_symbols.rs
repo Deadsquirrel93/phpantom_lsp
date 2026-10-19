@@ -4,7 +4,7 @@
 //! lazily parsing the defining file when the byte-level startup scan only
 //! recorded its path, and jump to the declaration's stored name offset.
 
-use tower_lsp::lsp_types::{Location, Url};
+use tower_lsp::lsp_types::Location;
 
 use super::point_location;
 use crate::Backend;
@@ -88,6 +88,6 @@ impl Backend {
         }
         let position =
             crate::text_position::offset_to_position(&file_content, name_offset as usize);
-        Some(point_location(Url::parse(file_uri).ok()?, position))
+        Some(point_location(crate::util::parse_url(file_uri)?, position))
     }
 }

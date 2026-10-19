@@ -5,8 +5,6 @@
 //! fragment so the hover popup can render it as a clickable link.  URLs
 //! and unresolvable symbols are left unlinked.
 
-use tower_lsp::lsp_types::Url;
-
 use crate::Backend;
 
 use super::formatting::ResolvedSeeRef;
@@ -90,7 +88,7 @@ impl Backend {
                 .filter(|&off| off > 0)?;
 
             let pos = crate::text_position::offset_to_position(&class_content, offset as usize);
-            let parsed_uri = Url::parse(&class_uri).ok()?;
+            let parsed_uri = crate::util::parse_url(&class_uri)?;
             Some(format!("{}#L{}", parsed_uri, pos.line + 1))
         } else {
             let cls = self.find_or_load_class(target)?;
@@ -104,7 +102,7 @@ impl Backend {
                 &class_content,
                 cls.keyword_offset as usize,
             );
-            let parsed_uri = Url::parse(&class_uri).ok()?;
+            let parsed_uri = crate::util::parse_url(&class_uri)?;
             Some(format!("{}#L{}", parsed_uri, pos.line + 1))
         }
     }

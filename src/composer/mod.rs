@@ -88,11 +88,62 @@ pub fn parse_composer_json(workspace_root: &Path) -> (Vec<Psr4Mapping>, String) 
 /// typed [`ComposerPackage`].
 ///
 /// Returns `None` if the file does not exist, cannot be read, or fails
-/// to parse.
+/// to parse.  Startup reads it through [`try_read_composer_package`]
+/// instead, to tell the user why their autoload mappings are missing.
 pub fn read_composer_package(workspace_root: &Path) -> Option<ComposerPackage> {
+    try_read_composer_package(workspace_root).ok().flatten()
+}
+
+/// [`read_composer_package`] that reports a file it cannot read or parse.
+/// `Ok(None)` means the workspace has no `composer.json`.
+pub fn try_read_composer_package(
+    workspace_root: &Path,
+) -> Result<Option<ComposerPackage>, ComposerReadError> {
     let composer_path = workspace_root.join("composer.json");
-    let content = fs::read_to_string(&composer_path).ok()?;
-    content.parse::<ComposerPackage>().ok()
+    let content = match fs::read_to_string(&composer_path) {
+        Ok(content) => content,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => {
+            return Err(ComposerReadError {
+                path: composer_path,
+                reason: e.to_string(),
+            });
+        }
+    };
+    content
+        .parse::<ComposerPackage>()
+        .map(Some)
+        .map_err(|e| ComposerReadError {
+            path: composer_path,
+            reason: e.to_string(),
+        })
+}
+
+/// Read one of Composer's generated files, `None` when it is missing.  A
+/// file that exists but cannot be read is logged rather than passed off
+/// as missing.
+pub(crate) fn read_composer_file(path: &Path) -> Option<String> {
+    match fs::read_to_string(path) {
+        Ok(content) => Some(content),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => {
+            tracing::warn!("Failed to read {}: {e}", path.display());
+            None
+        }
+    }
+}
+
+/// A Composer file that exists but could not be read or parsed.
+#[derive(Debug)]
+pub struct ComposerReadError {
+    pub path: PathBuf,
+    pub reason: String,
+}
+
+impl std::fmt::Display for ComposerReadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "failed to read {}: {}", self.path.display(), self.reason)
+    }
 }
 
 /// Read the configured vendor directory from a parsed [`ComposerPackage`].
@@ -222,6 +273,23 @@ mod tests {
     /// Helper: parse a JSON string into a [`ComposerPackage`].
     fn pkg(json: &str) -> ComposerPackage {
         json.parse::<ComposerPackage>().unwrap()
+    }
+
+    // ── try_read_composer_package ───────────────────────────────────
+
+    #[test]
+    fn a_missing_composer_json_is_not_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(matches!(try_read_composer_package(dir.path()), Ok(None)));
+    }
+
+    #[test]
+    fn a_malformed_composer_json_is_reported() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("composer.json"), "{ \"require\": ").unwrap();
+        let err = try_read_composer_package(dir.path()).unwrap_err();
+        assert!(err.to_string().contains("composer.json"), "{err}");
+        assert!(read_composer_package(dir.path()).is_none());
     }
 
     // ── get_vendor_dir ──────────────────────────────────────────────

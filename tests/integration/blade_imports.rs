@@ -9,9 +9,10 @@
 #[cfg(test)]
 mod tests {
     use crate::common::{
-        APP_PSR4_COMPOSER, create_psr4_workspace, open_document, position_of, workspace_uri,
+        APP_PSR4_COMPOSER, create_psr4_workspace, hover_response, open_document, position_of,
+        workspace_uri,
     };
-    use tower_lsp::LanguageServer;
+
     use tower_lsp::lsp_types::*;
 
     const HELPER: &str = "<?php\nnamespace App\\Helpers;\n\
@@ -117,20 +118,8 @@ class CurrencyHelper {\n\
         let uri = workspace_uri(&backend, "resources/views/page.blade.php");
         open_document(&backend, &uri, "blade", view).await;
 
-        let hover = backend
-            .hover(HoverParams {
-                text_document_position_params: TextDocumentPositionParams {
-                    text_document: TextDocumentIdentifier { uri },
-                    // `formatPrice` on the third Blade line.
-                    position: Position {
-                        line: 2,
-                        character: 25,
-                    },
-                },
-                work_done_progress_params: WorkDoneProgressParams::default(),
-            })
-            .await
-            .unwrap();
+        // `formatPrice` on the third Blade line.
+        let hover = hover_response(&backend, &uri, 2, 25).await;
         let text = match hover.map(|h| h.contents) {
             Some(HoverContents::Markup(m)) => m.value,
             _ => String::new(),

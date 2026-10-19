@@ -29,7 +29,7 @@ use crate::Backend;
 use crate::code_actions::cursor_context::{FunctionKinds, find_enclosing_function};
 use crate::code_actions::phpstan::phpstan_identifier;
 use crate::code_actions::{
-    CodeActionData, FunctionDocblock, function_docblock_at_line, make_code_action_data,
+    CodeActionData, FunctionDocblock, deferred_quickfix, function_docblock_at_line,
 };
 use crate::completion::use_edit::{
     analyze_use_block_in, build_use_edit, short_name_needs_import, use_import_conflicts,
@@ -111,24 +111,15 @@ impl Backend {
             // ── Phase 1: emit lightweight action with data ──────────
             let title = format!("Add @throws {}", short_name);
 
-            let extra = serde_json::json!({
-                "diagnostic_message": diag.message,
-                "diagnostic_line": diag.range.start.line,
-                "diagnostic_code": CHECKED_EXCEPTION_ID,
-            });
-
-            let data = make_code_action_data("phpstan.addThrows", uri, &params.range, extra);
-
-            out.push(CodeActionOrCommand::CodeAction(CodeAction {
+            out.push(deferred_quickfix(
                 title,
-                kind: Some(CodeActionKind::QUICKFIX),
-                diagnostics: Some(vec![diag.clone()]),
-                edit: None,
-                command: None,
-                is_preferred: Some(true),
-                disabled: None,
-                data: Some(data),
-            }));
+                "phpstan.addThrows",
+                uri,
+                &params.range,
+                vec![diag.clone()],
+                true,
+                serde_json::Value::Null,
+            ));
         }
     }
 

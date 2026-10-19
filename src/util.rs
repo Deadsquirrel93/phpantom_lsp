@@ -114,11 +114,29 @@ pub(crate) fn path_to_uri(path: &Path) -> String {
 
 /// The `file://` URL of `path`, or `None` when the path is not absolute.
 ///
-/// This, [`url_to_path`] and [`uri_to_path`] are the only places that
-/// convert between file paths and URLs, so a change of URL type touches
-/// these three functions rather than every caller.
+/// This, [`dir_path_to_url`], [`url_to_path`], [`uri_to_path`] and
+/// [`parse_url`] are the only places that convert between file paths, URI
+/// strings and URLs, so a change of URL type touches these functions
+/// rather than every caller.
 pub(crate) fn path_to_url(path: &Path) -> Option<Url> {
     Url::from_file_path(path).ok()
+}
+
+/// The `file://` URL of the directory `path`, with the trailing `/` that
+/// makes relative URLs resolve inside it, or `None` when the path is not
+/// absolute.
+pub(crate) fn dir_path_to_url(path: &Path) -> Option<Url> {
+    Url::from_directory_path(path).ok()
+}
+
+/// Parse a URI string into a URL, or `None` when it is malformed.
+pub(crate) fn parse_url(uri: &str) -> Option<Url> {
+    Url::parse(uri).ok()
+}
+
+/// The placeholder URL for a symbol whose own URI does not parse.
+pub(crate) fn unknown_url() -> Url {
+    Url::parse("file:///unknown").expect("constant URL parses")
 }
 
 /// The file a URL names, or `None` when it is not a `file://` URL.
@@ -129,7 +147,7 @@ pub(crate) fn url_to_path(url: &Url) -> Option<PathBuf> {
 /// The file a URI string names, or `None` when it does not parse or is
 /// not a `file://` URI.
 pub(crate) fn uri_to_path(uri: &str) -> Option<PathBuf> {
-    url_to_path(&Url::parse(uri).ok()?)
+    url_to_path(&parse_url(uri)?)
 }
 
 /// The URI prefix every file under the directory `dir` starts with.

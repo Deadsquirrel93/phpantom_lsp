@@ -24,7 +24,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::php_type::PhpType;
-use crate::text_position::offset_to_position;
+use crate::text_position::byte_range_to_lsp_range;
 
 use changes::{analyse_body, check_needs_update};
 use find::find_function_with_docblock_from_context;
@@ -177,19 +177,13 @@ impl Backend {
             return;
         }
 
-        let start_pos = offset_to_position(content, info.docblock_start);
-        let end_pos = offset_to_position(content, info.docblock_end);
-
         out.push(CodeActionOrCommand::CodeAction(CodeAction {
             title: "Update docblock to match signature".to_string(),
             kind: Some(CodeActionKind::QUICKFIX),
             diagnostics: None,
             edit: Some(crate::code_actions::single_edit(
                 doc_uri,
-                Range {
-                    start: start_pos,
-                    end: end_pos,
-                },
+                byte_range_to_lsp_range(content, info.docblock_start, info.docblock_end),
                 new_docblock,
             )),
             command: None,

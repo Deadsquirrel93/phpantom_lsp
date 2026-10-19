@@ -29,7 +29,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::code_actions::phpstan::phpstan_identifier;
-use crate::code_actions::{CodeActionData, make_code_action_data};
+use crate::code_actions::{CodeActionData, deferred_quickfix};
 
 // ── PHPStan identifier ──────────────────────────────────────────────────────
 
@@ -73,26 +73,19 @@ impl Backend {
                 continue;
             }
 
-            let diag_line = diag.range.start.line as usize;
+            let _diag_line = diag.range.start.line as usize;
 
             let title = "Remove always-true assert()".to_string();
 
-            let extra = serde_json::json!({
-                "diagnostic_line": diag_line,
-            });
-
-            let data = make_code_action_data(ACTION_KIND, uri, &params.range, extra);
-
-            out.push(CodeActionOrCommand::CodeAction(CodeAction {
+            out.push(deferred_quickfix(
                 title,
-                kind: Some(CodeActionKind::QUICKFIX),
-                diagnostics: Some(vec![diag.clone()]),
-                edit: None,
-                command: None,
-                is_preferred: Some(true),
-                disabled: None,
-                data: Some(data),
-            }));
+                ACTION_KIND,
+                uri,
+                &params.range,
+                vec![diag.clone()],
+                true,
+                serde_json::Value::Null,
+            ));
         }
     }
 
@@ -182,94 +175,41 @@ fn build_remove_assert_edit(content: &str, diag_line: usize) -> Option<TextEdit>
         true
     };
 
-    if is_only_statement && after_semi {
+    let (remove_start, remove_end) = if is_only_statement && after_semi {
         // Delete the entire line(s) from the start of the first line
         // to the start of the next line after the statement.
-        let delete_end_byte = if stmt_end_byte < content.len() {
-            // Include the trailing newline of the last line.
-            content[stmt_end_byte..]
-                .find('\n')
-                .map(|p| stmt_end_byte + p + 1)
-                .unwrap_or(content.len())
-        } else {
-            content.len()
-        };
-
-        let start_pos = Position::new(diag_line as u32, 0);
-        let end_line = content[..delete_end_byte].matches('\n').count();
-        let end_col = if delete_end_byte <= content.len() {
-            delete_end_byte
-                - content[..delete_end_byte]
-                    .rfind('\n')
-                    .map(|p| p + 1)
-                    .unwrap_or(0)
-        } else {
-            0
-        };
-
-        Some(TextEdit {
-            range: Range {
-                start: start_pos,
-                end: Position::new(end_line as u32, end_col as u32),
-            },
-            new_text: String::new(),
-        })
+        let delete_end_byte = content[stmt_end_byte..]
+            .find('\n')
+            .map(|p| stmt_end_byte + p + 1)
+            .unwrap_or(content.len());
+        (line_start_byte, delete_end_byte)
     } else if is_only_statement {
         // The assert is at the start (after whitespace) but there is
         // code after the semicolon.  Remove from line start to after
-        // the semicolon.
-        let start_pos = Position::new(diag_line as u32, 0);
-        // Also consume any trailing whitespace after the semicolon so
-        // the code that follows on the same line isn't left with a
-        // stray leading space.
+        // the semicolon, also consuming any trailing whitespace so the
+        // code that follows on the same line isn't left with a stray
+        // leading space.
         let trailing_space = content[stmt_end_byte..]
-            .chars()
-            .take_while(|c| *c == ' ' || *c == '\t')
+            .bytes()
+            .take_while(|b| *b == b' ' || *b == b'\t')
             .count();
-
-        // For same-line: use the end line from the statement.
-        let end_offset = stmt_end_byte + trailing_space;
-        let end_line_num = content[..end_offset].matches('\n').count();
-        let end_line_start = content[..end_offset]
-            .rfind('\n')
-            .map(|p| p + 1)
-            .unwrap_or(0);
-        let end_col_final = (end_offset - end_line_start) as u32;
-
-        Some(TextEdit {
-            range: Range {
-                start: start_pos,
-                end: Position::new(end_line_num as u32, end_col_final),
-            },
-            new_text: String::new(),
-        })
+        (line_start_byte, stmt_end_byte + trailing_space)
     } else {
         // There is code before the assert on the same line.  Remove
         // just the `assert(…);` portion (including any leading
         // whitespace before `assert`).
         let leading_space = content[..assert_byte]
-            .chars()
+            .bytes()
             .rev()
-            .take_while(|c| *c == ' ' || *c == '\t')
+            .take_while(|b| *b == b' ' || *b == b'\t')
             .count();
-        let remove_start = assert_byte - leading_space;
-        let remove_start_col = (remove_start - line_start_byte) as u32;
+        (assert_byte - leading_space, stmt_end_byte)
+    };
 
-        let end_line_num = content[..stmt_end_byte].matches('\n').count();
-        let end_line_start = content[..stmt_end_byte]
-            .rfind('\n')
-            .map(|p| p + 1)
-            .unwrap_or(0);
-        let end_col = (stmt_end_byte - end_line_start) as u32;
-
-        Some(TextEdit {
-            range: Range {
-                start: Position::new(diag_line as u32, remove_start_col),
-                end: Position::new(end_line_num as u32, end_col),
-            },
-            new_text: String::new(),
-        })
-    }
+    Some(TextEdit {
+        range: crate::text_position::byte_range_to_lsp_range(content, remove_start, remove_end),
+        new_text: String::new(),
+    })
 }
 
 /// Check whether a `function.alreadyNarrowedType` diagnostic for
@@ -337,6 +277,15 @@ mod tests {
         assert_eq!(edit.range.start.line, 1);
         assert!(edit.range.start.character > 0);
         assert_eq!(edit.new_text, "");
+    }
+
+    #[test]
+    fn columns_count_utf16_units_after_non_ascii_text() {
+        let content = "<?php\n$größe = 1; assert(true);\n";
+        let edit = build_remove_assert_edit(content, 1).unwrap();
+        // `$größe = 1;` is 11 UTF-16 units but 13 bytes.
+        assert_eq!(edit.range.start, Position::new(1, 11));
+        assert_eq!(edit.range.end, Position::new(1, 25));
     }
 
     #[test]

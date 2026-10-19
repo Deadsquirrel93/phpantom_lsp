@@ -22,7 +22,7 @@ impl Backend {
             Some(r) => r,
             None => return,
         };
-        let Ok(url) = Url::parse(uri) else {
+        let Some(url) = crate::util::parse_url(uri) else {
             return;
         };
         let Some(file_path) = crate::util::url_to_path(&url) else {

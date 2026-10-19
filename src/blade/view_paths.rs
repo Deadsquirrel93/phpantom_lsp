@@ -107,7 +107,7 @@ impl crate::Backend {
     /// configured view root that contains it, in dot notation, plus
     /// `namespace::name` forms for provider-registered directories.
     pub(crate) fn view_names_for_blade_uri(&self, uri: &str) -> Vec<String> {
-        let Ok(url) = tower_lsp::lsp_types::Url::parse(uri) else {
+        let Some(url) = crate::util::parse_url(uri) else {
             return Vec::new();
         };
         let Some(path) = crate::util::url_to_path(&url) else {
