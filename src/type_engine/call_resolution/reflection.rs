@@ -198,10 +198,10 @@ fn reflected_property_type(receiver: &[ResolvedType], ctx: &ResolutionCtx<'_>) -
         Some((*class_name, name.string_content()?.into_owned()))
     })?;
 
-    let class = (ctx.class_loader)(&class_name)?;
+    let class = (ctx.file.class_loader)(&class_name)?;
     let resolved = crate::virtual_members::resolve_class_fully_maybe_cached(
         &class,
-        ctx.class_loader,
+        ctx.file.class_loader,
         ctx.resolved_class_cache,
     );
     resolved.get_property(&property)?.type_hint.clone()

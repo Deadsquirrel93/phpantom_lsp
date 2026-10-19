@@ -82,9 +82,10 @@ impl Backend {
                 let patched_offset = position_to_offset(&patched, position);
                 let patched_current = find_class_at_offset(&patched_classes, patched_offset);
                 let patched_rctx = self.resolution_ctx_at(
+                    loaders
+                        .file_ctx_at(&patched, cursor_offset)
+                        .with_source(&patched, &patched_classes),
                     patched_current,
-                    &patched_classes,
-                    &patched,
                     patched_offset,
                     loaders.ctx_loaders_at(cursor_offset),
                 );

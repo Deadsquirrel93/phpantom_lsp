@@ -349,7 +349,8 @@ pub(super) fn seed_by_ref_parameters<'b>(
 
         let already_in_scope = !scope.get(&var_name).is_empty();
         let mut seeded = false;
-        if let Some(out_hint) = effective_out_type(param, param_index, template_owner, ctx.backend)
+        if let Some(out_hint) =
+            effective_out_type(param, param_index, template_owner, ctx.file.backend)
         {
             if out_hint.references_any_name(callee_templates) {
                 continue;
@@ -373,7 +374,7 @@ pub(super) fn seed_by_ref_parameters<'b>(
                     parameters,
                     template_owner,
                     arg_list,
-                    ctx.content,
+                    ctx.file.content,
                     &var_ctx.as_resolution_ctx(),
                     Some(&call_var_resolver),
                 )
@@ -402,8 +403,8 @@ pub(super) fn seed_by_ref_parameters<'b>(
                 crate::type_engine::type_resolution::type_hint_to_classes_typed(
                     &effective_hint,
                     &ctx.current_class.fqn(),
-                    ctx.all_classes,
-                    ctx.class_loader,
+                    ctx.file.all_classes,
+                    ctx.file.class_loader,
                 )
             };
             if is_spread && (primitive_hint || !classes.is_empty()) {

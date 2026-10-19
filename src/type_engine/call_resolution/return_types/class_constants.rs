@@ -54,7 +54,7 @@ pub(crate) fn resolve_static_access_type(text: &str, ctx: &ResolutionCtx<'_>) ->
     // otherwise infer a type from the initializer value.
     let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
         &cls,
-        ctx.class_loader,
+        ctx.file.class_loader,
         ctx.resolved_class_cache,
     );
     class_constant_type(&merged, _member, ctx)
@@ -112,7 +112,7 @@ fn static_access_class(class_part: &str, ctx: &ResolutionCtx<'_>) -> Option<Arc<
     } else {
         ctx.written_names().resolve_class(class_part)
     };
-    (ctx.class_loader)(class_name.strip_prefix('\\').unwrap_or(&class_name))
+    (ctx.file.class_loader)(class_name.strip_prefix('\\').unwrap_or(&class_name))
 }
 
 /// The type a class constant holds, read from its initializer where that
@@ -151,12 +151,12 @@ pub(crate) fn class_constant_type(
         // on which class that is, so the hierarchy is searched for no other.
         let declaring = val
             .contains("::")
-            .then(|| constant_declaring_class(merged, constant, ctx.class_loader))
+            .then(|| constant_declaring_class(merged, constant, ctx.file.class_loader))
             .flatten();
         let owner = declaring.as_deref().unwrap_or(merged);
         let ctx = &ResolutionCtx {
+            file: ctx.file.with_imports(None),
             current_class: Some(owner),
-            source_imports: None,
             ..*ctx
         };
         let resolve = |text: &str| {

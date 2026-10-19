@@ -53,7 +53,7 @@ pub(crate) fn destructuring_rhs_type(
         Expression::Variable(Variable::Direct(dv)) => Some(bytes_to_str(dv.name)),
         _ => None,
     };
-    let raw_type = preceding_var_type_of_value(var_ctx.content, stmt_offset, rhs_var)
+    let raw_type = preceding_var_type_of_value(var_ctx.file.content, stmt_offset, rhs_var)
         .map(|vt| var_ctx.written_names().resolve_type(&vt))
         .or_else(|| {
             super::super::iterable_elements::resolve_expression_type(assignment.rhs, var_ctx)
@@ -63,8 +63,8 @@ pub(crate) fn destructuring_rhs_type(
         crate::type_engine::type_ops::aliases::resolve_type_alias_typed(
             &raw_type,
             &var_ctx.current_class.fqn(),
-            var_ctx.all_classes,
-            var_ctx.class_loader,
+            var_ctx.file.all_classes,
+            var_ctx.file.class_loader,
         )
         .unwrap_or(raw_type),
     )

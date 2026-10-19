@@ -59,7 +59,7 @@ pub(crate) fn extract_native_type_from_rhs<'b>(
                 {
                     let method_name = bytes_to_str(ident.value).to_string();
                     let current = ctx.current_class.fqn();
-                    crate::class_lookup::find_class_by_fqn(ctx.all_classes, &current).and_then(
+                    crate::class_lookup::find_class_by_fqn(ctx.file.all_classes, &current).and_then(
                         |cls| {
                             cls.get_method(&method_name)
                                 .and_then(|m| m.return_type.clone())
@@ -84,9 +84,10 @@ pub(crate) fn extract_native_type_from_rhs<'b>(
                     && let ClassLikeMemberSelector::Identifier(ident) = &static_call.method
                 {
                     let method_name = bytes_to_str(ident.value).to_string();
-                    let owner = crate::class_lookup::find_class_by_fqn(ctx.all_classes, &cls_name)
-                        .cloned()
-                        .or_else(|| (ctx.class_loader)(&cls_name));
+                    let owner =
+                        crate::class_lookup::find_class_by_fqn(ctx.file.all_classes, &cls_name)
+                            .cloned()
+                            .or_else(|| (ctx.file.class_loader)(&cls_name));
                     owner.and_then(|o| {
                         o.get_method(&method_name)
                             .and_then(|m| m.return_type.clone())

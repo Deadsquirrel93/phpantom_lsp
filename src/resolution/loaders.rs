@@ -7,7 +7,7 @@ use std::sync::Arc;
 use crate::Backend;
 use crate::definition::member::MemberKind;
 use crate::php_type::PhpType;
-use crate::type_engine::resolver::{CtxLoaders, Loaders, ResolutionCtx, VarResolutionCtx};
+use crate::type_engine::resolver::{CtxLoaders, FileCtx, Loaders, ResolutionCtx, VarResolutionCtx};
 use crate::types::{ClassInfo, FileContext, FunctionInfo, PerBlock};
 
 impl Backend {
@@ -193,7 +193,7 @@ impl Backend {
     }
 
     /// Build a [`ResolutionCtx`](crate::type_engine::resolver::ResolutionCtx)
-    /// for `cursor_offset` in a file.
+    /// for `cursor_offset` in `file`.
     ///
     /// Fills the fields every request handler repeats: this backend and
     /// its resolved-class cache, no forward-walker scope, and a cursor
@@ -205,32 +205,21 @@ impl Backend {
     /// ```text
     /// ResolutionCtx {
     ///     is_in_static_method: symbol_map.is_in_static_method(span.start),
-    ///     ..self.resolution_ctx_at(current_class, classes, content, span.start, loaders)
+    ///     ..self.resolution_ctx_at(file, current_class, span.start, loaders)
     /// }
     /// ```
     pub(crate) fn resolution_ctx_at<'a>(
         &'a self,
+        file: FileCtx<'a>,
         current_class: Option<&'a ClassInfo>,
-        all_classes: &'a [Arc<ClassInfo>],
-        content: &'a str,
         cursor_offset: u32,
         loaders: CtxLoaders<'a>,
     ) -> ResolutionCtx<'a> {
         ResolutionCtx {
-            current_class,
-            all_classes,
-            content,
-            cursor_offset,
-            class_loader: loaders.class_loader,
-            source_class_loader: loaders.source_class_loader,
-            source_imports: loaders.source_imports,
-            backend: Some(self),
             laravel_macro_this_resolver: loaders.laravel_macro_this_resolver,
             resolved_class_cache: Some(&self.resolved_class_cache),
             function_loader: loaders.function_loader,
-            scope_var_resolver: None,
-            is_in_static_method: false,
-            preserve_static: false,
+            ..ResolutionCtx::new(file.with_backend(Some(self)), current_class, cursor_offset)
         }
     }
 
@@ -650,30 +639,35 @@ impl<'a> FileLoaders<'a> {
     /// The [`CtxLoaders`] for the block containing `offset`.
     pub(crate) fn ctx_loaders_at(&self, offset: u32) -> CtxLoaders<'_> {
         CtxLoaders::new(
-            self.resolved_class_loader(),
-            self.class_loader_at(offset),
             self.function_loader_at(offset),
             self.macro_this_resolver.as_ref(),
         )
-        .with_imports(self.file.use_map_at(offset))
+    }
+
+    /// The file these loaders were built for, with `content` as its text
+    /// and the loaders and imports of the block containing `offset`.
+    pub(crate) fn file_ctx_at<'b>(&'b self, content: &'b str, offset: u32) -> FileCtx<'b> {
+        FileCtx::new(
+            content,
+            &self.file.classes,
+            self.resolved_class_loader(),
+            self.class_loader_at(offset),
+        )
+        .with_imports(Some(self.file.use_map_at(offset)))
+        .with_backend(Some(self.backend))
     }
 
     /// The context for resolving an expression written at `offset` of
     /// `content`, the file these loaders were built for.
     pub(crate) fn var_ctx_at<'b>(&'b self, content: &'b str, offset: u32) -> VarResolutionCtx<'b> {
         VarResolutionCtx {
-            source_imports: Some(self.file.use_map_at(offset)),
-            backend: Some(self.backend),
             loaders: self.loaders_at(offset),
             resolved_class_cache: Some(&self.backend.resolved_class_cache),
             ..VarResolutionCtx::new(
                 "",
+                self.file_ctx_at(content, offset),
                 self.class_at(offset),
-                &self.file.classes,
-                content,
                 offset,
-                self.resolved_class_loader(),
-                self.class_loader_at(offset),
             )
         }
     }
@@ -687,9 +681,8 @@ impl<'a> FileLoaders<'a> {
         offset: u32,
     ) -> ResolutionCtx<'b> {
         self.backend.resolution_ctx_at(
+            self.file_ctx_at(content, offset),
             self.enclosing_class(offset),
-            &self.file.classes,
-            content,
             offset,
             self.ctx_loaders_at(offset),
         )

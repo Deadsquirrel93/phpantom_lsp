@@ -44,7 +44,7 @@ mod written_names;
 
 pub(crate) use chain_keys::is_narrowable_call;
 pub(crate) use context::{
-    ChainCacheGuard, CtxLoaders, FunctionLoaderFn, LendsLoaders, Loaders, OwnedLoaders,
+    ChainCacheGuard, CtxLoaders, FileCtx, FunctionLoaderFn, LendsLoaders, Loaders, OwnedLoaders,
     ResolutionCtx, ScopeVarResolverFn, SourceImports, VarResolutionCtx,
     with_chain_resolution_cache, with_isolated_chain_cache,
 };
@@ -213,8 +213,8 @@ fn resolve_target_classes_expr_inner(
     ctx: &ResolutionCtx<'_>,
 ) -> Vec<ResolvedType> {
     let current_class = ctx.current_class;
-    let all_classes = ctx.all_classes;
-    let class_loader = ctx.class_loader;
+    let all_classes = ctx.file.all_classes;
+    let class_loader = ctx.file.class_loader;
 
     match expr {
         // ── Keywords that always mean "current class" ────────────
@@ -324,8 +324,8 @@ fn resolve_static_access_subject(
     ctx: &ResolutionCtx<'_>,
 ) -> Vec<ResolvedType> {
     let current_class = ctx.current_class;
-    let all_classes = ctx.all_classes;
-    let class_loader = ctx.class_loader;
+    let all_classes = ctx.file.all_classes;
+    let class_loader = ctx.file.class_loader;
 
     // Handle self/static/parent keywords — SubjectExpr::parse
     // produces StaticAccess for "self::MONTH", "static::FOO",
@@ -481,8 +481,8 @@ fn resolve_property_chain_subject(
     receiver: Option<Vec<ResolvedType>>,
     ctx: &ResolutionCtx<'_>,
 ) -> Vec<ResolvedType> {
-    let all_classes = ctx.all_classes;
-    let class_loader = ctx.class_loader;
+    let all_classes = ctx.file.all_classes;
+    let class_loader = ctx.file.class_loader;
 
     // A type the forward walker narrowed this exact property path
     // to has already been consulted by the spine walk in
@@ -569,7 +569,8 @@ fn resolve_self_static_class(ctx: &ResolutionCtx<'_>) -> Option<Arc<ClassInfo>> 
         // The enclosing class is normally one of the file's own, already
         // behind an `Arc`.
         Some(
-            ctx.all_classes
+            ctx.file
+                .all_classes
                 .iter()
                 .find(|cls| std::ptr::eq(cls.as_ref(), current))
                 .cloned()
@@ -591,10 +592,10 @@ pub(in crate::type_engine) fn resolve_static_owner_class(
         resolve_self_static_class(rctx)
     } else if let Some(resolved_name) = resolve_class_keyword(class, rctx.current_class) {
         // parent — load via class_loader so we get the full parent ClassInfo
-        (rctx.class_loader)(&resolved_name)
+        (rctx.file.class_loader)(&resolved_name)
     } else {
         let fqn = rctx.written_names().resolve_class(class);
-        (rctx.class_loader)(&fqn).or_else(|| {
+        (rctx.file.class_loader)(&fqn).or_else(|| {
             resolved_to_arcs(resolve_target_classes(
                 class,
                 crate::AccessKind::DoubleColon,

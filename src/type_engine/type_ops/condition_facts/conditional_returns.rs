@@ -118,7 +118,7 @@ fn conditional_return_from_chain<'a>(
     let (method, _) = find_method_in_chain_where(
         class,
         method_name,
-        ctx.class_loader,
+        ctx.file.class_loader,
         &|m| m.conditional_return().is_some_and(names_a_conditional),
         &mut Vec::new(),
         0,

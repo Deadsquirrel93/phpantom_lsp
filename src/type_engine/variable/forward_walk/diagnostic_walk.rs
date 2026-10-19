@@ -9,7 +9,7 @@ use mago_span::HasSpan;
 
 use crate::atom::bytes_to_str;
 use crate::parser::with_parsed_program;
-use crate::type_engine::resolver::Loaders;
+use crate::type_engine::resolver::{FileCtx, Loaders};
 use crate::types::ClassInfo;
 use crate::types::{BlockClassLoaders, BlockImports};
 
@@ -519,22 +519,22 @@ impl<'a> DiagnosticWalkCtx<'a> {
     /// cursor is past the end of every body it visits.
     fn forward_walk_ctx<'c>(&'c self, current_class: &'c ClassInfo) -> ForwardWalkCtx<'c> {
         ForwardWalkCtx {
-            current_class,
-            all_classes: self.local_classes,
-            content: self.content,
-            cursor_offset: u32::MAX,
-            class_loader: self.class_loader,
-            source_class_loader: self.source_class_loader,
-            source_imports: Some(self.source_imports),
-            backend: self.backend,
             loaders: self.loaders,
             resolved_class_cache: self.resolved_class_cache,
-            enclosing_return_type: None,
             top_level_scope: self.globals.cloned(),
-            in_loop: false,
-            template_markers: None,
-            cursor_scope: None,
-            flow: self.flow,
+            ..ForwardWalkCtx::new(
+                FileCtx::new(
+                    self.content,
+                    self.local_classes,
+                    self.class_loader,
+                    self.source_class_loader,
+                )
+                .with_imports(Some(self.source_imports))
+                .with_backend(self.backend),
+                current_class,
+                u32::MAX,
+                self.flow,
+            )
         }
     }
 }
@@ -603,7 +603,7 @@ pub(crate) fn walk_anonymous_class_member_bodies<'b>(
     // the walk sees the anonymous class's real members instead of the
     // enclosing class.
     let anon_name = format!("__anonymous@{}", anon.left_brace.start.offset);
-    let Some(anon_class) = ctx.all_classes.iter().find(|c| *c.name == anon_name) else {
+    let Some(anon_class) = ctx.file.all_classes.iter().find(|c| *c.name == anon_name) else {
         return;
     };
 

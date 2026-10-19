@@ -139,7 +139,7 @@ impl Backend {
                 .all(|c| c.is_alphanumeric() || c == '_' || c == '\\')
             && !is_self_or_static(trimmed)
             && !trimmed.eq_ignore_ascii_case("parent")
-            && let Some(backend) = ctx.backend
+            && let Some(backend) = ctx.file.backend
             && let Some(ty) = match backend.lookup_global_constant(trimmed) {
                 None => None,
                 Some(Some(value)) => {

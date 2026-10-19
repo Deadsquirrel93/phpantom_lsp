@@ -119,8 +119,8 @@ impl Backend {
                             use_map: file_ctx.use_map_at(offset),
                             namespace: file_ctx.namespace_at(offset),
                             content,
-                            class_loader: var_ctx.class_loader,
-                            source_class_loader: var_ctx.source_class_loader,
+                            class_loader: var_ctx.file.class_loader,
+                            source_class_loader: var_ctx.file.source_class_loader,
                             backend: Some(self),
                             function_loader: loaders.function_loader_at(offset),
                         },
@@ -163,14 +163,18 @@ fn has_morph_column(ty: &PhpType, site: &MorphColumnSite, ctx: &ResolutionCtx<'_
     let Some(name) = ty.base_name() else {
         return false;
     };
-    if crate::class_lookup::is_subtype_of_named(ty, super::ELOQUENT_MODEL_FQN, ctx.class_loader) {
-        let Some(class) = (ctx.class_loader)(name) else {
+    if crate::class_lookup::is_subtype_of_named(
+        ty,
+        super::ELOQUENT_MODEL_FQN,
+        ctx.file.class_loader,
+    ) {
+        let Some(class) = (ctx.file.class_loader)(name) else {
             return false;
         };
         // Qualified columns only refer to this model when their table matches.
         let column = if let Some((table, column)) = site.column.rsplit_once('.') {
             if site.receiver_kind == MorphColumnReceiver::Model
-                || !model_table_matches(&class, table, ctx.class_loader)
+                || !model_table_matches(&class, table, ctx.file.class_loader)
             {
                 return false;
             }
@@ -178,24 +182,24 @@ fn has_morph_column(ty: &PhpType, site: &MorphColumnSite, ctx: &ResolutionCtx<'_
         } else {
             &site.column
         };
-        return super::is_morph_type_column(&class, column, ctx.class_loader);
+        return super::is_morph_type_column(&class, column, ctx.file.class_loader);
     }
     if site.receiver_kind != MorphColumnReceiver::Model
         && crate::class_lookup::is_subtype_of_named(
             ty,
             super::ELOQUENT_BUILDER_FQN,
-            ctx.class_loader,
+            ctx.file.class_loader,
         )
         && let Some(model) = crate::inheritance::extract_generic_arg_from_ancestor(
             ty,
             super::ELOQUENT_BUILDER_FQN,
             0,
-            ctx.class_loader,
+            ctx.file.class_loader,
         )
         && crate::class_lookup::is_subtype_of_named(
             &model,
             super::ELOQUENT_MODEL_FQN,
-            ctx.class_loader,
+            ctx.file.class_loader,
         )
     {
         return has_morph_column(&model, site, ctx);

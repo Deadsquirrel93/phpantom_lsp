@@ -206,7 +206,7 @@ fn method_exists_value(expr: &Expression<'_>, ctx: &ForwardWalkCtx<'_>) -> Optio
     find_method_in_chain_where(
         &subject,
         &method,
-        ctx.class_loader,
+        ctx.file.class_loader,
         &|_| true,
         &mut visited,
         0,
@@ -228,8 +228,8 @@ fn static_class_of(expr: &Expression<'_>, ctx: &ForwardWalkCtx<'_>) -> Option<Ar
                 return None;
             }
             ctx.written_names()
-                .static_receiver_class(access.class, ctx.class_loader)
+                .static_receiver_class(access.class, ctx.file.class_loader)
         }
-        _ => string_literal_value(expr).and_then(|name| (ctx.class_loader)(&name)),
+        _ => string_literal_value(expr).and_then(|name| (ctx.file.class_loader)(&name)),
     }
 }

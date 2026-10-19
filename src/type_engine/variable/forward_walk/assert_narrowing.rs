@@ -106,8 +106,8 @@ pub(crate) fn process_assert_narrowing<'b>(
                 let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
                     &PhpType::named(atom(&name)),
                     &ctx.current_class.fqn(),
-                    ctx.all_classes,
-                    ctx.class_loader,
+                    ctx.file.all_classes,
+                    ctx.file.class_loader,
                 );
                 if !resolved.is_empty() {
                     scope.set(
@@ -264,13 +264,13 @@ pub(crate) fn process_assert_narrowing<'b>(
                 condition_facts::apply_type_guard_exclusion(
                     kind,
                     &mut results,
-                    Some(ctx.class_loader),
+                    Some(ctx.file.class_loader),
                 );
             } else {
                 condition_facts::apply_type_guard_inclusion(
                     kind,
                     &mut results,
-                    Some(ctx.class_loader),
+                    Some(ctx.file.class_loader),
                 );
             }
         }
@@ -358,7 +358,7 @@ pub(crate) fn process_self_out_narrowing<'b>(
 
     let arg_texts = crate::type_engine::variable::raw_type_inference::extract_arg_texts_from_ast(
         argument_list,
-        ctx.content,
+        ctx.file.content,
     );
     let arg_refs: Vec<&str> = arg_texts.iter().map(|s| s.as_str()).collect();
 
@@ -402,8 +402,8 @@ pub(crate) fn process_self_out_narrowing<'b>(
             let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
                 &final_ty,
                 &ctx.current_class.fqn(),
-                ctx.all_classes,
-                ctx.class_loader,
+                ctx.file.all_classes,
+                ctx.file.class_loader,
             );
             Some(if classes.is_empty() {
                 vec![ResolvedType::from_type_string(final_ty)]
@@ -478,7 +478,7 @@ fn apply_never_branch_narrowing<'b>(
             &info.return_type,
             &parameter.name,
             &joined,
-            ctx.class_loader,
+            ctx.file.class_loader,
         );
         if ruled_out.is_empty() {
             continue;

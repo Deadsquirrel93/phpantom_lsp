@@ -26,8 +26,8 @@ pub(super) fn resolve_array_access_subject(
     ctx: &ResolutionCtx<'_>,
 ) -> Vec<ResolvedType> {
     let current_class = ctx.current_class;
-    let all_classes = ctx.all_classes;
-    let class_loader = ctx.class_loader;
+    let all_classes = ctx.file.all_classes;
+    let class_loader = ctx.file.class_loader;
 
     // Build the scope key using the canonical double-quote
     // format that the forward walker's `expr_to_subject_key`
@@ -269,7 +269,7 @@ fn raw_return_type_with_magic_fallback(
         // visible instead of the bare native hint.
         let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
             cls,
-            ctx.class_loader,
+            ctx.file.class_loader,
             ctx.resolved_class_cache,
         );
         if let Some(m) = merged.get_method_ci(method) {

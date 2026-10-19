@@ -41,8 +41,8 @@ pub(in crate::type_engine) fn classes_named_by(
             classes_named_by_type(
                 &rt.type_string,
                 &owning_class,
-                ctx.all_classes,
-                ctx.class_loader,
+                ctx.file.all_classes,
+                ctx.file.class_loader,
             ),
         );
     }

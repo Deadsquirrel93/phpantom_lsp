@@ -21,7 +21,7 @@ use tower_lsp::lsp_types::Position;
 use crate::atom::{atom, bytes_to_str};
 use crate::completion::source::comment_position::{docblock_start_at, position_to_byte_offset};
 use crate::php_type::PhpType;
-use crate::type_engine::resolver::{Loaders, VarResolutionCtx};
+use crate::type_engine::resolver::{FileCtx, Loaders, VarResolutionCtx};
 use crate::type_engine::variable::forward_walk::{self, ThrowSiteSink, walk_throw_sites};
 use crate::types::{ClassInfo, FunctionLoader, PerBlock};
 
@@ -276,8 +276,6 @@ impl Analysis<'_, '_> {
     fn var_ctx(&self, offset: u32) -> VarResolutionCtx<'_> {
         let current_class = self.current_class(offset);
         VarResolutionCtx {
-            source_imports: Some(self.ctx.use_map),
-            backend: self.ctx.backend,
             loaders: Loaders::with_function(self.ctx.function_loader),
             resolved_class_cache: self
                 .ctx
@@ -285,12 +283,16 @@ impl Analysis<'_, '_> {
                 .map(|backend| &backend.resolved_class_cache),
             ..VarResolutionCtx::new(
                 "",
+                FileCtx::new(
+                    self.content,
+                    self.ctx.local_classes,
+                    self.resolved_class_loader,
+                    self.ctx.class_loader,
+                )
+                .with_imports(Some(self.ctx.use_map))
+                .with_backend(self.ctx.backend),
                 current_class,
-                self.ctx.local_classes,
-                self.content,
                 offset,
-                self.resolved_class_loader,
-                self.ctx.class_loader,
             )
         }
     }

@@ -35,16 +35,16 @@ pub(in crate::type_engine) fn resolve_narrowing_target(
     let resolved = super::super::resolution::type_hint_to_classes_typed(
         ty,
         &ctx.current_class.fqn(),
-        ctx.all_classes,
-        ctx.class_loader,
+        ctx.file.all_classes,
+        ctx.file.class_loader,
     );
     let mut out: Vec<Arc<ClassInfo>> = Vec::with_capacity(resolved.len());
     for cls in resolved {
         let hosts = crate::type_engine::trait_context::trait_host_classes(
             &cls,
-            ctx.all_classes,
-            ctx.class_loader,
-            ctx.backend,
+            ctx.file.all_classes,
+            ctx.file.class_loader,
+            ctx.file.backend,
         );
         match hosts.is_empty() {
             // Either not a trait, or one whose hosts we cannot enumerate;

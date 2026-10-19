@@ -74,7 +74,11 @@ fn include_resolved_classes(
             .iter()
             .filter(|r| {
                 narrowed.iter().any(|n| {
-                    crate::class_lookup::is_subtype_of_names(&r.fqn(), &n.fqn(), ctx.class_loader)
+                    crate::class_lookup::is_subtype_of_names(
+                        &r.fqn(),
+                        &n.fqn(),
+                        ctx.file.class_loader,
+                    )
                 })
             })
             .cloned()
@@ -95,7 +99,7 @@ fn include_resolved_classes(
     if !exact {
         let narrowed_is_more_specific = narrowed.iter().any(|n| {
             results.iter().any(|r| {
-                crate::class_lookup::is_subtype_of_names(&n.fqn(), &r.fqn(), ctx.class_loader)
+                crate::class_lookup::is_subtype_of_names(&n.fqn(), &r.fqn(), ctx.file.class_loader)
             })
         });
 
@@ -176,7 +180,7 @@ fn exclude_resolved_classes(
                     || crate::class_lookup::is_subtype_of_names(
                         &r.fqn(),
                         &e.fqn(),
-                        ctx.class_loader,
+                        ctx.file.class_loader,
                     )
             })
         });
@@ -203,7 +207,7 @@ pub(in crate::type_engine) fn include_instance_of(
         let mut kept: Vec<ResolvedType> = Vec::new();
         for rt in results.iter() {
             if rt.class_info.as_ref().is_some_and(|c| {
-                crate::class_lookup::is_subtype_of_names(&c.fqn(), name, ctx.class_loader)
+                crate::class_lookup::is_subtype_of_names(&c.fqn(), name, ctx.file.class_loader)
             }) {
                 ResolvedType::push_unique(&mut kept, rt.clone());
                 continue;
@@ -247,7 +251,7 @@ pub(in crate::type_engine) fn exclude_instance_of(
     if let Some(name) = unloadable_check_target(ty, &resolved) {
         results.retain_mut(|rt| {
             if rt.class_info.as_ref().is_some_and(|c| {
-                crate::class_lookup::is_subtype_of_names(&c.fqn(), name, ctx.class_loader)
+                crate::class_lookup::is_subtype_of_names(&c.fqn(), name, ctx.file.class_loader)
             }) {
                 return false;
             }

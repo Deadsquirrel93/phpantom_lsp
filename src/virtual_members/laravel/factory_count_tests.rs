@@ -1,5 +1,6 @@
 use super::*;
 use crate::test_fixtures::{make_class, no_loader};
+use crate::type_engine::resolver::FileCtx;
 use std::cell::Cell;
 
 const FACTORY_BASE_FQN: &str = "Illuminate\\Database\\Eloquent\\Factories\\Factory";
@@ -29,22 +30,7 @@ fn count_ast_of(receiver: &str) -> FactoryCount {
 }
 
 fn resolution_ctx(class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>) -> ResolutionCtx<'_> {
-    ResolutionCtx {
-        current_class: None,
-        all_classes: &[],
-        content: "",
-        cursor_offset: 0,
-        class_loader,
-        source_class_loader: class_loader,
-        source_imports: None,
-        backend: None,
-        laravel_macro_this_resolver: None,
-        resolved_class_cache: None,
-        function_loader: None,
-        scope_var_resolver: None,
-        is_in_static_method: false,
-        preserve_static: false,
-    }
+    ResolutionCtx::new(FileCtx::new("", &[], class_loader, class_loader), None, 0)
 }
 
 fn eloquent_factory_result(name: &str) -> ResolvedType {

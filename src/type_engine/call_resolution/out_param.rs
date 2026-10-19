@@ -38,7 +38,7 @@ use crate::type_engine::conditional_resolution::{
     ConditionalClassContext, TemplateContext, VarClassStringResolver,
     resolve_conditional_with_text_args_and_defaults,
 };
-use crate::type_engine::resolver::{Loaders, ResolutionCtx};
+use crate::type_engine::resolver::{FileCtx, Loaders, ResolutionCtx};
 use crate::type_engine::variable::resolution::VarQuery;
 use crate::types::{ClassInfo, FunctionInfo, ParameterInfo};
 
@@ -264,7 +264,7 @@ pub(crate) fn resolve_out_type_for_call(
             declaring: declaring_fqn.as_deref(),
             written_class: Some(&|name: &str| resolution_ctx.written_names().resolve_class(name)),
         },
-        resolution_ctx.class_loader,
+        resolution_ctx.file.class_loader,
         &tpl,
     )
     .unwrap_or(hint)
@@ -392,16 +392,20 @@ fn read_out_type(
                 crate::type_engine::variable::resolution::resolve_variable_types_in_program(
                     program,
                     VarQuery {
-                        var_name: param_name,
-                        cursor_offset: exit,
-                        content,
-                        current_class: Some(current_class),
-                        all_classes: &file_ctx.classes,
-                        class_loader: &resolved_class_loader,
-                        source_class_loader: &class_loader,
-                        source_imports: Some(use_map),
-                        backend: Some(backend),
                         loaders,
+                        ..VarQuery::new(
+                            param_name,
+                            FileCtx::new(
+                                content,
+                                &file_ctx.classes,
+                                &resolved_class_loader,
+                                &class_loader,
+                            )
+                            .with_imports(Some(use_map))
+                            .with_backend(Some(backend)),
+                            Some(current_class),
+                            exit,
+                        )
                     },
                 )
             })

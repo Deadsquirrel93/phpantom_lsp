@@ -138,7 +138,7 @@ pub(crate) fn resolve_subject_outcome(
         }
 
         // Non-scalar, non-class type — check for unresolvable class.
-        if let Some(unresolved) = check_unresolvable_class_name(&joined, ctx.class_loader) {
+        if let Some(unresolved) = check_unresolvable_class_name(&joined, ctx.file.class_loader) {
             return SubjectOutcome::UnresolvableClass(unresolved);
         }
         return SubjectOutcome::Untyped;
@@ -175,7 +175,7 @@ pub(crate) fn resolve_subject_outcome(
             && let Some(fl) = ctx.function_loader
             && let Some(func_info) = fl(fn_name.as_str(), 0)
             && let Some(ref raw_type) = func_info.return_type
-            && let Some(unresolved) = check_unresolvable_class_name(raw_type, ctx.class_loader)
+            && let Some(unresolved) = check_unresolvable_class_name(raw_type, ctx.file.class_loader)
         {
             return SubjectOutcome::UnresolvableClass(unresolved);
         }
@@ -185,9 +185,14 @@ pub(crate) fn resolve_subject_outcome(
     if let SubjectExpr::PropertyChain { base, property } = &expr {
         let base_arcs = resolved_to_arcs(resolve_target_classes_expr(base, access_kind, ctx));
         for cls in &base_arcs {
-            let merged =
-                resolve_class_fully_maybe_cached(cls, ctx.class_loader, ctx.resolved_class_cache);
-            if let Some(parsed) = resolve_property_type_hint(&merged, property, ctx.class_loader) {
+            let merged = resolve_class_fully_maybe_cached(
+                cls,
+                ctx.file.class_loader,
+                ctx.resolved_class_cache,
+            );
+            if let Some(parsed) =
+                resolve_property_type_hint(&merged, property, ctx.file.class_loader)
+            {
                 if parsed.all_members_primitive_scalar() {
                     let scalar = parsed.non_null_type().unwrap_or(parsed);
                     if access_kind != AccessKind::DoubleColon || !is_all_string_type(&scalar) {
@@ -207,7 +212,8 @@ pub(crate) fn resolve_subject_outcome(
             crate::type_engine::variable::resolution::resolve_variable_php_type(
                 ctx.var_query(var_name),
             )
-        && let Some(unresolved) = check_unresolvable_class_name(&resolved_type, ctx.class_loader)
+        && let Some(unresolved) =
+            check_unresolvable_class_name(&resolved_type, ctx.file.class_loader)
     {
         return SubjectOutcome::UnresolvableClass(unresolved);
     }
@@ -303,7 +309,7 @@ fn declared_return_type_of(
 ) -> Option<PhpType> {
     for cls in classes {
         let resolved =
-            resolve_class_fully_maybe_cached(cls, ctx.class_loader, ctx.resolved_class_cache);
+            resolve_class_fully_maybe_cached(cls, ctx.file.class_loader, ctx.resolved_class_cache);
         if let Some(m) = resolved.get_method_ci(method)
             && let Some(ref hint) = m.return_type
             && accept(hint)

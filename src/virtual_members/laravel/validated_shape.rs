@@ -293,7 +293,7 @@ pub(crate) fn safe_source_class(
         // back to the request variable, then resolve that.
         SubjectExpr::Variable(name) => {
             let request = super::validation_rules::safe_source_variable(
-                ctx.content,
+                ctx.file.content,
                 ctx.cursor_offset as usize,
                 name,
             )?;

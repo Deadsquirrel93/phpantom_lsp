@@ -81,8 +81,8 @@ fn resolve_static_property_key_type(
     let owners = crate::type_engine::type_resolution::type_hint_to_classes_typed(
         &PhpType::named(crate::atom::atom(&class_name)),
         &ctx.current_class.fqn(),
-        ctx.all_classes,
-        ctx.class_loader,
+        ctx.file.all_classes,
+        ctx.file.class_loader,
     );
     for owner in &owners {
         let resolved = static_property_hint_of(owner, prop_name, ctx);
@@ -100,7 +100,7 @@ fn static_property_hint_of(
     ctx: &ForwardWalkCtx<'_>,
 ) -> Vec<ResolvedType> {
     let Some(hint) =
-        crate::inheritance::resolve_property_type_hint(owner, prop_name, ctx.class_loader)
+        crate::inheritance::resolve_property_type_hint(owner, prop_name, ctx.file.class_loader)
     else {
         return Vec::new();
     };
@@ -207,9 +207,9 @@ fn resolve_member_key_type(
             continue;
         };
         let type_hint = if is_call {
-            crate::inheritance::resolve_method_return_type(cls, member_name, ctx.class_loader)
+            crate::inheritance::resolve_method_return_type(cls, member_name, ctx.file.class_loader)
         } else {
-            crate::inheritance::resolve_property_type_hint(cls, member_name, ctx.class_loader)
+            crate::inheritance::resolve_property_type_hint(cls, member_name, ctx.file.class_loader)
         };
         let Some(hint) = type_hint else {
             continue;
@@ -227,11 +227,11 @@ fn resolve_member_key_type(
         let resolved_classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
             &hint,
             &ctx.current_class.fqn(),
-            ctx.all_classes,
-            ctx.class_loader,
+            ctx.file.all_classes,
+            ctx.file.class_loader,
         );
         if resolved_classes.is_empty() {
-            if is_call && !hint_says_what_it_says(&hint, ctx.class_loader) {
+            if is_call && !hint_says_what_it_says(&hint, ctx.file.class_loader) {
                 continue;
             }
             ResolvedType::extend_unique(

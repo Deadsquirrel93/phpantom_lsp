@@ -182,8 +182,8 @@ fn receiver_classes(
         }
         return super::super::closure_resolution::find_owner_by_name(
             &ctx.current_class.fqn(),
-            ctx.all_classes,
-            ctx.class_loader,
+            ctx.file.all_classes,
+            ctx.file.class_loader,
         )
         .into_iter()
         .collect();
@@ -239,7 +239,7 @@ fn method_runs_callable_immediately(
 ) -> bool {
     let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
         class,
-        ctx.class_loader,
+        ctx.file.class_loader,
         ctx.resolved_class_cache,
     );
     merged
@@ -609,7 +609,7 @@ fn method_call_on<'b>(
     classes.iter().find_map(|class| {
         let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
             class,
-            ctx.class_loader,
+            ctx.file.class_loader,
             ctx.resolved_class_cache,
         );
         let parameters = merged.get_method(method_name)?.parameters.clone();

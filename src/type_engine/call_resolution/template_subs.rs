@@ -48,7 +48,7 @@ impl Backend {
             _ => {
                 let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
                     class_info,
-                    ctx.class_loader,
+                    ctx.file.class_loader,
                     ctx.resolved_class_cache,
                 );
                 merged
@@ -338,7 +338,7 @@ fn ancestor_bound_binding(
         subject,
         &g.name,
         position,
-        ctx.class_loader,
+        ctx.file.class_loader,
     )
 }
 
@@ -424,7 +424,7 @@ fn drop_bindings_outside_bounds(
                 TypeKind::Generic(g) if !crate::php_type::is_keyword_type(&g.name) => g.name,
                 _ => return None,
             };
-            if template_params.contains(&name) || (ctx.class_loader)(&name).is_none() {
+            if template_params.contains(&name) || (ctx.file.class_loader)(&name).is_none() {
                 return None;
             }
             names.push(name);
@@ -444,9 +444,9 @@ fn drop_bindings_outside_bounds(
             continue;
         };
         let satisfies = bound_to_classes.iter().all(|sub| {
-            bound_classes
-                .iter()
-                .any(|sup| crate::class_lookup::is_subtype_of_names(sub, sup, ctx.class_loader))
+            bound_classes.iter().any(|sup| {
+                crate::class_lookup::is_subtype_of_names(sub, sup, ctx.file.class_loader)
+            })
         });
         if !satisfies {
             subs.remove(tpl_name.as_str());
@@ -832,7 +832,7 @@ mod class_template_sub_tests {
     use super::build_call_template_subs;
     use crate::atom::atom;
     use crate::php_type::PhpType;
-    use crate::type_engine::resolver::ResolutionCtx;
+    use crate::type_engine::resolver::{FileCtx, ResolutionCtx};
     use crate::types::ClassInfo;
 
     #[test]
@@ -847,22 +847,11 @@ mod class_template_sub_tests {
         };
         let classes = Vec::new();
         let class_loader = |_: &str| -> Option<Arc<ClassInfo>> { None };
-        let ctx = ResolutionCtx {
-            current_class: None,
-            all_classes: &classes,
-            content: "",
-            cursor_offset: 0,
-            class_loader: &class_loader,
-            source_class_loader: &class_loader,
-            source_imports: None,
-            backend: None,
-            laravel_macro_this_resolver: None,
-            resolved_class_cache: None,
-            function_loader: None,
-            scope_var_resolver: None,
-            is_in_static_method: false,
-            preserve_static: false,
-        };
+        let ctx = ResolutionCtx::new(
+            FileCtx::new("", &classes, &class_loader, &class_loader),
+            None,
+            0,
+        );
 
         assert!(
             build_call_template_subs(&owner, "send", &[], Some(&PhpType::parse("static")), &ctx,)

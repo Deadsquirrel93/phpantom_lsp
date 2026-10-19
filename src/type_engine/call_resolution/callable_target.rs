@@ -13,7 +13,7 @@ use crate::types::*;
 
 use crate::text_position::position_to_offset;
 use crate::type_engine::conditional_resolution::TemplateContext;
-use crate::type_engine::resolver::{CtxLoaders, ResolutionCtx};
+use crate::type_engine::resolver::{CtxLoaders, FileCtx, ResolutionCtx};
 
 use tower_lsp::lsp_types::Position;
 
@@ -47,7 +47,7 @@ impl Backend {
             param.type_hint.as_ref().and_then(|hint| {
                 crate::virtual_members::laravel::replace_eloquent_collections_in_param_type(
                     hint,
-                    rctx.class_loader,
+                    rctx.file.class_loader,
                 )
             })
         };
@@ -112,7 +112,7 @@ impl Backend {
                         declaring: Some(owner.fqn().as_str()),
                         written_class: Some(&|name: &str| rctx.written_names().resolve_class(name)),
                     },
-                    rctx.class_loader,
+                    rctx.file.class_loader,
                     &tpl,
                 );
             bound.return_type = Some(evaluated);
@@ -232,7 +232,7 @@ impl Backend {
             // re-substituting hundreds of virtual members each time.
             let effective = crate::virtual_members::resolve_class_fully_with_generics(
                 &owner,
-                rctx.class_loader,
+                rctx.file.class_loader,
                 rctx.resolved_class_cache,
                 &generic_arg_strings,
                 &generic_args,
@@ -330,14 +330,14 @@ impl Backend {
             let args = type_args.unwrap_or_else(|| crate::inheritance::default_type_args(&owner));
             crate::virtual_members::resolve_class_fully_with_type_args(
                 &owner,
-                rctx.class_loader,
+                rctx.file.class_loader,
                 rctx.resolved_class_cache,
                 &args,
             )
         } else {
             crate::virtual_members::resolve_class_fully_maybe_cached(
                 &owner,
-                rctx.class_loader,
+                rctx.file.class_loader,
                 rctx.resolved_class_cache,
             )
         };
@@ -621,17 +621,16 @@ impl Backend {
         let laravel_macro_this_resolver = self.laravel_macro_this_resolver(&class_loader);
 
         let rctx = self.resolution_ctx_at(
-            current_class,
-            &file_ctx.classes,
-            content,
-            cursor_offset,
-            CtxLoaders::new(
+            FileCtx::new(
+                content,
+                &file_ctx.classes,
                 &resolved_class_loader,
                 &class_loader,
-                &function_loader_cl,
-                &laravel_macro_this_resolver,
             )
-            .with_imports(use_map),
+            .with_imports(Some(use_map)),
+            current_class,
+            cursor_offset,
+            CtxLoaders::new(&function_loader_cl, &laravel_macro_this_resolver),
         );
 
         // ── Invoked value: `($this->handler)(…)` ──────────────────
@@ -848,7 +847,7 @@ pub(crate) fn invoked_value_types(
             ),
         );
         types.extend(owners.iter().filter_map(|owner| {
-            crate::inheritance::resolve_property_type_hint(owner, property, ctx.class_loader)
+            crate::inheritance::resolve_property_type_hint(owner, property, ctx.file.class_loader)
         }));
     }
     types

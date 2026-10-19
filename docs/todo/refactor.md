@@ -211,35 +211,6 @@ Each item must include:
 
 # Outstanding items
 
-### One file context for the type engine
-
-`ResolutionCtx`, `CtxLoaders`, `VarResolutionCtx`
-(`type_engine/resolver/context.rs`), `VarQuery`
-(`type_engine/variable/resolution.rs`) and `ForwardWalkCtx`
-(`forward_walk/walk_ctx.rs`) repeat the same fields: the content, the
-cursor offset, the current class, `all_classes`, the two class loaders, the
-source imports and the backend. They are built by hand in more than 90
-places, and the conversions between them drop state without saying so:
-`as_resolution_ctx` hard-codes `is_in_static_method: false`,
-`preserve_static: false` and `laravel_macro_this_resolver: None`. Pull the
-shared fields into one borrowed `FileCtx<'a>` that each context holds by
-reference, give each its own extras on top, and add constructors so call
-sites stop listing fields.
-
-The cursor offset and the current class are better left on each context:
-they change between the copies one resolution makes, and the contexts do
-not agree on the class's type (`Option<&ClassInfo>` in `ResolutionCtx` and
-`VarQuery`, `&ClassInfo` in the other two). That leaves the content,
-`all_classes`, both class loaders, the source imports and the backend for
-`FileCtx`. Moving them touches about 610 field reads, which the compiler's
-`no field` errors locate exactly, and about 190 struct literals, which
-have to be regrouped by hand or script.
-
-Files: `src/type_engine/resolver/context.rs`,
-`src/type_engine/variable/resolution.rs`,
-`src/type_engine/variable/forward_walk/walk_ctx.rs`, and their
-construction sites (including `resolution_tests.rs`).
-
 ### Type call arguments from the AST, not their text
 
 `resolve_arg_text_to_type` (`type_engine/call_resolution/arg_text_types.rs`),

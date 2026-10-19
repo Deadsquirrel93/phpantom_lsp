@@ -407,7 +407,11 @@ fn merge_if_branches(
         // Simplify unions where a child class is merged with its
         // parent — e.g. `ClassResolvesBackChild | ClassResolvesBack`
         // collapses to `ClassResolvesBack`.
-        simplify_class_hierarchy_unions(&mut merged, &surviving_scopes[0].locals, ctx.class_loader);
+        simplify_class_hierarchy_unions(
+            &mut merged,
+            &surviving_scopes[0].locals,
+            ctx.file.class_loader,
+        );
     }
     *scope = merged;
 
@@ -521,10 +525,10 @@ pub(crate) fn branch_exits_stmts<'s>(
     };
     let exit_ctx = condition_facts::ExitCtx {
         current_class: ctx.current_class,
-        all_classes: ctx.all_classes,
-        class_loader: ctx.class_loader,
-        source_class_loader: ctx.source_class_loader,
-        source_imports: ctx.source_imports,
+        all_classes: ctx.file.all_classes,
+        class_loader: ctx.file.class_loader,
+        source_class_loader: ctx.file.source_class_loader,
+        source_imports: ctx.file.source_imports,
         function_loader: ctx.loaders.function_loader,
         resolved_class_cache: ctx.resolved_class_cache,
         var_types: Some(&var_types),

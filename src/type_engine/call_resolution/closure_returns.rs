@@ -163,7 +163,7 @@ impl Backend {
         // spelling has to be canonicalised before it is bound.
         let declared = ctx.written_names().resolve_hint(&declared);
         let narrowed = body_type().filter(|body| {
-            crate::class_lookup::is_subtype_of_typed(body, &declared, ctx.class_loader)
+            crate::class_lookup::is_subtype_of_typed(body, &declared, ctx.file.class_loader)
         });
         Some(narrowed.unwrap_or(declared))
     }
@@ -236,7 +236,7 @@ impl Backend {
                             if crate::class_lookup::is_subtype_of_typed(
                                 seed,
                                 &declared,
-                                ctx.class_loader,
+                                ctx.file.class_loader,
                             ) =>
                         {
                             seed.clone()
@@ -261,8 +261,8 @@ impl Backend {
             let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
                 &ty,
                 owning_class_name,
-                ctx.all_classes,
-                ctx.class_loader,
+                ctx.file.all_classes,
+                ctx.file.class_loader,
             );
             if classes.is_empty() {
                 vec![ResolvedType::from_type_string(ty)]
@@ -329,20 +329,13 @@ impl Backend {
         };
 
         let param_ctx = ResolutionCtx {
-            current_class: ctx.current_class,
-            all_classes: ctx.all_classes,
-            content: ctx.content,
-            cursor_offset: ctx.cursor_offset,
-            class_loader: ctx.class_loader,
-            source_class_loader: ctx.source_class_loader,
-            source_imports: ctx.source_imports,
-            backend: ctx.backend,
             laravel_macro_this_resolver: ctx.laravel_macro_this_resolver,
             resolved_class_cache: ctx.resolved_class_cache,
             function_loader: ctx.function_loader,
             scope_var_resolver: Some(&param_aware_resolver),
             is_in_static_method: ctx.is_in_static_method,
             preserve_static: ctx.preserve_static,
+            ..ResolutionCtx::new(ctx.file, ctx.current_class, ctx.cursor_offset)
         };
         let mut members = Vec::with_capacity(returns.len());
         for ret in &returns {
@@ -415,23 +408,16 @@ fn walk_closure_body_locals(
                 }
             };
 
+            let flow = WalkFlow::default();
             let fw_ctx = ForwardWalkCtx {
-                current_class,
-                all_classes: ctx.all_classes,
-                content,
-                cursor_offset: u32::MAX,
-                class_loader: ctx.class_loader,
-                source_class_loader: ctx.source_class_loader,
-                source_imports: ctx.source_imports,
-                backend: ctx.backend,
                 loaders: Loaders::with_function(ctx.function_loader),
                 resolved_class_cache: ctx.resolved_class_cache,
-                enclosing_return_type: None,
-                top_level_scope: None,
-                in_loop: false,
-                template_markers: None,
-                cursor_scope: None,
-                flow: &WalkFlow::default(),
+                ..ForwardWalkCtx::new(
+                    ctx.file.with_source(content, ctx.file.all_classes),
+                    current_class,
+                    u32::MAX,
+                    &flow,
+                )
             };
 
             let mut scope = ScopeState::new();

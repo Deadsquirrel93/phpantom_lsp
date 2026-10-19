@@ -17,7 +17,7 @@ use crate::code_actions::cursor_context::{FunctionKinds, FunctionLike, find_encl
 use crate::parser::with_parsed_program;
 use crate::php_type::PhpType;
 use crate::return_collection::collect_returns;
-use crate::type_engine::resolver::{Loaders, SourceImports, VarResolutionCtx};
+use crate::type_engine::resolver::{FileCtx, Loaders, SourceImports, VarResolutionCtx};
 use crate::type_engine::variable::iterable_elements::resolve_expression_type;
 use crate::types::{ClassInfo, FunctionLoader};
 
@@ -192,17 +192,14 @@ fn infer_return_type_at(
                 }
 
                 let ctx = VarResolutionCtx {
-                    source_imports,
-                    backend,
                     loaders: Loaders::with_function(function_loader),
                     ..VarResolutionCtx::new(
                         "",
+                        FileCtx::new(content, local_classes, &resolved_class_loader, class_loader)
+                            .with_imports(source_imports)
+                            .with_backend(backend),
                         enclosing_class,
-                        local_classes,
-                        content,
                         start as u32,
-                        &resolved_class_loader,
-                        class_loader,
                     )
                 };
 

@@ -355,9 +355,17 @@ pub(super) fn apply_assertion_to_key(
     if let Some(kind) = condition_facts::scalar_assert_guard_kind(asserted_type) {
         exhaustible = true;
         if should_exclude {
-            condition_facts::apply_type_guard_exclusion(kind, &mut results, Some(ctx.class_loader));
+            condition_facts::apply_type_guard_exclusion(
+                kind,
+                &mut results,
+                Some(ctx.file.class_loader),
+            );
         } else {
-            condition_facts::apply_type_guard_inclusion(kind, &mut results, Some(ctx.class_loader));
+            condition_facts::apply_type_guard_inclusion(
+                kind,
+                &mut results,
+                Some(ctx.file.class_loader),
+            );
         }
     } else if should_exclude && matches!(asserted_type.kind(), TypeKind::Union(_)) {
         // Ruling out a union rules out every member, so each one narrows on
@@ -374,7 +382,7 @@ pub(super) fn apply_assertion_to_key(
                 condition_facts::apply_type_guard_exclusion(
                     kind,
                     &mut results,
-                    Some(ctx.class_loader),
+                    Some(ctx.file.class_loader),
                 );
             } else {
                 ResolvedType::apply_narrowing(&mut results, |classes| {

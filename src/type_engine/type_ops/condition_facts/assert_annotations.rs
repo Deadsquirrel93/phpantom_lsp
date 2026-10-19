@@ -128,7 +128,7 @@ pub(super) fn resolve_static_receiver_class(
     ctx: &VarResolutionCtx<'_>,
 ) -> Option<Arc<ClassInfo>> {
     ctx.written_names()
-        .static_receiver_class(class_expr, ctx.class_loader)
+        .static_receiver_class(class_expr, ctx.file.class_loader)
 }
 
 /// Resolve the receiver class of an instance method call (the `$x` in
@@ -147,11 +147,11 @@ pub(super) fn resolve_instance_receiver_class(
     // Variable names carry the leading `$` (e.g. `$this`, `$obj`).
     let name = bytes_to_str(dv.name);
     if name == "$this" {
-        return (ctx.class_loader)(&ctx.current_class.fqn());
+        return (ctx.file.class_loader)(&ctx.current_class.fqn());
     }
     let resolver = ctx.scope_var_resolver?;
     let first = resolver(name).into_iter().next()?;
-    (ctx.class_loader)(&first.type_string.to_string())
+    (ctx.file.class_loader)(&first.type_string.to_string())
 }
 
 /// The assertions an instance method call carries, for either arrow.
@@ -194,8 +194,13 @@ fn build_method_assertion_info<'a>(
     receiver_key: Option<String>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Option<CallAssertionInfo<'a>> {
-    let (method, _) =
-        find_assertion_method_in_chain(class, method_name, ctx.class_loader, &mut Vec::new(), 0)?;
+    let (method, _) = find_assertion_method_in_chain(
+        class,
+        method_name,
+        ctx.file.class_loader,
+        &mut Vec::new(),
+        0,
+    )?;
     let extras = method.extras.as_deref();
     Some(CallAssertionInfo {
         assertions: extras
@@ -619,7 +624,7 @@ pub(in crate::type_engine) fn phpunit_assertion<'a>(
     let (method, declaring) = find_method_in_chain_where(
         &class_info,
         method_name,
-        ctx.class_loader,
+        ctx.file.class_loader,
         &|_| true,
         &mut Vec::new(),
         0,

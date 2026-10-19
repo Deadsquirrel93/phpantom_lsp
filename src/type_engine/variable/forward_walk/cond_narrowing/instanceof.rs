@@ -21,8 +21,8 @@ pub(super) fn exclude_classes_in_scope(
         crate::type_engine::type_resolution::resolved_types_for_hint(
             hint,
             &var_ctx.current_class.fqn(),
-            var_ctx.all_classes,
-            var_ctx.class_loader,
+            var_ctx.file.all_classes,
+            var_ctx.file.class_loader,
         )
     };
     let mut results = split_iterable_alternatives(scope.get(var_name), resolve)
@@ -110,7 +110,7 @@ fn opaque_named_alternatives(
             let TypeKind::Named(name) = member.kind() else {
                 return None;
             };
-            if crate::php_type::is_keyword_type(name) || (ctx.class_loader)(name).is_some() {
+            if crate::php_type::is_keyword_type(name) || (ctx.file.class_loader)(name).is_some() {
                 return None;
             }
             if !names.contains(member) {
@@ -561,7 +561,11 @@ pub(super) fn commit_instanceof_narrowing(
         && !narrowed_fqns.iter().any(|checked| {
             existing.iter().any(|rt| {
                 rt.class_info.as_ref().is_some_and(|cls| {
-                    crate::class_lookup::is_subtype_of_names(checked, &cls.fqn(), ctx.class_loader)
+                    crate::class_lookup::is_subtype_of_names(
+                        checked,
+                        &cls.fqn(),
+                        ctx.file.class_loader,
+                    )
                 })
             })
         })
@@ -689,7 +693,8 @@ fn filter_to_checked_classes(
     let passes_check = |fqn: &str| {
         narrowed_fqns.iter().any(|n| {
             n == fqn
-                || (!exact && crate::class_lookup::is_subtype_of_names(fqn, n, ctx.class_loader))
+                || (!exact
+                    && crate::class_lookup::is_subtype_of_names(fqn, n, ctx.file.class_loader))
         })
     };
     let survives = |name: &str| {
@@ -737,8 +742,11 @@ fn filter_to_checked_classes(
             };
             // A checked class below this alternative is what that half
             // narrows to: `Animal&Dog` is just `Dog`.
-            if crate::class_lookup::is_subtype_of_names(&checked_cls.fqn(), &fqn, ctx.class_loader)
-            {
+            if crate::class_lookup::is_subtype_of_names(
+                &checked_cls.fqn(),
+                &fqn,
+                ctx.file.class_loader,
+            ) {
                 if !filtered.iter().any(|f| {
                     f.class_info
                         .as_ref()

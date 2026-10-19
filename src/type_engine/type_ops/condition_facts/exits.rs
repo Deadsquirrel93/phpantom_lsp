@@ -169,9 +169,9 @@ pub(in crate::type_engine) struct ExitCtx<'a> {
     /// namespace block declares.
     pub all_classes: &'a [Arc<ClassInfo>],
     pub class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    /// See [`ResolutionCtx::source_class_loader`](crate::type_engine::resolver::ResolutionCtx::source_class_loader).
+    /// See [`FileCtx::source_class_loader`](crate::type_engine::resolver::FileCtx::source_class_loader).
     pub source_class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    /// See [`ResolutionCtx::source_imports`](crate::type_engine::resolver::ResolutionCtx::source_imports).
+    /// See [`FileCtx::source_imports`](crate::type_engine::resolver::FileCtx::source_imports).
     pub source_imports: crate::type_engine::resolver::SourceImports<'a>,
     pub function_loader: FunctionLoaderFn<'a>,
     pub resolved_class_cache: Option<&'a crate::virtual_members::ResolvedClassCache>,

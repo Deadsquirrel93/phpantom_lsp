@@ -19,8 +19,7 @@ use crate::parser::with_parsed_program;
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::{ClassInfo, ResolvedType};
 
-use crate::Backend;
-use crate::type_engine::resolver::{Loaders, SourceImports, VarResolutionCtx, WrittenNames};
+use crate::type_engine::resolver::{FileCtx, Loaders, VarResolutionCtx};
 
 mod arguments;
 mod cursor_declarations;
@@ -123,36 +122,39 @@ pub(super) fn enrich_builder_type_in_scope(
 /// project one out of the contexts that already hold the inputs.
 #[derive(Clone, Copy)]
 pub(crate) struct VarQuery<'a> {
+    /// The file the variable is read in.
+    pub file: FileCtx<'a>,
     pub var_name: &'a str,
     pub cursor_offset: u32,
-    pub content: &'a str,
     pub current_class: Option<&'a ClassInfo>,
-    pub all_classes: &'a [Arc<ClassInfo>],
-    pub class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    pub source_class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    pub source_imports: SourceImports<'a>,
-    pub backend: Option<&'a Backend>,
     pub loaders: Loaders<'a>,
 }
 
-impl VarQuery<'_> {
+impl<'a> VarQuery<'a> {
+    /// A query for `var_name` at `cursor_offset` of `file`, read inside
+    /// `current_class`, with no loaders beyond the file's.
+    pub(crate) fn new(
+        var_name: &'a str,
+        file: FileCtx<'a>,
+        current_class: Option<&'a ClassInfo>,
+        cursor_offset: u32,
+    ) -> Self {
+        Self {
+            file,
+            var_name,
+            cursor_offset,
+            current_class,
+            loaders: Loaders::default(),
+        }
+    }
+
     /// The forward walker's context for this query, read inside
     /// `current_class`.
     fn var_ctx<'q>(&'q self, current_class: &'q ClassInfo) -> VarResolutionCtx<'q> {
         VarResolutionCtx {
-            source_imports: self.source_imports,
-            backend: self.backend,
             loaders: self.loaders,
             resolved_class_cache: crate::virtual_members::active_resolved_class_cache(),
-            ..VarResolutionCtx::new(
-                self.var_name,
-                current_class,
-                self.all_classes,
-                self.content,
-                self.cursor_offset,
-                self.class_loader,
-                self.source_class_loader,
-            )
+            ..VarResolutionCtx::new(self.var_name, self.file, current_class, self.cursor_offset)
         }
     }
 }
@@ -163,7 +165,7 @@ fn query_class<'q>(query: &VarQuery<'q>, slot: &'q mut Option<ClassInfo>) -> &'q
     match query.current_class {
         Some(cls) => cls,
         None => slot.insert(crate::class_lookup::class_context_placeholder(
-            query.content,
+            query.file.content,
             query.cursor_offset,
         )),
     }
@@ -179,9 +181,9 @@ pub(crate) fn resolve_variable_types(query: VarQuery<'_>) -> Vec<ResolvedType> {
     let VarQuery {
         var_name,
         cursor_offset,
-        content,
         ..
     } = query;
+    let content = query.file.content;
 
     // ── Diagnostic scope cache fast path ─────────────────────────
     // When the diagnostic scope cache is active (populated by
@@ -272,27 +274,22 @@ pub(crate) fn resolve_variable_php_type(query: VarQuery<'_>) -> Option<PhpType> 
     let VarQuery {
         var_name,
         cursor_offset,
+        file,
+        ..
+    } = query;
+    let FileCtx {
         content,
         class_loader,
         source_class_loader,
         ..
-    } = query;
+    } = file;
     let prefixed = if var_name.starts_with('$') {
         var_name.to_owned()
     } else {
         format!("${}", var_name)
     };
 
-    let written_names = || {
-        WrittenNames::new(
-            query.current_class,
-            query.all_classes,
-            content,
-            cursor_offset,
-            query.source_imports,
-            source_class_loader,
-        )
-    };
+    let written_names = || file.written_names(query.current_class, cursor_offset);
 
     // 1. Forward walker resolution.
     let mut placeholder = None;
@@ -341,13 +338,13 @@ pub(in crate::type_engine) fn resolve_variable_in_statements<'b>(
     // `global` keyword.  When the cursor turns out to be at the top level
     // (not inside any class or function), this scope is also reused for
     // the variable lookup, avoiding a redundant second forward walk.
-    let file_has_global_keyword = ctx.content.contains("global ");
+    let file_has_global_keyword = ctx.file.content.contains("global ");
     let top_level_scope = if ctx.top_level_scope.is_none() && file_has_global_keyword {
         // Guard 1: prevent re-entrant top-level scope construction for
         // the same file.  RHS resolution during the walk can trigger
         // another resolve_variable_types call, which would start a
         // second top-level walk on the same file content.
-        if let Some(_tl_guard) = try_acquire_top_level_guard(ctx.content) {
+        if let Some(_tl_guard) = try_acquire_top_level_guard(ctx.file.content) {
             let flow = super::forward_walk::WalkFlow::default();
             let tl_fw_ctx = super::forward_walk::ForwardWalkCtx {
                 cursor_offset: u32::MAX,

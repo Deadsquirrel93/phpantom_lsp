@@ -151,8 +151,8 @@ fn builtin_function_call(
     {
         return Some(vec![resolved_type_with_lookup(
             folded,
-            ctx.all_classes,
-            ctx.class_loader,
+            ctx.file.all_classes,
+            ctx.file.class_loader,
         )]);
     }
 
@@ -215,7 +215,7 @@ fn named_function_call<'b>(
         // argument's resolved type, so the branch a call takes matches
         // what it was actually handed.
         let arg_ty_resolver = |t: &str| Backend::resolve_arg_text_to_type(t, &rctx);
-        let arg_texts = extract_arg_texts_from_ast(argument_list, ctx.content);
+        let arg_texts = extract_arg_texts_from_ast(argument_list, ctx.file.content);
         let text_args = arg_texts.join(", ");
         let resolved_type = func_info.conditional_return.as_ref().and_then(|cond| {
             let tpl = crate::type_engine::type_ops::conditional::TemplateContext {
@@ -235,7 +235,7 @@ fn named_function_call<'b>(
                     declaring: None,
                     written_class: Some(&|name: &str| ctx.written_names().resolve_class(name)),
                 },
-                ctx.class_loader,
+                ctx.file.class_loader,
                 &tpl,
             )
         })
@@ -279,7 +279,7 @@ fn named_function_call<'b>(
     if !func_info.template_params.is_empty()
         && let Some(ref ret) = func_info.return_type
     {
-        let arg_texts = extract_arg_texts_from_ast(argument_list, ctx.content);
+        let arg_texts = extract_arg_texts_from_ast(argument_list, ctx.file.content);
         let rctx = ctx.as_resolution_ctx();
         let walker_types = walker_arg_types(argument_list, ctx);
         let subs = build_function_template_subs(&func_info, &arg_texts, Some(&walker_types), &rctx);
@@ -288,8 +288,8 @@ fn named_function_call<'b>(
             let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
                 &substituted,
                 current_class_name,
-                ctx.all_classes,
-                ctx.class_loader,
+                ctx.file.all_classes,
+                ctx.file.class_loader,
             );
             if !resolved.is_empty() {
                 return Some(ResolvedType::from_classes_with_hint(resolved, substituted));
@@ -352,8 +352,8 @@ fn expression_invocation<'b>(
         let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
             &parsed_ret_type,
             &ctx.current_class.fqn(),
-            ctx.all_classes,
-            ctx.class_loader,
+            ctx.file.all_classes,
+            ctx.file.class_loader,
         );
         if !resolved.is_empty() {
             return ResolvedType::from_classes_with_hint(resolved, parsed_ret_type);
@@ -506,13 +506,13 @@ fn array_callable_return(callable: &PhpType, ctx: &VarResolutionCtx<'_>) -> Vec<
     let owners = crate::type_engine::type_resolution::type_hint_to_classes_typed(
         &receiver.value_type,
         &ctx.current_class.fqn(),
-        ctx.all_classes,
-        ctx.class_loader,
+        ctx.file.all_classes,
+        ctx.file.class_loader,
     );
     for owner in &owners {
         let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
             owner,
-            ctx.class_loader,
+            ctx.file.class_loader,
             ctx.resolved_class_cache,
         );
         if let Some(ret) = merged

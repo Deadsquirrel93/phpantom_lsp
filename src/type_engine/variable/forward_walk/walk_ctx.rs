@@ -10,7 +10,9 @@ use std::sync::Arc;
 use mago_span::HasSpan;
 
 use crate::php_type::PhpType;
-use crate::type_engine::resolver::{Loaders, VarResolutionCtx, WrittenNames};
+use crate::type_engine::resolver::{
+    FileCtx, Loaders, ResolutionCtx, VarResolutionCtx, WrittenNames,
+};
 use crate::types::{ClassInfo, ResolvedType};
 
 /// The control-flow state of one forward walk.
@@ -65,25 +67,14 @@ impl WalkFlow {
 /// walk's control flow is the [`WalkFlow`] it borrows.
 #[derive(Clone)]
 pub(crate) struct ForwardWalkCtx<'a> {
+    /// The file being walked.
+    pub file: FileCtx<'a>,
     /// The class containing the method being analyzed (or a dummy for
     /// top-level functions).
     pub current_class: &'a ClassInfo,
-    /// All classes known in the current file.
-    pub all_classes: &'a [Arc<ClassInfo>],
-    /// Full source text of the current file.
-    pub content: &'a str,
     /// Byte offset of the cursor.  The walk stops when a statement's
     /// start offset reaches or exceeds this value.
     pub cursor_offset: u32,
-    /// Cross-file class resolution callback for already-resolved names.
-    pub class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    /// See [`ResolutionCtx::source_class_loader`](crate::type_engine::resolver::ResolutionCtx::source_class_loader).
-    pub source_class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    /// See [`ResolutionCtx::source_imports`](crate::type_engine::resolver::ResolutionCtx::source_imports).
-    pub source_imports: crate::type_engine::resolver::SourceImports<'a>,
-    /// Server state for project-wide answers.  See
-    /// [`ResolutionCtx::backend`](crate::type_engine::resolver::ResolutionCtx::backend).
-    pub backend: Option<&'a crate::Backend>,
     /// Cross-file loader callbacks (function loader, constant loader).
     pub loaders: Loaders<'a>,
     /// Shared cache of fully-resolved classes.
@@ -161,6 +152,30 @@ impl CursorScope {
 }
 
 impl<'a> ForwardWalkCtx<'a> {
+    /// A walk to `cursor_offset` of `file` inside `current_class`, with
+    /// no loaders beyond the file's, no resolved-class cache and none of
+    /// the per-body state (see [`Self::fresh`]).
+    pub(crate) fn new(
+        file: FileCtx<'a>,
+        current_class: &'a ClassInfo,
+        cursor_offset: u32,
+        flow: &'a WalkFlow,
+    ) -> Self {
+        ForwardWalkCtx {
+            file,
+            current_class,
+            cursor_offset,
+            loaders: Loaders::default(),
+            resolved_class_cache: None,
+            enclosing_return_type: None,
+            top_level_scope: None,
+            in_loop: false,
+            template_markers: None,
+            cursor_scope: None,
+            flow,
+        }
+    }
+
     /// Type `hint` against this walk's classes: the classes it names, or
     /// the bare type string when it names none.
     ///
@@ -169,21 +184,15 @@ impl<'a> ForwardWalkCtx<'a> {
         crate::type_engine::type_resolution::resolved_types_for_hint(
             hint,
             &self.current_class.fqn(),
-            self.all_classes,
-            self.class_loader,
+            self.file.all_classes,
+            self.file.class_loader,
         )
     }
 
     /// How a class name written at the cursor reads.
     pub(in crate::type_engine) fn written_names(&self) -> WrittenNames<'a> {
-        WrittenNames::new(
-            Some(self.current_class),
-            self.all_classes,
-            self.content,
-            self.cursor_offset,
-            self.source_imports,
-            self.source_class_loader,
-        )
+        self.file
+            .written_names(Some(self.current_class), self.cursor_offset)
     }
 
     /// Build a walk context from a variable-resolution context.
@@ -210,22 +219,9 @@ impl<'a> ForwardWalkCtx<'a> {
         flow: &'a WalkFlow,
     ) -> ForwardWalkCtx<'a> {
         ForwardWalkCtx {
-            current_class: ctx.current_class,
-            all_classes: ctx.all_classes,
-            content: ctx.content,
-            cursor_offset: ctx.cursor_offset,
-            class_loader: ctx.class_loader,
-            source_class_loader: ctx.source_class_loader,
-            source_imports: ctx.source_imports,
-            backend: ctx.backend,
             loaders: ctx.loaders,
             resolved_class_cache: ctx.resolved_class_cache,
-            enclosing_return_type: None,
-            top_level_scope: None,
-            in_loop: false,
-            template_markers: None,
-            cursor_scope: None,
-            flow,
+            ..Self::new(ctx.file, ctx.current_class, ctx.cursor_offset, flow)
         }
     }
 
@@ -289,12 +285,15 @@ impl<'a> ForwardWalkCtx<'a> {
         let names = self.written_names();
         ForwardWalkCtx {
             template_markers: declaration_template_markers(
-                self.content,
+                self.file.content,
                 decl_start as usize,
                 &names,
             ),
-            enclosing_return_type: declared_return_docblock_type(self.content, decl_start as usize)
-                .map(|ty| names.resolve_type(&ty)),
+            enclosing_return_type: declared_return_docblock_type(
+                self.file.content,
+                decl_start as usize,
+            )
+            .map(|ty| names.resolve_type(&ty)),
             top_level_scope: self.top_level_scope.clone(),
             ..*self
         }
@@ -307,22 +306,11 @@ impl<'a> ForwardWalkCtx<'a> {
     /// the *declarations* around the walk (a constant behind a type
     /// operator, a class behind a name) rather than the values flowing
     /// through it.
-    pub(crate) fn as_resolution_ctx(&self) -> crate::type_engine::resolver::ResolutionCtx<'_> {
-        crate::type_engine::resolver::ResolutionCtx {
-            current_class: Some(self.current_class),
-            all_classes: self.all_classes,
-            content: self.content,
-            cursor_offset: self.cursor_offset,
-            class_loader: self.class_loader,
-            source_class_loader: self.source_class_loader,
-            source_imports: self.source_imports,
-            backend: self.backend,
-            laravel_macro_this_resolver: None,
+    pub(crate) fn as_resolution_ctx(&self) -> ResolutionCtx<'_> {
+        ResolutionCtx {
             function_loader: self.loaders.function_loader,
             resolved_class_cache: self.resolved_class_cache,
-            scope_var_resolver: None,
-            is_in_static_method: false,
-            preserve_static: false,
+            ..ResolutionCtx::new(self.file, Some(self.current_class), self.cursor_offset)
         }
     }
 
@@ -342,23 +330,13 @@ impl<'a> ForwardWalkCtx<'a> {
         'a: 'b,
     {
         VarResolutionCtx {
-            source_imports: self.source_imports,
-            backend: self.backend,
             loaders: self.loaders,
             resolved_class_cache: self.resolved_class_cache,
             enclosing_return_type: self.enclosing_return_type.clone(),
             top_level_scope: self.top_level_scope.clone(),
             scope_var_resolver: Some(scope_resolver),
             scope_proofs,
-            ..VarResolutionCtx::new(
-                var_name,
-                self.current_class,
-                self.all_classes,
-                self.content,
-                cursor_offset,
-                self.class_loader,
-                self.source_class_loader,
-            )
+            ..VarResolutionCtx::new(var_name, self.file, self.current_class, cursor_offset)
         }
     }
 }

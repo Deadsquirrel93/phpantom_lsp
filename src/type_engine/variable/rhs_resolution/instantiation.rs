@@ -53,8 +53,8 @@ pub(super) fn resolve_rhs_instantiation(
         let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
             &parsed_name,
             &ctx.current_class.fqn(),
-            ctx.all_classes,
-            ctx.class_loader,
+            ctx.file.all_classes,
+            ctx.file.class_loader,
         );
 
         // ── Reflected property construction ─────────────────────
@@ -70,7 +70,7 @@ pub(super) fn resolve_rhs_instantiation(
             let arg_texts =
                 crate::type_engine::variable::raw_type_inference::extract_arg_texts_from_ast(
                     arg_list,
-                    ctx.content,
+                    ctx.file.content,
                 );
             let arg_refs: Vec<&str> = arg_texts.iter().map(String::as_str).collect();
             let reflected = crate::type_engine::call_resolution::resolve_reflected_property_at_new(
@@ -98,8 +98,8 @@ pub(super) fn resolve_rhs_instantiation(
             .then(|| {
                 crate::type_engine::type_resolution::lookup_class_declaration(
                     &fqn,
-                    ctx.all_classes,
-                    ctx.class_loader,
+                    ctx.file.all_classes,
+                    ctx.file.class_loader,
                 )
             })
             .flatten();
@@ -112,7 +112,7 @@ pub(super) fn resolve_rhs_instantiation(
                 .map(|arg_list| {
                     crate::type_engine::variable::raw_type_inference::extract_arg_texts_from_ast(
                         arg_list,
-                        ctx.content,
+                        ctx.file.content,
                     )
                 })
                 .unwrap_or_default();
@@ -148,8 +148,8 @@ pub(super) fn resolve_rhs_instantiation(
             let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
                 inner,
                 &ctx.current_class.fqn(),
-                ctx.all_classes,
-                ctx.class_loader,
+                ctx.file.all_classes,
+                ctx.file.class_loader,
             );
             if !classes.is_empty() {
                 return ResolvedType::from_classes_with_hint(classes, inner.clone());
@@ -181,7 +181,7 @@ pub(crate) fn class_string_generic_binding(
         &class,
         wrapper_name,
         tpl_position,
-        rctx.class_loader,
+        rctx.file.class_loader,
     )
 }
 

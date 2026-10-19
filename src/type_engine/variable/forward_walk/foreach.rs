@@ -190,8 +190,8 @@ pub(crate) fn iterable_ctx<'a>(
 ) -> crate::type_engine::variable::iterable_elements::IterableCtx<'a> {
     crate::type_engine::variable::iterable_elements::IterableCtx {
         current_class: ctx.current_class,
-        all_classes: ctx.all_classes,
-        class_loader: ctx.class_loader,
+        all_classes: ctx.file.all_classes,
+        class_loader: ctx.file.class_loader,
         resolved_class_cache: ctx.resolved_class_cache,
     }
 }
@@ -306,7 +306,7 @@ impl<'b> ForeachBinding<'b> {
         let mut value_docblock_override: Option<Vec<ResolvedType>> = None;
         let mut key_docblock_override: Option<Vec<ResolvedType>> = None;
         let foreach_offset = foreach.foreach.span().start.offset as usize;
-        if let Some(doc_text) = docblock_above(ctx.content, foreach_offset) {
+        if let Some(doc_text) = docblock_above(ctx.file.content, foreach_offset) {
             for (doc_var, php_type) in &parse_var_docblock_pairs(doc_text) {
                 if value_var_name.as_ref() == Some(doc_var) {
                     value_docblock_override = Some(resolve_type_to_resolved_types(php_type, ctx));
@@ -1154,8 +1154,8 @@ pub(crate) fn resolve_foreach_iterable_type<'b>(
         crate::type_engine::type_ops::aliases::resolve_type_alias_typed(
             &raw,
             &ctx.current_class.fqn(),
-            ctx.all_classes,
-            ctx.class_loader,
+            ctx.file.all_classes,
+            ctx.file.class_loader,
         )
         .unwrap_or(raw),
     )
@@ -1194,7 +1194,7 @@ pub(crate) fn bind_foreach_value<'b>(
             let value_php_type =
                 crate::type_engine::variable::iterable_elements::generic_traversal_value_type(
                     it,
-                    ctx.class_loader,
+                    ctx.file.class_loader,
                 )
                 .or_else(|| it.iterable_element_type());
             if let Some(vt) = value_php_type {

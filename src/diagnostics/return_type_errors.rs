@@ -23,7 +23,7 @@ use crate::class_lookup::find_class_at_offset;
 use crate::parser::with_parsed_program;
 use crate::php_type::{PhpType, TypeKind};
 use crate::return_collection::collect_returns;
-use crate::type_engine::resolver::{CtxLoaders, LendsLoaders, Loaders, VarResolutionCtx};
+use crate::type_engine::resolver::{CtxLoaders, FileCtx, LendsLoaders, Loaders, VarResolutionCtx};
 use crate::type_engine::variable::iterable_elements::resolve_expression_type;
 use crate::types::ClassInfo;
 
@@ -153,15 +153,14 @@ impl Backend {
 fn evaluate_declared_return(
     declared: PhpType,
     current_class: &ClassInfo,
-    content: &str,
-    all_classes: &[Arc<ClassInfo>],
+    file: FileCtx<'_>,
     loaders: CtxLoaders<'_>,
     backend: &Backend,
 ) -> PhpType {
     if !declared.contains_unevaluated_operator() {
         return declared;
     }
-    let ctx = backend.resolution_ctx_at(Some(current_class), all_classes, content, 0, loaders);
+    let ctx = backend.resolution_ctx_at(file, Some(current_class), 0, loaders);
     crate::type_engine::call_resolution::evaluate_constant_operands(&declared, &ctx)
         .unwrap_or(declared)
 }
@@ -265,18 +264,20 @@ fn resolve_return_and_push(
             }
 
             let var_ctx = VarResolutionCtx {
-                source_imports: Some(file_ctx.use_map_at(start as u32)),
-                backend: Some(backend),
                 loaders,
                 resolved_class_cache: Some(&backend.resolved_class_cache),
                 ..VarResolutionCtx::new(
                     "",
+                    FileCtx::new(
+                        content,
+                        &file_ctx.classes,
+                        resolved_class_loader,
+                        class_loader,
+                    )
+                    .with_imports(Some(file_ctx.use_map_at(start as u32)))
+                    .with_backend(Some(backend)),
                     current_class,
-                    &file_ctx.classes,
-                    content,
                     start as u32,
-                    resolved_class_loader,
-                    class_loader,
                 )
             };
 
@@ -449,14 +450,14 @@ fn process_top_level_statement(
             let declared_return = evaluate_declared_return(
                 declared_return,
                 current_class,
-                content,
-                &file_ctx.classes,
-                CtxLoaders::without_macro_this(
+                FileCtx::new(
+                    content,
+                    &file_ctx.classes,
                     resolved_class_loader,
                     class_loader,
-                    function_loader,
                 )
-                .with_imports(file_ctx.use_map_at(func_offset)),
+                .with_imports(Some(file_ctx.use_map_at(func_offset))),
+                CtxLoaders::without_macro_this(function_loader),
                 backend,
             );
 
@@ -615,10 +616,14 @@ fn process_class_member(
     let declared_return = evaluate_declared_return(
         declared_return,
         current_class,
-        content,
-        &file_ctx.classes,
-        CtxLoaders::without_macro_this(resolved_class_loader, class_loader, function_loader)
-            .with_imports(file_ctx.use_map_at(method_offset)),
+        FileCtx::new(
+            content,
+            &file_ctx.classes,
+            resolved_class_loader,
+            class_loader,
+        )
+        .with_imports(Some(file_ctx.use_map_at(method_offset))),
+        CtxLoaders::without_macro_this(function_loader),
         backend,
     );
     let declared_return =

@@ -51,8 +51,8 @@ impl<'a> IterableCtx<'a> {
     pub(crate) fn from_var_ctx(ctx: &'a VarResolutionCtx<'_>) -> Self {
         Self {
             current_class: ctx.current_class,
-            all_classes: ctx.all_classes,
-            class_loader: ctx.class_loader,
+            all_classes: ctx.file.all_classes,
+            class_loader: ctx.file.class_loader,
             resolved_class_cache: ctx.resolved_class_cache,
         }
     }

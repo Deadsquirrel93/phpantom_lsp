@@ -26,7 +26,7 @@ use mago_syntax::cst::*;
 use crate::Backend;
 use crate::parser::with_parsed_program;
 use crate::php_type::PhpType;
-use crate::type_engine::resolver::{LendsLoaders, VarResolutionCtx};
+use crate::type_engine::resolver::{FileCtx, LendsLoaders, VarResolutionCtx};
 use crate::types::ClassInfo;
 use crate::virtual_members::laravel::SharedViewVar;
 
@@ -226,18 +226,20 @@ impl Backend {
                         crate::class_lookup::find_class_at_offset(&file_ctx.classes, offset);
                     let current_class = enclosing.unwrap_or(&default_class);
                     let var_ctx = VarResolutionCtx {
-                        source_imports: Some(&use_map),
-                        backend: Some(self),
                         loaders: owned_loaders.loaders(),
                         resolved_class_cache: Some(&self.resolved_class_cache),
                         ..VarResolutionCtx::new(
                             "",
+                            FileCtx::new(
+                                content,
+                                &file_ctx.classes,
+                                &resolved_class_loader,
+                                &class_loader,
+                            )
+                            .with_imports(Some(&use_map))
+                            .with_backend(Some(self)),
                             current_class,
-                            &file_ctx.classes,
-                            content,
                             offset,
-                            &resolved_class_loader,
-                            &class_loader,
                         )
                     };
                     let ty =

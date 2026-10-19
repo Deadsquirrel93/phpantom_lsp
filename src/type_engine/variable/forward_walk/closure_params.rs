@@ -81,7 +81,7 @@ pub(crate) fn seed_closure_params(
     inferred_types: &[PhpType],
     ctx: &ForwardWalkCtx<'_>,
 ) {
-    let docblock = adjacent_docblock(ctx.content, fn_span_start as usize);
+    let docblock = adjacent_docblock(ctx.file.content, fn_span_start as usize);
     let enclosing = EnclosingMethod {
         span_start: fn_span_start,
         name: None,
@@ -137,7 +137,7 @@ fn refine_by_inferred(
     if super::super::closure_resolution::inferred_type_is_more_specific(
         effective,
         inferred,
-        ctx.class_loader,
+        ctx.file.class_loader,
     ) {
         return inferred_param_results(inferred, ctx);
     }
@@ -153,8 +153,8 @@ fn refine_by_inferred(
     let inferred_classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
         inferred,
         &ctx.current_class.fqn(),
-        ctx.all_classes,
-        ctx.class_loader,
+        ctx.file.all_classes,
+        ctx.file.class_loader,
     );
     // Narrow to the inferred type only when it is a genuine refinement of
     // the *whole* declared type: every inferred class must be a subtype of
@@ -168,7 +168,7 @@ fn refine_by_inferred(
         crate::class_lookup::is_subtype_of_names(
             &inferred_cls.fqn(),
             &declared_cls.fqn(),
-            ctx.class_loader,
+            ctx.file.class_loader,
         )
     };
     let inferred_is_subtype = !inferred_classes.is_empty()
@@ -194,8 +194,8 @@ fn inferred_param_results(inferred: &PhpType, ctx: &ForwardWalkCtx<'_>) -> Vec<R
     let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
         inferred,
         &ctx.current_class.fqn(),
-        ctx.all_classes,
-        ctx.class_loader,
+        ctx.file.all_classes,
+        ctx.file.class_loader,
     );
     if !resolved.is_empty() {
         ResolvedType::from_classes_with_hint(resolved, inferred.clone())

@@ -33,7 +33,7 @@ use crate::atom::bytes_to_str;
 use crate::parser::with_parsed_program;
 use crate::php_type::PhpType;
 use crate::symbol_map::{LaravelStringKind, SymbolKind, SymbolMap};
-use crate::type_engine::resolver::Loaders;
+use crate::type_engine::resolver::{FileCtx, Loaders};
 use crate::type_engine::variable::resolution::VarQuery;
 
 pub(crate) use super::view_call_walker::string_literal_contents;
@@ -740,16 +740,20 @@ impl Backend {
         let function_loader = self.function_loader(file_ctx);
         let function_loader_cl = |name: &str, offset: u32| function_loader(name, offset);
         let ty = crate::type_engine::variable::resolution::resolve_variable_php_type(VarQuery {
-            var_name: name,
-            cursor_offset: offset,
-            content,
-            current_class: crate::class_lookup::find_class_at_offset(&file_ctx.classes, offset),
-            all_classes: &file_ctx.classes,
-            class_loader: &resolved_class_loader,
-            source_class_loader: &class_loader,
-            source_imports: Some(&file_ctx.use_map),
-            backend: Some(self),
             loaders: Loaders::with_function(Some(&function_loader_cl)),
+            ..VarQuery::new(
+                name,
+                FileCtx::new(
+                    content,
+                    &file_ctx.classes,
+                    &resolved_class_loader,
+                    &class_loader,
+                )
+                .with_imports(Some(&file_ctx.use_map))
+                .with_backend(Some(self)),
+                crate::class_lookup::find_class_at_offset(&file_ctx.classes, offset),
+                offset,
+            )
         })?;
         Some(qualify_class_names(ty, &resolved_class_loader))
     }

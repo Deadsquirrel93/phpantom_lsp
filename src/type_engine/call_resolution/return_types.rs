@@ -58,7 +58,7 @@ pub(crate) struct MethodReturnCtx<'a> {
     /// Cross-file class resolution callback for already-resolved names.
     pub class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     /// Server state for project-wide answers.  See
-    /// [`ResolutionCtx::backend`].
+    /// [`FileCtx::backend`](crate::type_engine::resolver::FileCtx::backend).
     pub backend: Option<&'a Backend>,
     /// Template substitution map (method-level `@template` bindings).
     pub template_subs: &'a HashMap<String, PhpType>,
@@ -106,9 +106,9 @@ impl<'a> MethodReturnCtx<'a> {
         is_static: bool,
     ) -> Self {
         Self {
-            all_classes: ctx.all_classes,
-            class_loader: ctx.class_loader,
-            backend: ctx.backend,
+            all_classes: ctx.file.all_classes,
+            class_loader: ctx.file.class_loader,
+            backend: ctx.file.backend,
             template_subs,
             var_resolver: Some(var_resolver),
             cache: ctx.resolved_class_cache,
@@ -137,23 +137,20 @@ pub(super) fn build_var_resolver<'a>(
         let current_class = match ctx.current_class {
             Some(cc) => cc,
             None => {
-                placeholder =
-                    crate::class_lookup::class_context_placeholder(ctx.content, ctx.cursor_offset);
+                placeholder = crate::class_lookup::class_context_placeholder(
+                    ctx.file.content,
+                    ctx.cursor_offset,
+                );
                 &placeholder
             }
         };
         let var_ctx = crate::type_engine::resolver::VarResolutionCtx {
-            source_imports: ctx.source_imports,
-            backend: ctx.backend,
             scope_var_resolver: ctx.scope_var_resolver,
             ..crate::type_engine::resolver::VarResolutionCtx::new(
                 var_name,
+                ctx.file,
                 current_class,
-                ctx.all_classes,
-                ctx.content,
                 ctx.cursor_offset,
-                ctx.class_loader,
-                ctx.source_class_loader,
             )
         };
         crate::type_engine::variable::class_string_resolution::resolve_class_string_targets(
@@ -353,8 +350,8 @@ impl Backend {
             crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
                 &evaluated,
                 "",
-                ctx.all_classes,
-                ctx.class_loader,
+                ctx.file.all_classes,
+                ctx.file.class_loader,
             )
         } else {
             classes
@@ -999,7 +996,7 @@ pub(super) fn resolve_chain_declared_return(
         // Fall back to the fully resolved class for inherited methods.
         let resolved = crate::virtual_members::resolve_class_fully_maybe_cached(
             ci,
-            ctx.class_loader,
+            ctx.file.class_loader,
             ctx.resolved_class_cache,
         );
         if let Some(method) = resolved

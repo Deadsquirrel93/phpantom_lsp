@@ -27,8 +27,8 @@ fn bind_catch_variable(
     let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
         &parsed_hint,
         &ctx.current_class.fqn(),
-        ctx.all_classes,
-        ctx.class_loader,
+        ctx.file.all_classes,
+        ctx.file.class_loader,
     );
     let exception_types = if resolved.is_empty() {
         vec![ResolvedType::from_type_string(parsed_hint)]

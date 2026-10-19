@@ -1,6 +1,7 @@
 use super::*;
 use crate::atom::atom;
 use crate::test_fixtures::make_class;
+use crate::type_engine::resolver::FileCtx;
 
 fn symbol_map(content: &str) -> Arc<SymbolMap> {
     crate::parser::with_parsed_program(content, "morph_test", |program, content| {
@@ -115,22 +116,7 @@ fn morph_column_cache_rejects_missing_changed_and_outdated_sources() {
 #[test]
 fn morph_columns_reject_untyped_and_missing_models() {
     let loader = |_: &str| None;
-    let ctx = ResolutionCtx {
-        current_class: None,
-        all_classes: &[],
-        content: "",
-        cursor_offset: 0,
-        class_loader: &loader,
-        source_class_loader: &loader,
-        source_imports: None,
-        backend: None,
-        laravel_macro_this_resolver: None,
-        resolved_class_cache: None,
-        function_loader: None,
-        scope_var_resolver: None,
-        is_in_static_method: false,
-        preserve_static: false,
-    };
+    let ctx = ResolutionCtx::new(FileCtx::new("", &[], &loader, &loader), None, 0);
     let map = symbol_map("<?php Comment::where('subject_type', 'post');");
     let site = &map.morph_column_sites[0];
     for ty in [

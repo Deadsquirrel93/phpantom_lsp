@@ -230,7 +230,7 @@ impl SpineKeys {
         // reason (see `variable/resolution.rs`).  Two ResolutionCtx built
         // from the same file share `content` and thus the pointer, so
         // within-file sharing (the cache's actual purpose) is unaffected.
-        let file_id = ctx.content.as_ptr() as usize;
+        let file_id = ctx.file.content.as_ptr() as usize;
 
         // Within one file the same text still means different things where
         // its names are read differently: `self::make()` in two classes,

@@ -36,7 +36,7 @@ use crate::Backend;
 use crate::class_lookup::find_class_at_offset;
 use crate::php_type::PhpType;
 use crate::text_position::{position_to_offset, utf16_col_to_char_index};
-use crate::type_engine::resolver::Loaders;
+use crate::type_engine::resolver::{FileCtx, Loaders};
 use crate::type_engine::variable::resolution::VarQuery;
 use crate::types::{ClassInfo, FileContext, ResolvedType};
 
@@ -567,21 +567,25 @@ impl Backend {
         let config_resolver = |key: &str| self.resolve_config_type(key);
         let trans_resolver = |key: &str| self.resolve_trans_type(key);
         let resolved = crate::type_engine::variable::resolution::resolve_variable_types(VarQuery {
-            var_name,
-            cursor_offset: cursor_offset as u32,
-            content,
-            current_class,
-            all_classes: &file_ctx.classes,
-            class_loader: &resolved_class_loader,
-            source_class_loader: &class_loader,
-            source_imports: Some(&file_ctx.use_map),
-            backend: Some(self),
             loaders: Loaders {
                 function_loader: Some(&function_loader),
                 config_resolver: Some(&config_resolver),
                 trans_resolver: Some(&trans_resolver),
                 ..Loaders::default()
             },
+            ..VarQuery::new(
+                var_name,
+                FileCtx::new(
+                    content,
+                    &file_ctx.classes,
+                    &resolved_class_loader,
+                    &class_loader,
+                )
+                .with_imports(Some(&file_ctx.use_map))
+                .with_backend(Some(self)),
+                current_class,
+                cursor_offset as u32,
+            )
         });
         if resolved.is_empty() {
             None

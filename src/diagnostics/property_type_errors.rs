@@ -25,7 +25,7 @@ use crate::atom::bytes_to_str;
 use crate::class_lookup::find_class_at_offset;
 use crate::parser::{for_each_nested_statement_list, with_parsed_program};
 use crate::php_type::{PhpType, TypeKind};
-use crate::type_engine::resolver::VarResolutionCtx;
+use crate::type_engine::resolver::{FileCtx, VarResolutionCtx};
 use crate::type_engine::variable::iterable_elements::resolve_expression_type;
 
 use super::helpers::{FileDiagnosticContext, TypeCheckCtx, collect_type_check};
@@ -216,18 +216,20 @@ fn check_expression_for_property_assignment(expr: &Expression<'_>, ctx: &mut Pro
     let rhs_end = rhs_span.end.offset as usize;
 
     let var_ctx = VarResolutionCtx {
-        source_imports: Some(ctx.type_ctx.file_ctx.use_map_at(site)),
-        backend: Some(ctx.backend),
         loaders: ctx.type_ctx.loaders.loaders_at(site),
         resolved_class_cache: Some(&ctx.backend.resolved_class_cache),
         ..VarResolutionCtx::new(
             "",
+            FileCtx::new(
+                ctx.content,
+                &ctx.file_ctx.classes,
+                resolved_class_loader,
+                class_loader,
+            )
+            .with_imports(Some(ctx.type_ctx.file_ctx.use_map_at(site)))
+            .with_backend(Some(ctx.backend)),
             prop_class,
-            &ctx.file_ctx.classes,
-            ctx.content,
             rhs_start as u32,
-            resolved_class_loader,
-            class_loader,
         )
     };
 

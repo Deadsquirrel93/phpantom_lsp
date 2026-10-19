@@ -16,7 +16,7 @@ use std::sync::Arc;
 use crate::class_lookup::find_class_at_offset;
 use crate::names::resolve_to_fqn;
 use crate::php_type::PhpType;
-use crate::type_engine::resolver::Loaders;
+use crate::type_engine::resolver::{FileCtx, Loaders};
 use crate::type_engine::subject_expr::SubjectExpr;
 use crate::type_engine::variable::resolution::VarQuery;
 use crate::types::{AccessKind, ClassInfo, ResolvedType};
@@ -33,13 +33,27 @@ pub(crate) struct SubjectResolutionCtx<'a> {
     pub content: &'a str,
     /// Class loader for already-resolved names.
     pub class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    /// See [`ResolutionCtx::source_class_loader`](crate::type_engine::resolver::ResolutionCtx::source_class_loader).
+    /// See [`FileCtx::source_class_loader`](crate::type_engine::resolver::FileCtx::source_class_loader).
     pub source_class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     /// Server state for project-wide answers.  See
-    /// [`ResolutionCtx::backend`](crate::type_engine::resolver::ResolutionCtx::backend).
+    /// [`FileCtx::backend`](crate::type_engine::resolver::FileCtx::backend).
     pub backend: Option<&'a crate::Backend>,
     /// Function loader (for variable resolution via the forward walker).
     pub function_loader: &'a dyn Fn(&str, u32) -> Option<crate::types::FunctionInfo>,
+}
+
+impl<'a> SubjectResolutionCtx<'a> {
+    /// The file the subject is read in, as the type engine takes it.
+    fn file(&self) -> FileCtx<'a> {
+        FileCtx::new(
+            self.content,
+            self.local_classes,
+            self.class_loader,
+            self.source_class_loader,
+        )
+        .with_imports(Some(self.use_map))
+        .with_backend(self.backend)
+    }
 }
 
 /// Resolve a subject string to a [`PhpType`].
@@ -84,16 +98,8 @@ pub(crate) fn resolve_subject_type(
                 let current_class = find_class_at_offset(ctx.local_classes, access_offset);
                 return crate::type_engine::variable::resolution::resolve_variable_php_type(
                     VarQuery {
-                        var_name: trimmed,
-                        cursor_offset: access_offset,
-                        content: ctx.content,
-                        current_class,
-                        all_classes: ctx.local_classes,
-                        class_loader: ctx.class_loader,
-                        source_class_loader: ctx.source_class_loader,
-                        source_imports: Some(ctx.use_map),
-                        backend: ctx.backend,
                         loaders: Loaders::with_function(Some(ctx.function_loader)),
+                        ..VarQuery::new(trimmed, ctx.file(), current_class, access_offset)
                     },
                 );
             }
@@ -104,20 +110,13 @@ pub(crate) fn resolve_subject_type(
             // and hover use.
             let current_class = find_class_at_offset(ctx.local_classes, access_offset);
             let rctx = crate::type_engine::resolver::ResolutionCtx {
-                current_class,
-                all_classes: ctx.local_classes,
-                content: ctx.content,
-                cursor_offset: access_offset,
-                class_loader: ctx.class_loader,
-                source_class_loader: ctx.source_class_loader,
-                source_imports: Some(ctx.use_map),
-                backend: ctx.backend,
-                laravel_macro_this_resolver: None,
                 resolved_class_cache: ctx.backend.map(|b| &b.resolved_class_cache),
                 function_loader: Some(ctx.function_loader),
-                scope_var_resolver: None,
-                is_in_static_method: false,
-                preserve_static: false,
+                ..crate::type_engine::resolver::ResolutionCtx::new(
+                    ctx.file(),
+                    current_class,
+                    access_offset,
+                )
             };
             let access_kind = AccessKind::of_member_access(is_static);
             let resolved = crate::type_engine::resolver::resolve_target_classes_expr(

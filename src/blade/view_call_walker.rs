@@ -522,13 +522,13 @@ fn arrayable_shape_entries(
     ty: &PhpType,
     ctx: &VarResolutionCtx<'_>,
 ) -> Option<Vec<(String, PhpType)>> {
-    let class = (ctx.class_loader)(ty.base_name()?)?;
+    let class = (ctx.file.class_loader)(ty.base_name()?)?;
     let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
         &class,
-        ctx.class_loader,
+        ctx.file.class_loader,
         ctx.resolved_class_cache,
     );
-    if !crate::class_lookup::is_subtype_of(&merged, ARRAYABLE, ctx.class_loader) {
+    if !crate::class_lookup::is_subtype_of(&merged, ARRAYABLE, ctx.file.class_loader) {
         return None;
     }
     array_shape_entries(merged.get_method_ci("toArray")?.return_type.as_ref()?)

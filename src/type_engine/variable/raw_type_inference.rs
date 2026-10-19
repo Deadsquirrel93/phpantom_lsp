@@ -595,6 +595,7 @@ fn infer_element_type<'b>(
             // `array{int}`, not the `int|float` the annotation states for
             // the assignment above it.
             let current_class = ctx
+                .file
                 .all_classes
                 .iter()
                 .find(|c| c.fqn() == ctx.current_class.fqn())
@@ -706,20 +707,20 @@ impl ArrayFuncArgs for AstArrayFuncArgs<'_, '_, '_> {
             expr,
             param_index,
             subject,
-            Some(&self.ctx.class_loader),
+            Some(&self.ctx.file.class_loader),
             &self.ctx.written_names(),
         )
     }
 
     fn narrows(&self, inferred: &PhpType, declared: &PhpType) -> bool {
-        crate::class_lookup::is_subtype_of_typed(inferred, declared, self.ctx.class_loader)
+        crate::class_lookup::is_subtype_of_typed(inferred, declared, self.ctx.file.class_loader)
     }
 
     fn guard_split(&self, guard: &str, subject: &PhpType) -> Option<(Option<PhpType>, bool)> {
         crate::type_engine::type_ops::condition_facts::split_type_by_guard_name(
             guard,
             subject,
-            Some(&self.ctx.class_loader),
+            Some(&self.ctx.file.class_loader),
         )
     }
 }
@@ -859,7 +860,10 @@ fn infer_callback_return_type(
     // could only carry the union as its type string, leaving a `@return T`
     // on that class with no instantiation to substitute from.
     let seed_member = |ty: &PhpType| -> ResolvedType {
-        match ty.base_name().and_then(|name| (ctx.class_loader)(name)) {
+        match ty
+            .base_name()
+            .and_then(|name| (ctx.file.class_loader)(name))
+        {
             Some(cls) => ResolvedType::from_both_arc(ty.clone(), cls),
             None => ResolvedType::from_type_string(ty.clone()),
         }
@@ -905,20 +909,10 @@ fn infer_callback_return_type(
     // Create a synthetic context with the scope resolver.
     let body_offset = body_expr.span().start.offset;
     let infer_ctx = VarResolutionCtx {
-        source_imports: ctx.source_imports,
-        backend: ctx.backend,
         loaders: ctx.loaders,
         resolved_class_cache: ctx.resolved_class_cache,
         scope_var_resolver: Some(&scope_resolver),
-        ..VarResolutionCtx::new(
-            "",
-            ctx.current_class,
-            ctx.all_classes,
-            ctx.content,
-            body_offset,
-            ctx.class_loader,
-            ctx.source_class_loader,
-        )
+        ..VarResolutionCtx::new("", ctx.file, ctx.current_class, body_offset)
     };
 
     super::iterable_elements::resolve_expression_type(body_expr, &infer_ctx)

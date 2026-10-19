@@ -263,7 +263,7 @@ fn walked_scope(
     walk: impl FnOnce() -> ScopeState,
 ) -> ScopeState {
     let key: WalkKey = (
-        (ctx.content.as_ptr() as usize, ctx.content.len()),
+        (ctx.file.content.as_ptr() as usize, ctx.file.content.len()),
         body,
         ctx.cursor_offset,
         ctx.current_class.name,
@@ -419,8 +419,8 @@ fn try_generator_yield_inference(
     let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
         value_type,
         &ctx.current_class.fqn(),
-        ctx.all_classes,
-        ctx.class_loader,
+        ctx.file.all_classes,
+        ctx.file.class_loader,
     );
     if classes.is_empty() {
         return None;

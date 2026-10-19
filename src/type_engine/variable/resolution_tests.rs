@@ -5,7 +5,7 @@ use crate::atom::atom;
 use crate::php_type::PhpType;
 use crate::test_fixtures::make_class;
 
-use crate::type_engine::resolver::Loaders;
+use crate::type_engine::resolver::{FileCtx, Loaders};
 use crate::types::{ClassInfo, ResolvedType};
 
 /// A variable query with no imports, backend or cross-file loaders: only
@@ -18,18 +18,12 @@ fn query<'a>(
     all_classes: &'a [Arc<ClassInfo>],
     class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> VarQuery<'a> {
-    VarQuery {
+    VarQuery::new(
         var_name,
+        FileCtx::new(content, all_classes, class_loader, class_loader),
+        Some(current_class),
         cursor_offset,
-        content,
-        current_class: Some(current_class),
-        all_classes,
-        class_loader,
-        source_class_loader: class_loader,
-        source_imports: None,
-        backend: None,
-        loaders: Loaders::default(),
-    }
+    )
 }
 
 fn make_model(name: &str) -> ClassInfo {

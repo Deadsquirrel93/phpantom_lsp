@@ -283,7 +283,7 @@ fn resolve_rhs_expression_inner<'b>(
         Expression::AnonymousClass(anon) => {
             let start = anon.left_brace.start.offset;
             let name = format!("__anonymous@{}", start);
-            if let Some(cls) = ctx.all_classes.iter().find(|c| c.name == name) {
+            if let Some(cls) = ctx.file.all_classes.iter().find(|c| c.name == name) {
                 return ResolvedType::from_classes(vec![Arc::clone(cls)]);
             }
             vec![]
@@ -391,8 +391,8 @@ fn resolve_rhs_expression_inner<'b>(
             let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
                 &lookup_ty,
                 &ctx.current_class.fqn(),
-                ctx.all_classes,
-                ctx.class_loader,
+                ctx.file.all_classes,
+                ctx.file.class_loader,
             );
             if classes.is_empty() {
                 vec![ResolvedType::from_type_string(closure_ty)]
@@ -411,8 +411,8 @@ fn resolve_rhs_expression_inner<'b>(
                     crate::type_engine::type_resolution::type_hint_to_classes_typed(
                         send_php_type,
                         &ctx.current_class.fqn(),
-                        ctx.all_classes,
-                        ctx.class_loader,
+                        ctx.file.all_classes,
+                        ctx.file.class_loader,
                     ),
                     send_php_type.clone(),
                 );

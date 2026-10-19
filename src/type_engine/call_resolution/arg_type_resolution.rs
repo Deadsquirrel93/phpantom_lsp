@@ -158,20 +158,20 @@ impl ArrayFuncArgs for TextArrayFuncArgs<'_, '_> {
             self.arg_text(index)?,
             param_index,
             subject,
-            Some(&self.ctx.class_loader),
+            Some(&self.ctx.file.class_loader),
             &self.ctx.written_names(),
         )
     }
 
     fn narrows(&self, inferred: &PhpType, declared: &PhpType) -> bool {
-        crate::class_lookup::is_subtype_of_typed(inferred, declared, self.ctx.class_loader)
+        crate::class_lookup::is_subtype_of_typed(inferred, declared, self.ctx.file.class_loader)
     }
 
     fn guard_split(&self, guard: &str, subject: &PhpType) -> Option<(Option<PhpType>, bool)> {
         crate::type_engine::type_ops::condition_facts::split_type_by_guard_name(
             guard,
             subject,
-            Some(&self.ctx.class_loader),
+            Some(&self.ctx.file.class_loader),
         )
     }
 }
@@ -214,7 +214,7 @@ impl Backend {
             key: arg_text.to_string(),
         };
 
-        let class_loader = ctx.class_loader;
+        let class_loader = ctx.file.class_loader;
 
         // ── Plain variable: `$customers` ────────────────────────────────
         if arg_text.starts_with('$')

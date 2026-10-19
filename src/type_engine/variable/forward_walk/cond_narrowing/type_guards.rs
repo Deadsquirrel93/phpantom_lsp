@@ -92,13 +92,13 @@ pub(crate) fn apply_type_guard_on_operands(
                     condition_facts::apply_type_guard_inclusion(
                         kind,
                         &mut results,
-                        Some(ctx.class_loader),
+                        Some(ctx.file.class_loader),
                     );
                 } else {
                     condition_facts::apply_type_guard_exclusion(
                         kind,
                         &mut results,
-                        Some(ctx.class_loader),
+                        Some(ctx.file.class_loader),
                     );
                 }
                 if results.is_empty() {
@@ -248,7 +248,7 @@ fn names_only_subclasses_of(ty: &PhpType, fqn: &str, ctx: &ForwardWalkCtx<'_>) -
                 .map(|name| name.into_owned()),
         };
         named.is_some_and(|name| {
-            crate::class_lookup::is_subtype_of_names(&name, fqn, ctx.class_loader)
+            crate::class_lookup::is_subtype_of_names(&name, fqn, ctx.file.class_loader)
         })
     })
 }

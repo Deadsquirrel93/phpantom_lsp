@@ -118,7 +118,7 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
             // `parent`, and subclass names.
             let Some(class_info) = ctx
                 .written_names()
-                .static_receiver_class(static_call.class, ctx.class_loader)
+                .static_receiver_class(static_call.class, ctx.file.class_loader)
             else {
                 return;
             };
@@ -129,7 +129,7 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
             let (method, _) = match condition_facts::find_assertion_method_in_chain(
                 &class_info,
                 &method_name,
-                ctx.class_loader,
+                ctx.file.class_loader,
                 &mut Vec::new(),
                 0,
             ) {
@@ -223,7 +223,7 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
                 let (method, _) = match condition_facts::find_assertion_method_in_chain(
                     &receiver,
                     &method_name,
-                    ctx.class_loader,
+                    ctx.file.class_loader,
                     &mut Vec::new(),
                     0,
                 ) {
@@ -358,7 +358,7 @@ fn resolve_receiver_class(
     if let TypeKind::Intersection(members) = rt.type_string.kind() {
         return members
             .iter()
-            .find_map(|member| (ctx.class_loader)(&member.to_string()));
+            .find_map(|member| (ctx.file.class_loader)(&member.to_string()));
     }
-    (ctx.class_loader)(&rt.type_string.to_string())
+    (ctx.file.class_loader)(&rt.type_string.to_string())
 }

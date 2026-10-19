@@ -33,7 +33,7 @@ pub(super) fn laravel_helper_call_class(
     if matches!(normalized_func, "app" | "resolve")
         && let Some(binding) = Backend::extract_first_arg_text(text_args)
         && let Some(name) = crate::util::unescape_php_string_literal(binding.trim())
-        && let Some(cls) = (ctx.class_loader)(&name)
+        && let Some(cls) = (ctx.file.class_loader)(&name)
     {
         return Some(cls);
     }
@@ -54,7 +54,7 @@ pub(super) fn laravel_helper_call_class(
         normalized_func,
         "now" | "today" | "Illuminate\\Support\\now" | "Illuminate\\Support\\today"
     ) && let Some(cls) =
-        (ctx.class_loader)(crate::virtual_members::laravel::CONFIGURED_DATE_CLASS_FQN)
+        (ctx.file.class_loader)(crate::virtual_members::laravel::CONFIGURED_DATE_CLASS_FQN)
     {
         return Some(cls);
     }
@@ -65,7 +65,7 @@ pub(super) fn laravel_helper_call_class(
         Backend::extract_first_arg_text(text_args)
             .as_deref()
             .unwrap_or(""),
-    ) && let Some(cls) = (ctx.class_loader)(crate::virtual_members::laravel::VIEW_FQN)
+    ) && let Some(cls) = (ctx.file.class_loader)(crate::virtual_members::laravel::VIEW_FQN)
     {
         return Some(cls);
     }
@@ -96,7 +96,7 @@ pub(super) fn resolve_auth_user_at_call(
 ) -> Option<Vec<Arc<ClassInfo>>> {
     // Cheap gate first: without the server state there is nothing to
     // refine, so skip the (comparatively expensive) subtype walk below.
-    let backend = ctx.backend?;
+    let backend = ctx.file.backend?;
 
     // Only intercept `user()` on an actual auth entry point.  Every
     // other class with a `user()` method must resolve normally.
@@ -105,11 +105,11 @@ pub(super) fn resolve_auth_user_at_call(
             crate::class_lookup::is_subtype_of(
                 ci,
                 crate::virtual_members::laravel::GUARD_FQN,
-                ctx.class_loader,
+                ctx.file.class_loader,
             ) || crate::class_lookup::is_subtype_of(
                 ci,
                 crate::virtual_members::laravel::REQUEST_FQN,
-                ctx.class_loader,
+                ctx.file.class_loader,
             )
         })
     });
@@ -128,8 +128,8 @@ pub(super) fn resolve_auth_user_at_call(
     let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
         &model_type,
         "",
-        ctx.all_classes,
-        ctx.class_loader,
+        ctx.file.all_classes,
+        ctx.file.class_loader,
     );
     if classes.is_empty() {
         None
@@ -161,7 +161,7 @@ pub(super) fn resolve_request_accessor_at_call(
     let (method, _) = crate::type_engine::type_ops::condition_facts::find_method_in_chain_where(
         receiver,
         method_name,
-        ctx.class_loader,
+        ctx.file.class_loader,
         &|_| true,
         &mut Vec::new(),
         0,
@@ -181,10 +181,10 @@ pub(super) fn resolve_request_accessor_at_call(
             key: bound.first().and_then(|k| k.as_deref()),
             default_type: &default_type,
         },
-        ctx.content,
+        ctx.file.content,
         ctx.cursor_offset,
-        ctx.class_loader,
-        ctx.backend,
+        ctx.file.class_loader,
+        ctx.file.backend,
     )
 }
 
@@ -214,10 +214,10 @@ pub(super) fn resolve_validated_shape_at_call(
         call,
         &args,
         &|| validated_shape::safe_source_class(base, ctx),
-        ctx.content,
+        ctx.file.content,
         ctx.cursor_offset,
-        ctx.class_loader,
-        ctx.backend,
+        ctx.file.class_loader,
+        ctx.file.backend,
     )
 }
 
@@ -309,7 +309,7 @@ mod auth_guard_tests {
     use crate::atom::atom;
     use crate::php_type::PhpType;
     use crate::test_fixtures::{make_class, make_method};
-    use crate::type_engine::resolver::ResolutionCtx;
+    use crate::type_engine::resolver::{FileCtx, ResolutionCtx};
     use crate::type_engine::subject_expr::SubjectExpr;
     use crate::types::ResolvedType;
     use std::sync::Arc;
@@ -349,22 +349,11 @@ mod auth_guard_tests {
                 .then(|| Arc::clone(&request))
         };
         assert!(class_loader("\\Illuminate\\Http\\Request").is_some());
-        let ctx = ResolutionCtx {
-            current_class: None,
-            all_classes: &classes,
-            content: "",
-            cursor_offset: 0,
-            class_loader: &class_loader,
-            source_class_loader: &class_loader,
-            source_imports: None,
-            backend: None,
-            laravel_macro_this_resolver: None,
-            resolved_class_cache: None,
-            function_loader: None,
-            scope_var_resolver: None,
-            is_in_static_method: false,
-            preserve_static: false,
-        };
+        let ctx = ResolutionCtx::new(
+            FileCtx::new("", &classes, &class_loader, &class_loader),
+            None,
+            0,
+        );
         let owners = vec![ResolvedType::from_arc(Arc::clone(&request))];
 
         let shape = resolve_validated_shape_at_call(

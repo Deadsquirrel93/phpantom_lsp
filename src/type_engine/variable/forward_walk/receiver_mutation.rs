@@ -977,7 +977,7 @@ fn untouched_property_keys(
     }
     let classes: Vec<Arc<crate::types::ClassInfo>> = subject_class_names(subject, scope, ctx)
         .iter()
-        .filter_map(|name| (ctx.class_loader)(name))
+        .filter_map(|name| (ctx.file.class_loader)(name))
         .collect();
     if classes.is_empty() {
         return Vec::new();
@@ -998,7 +998,7 @@ fn untouched_property_keys(
                 {
                     let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
                         cls,
-                        ctx.class_loader,
+                        ctx.file.class_loader,
                         ctx.resolved_class_cache,
                     );
                     merged
@@ -1024,14 +1024,14 @@ fn inherits_method(cls: &crate::types::ClassInfo, method: &str, ctx: &ForwardWal
     let Some(parent) = cls
         .parent_class
         .as_ref()
-        .and_then(|p| (ctx.class_loader)(p))
+        .and_then(|p| (ctx.file.class_loader)(p))
     else {
         return false;
     };
     condition_facts::find_method_in_chain_where(
         &parent,
         method,
-        ctx.class_loader,
+        ctx.file.class_loader,
         &|_| true,
         &mut Vec::new(),
         0,
@@ -1060,7 +1060,7 @@ fn declares_method(cls: &crate::types::ClassInfo, method: &str, ctx: &ForwardWal
                 return false;
             }
             visited.push(*name);
-            (ctx.class_loader)(name).is_some_and(|t| walk(&t, method, ctx, visited))
+            (ctx.file.class_loader)(name).is_some_and(|t| walk(&t, method, ctx, visited))
         })
     }
     walk(cls, method, ctx, &mut Vec::new())
@@ -1109,7 +1109,7 @@ fn method_call_effect(
     }
     class_names
         .iter()
-        .map(|name| match (ctx.class_loader)(name) {
+        .map(|name| match (ctx.file.class_loader)(name) {
             Some(cls) => class_method_effect(&cls, method_name, ctx).0,
             None => CallEffect::Unknown,
         })
@@ -1138,7 +1138,7 @@ fn class_method_effect(
 ) -> (CallEffect, bool) {
     let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
         cls,
-        ctx.class_loader,
+        ctx.file.class_loader,
         ctx.resolved_class_cache,
     );
     let Some(method) = merged.get_method_ci(method_name) else {
@@ -1220,7 +1220,7 @@ fn declared_purity(
     condition_facts::find_method_in_chain_where(
         cls,
         method_name,
-        ctx.class_loader,
+        ctx.file.class_loader,
         &|m| m.is_pure || m.is_impure,
         &mut Vec::new(),
         0,
@@ -1248,9 +1248,9 @@ fn static_receiver_class(
     let name = crate::class_lookup::class_expression_name(
         expr,
         ctx.current_class,
-        ctx.all_classes,
-        ctx.source_class_loader,
-        ctx.source_imports,
+        ctx.file.all_classes,
+        ctx.file.source_class_loader,
+        ctx.file.source_imports,
     )?;
-    (ctx.class_loader)(&name)
+    (ctx.file.class_loader)(&name)
 }

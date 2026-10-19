@@ -111,8 +111,8 @@ pub(super) fn resolve_rhs_array_access<'b>(
     if let Some(expanded) = crate::type_engine::type_ops::aliases::resolve_type_alias_typed(
         &current,
         &ctx.current_class.fqn(),
-        ctx.all_classes,
-        ctx.class_loader,
+        ctx.file.all_classes,
+        ctx.file.class_loader,
     ) {
         current = expanded;
     }
@@ -136,8 +136,8 @@ pub(super) fn resolve_rhs_array_access<'b>(
         if let Some(expanded) = crate::type_engine::type_ops::aliases::resolve_type_alias_typed(
             &current,
             &ctx.current_class.fqn(),
-            ctx.all_classes,
-            ctx.class_loader,
+            ctx.file.all_classes,
+            ctx.file.class_loader,
         ) {
             current = expanded;
         }
@@ -146,8 +146,8 @@ pub(super) fn resolve_rhs_array_access<'b>(
     let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
         &current,
         &ctx.current_class.fqn(),
-        ctx.all_classes,
-        ctx.class_loader,
+        ctx.file.all_classes,
+        ctx.file.class_loader,
     );
     if classes.is_empty() {
         // No class matched (e.g. `list<Rule>`, `int`, `string`).
@@ -303,19 +303,19 @@ fn index_segment(
     let class_element = crate::type_engine::type_resolution::type_hint_to_classes_typed(
         base,
         &ctx.current_class.map(|cls| cls.fqn()).unwrap_or_default(),
-        ctx.all_classes,
-        ctx.class_loader,
+        ctx.file.all_classes,
+        ctx.file.class_loader,
     )
     .into_iter()
     .find_map(|cls| {
         let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
             &cls,
-            ctx.class_loader,
+            ctx.file.class_loader,
             ctx.resolved_class_cache,
         );
         crate::type_engine::variable::iterable_elements::extract_iterable_element_type_from_class(
             &merged,
-            ctx.class_loader,
+            ctx.file.class_loader,
         )
     });
     if let Some(element) = class_element {
@@ -497,7 +497,7 @@ pub(crate) fn class_string_inner_binding(
         {
             return None;
         }
-        let fqn = match (ctx.class_loader)(content) {
+        let fqn = match (ctx.file.class_loader)(content) {
             Some(cls) => cls.fqn().to_string(),
             None => content.to_string(),
         };

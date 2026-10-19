@@ -404,7 +404,7 @@ fn recorded_narrows_current(
             wide.type_string.unwrap_nullable().class_name(),
         ) {
             (Some(child), Some(parent)) => {
-                crate::class_lookup::is_subclass_of(child, parent, ctx.class_loader)
+                crate::class_lookup::is_subclass_of(child, parent, ctx.file.class_loader)
             }
             _ => false,
         }

@@ -2,7 +2,7 @@ use super::*;
 use crate::test_fixtures::{
     make_class, make_method, make_method_with_params, make_param, no_loader,
 };
-use crate::type_engine::resolver::Loaders;
+use crate::type_engine::resolver::FileCtx;
 use crate::types::TraitPrecedence;
 use crate::virtual_members::laravel::ELOQUENT_BUILDER_FQN;
 
@@ -11,26 +11,14 @@ fn context<'a>(
     content: &'a str,
     loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> ForwardWalkCtx<'a> {
-    ForwardWalkCtx {
-        current_class: class,
-        all_classes: &[],
-        content,
-        cursor_offset: content.len() as u32,
-        class_loader: loader,
-        source_class_loader: loader,
-        source_imports: None,
-        backend: None,
-        loaders: Loaders::default(),
-        resolved_class_cache: None,
-        enclosing_return_type: None,
-        top_level_scope: None,
-        in_loop: false,
-        template_markers: None,
-        cursor_scope: None,
+    ForwardWalkCtx::new(
+        FileCtx::new(content, &[], loader, loader),
+        class,
+        content.len() as u32,
         // A test's walks are few and short, so its flow is leaked rather
         // than threaded through every helper.
-        flow: Box::leak(Box::default()),
-    }
+        Box::leak(Box::default()),
+    )
 }
 
 #[test]
@@ -197,10 +185,11 @@ fn eager_callbacks_require_a_known_framework_receiver_and_relations_parameter() 
         for class in &all_classes {
             crate::virtual_members::resolve_class_fully_cached(class, &no_loader, &cache);
         }
+        let base = context(&empty, content, &loader);
         let ctx = ForwardWalkCtx {
-            all_classes: &all_classes,
+            file: base.file.with_source(content, &all_classes),
             resolved_class_cache: Some(&cache),
-            ..context(&empty, content, &loader)
+            ..base
         };
         let mut scope = ScopeState::new();
         scope.locals.insert(atom("$query"), vec![receiver]);
@@ -216,7 +205,7 @@ fn eager_callbacks_require_a_known_framework_receiver_and_relations_parameter() 
             content,
             &ScopeState::new(),
             &ForwardWalkCtx {
-                content,
+                file: ctx.file.with_source(content, ctx.file.all_classes),
                 ..ctx.with_cursor_offset(content.len() as u32)
             },
         );
@@ -244,22 +233,7 @@ fn assert_no_eager_context(content: &str, scope: &ScopeState, ctx: &ForwardWalkC
 /// A resolution context with no class or file around it, for the
 /// relation query helpers.
 fn resolution_context(loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>) -> ResolutionCtx<'_> {
-    ResolutionCtx {
-        current_class: None,
-        all_classes: &[],
-        content: "",
-        cursor_offset: 0,
-        class_loader: loader,
-        source_class_loader: loader,
-        source_imports: None,
-        backend: None,
-        laravel_macro_this_resolver: None,
-        resolved_class_cache: None,
-        function_loader: None,
-        scope_var_resolver: None,
-        is_in_static_method: false,
-        preserve_static: false,
-    }
+    ResolutionCtx::new(FileCtx::new("", &[], loader, loader), None, 0)
 }
 
 #[test]

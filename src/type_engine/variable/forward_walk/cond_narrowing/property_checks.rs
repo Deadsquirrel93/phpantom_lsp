@@ -164,9 +164,9 @@ pub(super) fn narrow_union_by_property_check(
             Some(cls) => crate::inheritance::resolve_property_type_hint(
                 cls,
                 &check.property,
-                ctx.class_loader,
+                ctx.file.class_loader,
             )
-            .is_none_or(|hint| check.test.admits(&hint, ctx.class_loader)),
+            .is_none_or(|hint| check.test.admits(&hint, ctx.file.class_loader)),
             None => true,
         };
         if admitted {

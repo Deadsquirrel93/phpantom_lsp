@@ -678,21 +678,11 @@ pub(crate) fn build_var_ctx<'a>(
     scope_resolver: &'a dyn Fn(&str) -> Vec<ResolvedType>,
 ) -> VarResolutionCtx<'a> {
     VarResolutionCtx {
-        source_imports: ctx.source_imports,
-        backend: ctx.backend,
         loaders: ctx.loaders,
         resolved_class_cache: ctx.resolved_class_cache,
         enclosing_return_type: ctx.enclosing_return_type.clone(),
         top_level_scope: ctx.top_level_scope.clone(),
         scope_var_resolver: Some(scope_resolver),
-        ..VarResolutionCtx::new(
-            var_name,
-            ctx.current_class,
-            ctx.all_classes,
-            ctx.content,
-            ctx.cursor_offset,
-            ctx.class_loader,
-            ctx.source_class_loader,
-        )
+        ..VarResolutionCtx::new(var_name, ctx.file, ctx.current_class, ctx.cursor_offset)
     }
 }

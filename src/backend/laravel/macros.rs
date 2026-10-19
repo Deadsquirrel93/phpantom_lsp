@@ -4,8 +4,7 @@
 use std::collections::HashMap;
 
 use crate::Backend;
-use crate::type_engine::resolver::CtxLoaders;
-use crate::types::FileContext;
+use crate::type_engine::resolver::{CtxLoaders, FileCtx};
 
 impl Backend {
     /// Build the Laravel macro index by scanning the project's own source
@@ -333,8 +332,7 @@ impl Backend {
             }
             self.infer_macro_return_type(
                 reg,
-                content,
-                &file_ctx,
+                loaders.file_ctx_at(content, reg.name_offset),
                 loaders.ctx_loaders_at(reg.name_offset),
             );
         }
@@ -359,23 +357,21 @@ impl Backend {
         let loaders = self.file_loaders(&file_ctx);
         self.infer_macro_return_type(
             reg,
-            &content,
-            &file_ctx,
+            loaders.file_ctx_at(&content, reg.name_offset),
             loaders.ctx_loaders_at(reg.name_offset),
         );
     }
 
     /// Type `reg`'s macro from the closure it registers, read as the body of
-    /// a method on the target class.  `content` is the file the closure is
-    /// written in, and `file_ctx` and `loaders` describe that same file.
+    /// a method on the target class.  `file` is the file the closure is
+    /// written in, and `loaders` belong to that same file.
     ///
     /// A no-op when the registration has no closure or the target class
     /// cannot be resolved.
     fn infer_macro_return_type(
         &self,
         reg: &mut crate::virtual_members::laravel::MacroRegistration,
-        content: &str,
-        file_ctx: &FileContext,
+        file: FileCtx<'_>,
         loaders: CtxLoaders<'_>,
     ) {
         let Some(closure_text) = reg.closure_text.as_deref() else {
@@ -386,13 +382,7 @@ impl Backend {
         };
         let rctx = crate::type_engine::resolver::ResolutionCtx {
             preserve_static: true,
-            ..self.resolution_ctx_at(
-                Some(target_class.as_ref()),
-                &file_ctx.classes,
-                content,
-                reg.name_offset,
-                loaders,
-            )
+            ..self.resolution_ctx_at(file, Some(target_class.as_ref()), reg.name_offset, loaders)
         };
         if let Some(ty) = Self::infer_closure_return_type(closure_text, &rctx) {
             reg.method.return_type = Some(ty);

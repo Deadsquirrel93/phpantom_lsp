@@ -503,8 +503,8 @@ fn extract_match_arm_narrowings(
         let resolved = type_resolution::type_hint_to_classes_typed(
             &class_type,
             &ctx.current_class.fqn(),
-            ctx.all_classes,
-            ctx.class_loader,
+            ctx.file.all_classes,
+            ctx.file.class_loader,
         );
         if resolved.is_empty() {
             return HashMap::new();
