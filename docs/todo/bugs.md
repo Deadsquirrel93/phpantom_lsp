@@ -57,36 +57,7 @@ No outstanding items.
 
 ## Name resolution
 
-### B647. Some lookups find a class's file by its short name
-
-**Impact: Low · Complexity: Low**
-
-```php
-namespace App\Billing;
-class Invoice { public function total(): int {} }
-
-namespace App\Legacy;
-class Invoice {}
-
-namespace App;
-/** @see \App\Billing\Invoice::total() */
-function report() {}   // hover link can point into App\Legacy\Invoice's file
-```
-
-`find_class_file_uri` (`definition/member/file_lookup.rs`) only checks the
-namespace when the name it is given has one. Several callers hand it
-`ClassInfo::name`, the short name, so any class with that short name in any
-file matches, and the first one found wins. The result is a link or jump to
-the wrong file, at the right class's offset. The callers are both
-`resolve_see_target` branches (`hover/see_refs.rs`), the fallback in
-`build_hierarchy_item_for_class` (`type_hierarchy.rs`, tried before the
-`fqn_uri_index` lookup that would get it right), and the
-`resolve_search_name` fallback in `definition/member/mod.rs`, which uses
-`target_class.name` as `declaring_fqn`. Pass `ClassInfo::fqn()` at each site.
-`resolve_see_target` also passes the raw `@see` text to `find_or_load_class`,
-so a `@see Foo` that relies on a `use` import is not resolved through it.
-Resolve it with the declaring file's imports, the way other docblock names
-are.
+No outstanding items.
 
 ## Miscellaneous
 

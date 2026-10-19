@@ -163,7 +163,6 @@ impl Backend {
         // disk.
         let (class_uri, class_content) = self
             .find_class_file_content(fqn, "", "")
-            .or_else(|| self.find_class_file_content(&class_info.name, "", ""))
             .unwrap_or_else(|| {
                 // Last resort: try to find the URI from the fqn_uri_index
                 // and read from disk / open_files.

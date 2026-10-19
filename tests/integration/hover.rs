@@ -5435,6 +5435,64 @@ oldFormat();
 }
 
 #[test]
+fn hover_see_links_to_the_named_class_not_one_sharing_its_short_name() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[(
+            "src/Billing/Invoice.php",
+            "<?php\nnamespace App\\Billing;\nclass Invoice {\n    public function total(): int { return 0; }\n}\n",
+        )],
+    );
+    let uri = "file:///report.php";
+    let content = r#"<?php
+namespace App\Legacy {
+class Invoice {}
+}
+namespace App {
+/** @see \App\Billing\Invoice::total() */
+function report(): void {}
+report();
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 7, 2).expect("expected hover on report");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("src/Billing/Invoice.php#L4)"),
+        "@see should link into App\\Billing\\Invoice's file, got: {text}"
+    );
+}
+
+#[test]
+fn hover_see_resolves_through_the_declaring_files_imports() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[
+            (
+                "src/Billing/Invoice.php",
+                "<?php\nnamespace App\\Billing;\nclass Invoice {\n    public function total(): int { return 0; }\n}\n",
+            ),
+            (
+                "src/Reports.php",
+                "<?php\nnamespace App;\nuse App\\Billing\\Invoice;\nclass Reports {\n    /** @see Invoice::total() */\n    public function run(): void {}\n}\n",
+            ),
+        ],
+    );
+    // The hovered call sits in a file with none of `Reports.php`'s imports.
+    let uri = "file:///main.php";
+    let content = r#"<?php
+(new \App\Reports())->run();
+"#;
+
+    let hover = hover_at(&backend, uri, content, 1, 23).expect("expected hover on run");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("[`Invoice::total()`](") && text.contains("src/Billing/Invoice.php#L4)"),
+        "@see should resolve Invoice through Reports.php's use import, got: {text}"
+    );
+}
+
+#[test]
 fn hover_see_unresolvable_symbol_falls_back_to_inline_code() {
     let backend = create_test_backend();
     let uri = "file:///test.php";

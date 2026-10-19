@@ -239,7 +239,7 @@ impl Backend {
             (
                 effective_name.clone(),
                 ClassInfo::clone(target_class),
-                target_class.name.to_string(),
+                target_class.fqn().to_string(),
             )
         });
 

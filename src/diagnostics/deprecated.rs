@@ -27,7 +27,7 @@ use crate::class_lookup::find_class_at_offset;
 use crate::symbol_map::{ClassRefContext, SymbolKind};
 use crate::type_engine::resolver::{ResolutionCtx, SubjectOutcome, resolve_subject_outcome};
 use crate::types::AccessKind;
-use crate::types::{ClassInfo, ClassLikeKind};
+use crate::types::{ClassInfo, ClassLikeKind, SeeRef};
 use crate::virtual_members::{ResolvedClassCache, resolve_class_fully_cached};
 
 use super::helpers::{FileDiagnosticContext, find_enclosing_method_name, make_tagged_diagnostic};
@@ -101,7 +101,7 @@ impl Backend {
                       symbol: &str,
                       class: Option<&str>,
                       msg: &str,
-                      see_refs: &[String]| {
+                      see_refs: &[SeeRef]| {
             if is_within_deprecated_scope(
                 self,
                 local_classes,
@@ -330,7 +330,7 @@ fn deprecated_diagnostic(
     symbol_name: &str,
     class_name: Option<&str>,
     deprecation_message: &str,
-    see_refs: &[String],
+    see_refs: &[SeeRef],
 ) -> Diagnostic {
     let display = if let Some(cls) = class_name {
         format!("{}::{}", cls, symbol_name)
@@ -343,7 +343,11 @@ fn deprecated_diagnostic(
     let full_message = if see_refs.is_empty() {
         deprecation_message.to_string()
     } else {
-        let see_list = see_refs.join(", ");
+        let see_list = see_refs
+            .iter()
+            .map(|see| see.text.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
         if deprecation_message.is_empty() {
             format!("See: {}", see_list)
         } else {

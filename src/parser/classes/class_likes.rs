@@ -55,7 +55,7 @@ struct ClassDocblockInfo {
     /// URLs from `@link` and `@see` tags in the class-level docblock.
     links: Vec<String>,
     /// `@see` references from the class-level docblock.
-    see_refs: Vec<String>,
+    see_refs: Vec<crate::types::SeeRef>,
     /// Raw class-level docblock text, kept for the consumers that render
     /// or re-scan the original text.
     raw_docblock: Option<String>,
@@ -133,7 +133,7 @@ fn extract_class_docblock<'a>(
             .map(|n| atom(&n))
             .collect(),
         links: docblock::extract_link_urls_from_info(&info),
-        see_refs: docblock::extract_see_references_from_info(&info),
+        see_refs: docblock::extract_see_refs_from_info(&info),
         raw_docblock: Some(doc_text.to_string()),
         docblock_start,
         doc_members: DocblockMembers::from_info(&info),

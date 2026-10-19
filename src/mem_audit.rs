@@ -25,7 +25,7 @@ use crate::php_type::{
 };
 use crate::types::{
     ClassInfo, ConstantInfo, DocblockMembers, FunctionInfo, LaravelMetadata, MethodExtras,
-    MethodInfo, ParameterInfo, PropertyInfo, PropertySource, SharedVec, TraitAlias,
+    MethodInfo, ParameterInfo, PropertyInfo, PropertySource, SeeRef, SharedVec, TraitAlias,
     TraitPrecedence, TypeAliasDef, TypeAssertion,
 };
 
@@ -148,6 +148,15 @@ fn map_buckets<K, V>(cap: usize) -> Sz {
     if cap > 0 {
         let buckets = ((cap * 8).div_ceil(7).max(4)).next_power_of_two();
         z.add(buckets * (size_of::<(K, V)>() + 1));
+    }
+    z
+}
+
+fn see(v: &[SeeRef]) -> Sz {
+    let mut z = Sz::default();
+    z.add(size_of_val(v));
+    for x in v {
+        z.add(x.text.capacity());
     }
     z
 }
@@ -708,7 +717,7 @@ impl Audit {
         self.m_tmpl += atom_map_ty(&e.template_param_bounds);
         self.m_docs += s(&e.return_description);
         self.m_docs += vs(&e.links);
-        self.m_docs += vs(&e.see_refs);
+        self.m_docs += see(&e.see_refs);
         self.m_docs += s(&e.deprecation_message);
         self.m_docs += s(&e.deprecated_replacement);
         self.params(&m.parameters);
@@ -735,7 +744,7 @@ impl Audit {
         self.p_types += opt_ty(&p.type_hint);
         self.p_types += opt_ty(&p.native_type_hint);
         self.p_docs += s(&p.description);
-        self.p_docs += vs(&p.see_refs);
+        self.p_docs += see(&p.see_refs);
         self.p_docs += s(&p.deprecation_message);
         self.p_docs += s(&p.deprecated_replacement);
         if let Some(src) = &p.source {
@@ -762,7 +771,7 @@ impl Audit {
         }
         self.c_types += opt_ty(&c.type_hint);
         self.c_docs += s(&c.description);
-        self.c_docs += vs(&c.see_refs);
+        self.c_docs += see(&c.see_refs);
         self.c_docs += s(&c.deprecation_message);
         self.c_docs += s(&c.deprecated_replacement);
         self.c_vals += s(&c.enum_value);
@@ -843,7 +852,7 @@ impl Audit {
         self.cls_docs += s(&c.deprecation_message);
         self.cls_docs += s(&c.deprecated_replacement);
         self.cls_docs += vs(&c.links);
-        self.cls_docs += vs(&c.see_refs);
+        self.cls_docs += see(&c.see_refs);
 
         // `@method` / `@property` tags parsed at extraction time.  The
         // methods are `Arc`-shared with every class that mixes them in, so
@@ -896,7 +905,7 @@ impl Audit {
         self.m_docs += s(&f.description);
         self.m_docs += s(&f.return_description);
         self.m_docs += vs(&f.links);
-        self.m_docs += vs(&f.see_refs);
+        self.m_docs += see(&f.see_refs);
         self.m_docs += s(&f.deprecation_message);
         self.m_docs += s(&f.deprecated_replacement);
         self.m_docs += s(&f.namespace);
