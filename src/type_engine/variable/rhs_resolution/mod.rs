@@ -295,7 +295,8 @@ fn resolve_rhs_expression_inner<'b>(
             // `is_a(..., true)` guard).  The completion/hover paths carry
             // a `scope_var_resolver`; the diagnostic path instead reads
             // the forward walker's snapshot cache, so both are consulted.
-            if let Some(key) = crate::type_engine::types::narrowing::expr_to_subject_key(expr)
+            if let Some(key) =
+                crate::type_engine::type_ops::condition_facts::expr_to_subject_key(expr)
                 && key.contains('[')
                 && let Some(from_scope) = narrowed_subject_from_scope(&key, expr, ctx)
             {
@@ -320,7 +321,8 @@ fn resolve_rhs_expression_inner<'b>(
             // lookup because the arm describes this branch specifically,
             // where the scope entry describes the statement as a whole.
             if !ctx.match_arm_narrowing.is_empty()
-                && let Some(key) = crate::type_engine::types::narrowing::expr_to_subject_key(expr)
+                && let Some(key) =
+                    crate::type_engine::type_ops::condition_facts::expr_to_subject_key(expr)
                 && let Some(narrowed) = ctx.match_arm_narrowing.get(&key)
             {
                 return narrowed.clone();
@@ -331,7 +333,8 @@ fn resolve_rhs_expression_inner<'b>(
             // property (`self::$repo`) is read the same way: the walker
             // records writes and checks under its own key, and reading
             // straight from the declaration is what loses them.
-            if let Some(key) = crate::type_engine::types::narrowing::expr_to_subject_key(expr)
+            if let Some(key) =
+                crate::type_engine::type_ops::condition_facts::expr_to_subject_key(expr)
                 && (key.contains("->") || key.contains("::$"))
                 && let Some(from_scope) = narrowed_subject_from_scope(&key, expr, ctx)
             {

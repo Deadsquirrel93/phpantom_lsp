@@ -144,10 +144,13 @@ fn unique_ids_preserve_explicit_attribute_types() {
 fn unique_ids_preserve_schema_metadata_and_dynamic_key_names() {
     let mut class = model(&[UUIDS]);
     let cache = new_resolved_class_cache();
-    cache.write().set_schema_index(SchemaIndex::from_tables(
-        Some("primary".into()),
-        parse_schema_dump("primary", "CREATE TABLE users (id varchar(36) NOT NULL);"),
-    ));
+    cache
+        .write()
+        .laravel_mut()
+        .set_schema_index(SchemaIndex::from_tables(
+            Some("primary".into()),
+            parse_schema_dump("primary", "CREATE TABLE users (id varchar(36) NOT NULL);"),
+        ));
     let members = LaravelModelProvider.provide(&class, &no_loader, Some(&cache));
     assert_key(&members, "id", "string");
     assert!(matches!(

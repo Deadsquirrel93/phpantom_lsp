@@ -9,7 +9,7 @@ use mago_span::HasSpan;
 
 use crate::atom::{atom, bytes_to_str};
 use crate::php_type::{PhpType, TypeKind};
-use crate::type_engine::types::narrowing;
+use crate::type_engine::type_ops::condition_facts;
 
 use super::scope_state::{ClosureCaptureEffect, MemberInvalidation};
 
@@ -102,9 +102,9 @@ fn apply_invalidations(
                 let key: &str = key;
                 key != invalidation.subject
                     && !kept.iter().any(|k| k == key)
-                    && !narrowing::is_call_key(key)
+                    && !condition_facts::is_call_key(key)
                     && key.ends_with(|c: char| c.is_alphanumeric() || c == '_')
-                    && narrowing::key_reads_variable(key, &invalidation.subject)
+                    && condition_facts::key_reads_variable(key, &invalidation.subject)
             })
             .map(|key| key.to_string())
             .collect();
@@ -153,7 +153,7 @@ fn forget_static_properties_after_impure_call(
         .map(|key| key.to_string())
         .collect();
     for key in keys {
-        let declared = if narrowing::is_call_key(&key) {
+        let declared = if condition_facts::is_call_key(&key) {
             Vec::new()
         } else {
             super::cond_narrowing::declared_key_type(&key, scope, ctx)
@@ -228,7 +228,7 @@ pub(crate) fn forget_impure_call_results(
             forget_impure_call_results(bin.rhs, scope, ctx);
         }
         Expression::Call(call) => {
-            let Some(key) = narrowing::expr_to_subject_key(condition) else {
+            let Some(key) = condition_facts::expr_to_subject_key(condition) else {
                 return;
             };
             if !scope.contains(&key) {
@@ -531,7 +531,7 @@ fn call_node_invalidations<'b>(
                     // chain, which a fluent chain pays at every link, so it
                     // is skipped when nothing could read through it.
                     let receiver = scope_tracks_paths(scope)
-                        .then(|| narrowing::expr_to_subject_key(object))
+                        .then(|| condition_facts::expr_to_subject_key(object))
                         .flatten();
                     let receiver_has_state = receiver
                         .as_deref()
@@ -665,7 +665,7 @@ fn collect_closure_invalidations<'b>(
     out.extend(closure_out.into_iter().filter(|invalidation| {
         captured.iter().any(|name| {
             invalidation.subject == *name
-                || narrowing::key_reads_variable(&invalidation.subject, name)
+                || condition_facts::key_reads_variable(&invalidation.subject, name)
         })
     }));
 }
@@ -818,7 +818,7 @@ fn push_receiver_invalidation(
     let made = if effect.forgets_own_result() {
         None
     } else {
-        narrowing::expr_to_subject_key(call)
+        condition_facts::expr_to_subject_key(call)
     };
     push_unique(
         out,
@@ -841,7 +841,7 @@ fn push_argument_invalidations(
     out: &mut Vec<Invalidation>,
 ) {
     for arg in args.arguments.iter() {
-        let Some(key) = narrowing::expr_to_subject_key(arg.value()) else {
+        let Some(key) = condition_facts::expr_to_subject_key(arg.value()) else {
             continue;
         };
         if !scope_reads_through(scope, &key) {
@@ -897,7 +897,7 @@ fn push_unique(out: &mut Vec<Invalidation>, invalidation: Invalidation) {
 fn any_argument_has_state(args: &ArgumentList<'_>, scope: &ScopeState) -> bool {
     scope_tracks_paths(scope)
         && args.arguments.iter().any(|arg| {
-            narrowing::expr_to_subject_key(arg.value())
+            condition_facts::expr_to_subject_key(arg.value())
                 .is_some_and(|key| scope_reads_through(scope, &key))
         })
 }
@@ -921,7 +921,8 @@ fn scope_holds_call_state(scope: &ScopeState) -> bool {
 /// Whether the scope holds any synthetic key read through `subject`.
 fn scope_reads_through(scope: &ScopeState, subject: &str) -> bool {
     let reads = |key: &str| {
-        key != subject && crate::type_engine::types::narrowing::key_reads_variable(key, subject)
+        key != subject
+            && crate::type_engine::type_ops::condition_facts::key_reads_variable(key, subject)
     };
     scope.locals.compound_keys().any(|k| reads(k))
         || scope
@@ -942,10 +943,10 @@ fn written_object(expr: &Expression<'_>) -> Option<String> {
             Expression::ArrayAccess(access) => target = access.array,
             Expression::ArrayAppend(append) => target = append.array,
             Expression::Access(Access::Property(pa)) => {
-                return narrowing::expr_to_subject_key(pa.object);
+                return condition_facts::expr_to_subject_key(pa.object);
             }
             Expression::Access(Access::NullSafeProperty(pa)) => {
-                return narrowing::expr_to_subject_key(pa.object);
+                return condition_facts::expr_to_subject_key(pa.object);
             }
             _ => return None,
         }
@@ -1027,7 +1028,7 @@ fn inherits_method(cls: &crate::types::ClassInfo, method: &str, ctx: &ForwardWal
     else {
         return false;
     };
-    narrowing::find_method_in_chain_where(
+    condition_facts::find_method_in_chain_where(
         &parent,
         method,
         ctx.class_loader,
@@ -1097,7 +1098,7 @@ fn method_call_effect(
             vec![ctx.current_class.fqn().to_string()]
         }
         _ => {
-            let Some(key) = narrowing::expr_to_subject_key(object) else {
+            let Some(key) = condition_facts::expr_to_subject_key(object) else {
                 return CallEffect::Unknown;
             };
             subject_class_names(&key, scope, ctx)
@@ -1216,7 +1217,7 @@ fn declared_purity(
     method_name: &str,
     ctx: &ForwardWalkCtx<'_>,
 ) -> Option<bool> {
-    narrowing::find_method_in_chain_where(
+    condition_facts::find_method_in_chain_where(
         cls,
         method_name,
         ctx.class_loader,

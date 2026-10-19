@@ -235,7 +235,11 @@ fn root_facade_candidates_follow_global_class_lifecycle() {
 #[test]
 fn batch_publication_indexes_runtime_writes_without_opening_the_writer() {
     let backend = Backend::new_test();
-    backend.resolved_class_cache.write().set_laravel(true);
+    backend
+        .resolved_class_cache
+        .write()
+        .laravel_mut()
+        .set_enabled(true);
     let writer_uri = "file:///project/tests/DiskTest.php";
     let reader_uri = "file:///project/app/Reader.php";
     let writer = backend.parse_ast_index_update_for_index(
@@ -250,14 +254,14 @@ fn batch_publication_indexes_runtime_writes_without_opening_the_writer() {
     backend.apply_ast_index_parse_results_batch(vec![reader, writer]);
 
     assert_eq!(
-        backend.laravel_runtime_config_keys.read()[writer_uri],
+        backend.laravel.runtime_config_keys.read()[writer_uri],
         [
             "cache.stores.scratch",
             "filesystems.disks.persistent",
             "filesystems.disks.temporary",
         ]
     );
-    let writes = backend.laravel_runtime_config_keys.read();
+    let writes = backend.laravel.runtime_config_keys.read();
     assert_eq!(
         writes[writer_uri].len(),
         3,
@@ -281,7 +285,11 @@ fn runtime_writes_follow_cross_file_facade_shadows() {
         ),
     ] {
         let backend = Backend::new_test();
-        backend.resolved_class_cache.write().set_laravel(true);
+        backend
+            .resolved_class_cache
+            .write()
+            .laravel_mut()
+            .set_enabled(true);
         let writer_uri = "file:///project/tests/FixtureTest.php";
         let shadow_uri = "file:///project/app/LocalFacade.php";
         backend.update_ast(writer_uri, &format!("<?php\n{call};\n"));
@@ -289,7 +297,7 @@ fn runtime_writes_follow_cross_file_facade_shadows() {
 
         backend.update_ast(shadow_uri, &format!("<?php\nclass {facade} {{}}\n"));
         assert!(
-            backend.laravel_runtime_config_keys.read().is_empty(),
+            backend.laravel.runtime_config_keys.read().is_empty(),
             "a global {facade} class must withdraw the unedited file's write"
         );
 
@@ -304,7 +312,11 @@ fn runtime_writes_follow_cross_file_facade_shadows() {
 #[test]
 fn discovery_refresh_reconciles_runtime_writes_with_facade_aliases() {
     let backend = Backend::new_test();
-    backend.resolved_class_cache.write().set_laravel(true);
+    backend
+        .resolved_class_cache
+        .write()
+        .laravel_mut()
+        .set_enabled(true);
     let writer_uri = "file:///project/tests/DiskTest.php";
     let shadow_uri = "file:///project/app/Storage.php";
     let key = "filesystems.disks.scratch";
@@ -315,7 +327,7 @@ fn discovery_refresh_reconciles_runtime_writes_with_facade_aliases() {
         declarations.note_discovered("Storage", shadow_uri.to_string());
     });
     assert!(backend.refresh_all_published_laravel_candidates());
-    assert!(backend.laravel_runtime_config_keys.read().is_empty());
+    assert!(backend.laravel.runtime_config_keys.read().is_empty());
 
     backend.symbols.with_class_declarations(|declarations| {
         declarations.withdraw_uris(&HashSet::from([shadow_uri.to_string()]));
@@ -367,7 +379,7 @@ fn racing_template_parses_leave_one_consistent_lowering() {
     let template = "<p>{{ $a }}</p>\n{{ \\App\\Item::class }}\n";
 
     let stale = backend.parse_ast_index_update_for_index(uri, template);
-    backend.blade_injected_vars.write().insert(
+    backend.blade.injected_vars.write().insert(
         uri.to_string(),
         crate::blade::call_site_inference::BladeScope {
             vars: vec![
@@ -381,7 +393,7 @@ fn racing_template_parses_leave_one_consistent_lowering() {
     backend.apply_ast_index_parse_results_batch(vec![stale]);
 
     let virtual_php = backend.blade_virtual_php_arc(uri).unwrap();
-    let symbol_map = backend.symbol_maps.read().get(uri).cloned().unwrap();
+    let symbol_map = backend.symbol_map_for(uri).unwrap();
     assert!(
         symbol_map.matches_source(&virtual_php),
         "the symbol map must index the virtual PHP that was published with it"
@@ -420,7 +432,7 @@ fn stale_scope_batch_does_not_clobber_a_fresher_reinference() {
 
     // Call-site re-inference computes the real scope and re-parses
     // against it before the index worker's batch is applied.
-    backend.blade_injected_vars.write().insert(
+    backend.blade.injected_vars.write().insert(
         uri.to_string(),
         crate::blade::call_site_inference::BladeScope {
             vars: vec![("a".to_string(), "int".to_string())],
@@ -587,7 +599,9 @@ fn ast_index_parse_result_batch_records_failures_and_empty_noops() {
 
     assert!(!changed);
     assert_eq!(
-        backend.parse_errors.read().get(uri).cloned(),
+        backend
+            .file_state(uri)
+            .map(|state| state.parse_errors.clone()),
         Some(vec![("Parse failed (internal error)".to_string(), 10, 20)])
     );
 }
@@ -706,7 +720,7 @@ fn an_unclosed_call_keeps_its_braced_namespace_block_indexed() {
         ),
     );
 
-    let spans = backend.file_namespaces.read().get(uri).cloned().unwrap();
+    let spans = backend.namespace_spans_for_uri(uri);
     let names: Vec<_> = spans.iter().map(|s| s.namespace.as_deref()).collect();
     assert_eq!(names, [Some("Lib"), Some("App")]);
     assert_eq!(
@@ -733,7 +747,7 @@ fn an_unclosed_call_keeps_its_braced_namespace_block_indexed() {
             .contains_key("App\\wave")
     );
 
-    let errors = backend.parse_errors.read().get(uri).cloned().unwrap();
+    let errors = backend.file_state(uri).unwrap().parse_errors.clone();
     assert!(
         errors
             .iter()

@@ -1,8 +1,9 @@
-//! The immutable context a forward walk carries: loaders, the enclosing
-//! class and function, the source text, and the per-walk settings every
-//! statement and expression handler reads.
+//! The context a forward walk carries: loaders, the enclosing class and
+//! function, the source text, the per-walk settings every statement and
+//! expression handler reads, and the walk's control-flow state.
 
 use super::*;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -12,11 +13,56 @@ use crate::php_type::PhpType;
 use crate::type_engine::resolver::{Loaders, VarResolutionCtx, WrittenNames};
 use crate::types::{ClassInfo, ResolvedType};
 
+/// The control-flow state of one forward walk.
+///
+/// Every copy of a walk's [`ForwardWalkCtx`] borrows the same one, so the
+/// loops, `switch`es and closures the walk is inside of are tracked across
+/// the copies it makes for a loop body or a closure.  A walk over a body
+/// of its own (a callee read for its return type, a variable query) owns a
+/// fresh one, so nothing the walk around it is doing changes its answer.
+#[derive(Default)]
+pub(crate) struct WalkFlow {
+    /// The loop nesting depth (foreach, while, for, do-while).  Used to
+    /// reduce the number of loop iterations for deeply nested loops,
+    /// preventing the exponential blowup that occurs when loop iteration
+    /// interacts with if-branch merging.
+    pub(super) loop_depth: Cell<u32>,
+    /// One frame per enclosing breakable structure (loop or `switch`),
+    /// innermost last.  A `break`/`continue` writes the scope it leaves
+    /// with into the frame its level names, and the structure that owns
+    /// the frame folds those states into its own join.
+    pub(super) exit_edges: RefCell<Vec<ExitEdges>>,
+    /// One frame per closure body being walked for the states its
+    /// `return`s leave with, innermost last.
+    pub(super) return_edges: RefCell<Vec<ReturnFrame>>,
+    /// Byte ranges of the branches a decidable guard rules out, when this
+    /// walk collects them (the diagnostic pass's walk of a file).
+    pub(super) unreachable: Option<RefCell<Vec<(u32, u32)>>>,
+}
+
+impl WalkFlow {
+    /// A walk that collects the branches it proves cannot run.
+    pub(crate) fn collecting_unreachable() -> Self {
+        Self {
+            unreachable: Some(RefCell::default()),
+            ..Self::default()
+        }
+    }
+
+    /// The ranges the walk proved cannot run, empty when it collected none.
+    pub(crate) fn into_unreachable(self) -> Vec<(u32, u32)> {
+        self.unreachable
+            .map(RefCell::into_inner)
+            .unwrap_or_default()
+    }
+}
+
 /// Context for the forward walk.
 ///
-/// Bundles the immutable context that every statement/expression handler
-/// needs — the class loader, function loader, current class info, source
-/// text, etc.  The mutable `ScopeState` is passed separately as `&mut`.
+/// Bundles the context that every statement/expression handler needs —
+/// the class loader, function loader, current class info, source text,
+/// etc.  The mutable `ScopeState` is passed separately as `&mut`; the
+/// walk's control flow is the [`WalkFlow`] it borrows.
 #[derive(Clone)]
 pub(crate) struct ForwardWalkCtx<'a> {
     /// The class containing the method being analyzed (or a dummy for
@@ -72,6 +118,8 @@ pub(crate) struct ForwardWalkCtx<'a> {
     /// with, while it walks the statement that holds the cursor; see
     /// [`CursorScope`].
     pub cursor_scope: Option<&'a CursorScope>,
+    /// The walk's control-flow state; see [`WalkFlow`].
+    pub flow: &'a WalkFlow,
 }
 
 /// The scope at the cursor, as the expression walk found it.
@@ -145,11 +193,12 @@ impl<'a> ForwardWalkCtx<'a> {
     /// than re-deriving narrowing from syntax on their own.
     pub(crate) fn from_var_ctx(
         ctx: &crate::type_engine::resolver::VarResolutionCtx<'a>,
+        flow: &'a WalkFlow,
     ) -> ForwardWalkCtx<'a> {
         ForwardWalkCtx {
             enclosing_return_type: ctx.enclosing_return_type.clone(),
             top_level_scope: ctx.top_level_scope.clone(),
-            ..Self::fresh_from_var_ctx(ctx)
+            ..Self::fresh_from_var_ctx(ctx, flow)
         }
     }
 
@@ -158,6 +207,7 @@ impl<'a> ForwardWalkCtx<'a> {
     /// cursor, but none of the per-body state (see [`Self::fresh`]).
     pub(crate) fn fresh_from_var_ctx(
         ctx: &crate::type_engine::resolver::VarResolutionCtx<'a>,
+        flow: &'a WalkFlow,
     ) -> ForwardWalkCtx<'a> {
         ForwardWalkCtx {
             current_class: ctx.current_class,
@@ -175,6 +225,7 @@ impl<'a> ForwardWalkCtx<'a> {
             in_loop: false,
             template_markers: None,
             cursor_scope: None,
+            flow,
         }
     }
 

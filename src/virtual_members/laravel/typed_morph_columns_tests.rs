@@ -10,12 +10,16 @@ fn symbol_map(content: &str) -> Arc<SymbolMap> {
 
 /// Mark `backend` as a Laravel project whose morph map registers `post`.
 fn with_morph_map(backend: Backend) -> Backend {
-    backend.resolved_class_cache.write().set_laravel(true);
+    backend
+        .resolved_class_cache
+        .write()
+        .laravel_mut()
+        .set_enabled(true);
     backend.refresh_laravel_morph_map(
         "file:///phpantom-morph-provider.php",
         "<?php \\Illuminate\\Database\\Eloquent\\Relations\\Relation::morphMap(['post' => \\Post::class]);",
     );
-    assert!(!backend.laravel_morph_map.read().is_empty());
+    assert!(!backend.laravel.morph_map.read().is_empty());
     backend
 }
 
@@ -37,7 +41,11 @@ fn morph_columns_are_not_confirmed_without_a_laravel_morph_map() {
     assert!(plain.morph_column_spans_for(uri, &map).is_empty());
 
     let laravel = Backend::new_headless();
-    laravel.resolved_class_cache.write().set_laravel(true);
+    laravel
+        .resolved_class_cache
+        .write()
+        .laravel_mut()
+        .set_enabled(true);
     let map = open(&laravel);
     assert!(laravel.morph_column_spans_for(uri, &map).is_empty());
 
@@ -86,10 +94,16 @@ fn morph_column_cache_rejects_missing_changed_and_outdated_sources() {
         .write()
         .insert(uri.to_string(), Arc::new(format!("{source}\n")));
     assert!(backend.morph_column_spans_for(uri, &map).is_empty());
-    backend
-        .blade_virtual_content
-        .write()
-        .insert(uri.to_string(), Arc::new(source.to_string()));
+    backend.files.write().insert(
+        uri.to_string(),
+        Arc::new(crate::file_state::FileState {
+            blade: Some(crate::file_state::BladeFileState {
+                virtual_php: Arc::new(source.to_string()),
+                source_map: Arc::default(),
+            }),
+            ..Default::default()
+        }),
+    );
     assert_eq!(backend.morph_column_spans_for(uri, &map).len(), 1);
     assert!(
         backend

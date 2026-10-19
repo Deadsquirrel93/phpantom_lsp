@@ -31,7 +31,7 @@ impl Backend {
         scans.mark_built();
 
         let resources = scans.merged();
-        *self.laravel_provider_scans.write() = scans;
+        *self.laravel.provider_scans.write() = scans;
 
         let config_count = resources.config_files.len();
         let view_count = resources.view_dirs.len();
@@ -99,7 +99,7 @@ impl Backend {
     /// Drop a deleted provider file's registrations from the merged table.
     pub(super) fn forget_laravel_provider_resources(&self, uri: &str) {
         let merged = {
-            let mut scans = self.laravel_provider_scans.write();
+            let mut scans = self.laravel.provider_scans.write();
             if !scans.is_built() || !scans.remove(uri) {
                 return;
             }
@@ -122,20 +122,20 @@ impl Backend {
             + resources.folio_mounts.len()
             > 0;
         let bindings_changed = {
-            let mut published = self.laravel_provider_resources.write();
+            let mut published = self.laravel.provider_resources.write();
             let changed = published.bindings != resources.bindings;
             *published = resources;
             changed
         };
-        self.laravel_string_key_cache.write().translations = None;
+        self.laravel.string_key_cache.write().translations = None;
 
         // The shared and composed template variables are resolved from these
         // registrations, so the previous scan's set is stale whether or not
         // any other resource count moved.
-        self.laravel_string_key_cache.write().shared_view_vars = None;
+        self.laravel.string_key_cache.write().shared_view_vars = None;
 
         if has_string_key_sources {
-            let mut cache = self.laravel_string_key_cache.write();
+            let mut cache = self.laravel.string_key_cache.write();
             cache.config_keys = None;
             cache.config_trees = None;
             cache.view_names = None;
@@ -146,7 +146,7 @@ impl Backend {
         // The provider bindings overlay the core container alias table, which
         // an earlier resolution may already have built from the previous set.
         if bindings_changed {
-            self.laravel_aliases.invalidate();
+            self.laravel.aliases.invalidate();
             self.clear_not_found_caches();
             // A binding is followed without a class lookup naming the
             // provider that registered it, so a cached receiver resolution
@@ -172,11 +172,11 @@ impl Backend {
             compiler_methods
                 .is_some()
                 .then_some(&has_method as &dyn Fn(&str) -> bool),
-            &self.laravel_provider_resources.read().custom_directives,
+            &self.laravel.provider_resources.read().custom_directives,
         );
-        let directives_changed = *self.blade_directives.read() != directives;
+        let directives_changed = *self.blade.directives.read() != directives;
         if directives_changed {
-            *self.blade_directives.write() = directives;
+            *self.blade.directives.write() = directives;
             self.reparse_blade_templates();
         }
     }
@@ -207,7 +207,7 @@ impl Backend {
     /// when the registered directive set actually moved, so the pass cannot
     /// repeat itself: the second scan publishes the same set.
     fn reparse_blade_templates(&self) {
-        let uris: Vec<String> = self.blade_virtual_content.read().keys().cloned().collect();
+        let uris = self.lowered_template_uris();
         for uri in uris {
             if let Some(content) = self.get_file_content(&uri) {
                 self.update_ast(&uri, &content);
@@ -233,10 +233,10 @@ impl Backend {
         content: &str,
         providers: &super::ProvidersOnce<'_>,
     ) {
-        if !self.resolved_class_cache.read().is_laravel() {
+        if !self.resolved_class_cache.read().laravel().is_enabled() {
             return;
         }
-        if !self.laravel_provider_scans.read().is_built() {
+        if !self.laravel.provider_scans.read().is_built() {
             return;
         }
 
@@ -249,7 +249,7 @@ impl Backend {
         }
 
         let known = {
-            let scans = self.laravel_provider_scans.read();
+            let scans = self.laravel.provider_scans.read();
             scans
                 .scan_for(uri)
                 .map(|scan| (scan.identity.fqn.clone(), scan.identity.origin))
@@ -271,7 +271,7 @@ impl Backend {
         };
 
         let merged = {
-            let mut scans = self.laravel_provider_scans.write();
+            let mut scans = self.laravel.provider_scans.write();
             // An edit that leaves the registrations alone (any edit outside
             // them, which is most of them) changes nothing downstream, so the
             // derived caches are left intact.
@@ -297,7 +297,7 @@ impl Backend {
     /// cannot make every keystroke rebuild the whole table.
     fn declares_registered_provider(&self, uri: &str) -> bool {
         let candidates: Vec<String> = {
-            let scans = self.laravel_provider_scans.read();
+            let scans = self.laravel.provider_scans.read();
             let classes = self.symbols.uri_classes_index.read();
             let Some(classes) = classes.get(uri) else {
                 return false;

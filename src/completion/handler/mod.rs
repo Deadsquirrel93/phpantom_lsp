@@ -221,18 +221,7 @@ impl Backend {
         let (content, position) = self.analysable_content_at(uri, position)?;
 
         let response = {
-            // Activate the chain resolution cache so that shared chain
-            // prefixes are resolved once and reused within this completion
-            // request.  The guard is re-entrant safe.
-            let _chain_guard = crate::type_engine::resolver::with_chain_resolution_cache();
-            let _resolver_guard =
-                crate::type_engine::call_resolution::activate_type_engine_caches();
-            let _cache_guard = crate::virtual_members::with_active_resolved_class_cache(
-                &self.resolved_class_cache,
-            );
-            // Parse the document at most once per request, as every request
-            // that goes through `with_file_content` does.
-            let _parse_guard = crate::parser::with_parse_cache_arc(std::sync::Arc::clone(&content));
+            let _scope = self.enter_request_scope(std::sync::Arc::clone(&content));
 
             let cursor_offset = crate::text_position::position_to_offset(&content, position);
             let site = CompletionSite {
@@ -501,10 +490,9 @@ impl Backend {
         uri: &str,
     ) -> Option<CompletionResponse> {
         let partial = Self::extract_partial_variable_name(content, position)?;
-        let symbol_maps = self.symbol_maps.read();
-        let symbol_map = symbol_maps.get(uri).map(|arc| arc.as_ref());
+        let symbol_map = self.symbol_map_for(uri);
         let (var_items, var_incomplete) =
-            Self::build_variable_completions(content, &partial, position, symbol_map);
+            Self::build_variable_completions(content, &partial, position, symbol_map.as_deref());
 
         if var_items.is_empty() {
             None

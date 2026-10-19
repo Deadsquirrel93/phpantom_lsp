@@ -27,6 +27,9 @@ fn context<'a>(
         in_loop: false,
         template_markers: None,
         cursor_scope: None,
+        // A test's walks are few and short, so its flow is leaked rather
+        // than threaded through every helper.
+        flow: Box::leak(Box::default()),
     }
 }
 

@@ -15,13 +15,21 @@ fn non_laravel_projects_ignore_schema_watch_changes() {
     };
 
     let backend = Backend::new_test();
-    backend.resolved_class_cache.write().set_laravel(false);
+    backend
+        .resolved_class_cache
+        .write()
+        .laravel_mut()
+        .set_enabled(false);
     assert!(!backend.apply_watched_file_changes(&params, dir.path()));
 
     // The gate is on the project type alone: the same event in a
     // Laravel workspace still rebuilds the schema index.
     let backend = Backend::new_test();
-    backend.resolved_class_cache.write().set_laravel(true);
+    backend
+        .resolved_class_cache
+        .write()
+        .laravel_mut()
+        .set_enabled(true);
     assert!(backend.apply_watched_file_changes(&params, dir.path()));
 }
 
@@ -63,8 +71,8 @@ fn deleting_a_template_drops_its_lowered_php_and_source_map() {
 
     let backend = Backend::new_test();
     backend.update_ast(&uri, "<div>{{ $name }}</div>\n");
-    assert!(backend.blade_virtual_content.read().contains_key(&uri));
-    assert!(backend.blade_source_maps.read().contains_key(&uri));
+    assert!(backend.blade_virtual_php_arc(&uri).is_some());
+    assert!(backend.blade_source_map(&uri).is_some());
 
     let params = DidChangeWatchedFilesParams {
         changes: vec![FileEvent {
@@ -74,8 +82,8 @@ fn deleting_a_template_drops_its_lowered_php_and_source_map() {
     };
     backend.apply_watched_file_changes(&params, dir.path());
 
-    assert!(!backend.blade_virtual_content.read().contains_key(&uri));
-    assert!(!backend.blade_source_maps.read().contains_key(&uri));
+    assert!(backend.blade_virtual_php_arc(&uri).is_none());
+    assert!(backend.blade_source_map(&uri).is_none());
 }
 
 /// The registrations a provider contributes are replaced when the file
@@ -89,7 +97,11 @@ fn deleting_a_provider_drops_its_gate_and_macro_registrations() {
     let uri = url.to_string();
 
     let backend = Backend::new_test();
-    backend.resolved_class_cache.write().set_laravel(true);
+    backend
+        .resolved_class_cache
+        .write()
+        .laravel_mut()
+        .set_enabled(true);
     backend.update_ast(
         &uri,
         "<?php\n\
@@ -105,12 +117,13 @@ fn deleting_a_provider_drops_its_gate_and_macro_registrations() {
     );
     assert!(
         backend
-            .laravel_gates
+            .laravel
+            .gates
             .read()
             .definition("edit-post")
             .is_some()
     );
-    assert!(backend.laravel_macros.read().files.has_uri(&uri));
+    assert!(backend.laravel.macros.read().files.has_uri(&uri));
 
     let params = DidChangeWatchedFilesParams {
         changes: vec![FileEvent {
@@ -122,13 +135,14 @@ fn deleting_a_provider_drops_its_gate_and_macro_registrations() {
 
     assert!(
         backend
-            .laravel_gates
+            .laravel
+            .gates
             .read()
             .definition("edit-post")
             .is_none()
     );
-    assert!(!backend.laravel_gates.read().files.has_uri(&uri));
-    assert!(!backend.laravel_macros.read().files.has_uri(&uri));
+    assert!(!backend.laravel.gates.read().files.has_uri(&uri));
+    assert!(!backend.laravel.macros.read().files.has_uri(&uri));
 }
 
 /// A running Laravel application compiles Blade templates into
@@ -147,7 +161,11 @@ fn laravel_cache_artifact_events_are_ignored() {
     }
 
     let backend = Backend::new_test();
-    backend.resolved_class_cache.write().set_laravel(true);
+    backend
+        .resolved_class_cache
+        .write()
+        .laravel_mut()
+        .set_enabled(true);
     seed_resolved_class(&backend);
 
     for path in [&view, &manifest] {
@@ -353,7 +371,11 @@ fn non_laravel_project_reloads_its_own_config_on_change() {
     std::fs::write(&config_path, "[diagnostics]\nextra-arguments = true\n").unwrap();
 
     let backend = Backend::new_test();
-    backend.resolved_class_cache.write().set_laravel(false);
+    backend
+        .resolved_class_cache
+        .write()
+        .laravel_mut()
+        .set_enabled(false);
     assert!(!backend.config().diagnostics.extra_arguments_enabled());
 
     let params = DidChangeWatchedFilesParams {
@@ -368,7 +390,7 @@ fn non_laravel_project_reloads_its_own_config_on_change() {
 
 /// `reload_config` writes through the `Arc<Mutex<Config>>` shared by
 /// every `Backend` clone (the blocking-task and background-worker
-/// clones created via `clone_for_diagnostic_worker`), not just the
+/// clones created via `clone_for_blocking`), not just the
 /// clone it was called on. Before `config` moved behind an `Arc`, a
 /// reload performed on one of those clones (as every reload always is)
 /// was invisible to the original `Backend` answering LSP requests.
@@ -382,7 +404,7 @@ fn reload_config_is_visible_on_every_clone() {
     .unwrap();
 
     let backend = Backend::new_test();
-    let clone = backend.clone_for_diagnostic_worker();
+    let clone = backend.clone_for_blocking();
     assert!(!backend.config().diagnostics.extra_arguments_enabled());
 
     clone.reload_config(dir.path());
@@ -419,7 +441,7 @@ fn reload_config_merges_the_configured_global_layer() {
     );
 
     let mut backend = Backend::new_test();
-    backend.workspace.global_config_path = Some(global);
+    backend.state_mut().workspace.global_config_path = Some(global);
     backend.reload_config(&project);
     assert!(backend.config().diagnostics.extra_arguments_enabled());
 }
@@ -493,8 +515,9 @@ fn reload_config_evicts_newly_excluded_classes() {
 fn backend_whose_client_accepts_watcher_registration() -> Backend {
     let backend = Backend::new_test();
     backend
-        .supports_watched_files_dynamic_registration
-        .store(true, Ordering::Release);
+        .client_caps
+        .write()
+        .watched_files_dynamic_registration = true;
     backend
 }
 
@@ -637,9 +660,7 @@ fn a_followed_link_gets_its_own_relative_pattern_watcher() {
 
     let backend = Backend::new_test();
     *backend.workspace.workspace_root.write() = Some(root.clone());
-    backend
-        .supports_relative_pattern_watchers
-        .store(true, Ordering::Release);
+    backend.client_caps.write().relative_pattern_watchers = true;
 
     // The walk is what discovers the link, exactly as it does at
     // startup.

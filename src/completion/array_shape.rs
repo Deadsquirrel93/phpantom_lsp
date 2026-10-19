@@ -366,7 +366,7 @@ impl Backend {
         // Expand type aliases before parsing as an array shape.
         // The raw type might be an alias name like `UserData` that
         // resolves to `array{name: string, email: string}`.
-        let parsed = crate::type_engine::types::aliases::resolve_type_alias_typed(
+        let parsed = crate::type_engine::type_ops::aliases::resolve_type_alias_typed(
             &effective_type,
             "",
             effective_classes,
@@ -529,7 +529,7 @@ impl Backend {
         }
 
         for key in prefix_keys {
-            let expanded = crate::type_engine::types::aliases::resolve_type_alias_typed(
+            let expanded = crate::type_engine::type_ops::aliases::resolve_type_alias_typed(
                 &current,
                 "",
                 all_classes,

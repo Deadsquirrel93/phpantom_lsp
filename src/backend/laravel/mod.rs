@@ -9,6 +9,7 @@
 //! Each index has its own file; what they share is the discovery of the
 //! registered service providers, which lives here.
 
+mod class_loading;
 mod commands;
 mod date_class;
 mod gates;
@@ -17,9 +18,12 @@ mod morph_map;
 mod pivots;
 mod provider_resources;
 mod schema;
+mod state;
 mod storage;
 mod string_key_cache;
 
+pub(crate) use class_loading::CLASS_LOAD_HOOKS;
+pub(crate) use state::LaravelState;
 pub(crate) use string_key_cache::{LaravelStringKeyBuildLocks, LaravelStringKeyCache};
 
 use crate::Backend;

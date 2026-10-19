@@ -30,7 +30,7 @@ use crate::php_type::{LiteralValue, PhpType, TypeKind, parse_php_int_literal};
 use crate::text_scan::{ScanStep, find_matching_forward, scan_top_level};
 
 /// Resolver from an expression's source text to its type, as
-/// [`crate::type_engine::types::conditional::ArgTypeResolver`] provides.
+/// [`crate::type_engine::type_ops::conditional::ArgTypeResolver`] provides.
 type TextResolver<'a> = &'a dyn Fn(&str) -> Option<PhpType>;
 
 /// A PHP bitwise operator, as far as folding two integers with it.

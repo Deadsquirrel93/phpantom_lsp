@@ -168,7 +168,7 @@ impl ArrayFuncArgs for TextArrayFuncArgs<'_, '_> {
     }
 
     fn guard_split(&self, guard: &str, subject: &PhpType) -> Option<(Option<PhpType>, bool)> {
-        crate::type_engine::types::narrowing::split_type_by_guard_name(
+        crate::type_engine::type_ops::condition_facts::split_type_by_guard_name(
             guard,
             subject,
             Some(&self.ctx.class_loader),

@@ -50,12 +50,8 @@ impl Backend {
             crate::text_position::position_to_byte_offset(content, params.range.start);
         let request_end = crate::text_position::position_to_byte_offset(content, params.range.end);
 
-        let symbol_map = {
-            let maps = self.symbol_maps.read();
-            match maps.get(uri) {
-                Some(sm) => sm.clone(),
-                None => return,
-            }
+        let Some(symbol_map) = self.symbol_map_for(uri) else {
+            return;
         };
 
         let Some(source) = symbol_map.source(content) else {

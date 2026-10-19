@@ -330,8 +330,8 @@ impl Backend {
             // snapshot's copy can describe a text that no longer exists.
             let is_blade = self.is_blade_file(file_uri);
             let symbol_map = match is_blade {
-                true => match self.symbol_maps.read().get(file_uri) {
-                    Some(map) => Arc::clone(map),
+                true => match self.symbol_map_for(file_uri) {
+                    Some(map) => map,
                     None => continue,
                 },
                 false => Arc::clone(snapshot_map),
@@ -414,7 +414,8 @@ impl Backend {
                 // attributes became arguments of the tag's call and are
                 // therefore not `blade_bound_attr_directive` calls to count.
                 let caller_components = self
-                    .blade_injected_vars
+                    .blade
+                    .injected_vars
                     .read()
                     .get(file_uri)
                     .map(|scope| scope.components.clone())
@@ -511,9 +512,10 @@ impl Backend {
     /// PHP, which is what [`Self::caller_source`] hands back for one.
     pub(super) fn view_caller_snapshot(&self) -> ViewCallerSnapshot {
         let vendor_prefixes = self.workspace.vendor_uri_prefixes.lock().clone();
-        let maps = self.symbol_maps.read();
+        let maps = self.files.read();
         let mut files: Vec<(String, Arc<SymbolMap>)> = maps
             .iter()
+            .filter_map(|(uri, state)| Some((uri, state.symbol_map.as_ref()?)))
             .filter(|(uri, map)| {
                 !crate::stubs::is_stub_uri(uri)
                     && !vendor_prefixes.iter().any(|p| uri.starts_with(p.as_str()))
@@ -573,7 +575,7 @@ impl Backend {
     /// Blade file once per refresh pass.
     pub(super) fn blade_caller_snapshot(&self) -> BladeCallerSnapshot {
         let vendor_prefixes = self.workspace.vendor_uri_prefixes.lock().clone();
-        let uris: Vec<String> = self.blade_virtual_content.read().keys().cloned().collect();
+        let uris = self.lowered_template_uris();
         uris.into_iter()
             .filter(|uri| !vendor_prefixes.iter().any(|p| uri.starts_with(p.as_str())))
             .filter_map(|uri| {
@@ -651,7 +653,7 @@ impl Backend {
                                 Expression::Variable(Variable::Direct(dv)) => {
                                     variable_type(bytes_to_str(dv.name))
                                 }
-                                _ => crate::type_engine::variable::foreach_resolution::resolve_expression_type(
+                                _ => crate::type_engine::variable::iterable_elements::resolve_expression_type(
                                     expr, &var_ctx,
                                 ),
                             }
@@ -797,7 +799,7 @@ impl Backend {
                             continue;
                         };
                         let var_ctx = loaders.var_ctx_at(content, expr.span().start.offset);
-                        let ty = crate::type_engine::variable::foreach_resolution::resolve_expression_type(
+                        let ty = crate::type_engine::variable::iterable_elements::resolve_expression_type(
                         expr, &var_ctx,
                     )
                     .unwrap_or_else(PhpType::mixed);

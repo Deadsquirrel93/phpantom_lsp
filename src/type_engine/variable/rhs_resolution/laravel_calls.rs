@@ -278,7 +278,7 @@ pub(super) fn try_resolve_request_accessor_type(
     // receiver is usually an app's own `FormRequest` subclass that never
     // redeclares it, so its parameters have to be found by walking the
     // parent chain rather than reading `owner`'s own members.
-    let (method, _) = crate::type_engine::types::narrowing::find_method_in_chain_where(
+    let (method, _) = crate::type_engine::type_ops::condition_facts::find_method_in_chain_where(
         owner,
         method_name,
         ctx.class_loader,

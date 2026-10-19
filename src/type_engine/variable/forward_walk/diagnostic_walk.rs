@@ -165,6 +165,7 @@ fn walk_file_for_scopes(
     let _building_guard = BuildingScopesGuard;
 
     let default_class = crate::class_lookup::placeholder_in_namespace(None);
+    let flow = WalkFlow::collecting_unreachable();
     let diag_ctx = DiagnosticWalkCtx {
         content,
         local_classes,
@@ -179,6 +180,7 @@ fn walk_file_for_scopes(
         resolved_class_cache,
         targets,
         globals: None,
+        flow: &flow,
     };
 
     with_parsed_program(content, "build_diagnostic_scopes", |program, _content| {
@@ -187,6 +189,7 @@ fn walk_file_for_scopes(
         // foreach, etc.) that lives outside any function body.
         walk_top_level_statements(program.statements.iter(), &default_class, &diag_ctx);
     });
+    record_scope_unreachable(flow.into_unreachable());
 }
 
 /// Walk a sequence of top-level (or namespace-level) statements,
@@ -478,6 +481,9 @@ pub(crate) struct DiagnosticWalkCtx<'a> {
     /// body imports.  `None` until the top-level walk has built them, and
     /// in a file that never says `global`.
     globals: Option<&'a Locals>,
+    /// The control-flow state every body in the file is walked on; it
+    /// collects the branches the walk proves cannot run.
+    flow: &'a WalkFlow,
 }
 
 impl<'a> DiagnosticWalkCtx<'a> {
@@ -528,6 +534,7 @@ impl<'a> DiagnosticWalkCtx<'a> {
             in_loop: false,
             template_markers: None,
             cursor_scope: None,
+            flow: self.flow,
         }
     }
 }

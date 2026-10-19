@@ -11,6 +11,7 @@ use super::*;
 use std::collections::HashMap;
 
 use crate::class_lookup::find_class_at_offset;
+use crate::names::resolve_to_fqn;
 use crate::types::ClassInfo;
 
 /// The class a member declared at `offset` belongs to.
@@ -273,7 +274,7 @@ impl Backend {
             return Vec::new();
         }
 
-        let class_fqn = normalize_fqn(&Self::resolve_to_fqn(class_name, use_map, namespace));
+        let class_fqn = normalize_fqn(&resolve_to_fqn(class_name, use_map, namespace));
         let Some(class_info) = class_loader(&class_fqn) else {
             return Vec::new();
         };
@@ -515,7 +516,7 @@ impl Backend {
     }
 
     fn extend_laravel_member_roots(&self, roots: &mut HashSet<String>) {
-        if !self.resolved_class_cache.read().is_laravel() {
+        if !self.resolved_class_cache.read().laravel().is_enabled() {
             return;
         }
         let class_loader = |name: &str| -> Option<Arc<ClassInfo>> { self.find_or_load_class(name) };
@@ -623,7 +624,7 @@ impl Backend {
         // index too, and a reader queues behind a waiting writer, so a
         // rebuild arriving mid-walk would wait on a guard held here while
         // the walk waited on the rebuild.
-        let index = self.laravel_macros.read();
+        let index = self.laravel.macros.read();
         let targets: Vec<String> = candidates
             .into_iter()
             .filter(|candidate| index.has_macro(candidate, member_name))

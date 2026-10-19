@@ -29,7 +29,7 @@ impl Backend {
         let mut locations = Vec::new();
 
         // Hold the map, not the index guard, for the walk below.
-        let Some(symbol_map) = self.symbol_maps.read().get(uri).cloned() else {
+        let Some(symbol_map) = self.symbol_map_for(uri) else {
             return locations;
         };
 
@@ -289,7 +289,7 @@ impl Backend {
         let mut locations = Vec::new();
 
         // Hold the map, not the index guard, for the walk below.
-        let Some(symbol_map) = self.symbol_maps.read().get(uri).cloned() else {
+        let Some(symbol_map) = self.symbol_map_for(uri) else {
             return locations;
         };
 

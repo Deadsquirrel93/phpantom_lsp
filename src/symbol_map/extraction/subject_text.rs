@@ -295,7 +295,7 @@ fn lower_spine_base<'a>(expr: &'a Expression<'a>) -> Option<SubjectExpr> {
                         .unwrap_or_else(|| bytes_to_str(i.raw).to_string());
                     BracketSegment::IntKey(n)
                 }
-                other => crate::type_engine::types::narrowing::array_index_key(other)
+                other => crate::type_engine::type_ops::condition_facts::array_index_key(other)
                     .filter(|index| index.contains('$'))
                     .map_or(BracketSegment::ElementAccess, BracketSegment::ComputedIndex),
             };

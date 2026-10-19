@@ -293,7 +293,7 @@ impl Backend {
         // reading one is the template declaring an attribute implicitly
         // (see [`crate::blade::implicit_props`]).
         let implicit = {
-            let directives = self.blade_directives.read();
+            let directives = self.blade.directives.read();
             crate::blade::implicit_props::implicit_props(&source, &directives)
         };
         if implicit.is_empty() {

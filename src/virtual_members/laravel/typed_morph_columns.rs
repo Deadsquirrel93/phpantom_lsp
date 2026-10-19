@@ -31,8 +31,8 @@ impl Backend {
         // enforced, has nothing for confirmation to find. Skipping it spares
         // the re-parse and receiver resolution for every ordinary
         // `$model->status === 'active'` comparison.
-        if !self.resolved_class_cache.read().is_laravel()
-            || self.laravel_morph_map.read().is_empty()
+        if !self.resolved_class_cache.read().laravel().is_enabled()
+            || self.laravel.morph_map.read().is_empty()
         {
             return empty_spans();
         }
@@ -52,14 +52,14 @@ impl Backend {
         // an answer that finishes computing after that edit invalidated caches.
         let generation = self.symbols.class_lookup_generation();
         if let Some((cached_generation, source, spans)) =
-            self.morph_column_spans_cache.read().get(uri)
+            self.laravel.morph_column_spans_cache.read().get(uri)
             && *cached_generation == generation
             && Arc::ptr_eq(source, map)
         {
             return Arc::clone(spans);
         }
         let spans = Arc::new(self.confirm_morph_columns(uri, &content, &map.morph_column_sites));
-        self.morph_column_spans_cache.write().insert(
+        self.laravel.morph_column_spans_cache.write().insert(
             uri.to_string(),
             (generation, Arc::clone(map), Arc::clone(&spans)),
         );
@@ -70,10 +70,10 @@ impl Backend {
     pub(crate) fn evict_morph_column_spans(&self, uri: &str) {
         // Only files with confirmed candidates get an entry, so the common
         // case is a miss on an empty map that needs no write lock.
-        if self.morph_column_spans_cache.read().is_empty() {
+        if self.laravel.morph_column_spans_cache.read().is_empty() {
             return;
         }
-        self.morph_column_spans_cache.write().remove(uri);
+        self.laravel.morph_column_spans_cache.write().remove(uri);
     }
 
     fn confirm_morph_columns(
@@ -126,7 +126,7 @@ impl Backend {
                         },
                     )
                 } else {
-                    crate::type_engine::variable::foreach_resolution::resolve_expression_type(
+                    crate::type_engine::variable::iterable_elements::resolve_expression_type(
                         expr, &var_ctx,
                     )
                 };

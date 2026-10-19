@@ -494,7 +494,7 @@ pub(super) fn resolve_owner_method_call(
     // before returning so that `@phpstan-type UserList array<int, User>`
     // with `@return UserList` is expanded to its concrete type.
     if let Some(hint) = ret_type_string {
-        let expanded = crate::type_engine::types::aliases::resolve_type_alias_typed(
+        let expanded = crate::type_engine::type_ops::aliases::resolve_type_alias_typed(
             &hint,
             &owner.fqn(),
             ctx.all_classes,

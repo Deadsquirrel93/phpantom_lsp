@@ -54,9 +54,7 @@ impl Backend {
         let resolved_types: Vec<PhpType> = match &symbol.kind {
             SymbolKind::Variable { name } | SymbolKind::CompactVariable { name } => {
                 let in_static = self
-                    .symbol_maps
-                    .read()
-                    .get(uri)
+                    .symbol_map_for(uri)
                     .is_some_and(|map| map.is_in_static_method(offset));
                 // $this is not available in static methods.
                 if name == "this" && in_static {

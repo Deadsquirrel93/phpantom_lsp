@@ -206,5 +206,5 @@ pub(in crate::type_engine) fn resolve_arg_raw_type<'b>(
         }
     }
     // Fall back to the unified pipeline (method calls, etc.)
-    super::super::foreach_resolution::resolve_expression_type(arg_expr, ctx)
+    super::super::iterable_elements::resolve_expression_type(arg_expr, ctx)
 }

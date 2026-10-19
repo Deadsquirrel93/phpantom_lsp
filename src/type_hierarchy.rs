@@ -10,6 +10,7 @@
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::names::resolve_to_fqn;
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind as MapSymbolKind};
 use crate::text_position::{offset_to_position, position_to_offset};
 use crate::types::{ClassInfo, ClassLikeKind};
@@ -103,7 +104,7 @@ impl Backend {
             let (resolved_fqn, super_info) = if let Some(info) = self.find_or_load_class(name) {
                 (name.to_string(), info)
             } else {
-                let fqn = Self::resolve_to_fqn(name, use_map, namespace);
+                let fqn = resolve_to_fqn(name, use_map, namespace);
                 match self.find_or_load_class(&fqn) {
                     Some(info) => (fqn, info),
                     None => continue,

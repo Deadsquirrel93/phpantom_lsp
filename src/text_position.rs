@@ -270,6 +270,23 @@ pub(crate) fn line_start_byte_offset(content: &str, line_idx: usize) -> usize {
     content.len()
 }
 
+/// Return the byte offset of the start of the line holding byte `offset`
+/// (just past the preceding `\n`, or 0 on the first line).
+pub(crate) fn find_line_start(content: &str, offset: usize) -> usize {
+    content[..offset.min(content.len())]
+        .rfind('\n')
+        .map_or(0, |nl| nl + 1)
+}
+
+/// Return the byte offset just past the `\n` that ends the line holding
+/// byte `offset`, or `content.len()` on the last line.
+pub(crate) fn find_line_end(content: &str, offset: usize) -> usize {
+    let offset = offset.min(content.len());
+    content[offset..]
+        .find('\n')
+        .map_or(content.len(), |nl| offset + nl + 1)
+}
+
 /// Convert an LSP `Position` (line, character) to a byte offset in
 /// `content`.
 ///

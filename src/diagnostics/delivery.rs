@@ -336,7 +336,7 @@ impl Backend {
             cache.insert(uri_str.to_string(), pruned);
         }
 
-        let pull_mode = self.supports_pull_diagnostics.load(Ordering::Acquire);
+        let pull_mode = self.caps().pull_diagnostics;
 
         if pull_mode {
             // ── Pull mode ───────────────────────────────────────────
@@ -394,7 +394,7 @@ impl Backend {
     /// nothing but the pump itself, and signals landing while a refresh
     /// is in flight coalesce into a single follow-up.
     pub(crate) async fn request_diagnostic_refresh(&self) {
-        if !self.supports_pull_diagnostics.load(Ordering::Acquire) {
+        if !self.caps().pull_diagnostics {
             return;
         }
         let Some(client) = &self.client else {
@@ -521,7 +521,7 @@ impl Backend {
             return;
         }
 
-        let pull_mode = self.supports_pull_diagnostics.load(Ordering::Acquire);
+        let pull_mode = self.caps().pull_diagnostics;
 
         let uris = self.open_files_affected_by_save(exclude_uri);
         if uris.is_empty() {
@@ -785,7 +785,7 @@ impl Backend {
             .workspace_diag_pass_started
             .load(Ordering::Acquire)
         {
-            let backend = self.clone_for_diagnostic_worker();
+            let backend = self.clone_for_blocking();
             let uri = uri_str.to_string();
             tokio::spawn(async move {
                 backend

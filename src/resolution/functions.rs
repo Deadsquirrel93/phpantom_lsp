@@ -32,7 +32,7 @@ impl Backend {
 
     /// Keep each docblock type `function` settled in place of a native hint
     /// naming another class only where it narrows the hint (see
-    /// [`docblock_narrowing`](crate::type_engine::types::docblock_narrowing)).
+    /// [`docblock_narrowing`](crate::type_engine::type_ops::docblock_narrowing)).
     ///
     /// Every lookup clones the function out of the index, so the check runs
     /// on that copy rather than being cached.
@@ -43,7 +43,7 @@ impl Backend {
         let loader = |name: &str| {
             self.find_indexed_class(&PhpType::parse(name.strip_prefix('\\').unwrap_or(name)))
         };
-        crate::type_engine::types::docblock_narrowing::verify_function(function, &loader);
+        crate::type_engine::type_ops::docblock_narrowing::verify_function(function, &loader);
     }
 
     /// [`find_or_load_function`](Self::find_or_load_function) with the

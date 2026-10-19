@@ -120,7 +120,7 @@ pub(crate) fn resolve_auth_user_type(
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<PhpType> {
     let key = guard.unwrap_or("").to_string();
-    if let Some(cached) = backend.auth_user_type_cache.read().get(&key) {
+    if let Some(cached) = backend.laravel.auth_user_type_cache.read().get(&key) {
         return cached.clone();
     }
     // Break re-entry: resolving the floor scans the class index and re-loads
@@ -129,11 +129,13 @@ pub(crate) fn resolve_auth_user_type(
     // exactly what the implementor scan needs — then overwrite with the real
     // result once computed.
     backend
+        .laravel
         .auth_user_type_cache
         .write()
         .insert(key.clone(), None);
     let result = compute_auth_user_type(backend, guard, class_loader);
     backend
+        .laravel
         .auth_user_type_cache
         .write()
         .insert(key, result.clone());

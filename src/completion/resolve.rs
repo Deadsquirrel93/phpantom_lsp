@@ -116,13 +116,12 @@ impl Backend {
         };
 
         // This handler builds the same hovers `textDocument/hover` does
-        // but fetches the file content itself, so it has to activate the
-        // type-engine resolvers on its own to describe a member the same
-        // way hover would.
-        let _resolver_guard = crate::type_engine::call_resolution::activate_type_engine_caches();
+        // but fetches the file content itself, so it enters the request
+        // scope on its own to describe a member the same way hover would.
+        let content = self.get_file_content_arc(&data.uri).unwrap_or_default();
+        let _scope = self.enter_request_scope(std::sync::Arc::clone(&content));
 
         let ctx = self.file_context(&data.uri);
-        let content = self.get_file_content(&data.uri).unwrap_or_default();
 
         match data.kind.as_str() {
             // ── Class member kinds ──────────────────────────────────

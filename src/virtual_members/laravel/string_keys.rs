@@ -106,7 +106,8 @@ fn resolve_gate_ability_definitions(backend: &crate::Backend, ability: &str) -> 
     let mut locations = Vec::new();
 
     let definition = backend
-        .laravel_gates
+        .laravel
+        .gates
         .read()
         .definition(ability)
         .map(|target| (target.uri.clone(), target.offset));
@@ -172,7 +173,8 @@ fn policy_method_location(
 /// follows so that go-to-definition also offers the class the alias stands for.
 fn resolve_morph_alias_definitions(backend: &crate::Backend, alias: &str) -> Vec<Location> {
     let Some((fqn, uri, offset)) = backend
-        .laravel_morph_map
+        .laravel
+        .morph_map
         .read()
         .get(alias)
         .map(|target| (target.fqn.clone(), target.uri.clone(), target.offset))
@@ -196,7 +198,7 @@ fn resolve_morph_alias_definitions(backend: &crate::Backend, alias: &str) -> Vec
 /// Resolve an Artisan command name to the declaration site inside its
 /// command class (the `$signature` / `$name` / `#[AsCommand]` literal).
 fn resolve_command_definition(backend: &crate::Backend, name: &str) -> Option<Location> {
-    let index = backend.laravel_commands.read();
+    let index = backend.laravel.commands.read();
     let entry = index.get(name)?;
     let uri = crate::util::parse_url(&entry.uri)?;
     let content = backend.get_file_content(&entry.uri)?;

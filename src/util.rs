@@ -89,7 +89,7 @@ pub(crate) fn catch_panic_unwind_safe<T>(
 /// un-encoded paths (e.g. `file:///home/user/My Project/Foo.php`) while
 /// LSP clients send URIs through the `Url` type which percent-encodes
 /// special characters (e.g. `file:///home/user/My%20Project/Foo.php`).
-/// When both forms end up as keys in `symbol_maps`, the same file is
+/// When both forms end up as keys in `Backend::files`, the same file is
 /// indexed twice and every Find References result is duplicated.
 ///
 /// Falls back to the raw `format!` form only when `Url::from_file_path`

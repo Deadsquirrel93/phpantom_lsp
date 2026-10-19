@@ -60,7 +60,7 @@ pub(super) fn apply_null_order_narrowing<'b>(
     ctx: &ForwardWalkCtx<'_>,
     truthy: bool,
 ) {
-    let (inner, negated) = narrowing::unwrap_condition_negation(condition);
+    let (inner, negated) = condition_facts::unwrap_condition_negation(condition);
     let Expression::Binary(bin) = inner else {
         return;
     };

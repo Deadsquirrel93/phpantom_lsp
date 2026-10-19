@@ -38,7 +38,8 @@ pub(super) fn extract_nested_array_access_chain<'a, 'b>(
                 return Some((bytes_to_str(dv.name).to_string(), keys));
             }
             Expression::Access(Access::Property(_) | Access::StaticProperty(_)) => {
-                let base = crate::type_engine::types::narrowing::expr_to_subject_key(current)?;
+                let base =
+                    crate::type_engine::type_ops::condition_facts::expr_to_subject_key(current)?;
                 keys.reverse();
                 return Some((base, keys));
             }

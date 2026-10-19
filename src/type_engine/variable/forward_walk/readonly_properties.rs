@@ -161,7 +161,7 @@ fn constructor_narrowed_properties(
     }
     {
         let _suspend = suspend_snapshot_recording();
-        let return_frame = push_return_frame();
+        let return_frame = push_return_frame(walk_ctx.flow);
         walk_body_forward(body.statements.iter(), &mut ctor_scope, &walk_ctx);
         // An object exists once its constructor returns, early or off the
         // end; a path that throws leaves no object behind to read.

@@ -192,9 +192,9 @@ mod tests {
     fn clone_preserves_the_global_config_path() {
         let path = std::path::PathBuf::from("/tmp/global/.phpantom.toml");
         let mut backend = Backend::new_test();
-        backend.workspace.global_config_path = Some(path.clone());
+        backend.state_mut().workspace.global_config_path = Some(path.clone());
 
-        let clone = backend.clone_for_diagnostic_worker();
+        let clone = backend.clone_for_blocking();
 
         assert_eq!(clone.workspace.global_config_path.as_deref(), Some(&*path));
     }
@@ -329,7 +329,7 @@ mod tests {
     #[test]
     fn clone_shares_the_client_filter_layer() {
         let (backend, dir) = backend_with_config("");
-        let clone = backend.clone_for_diagnostic_worker();
+        let clone = backend.clone_for_blocking();
 
         clone.set_client_indexing_options(client_options(&["generated"], &[]));
 

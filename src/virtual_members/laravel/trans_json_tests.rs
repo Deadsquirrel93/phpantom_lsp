@@ -116,7 +116,7 @@ fn json_translation_provider_paths_and_duplicate_keys_resolve() {
         path: dir.path().to_path_buf(),
         namespace: String::new(),
     };
-    backend.laravel_provider_resources.write().trans_dirs = vec![resource.clone(), resource];
+    backend.laravel.provider_resources.write().trans_dirs = vec![resource.clone(), resource];
     let uri = Url::from_file_path(path).unwrap();
     let locations =
         find_json_trans_references(&backend, uri.as_str(), content, Position::new(0, 2), true)

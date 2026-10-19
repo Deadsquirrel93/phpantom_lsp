@@ -139,11 +139,9 @@ pub(crate) fn class_constant_type(
     // under a key of its own; `folded_class_constant_type` claims the
     // plain `Class::NAME` one for its own fold.
     if let Some(ref val) = constant.value
-        && let Some(_guard) = crate::type_engine::types::const_fold::FoldGuard::acquire(&format!(
-            "{}::{} initializer",
-            merged.fqn(),
-            member
-        ))
+        && let Some(_guard) = crate::type_engine::type_ops::const_fold::FoldGuard::acquire(
+            &format!("{}::{} initializer", merged.fqn(), member),
+        )
     {
         // The initialiser was written in the declaring class's file, so the
         // reader's imports have no say in it: the classes it names were
@@ -195,11 +193,14 @@ pub(crate) fn class_constant_type(
 /// The class `self` names inside `constant`'s initialiser, when that is an
 /// ancestor of `merged` rather than `merged` itself.
 ///
-/// Inheritance shares a constant by `Arc`, so the declaring class is the one
-/// whose own constants hold that same `Arc`. A constant declared on a trait
-/// is the class's that uses the trait, as PHP copies it in. `None` when
-/// `merged` declares the constant itself, or when no ancestor can be shown
-/// to.
+/// The declaring class is the nearest one, in PHP's lookup order, whose own
+/// constants include one of that name, which is the declaration the merge
+/// kept. The name is compared rather than the `Arc`: `merged` may come from
+/// the resolved-class cache, which outlives a reparse that leaves the class
+/// signatures as they were, so its constants can be older copies of the ones
+/// the loader returns now. A constant declared on a trait is the class's
+/// that uses the trait, as PHP copies it in. `None` when `merged` declares
+/// the constant itself, or when no ancestor can be shown to.
 fn constant_declaring_class(
     merged: &ClassInfo,
     constant: &Arc<ConstantInfo>,
@@ -207,7 +208,7 @@ fn constant_declaring_class(
 ) -> Option<Arc<ClassInfo>> {
     use crate::inheritance::ancestry::{ancestors, find_declaring_ancestor, find_declaring_trait};
 
-    let declares = |c: &ClassInfo| c.constants.iter().any(|k| Arc::ptr_eq(k, constant));
+    let declares = |c: &ClassInfo| c.constants.iter().any(|k| k.name == constant.name);
     let declares_or_uses = |c: &ClassInfo| {
         declares(c) || find_declaring_trait(&c.used_traits, class_loader, &declares).is_some()
     };
@@ -258,7 +259,7 @@ pub(crate) fn folded_class_constant_type(
     let resolve =
         |text: &str| Backend::resolve_arg_text_to_type(&qualify_class_keyword(text, class), ctx);
     let key = format!("{}::{}", class.fqn(), const_name);
-    crate::type_engine::types::const_fold::folded_constant_type(&key, value, &resolve)
+    crate::type_engine::type_ops::const_fold::folded_constant_type(&key, value, &resolve)
 }
 
 /// The literal value a global constant holds, folded from an initialiser that
@@ -270,5 +271,5 @@ pub(crate) fn folded_global_constant_type(
     ctx: &ResolutionCtx<'_>,
 ) -> Option<PhpType> {
     let resolve = |text: &str| Backend::resolve_arg_text_to_type(text, ctx);
-    crate::type_engine::types::const_fold::folded_constant_type(name, value, &resolve)
+    crate::type_engine::type_ops::const_fold::folded_constant_type(name, value, &resolve)
 }

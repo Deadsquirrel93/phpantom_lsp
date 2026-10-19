@@ -87,7 +87,10 @@ impl Backend {
             .as_ref()
             .map(composer::is_laravel_project)
             .unwrap_or(false);
-        self.resolved_class_cache.write().set_laravel(is_laravel);
+        self.resolved_class_cache
+            .write()
+            .laravel_mut()
+            .set_enabled(is_laravel);
 
         // A library's configuration is declared by whatever application
         // installs it, so the keys it reads cannot be judged.  An `artisan`
@@ -107,7 +110,8 @@ impl Backend {
             .as_ref()
             .map(composer::has_runtime_permission_package)
             .unwrap_or(false);
-        self.laravel_gates
+        self.laravel
+            .gates
             .write()
             .set_runtime_permission_package(runtime_permissions);
 
@@ -398,9 +402,13 @@ impl Backend {
             );
         }
 
-        self.resolved_class_cache.write().set_laravel(any_laravel);
+        self.resolved_class_cache
+            .write()
+            .laravel_mut()
+            .set_enabled(any_laravel);
         self.set_is_application(any_application);
-        self.laravel_gates
+        self.laravel
+            .gates
             .write()
             .set_runtime_permission_package(any_runtime_permissions);
 
@@ -450,7 +458,10 @@ impl Backend {
 
         // No composer.json means no Laravel/Illuminate dependency, so
         // Laravel-specific resolution is disabled.
-        self.resolved_class_cache.write().set_laravel(false);
+        self.resolved_class_cache
+            .write()
+            .laravel_mut()
+            .set_enabled(false);
 
         let skip_dirs = HashSet::new();
         let scan = classmap_scanner::scan_workspace_fallback_full(

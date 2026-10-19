@@ -166,7 +166,7 @@ impl Backend {
     /// The project's section and stack index, built on first use.
     pub(crate) fn blade_block_index(&self) -> Arc<BladeBlockIndex> {
         self.cached_laravel_enumeration(
-            &self.laravel_string_key_build_locks.blade_blocks,
+            &self.laravel.string_key_build_locks.blade_blocks,
             |cache| cache.blade_blocks.clone(),
             |cache, index| cache.blade_blocks = Some(index),
             || Arc::new(self.build_blade_block_index()),
@@ -190,7 +190,7 @@ impl Backend {
             };
             let entry = Arc::new(IndexedTemplate {
                 uri: uri.clone(),
-                blocks: super::blocks::analyse(&content, &self.blade_directives.read()),
+                blocks: super::blocks::analyse(&content, &self.blade.directives.read()),
             });
             templates.view_by_uri.insert(uri, view.clone());
             templates.add_edges(view, &entry.blocks);
@@ -217,7 +217,7 @@ impl Backend {
         if !self.is_blade_file(uri) {
             return;
         }
-        let Some(index) = self.laravel_string_key_cache.read().blade_blocks.clone() else {
+        let Some(index) = self.laravel.string_key_cache.read().blade_blocks.clone() else {
             return;
         };
         // A template the index has never seen is one the discovery
@@ -228,7 +228,7 @@ impl Backend {
         };
         let entry = Arc::new(IndexedTemplate {
             uri: uri.to_string(),
-            blocks: super::blocks::analyse(content, &self.blade_directives.read()),
+            blocks: super::blocks::analyse(content, &self.blade.directives.read()),
         });
         let mut templates = index.templates.write();
         if let Some(previous) = templates.by_view.get(&view).map(Arc::clone) {
@@ -265,7 +265,7 @@ impl Backend {
 
         let mut current = Arc::new(IndexedTemplate {
             uri: uri.to_string(),
-            blocks: super::blocks::analyse(content, &self.blade_directives.read()),
+            blocks: super::blocks::analyse(content, &self.blade.directives.read()),
         });
         loop {
             seen.insert(current.uri.clone());
@@ -427,7 +427,7 @@ impl Backend {
         let Some(content) = self.get_file_content(uri) else {
             return (BlockRole::Fill, Vec::new());
         };
-        let role = super::blocks::analyse(&content, &self.blade_directives.read())
+        let role = super::blocks::analyse(&content, &self.blade.directives.read())
             .blocks
             .iter()
             .find(|block| block.kind == kind && block.name == name)

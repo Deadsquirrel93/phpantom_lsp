@@ -4,15 +4,13 @@ use std::sync::atomic::Ordering;
 use tower_lsp::lsp_types::*;
 
 fn seed_macro_index(backend: &Backend, uri: &Url, text: &str) {
-    let mut index = backend.laravel_macros.write();
+    let mut index = backend.laravel.macros.write();
     index.files.set_file(
         uri.to_string(),
         extract_macro_registrations(text, Some(*backend.workspace.php_version.lock())),
     );
     index.rebuild();
-    backend
-        .laravel_has_macros
-        .store(!index.is_empty(), Ordering::Relaxed);
+    backend.laravel.macros.set_has_any(!index.is_empty());
 }
 
 // ─── Laravel macro registrations ────────────────────────────────────────────
@@ -63,7 +61,9 @@ fn macro_targets_leave_the_macro_index_free_while_loading_ancestors() {
     );
     assert!(
         backend
-            .laravel_macros
+            .laravel
+            .macros
+            .index()
             .try_write_for(std::time::Duration::from_secs(5))
             .is_some(),
         "the macro index must not be held while the walk loads a class"
@@ -111,11 +111,12 @@ fn workspace_indexing_batch_merges_disk_files() {
 
     assert!(
         backend
-            .workspace_indexed
+            .workspace_index
+            .indexed
             .load(std::sync::atomic::Ordering::Acquire)
     );
     assert_eq!(
-        backend.symbol_maps.read().len(),
+        backend.uris_with_symbol_maps().len(),
         4,
         "all disk files should publish symbol maps through the batch merge"
     );
@@ -209,7 +210,8 @@ fn reference_key_snapshot_falls_back_until_workspace_index_ready() {
 
     assert!(
         !backend
-            .workspace_indexed
+            .workspace_index
+            .indexed
             .load(std::sync::atomic::Ordering::Acquire)
     );
     assert!(uris.contains(matching_uri));
@@ -336,9 +338,10 @@ fn workspace_index_progress_covers_known_and_discovered_files() {
 fn completed_workspace_index_is_reused_without_waiting() {
     let backend = Backend::new_test();
     backend
-        .workspace_indexed
+        .workspace_index
+        .indexed
         .store(true, std::sync::atomic::Ordering::Release);
-    let indexing = backend.workspace_index_lock.lock();
+    let indexing = backend.workspace_index.lock.lock();
 
     let (done_tx, done_rx) = std::sync::mpsc::channel();
     let waiter = {
@@ -443,9 +446,9 @@ fn blocked_request_reports_in_flight_index_status() {
     .expect("target file");
 
     let backend = Backend::new_test_with_workspace(dir.path().to_path_buf(), Vec::new());
-    *backend.workspace_index_status.lock() =
+    *backend.workspace_index.status.lock() =
         Some((37, "Parsing workspace files (3/9)".to_string()));
-    let indexing = backend.workspace_index_lock.lock();
+    let indexing = backend.workspace_index.lock.lock();
 
     let reports = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let waiter = {
@@ -479,14 +482,15 @@ fn blocked_request_reports_in_flight_index_status() {
     // Stand in for the lock owner publishing the completed index before it
     // releases the single-flight guard.
     backend
-        .workspace_indexed
+        .workspace_index
+        .indexed
         .store(true, std::sync::atomic::Ordering::Release);
-    *backend.workspace_index_status.lock() = None;
+    *backend.workspace_index.status.lock() = None;
     drop(indexing);
     waiter.join().expect("waiter thread");
 
     assert!(
-        backend.workspace_index_status.lock().is_none(),
+        backend.workspace_index.status.lock().is_none(),
         "a finished indexing pass clears the shared status"
     );
     let reports = reports.lock().expect("reports lock");
@@ -758,16 +762,14 @@ fn parse_file(backend: &Backend, uri: &str, text: &str) {
         .write()
         .insert(uri.to_string(), std::sync::Arc::new(text.to_string()));
     backend.update_ast(uri, text);
-    backend.workspace_indexed.store(true, Ordering::Release);
+    backend
+        .workspace_index
+        .indexed
+        .store(true, Ordering::Release);
 }
 
 fn symbol_map_of(backend: &Backend, uri: &str) -> std::sync::Arc<crate::symbol_map::SymbolMap> {
-    backend
-        .symbol_maps
-        .read()
-        .get(uri)
-        .cloned()
-        .expect("the file was parsed")
+    backend.symbol_map_for(uri).expect("the file was parsed")
 }
 
 /// A file selected as a candidate only because it accesses the same *name*

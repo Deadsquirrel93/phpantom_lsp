@@ -131,15 +131,15 @@ fn refine_disk_return_type(method: &mut MethodInfo, adapter: &PhpType) -> bool {
 /// [`Backend::refresh_laravel_storage_drivers`]), so an edit takes effect
 /// without a restart.
 fn configured_disk_type(backend: &Backend) -> Option<PhpType> {
-    if let Some(cached) = backend.storage_disk_type_cache.read().as_ref() {
+    if let Some(cached) = backend.laravel.storage_disk_type_cache.read().as_ref() {
         return cached.clone();
     }
     let trees = backend.cached_config_trees();
     let resolved = trees
         .iter()
         .find(|(prefix, _)| prefix == "filesystems")
-        .and_then(|(_, tree)| disk_union(tree, &backend.laravel_storage_drivers.read()));
-    *backend.storage_disk_type_cache.write() = Some(resolved.clone());
+        .and_then(|(_, tree)| disk_union(tree, &backend.laravel.storage_drivers.read()));
+    *backend.laravel.storage_disk_type_cache.write() = Some(resolved.clone());
     resolved
 }
 

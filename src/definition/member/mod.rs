@@ -602,8 +602,7 @@ impl Backend {
         content: &str,
         offset: u32,
     ) -> Option<(String, AccessKind)> {
-        let maps = self.symbol_maps.read();
-        let map = maps.get(uri)?;
+        let map = self.symbol_map_for(uri)?;
         let source = map.source(content)?;
         let span = map.lookup(offset)?;
         match &span.kind {

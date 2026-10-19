@@ -61,7 +61,7 @@ pub(in crate::type_engine) fn infer_array_literal_raw_type<'b>(
                 builder.append(resolved);
             }
             ArrayElement::Variadic(v) => {
-                let raw = super::foreach_resolution::resolve_expression_type(v.value, ctx);
+                let raw = super::iterable_elements::resolve_expression_type(v.value, ctx);
                 builder.spread(raw.as_ref());
             }
             ArrayElement::Missing(_) => {}
@@ -544,7 +544,7 @@ fn infer_element_type<'b>(
         },
         Expression::Call(_) => {
             // Resolve call return type via the unified pipeline.
-            super::foreach_resolution::resolve_expression_type(value, ctx)
+            super::iterable_elements::resolve_expression_type(value, ctx)
         }
         Expression::Variable(Variable::Direct(dv)) => {
             let var_text = bytes_to_str(dv.name).to_string();
@@ -610,7 +610,7 @@ fn infer_element_type<'b>(
         // Delegate to the unified pipeline which resolves property
         // type hints and method return types through the class
         // hierarchy.
-        _ => super::foreach_resolution::resolve_expression_type(value, ctx),
+        _ => super::iterable_elements::resolve_expression_type(value, ctx),
     }
 }
 
@@ -716,7 +716,7 @@ impl ArrayFuncArgs for AstArrayFuncArgs<'_, '_, '_> {
     }
 
     fn guard_split(&self, guard: &str, subject: &PhpType) -> Option<(Option<PhpType>, bool)> {
-        crate::type_engine::types::narrowing::split_type_by_guard_name(
+        crate::type_engine::type_ops::condition_facts::split_type_by_guard_name(
             guard,
             subject,
             Some(&self.ctx.class_loader),
@@ -921,7 +921,7 @@ fn infer_callback_return_type(
         )
     };
 
-    super::foreach_resolution::resolve_expression_type(body_expr, &infer_ctx)
+    super::iterable_elements::resolve_expression_type(body_expr, &infer_ctx)
 }
 
 /// Walk a closure's own body with the shared forward walker, seeded with
@@ -939,15 +939,15 @@ fn walk_closure_body_scope(
     resolved_param: &[ResolvedType],
     ctx: &VarResolutionCtx<'_>,
 ) -> super::forward_walk::Locals {
+    let flow = super::forward_walk::WalkFlow::default();
     let fw_ctx =
-        super::forward_walk::ForwardWalkCtx::from_var_ctx(ctx).with_cursor_offset(u32::MAX);
+        super::forward_walk::ForwardWalkCtx::from_var_ctx(ctx, &flow).with_cursor_offset(u32::MAX);
     let mut scope = super::forward_walk::ScopeState::new();
     if let Some(name) = param_name {
         scope.seed(name, resolved_param.to_vec());
     }
 
     let _suspend = super::forward_walk::suspend_snapshot_recording();
-    let _barrier = super::forward_walk::suspend_return_edges();
     super::forward_walk::walk_body_forward(closure.body.statements.iter(), &mut scope, &fw_ctx);
 
     scope.locals

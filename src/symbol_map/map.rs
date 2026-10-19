@@ -293,7 +293,7 @@ pub(crate) struct SymbolMap {
     /// Every offset in this map indexes the exact text it was built from.
     /// The map is refreshed on a background task after each keystroke and
     /// is left untouched when a parse panics, so a request that reads
-    /// `symbol_maps` may get a map built from *older* text than the buffer
+    /// it may get a map built from *older* text than the buffer
     /// it was handed.  See [`Self::matches_source`].
     pub source_len: u32,
     /// A hash of the source text, recorded only for a file open in the

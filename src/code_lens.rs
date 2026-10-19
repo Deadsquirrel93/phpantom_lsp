@@ -74,7 +74,7 @@ impl Backend {
             let map = self.symbols.uri_classes_index.read();
             map.get(uri).cloned().unwrap_or_default()
         };
-        let symbol_map = self.symbol_maps.read().get(uri).cloned();
+        let symbol_map = self.symbol_map_for(uri);
 
         // One line table for the whole request: every lens converts at
         // least one offset from this content, and `offset_to_position` is
@@ -334,9 +334,7 @@ impl Backend {
             });
         }
 
-        let supports_refresh = self
-            .supports_code_lens_refresh
-            .load(std::sync::atomic::Ordering::Acquire);
+        let supports_refresh = self.caps().code_lens_refresh;
         let cached_locations = if supports_refresh {
             self.member_ref_locations_cached(
                 origin_uri,
@@ -458,7 +456,8 @@ impl Backend {
         if !(class.kind == ClassLikeKind::Interface || class.is_abstract)
             || class.keyword_offset == 0
             || !self
-                .workspace_indexed
+                .workspace_index
+                .indexed
                 .load(std::sync::atomic::Ordering::Acquire)
         {
             return None;
@@ -762,10 +761,7 @@ impl Backend {
         uri: Url,
         position: Position,
     ) -> Command {
-        if self
-            .supports_show_document
-            .load(std::sync::atomic::Ordering::Acquire)
-        {
+        if self.caps().show_document {
             return Command {
                 title,
                 command: "phpantom.navigateToPrototype".to_string(),

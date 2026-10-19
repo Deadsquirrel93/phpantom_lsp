@@ -4,7 +4,7 @@
 use mago_syntax::cst::{Expression, unary};
 
 use crate::atom::atom;
-use crate::php_type::{LiteralValue, PhpType, ShapeEntry, TypeKind, keyword_lowercase};
+use crate::php_type::{LiteralValue, PhpType, ShapeEntry, TypeKind, with_keyword_lowercase};
 use crate::types::ResolvedType;
 
 use super::scalar_fold;
@@ -288,19 +288,21 @@ fn array_cast_type(operand: Vec<ResolvedType>) -> PhpType {
 /// wrapper rather than a plain `stdClass`.
 fn is_object_cast_scalar_type(ty: &PhpType) -> bool {
     match ty.kind() {
-        TypeKind::Named(name) => matches!(
-            keyword_lowercase(name).as_str(),
-            "int"
-                | "integer"
-                | "string"
-                | "float"
-                | "double"
-                | "real"
-                | "bool"
-                | "boolean"
-                | "true"
-                | "false"
-        ),
+        TypeKind::Named(name) => with_keyword_lowercase(name, |lower| {
+            matches!(
+                lower,
+                "int"
+                    | "integer"
+                    | "string"
+                    | "float"
+                    | "double"
+                    | "real"
+                    | "bool"
+                    | "boolean"
+                    | "true"
+                    | "false"
+            )
+        }),
         TypeKind::Union(members) => {
             !members.is_empty() && members.iter().all(is_object_cast_scalar_type)
         }

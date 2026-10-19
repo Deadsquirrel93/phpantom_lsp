@@ -99,16 +99,16 @@ pub(in crate::type_engine::call_resolution) fn resolve_operator_type(
     // not two flags).
     // Only an expression that actually has an operator folds: a single term
     // would ask this very resolver about the same text again.
-    if crate::type_engine::types::const_fold::has_top_level_int_operator(text) {
+    if crate::type_engine::type_ops::const_fold::has_top_level_int_operator(text) {
         let resolve = |term: &str| Backend::resolve_arg_text_to_type(term, ctx);
         if let Some(value) =
-            crate::type_engine::types::const_fold::fold_int_expression(text, &resolve)
+            crate::type_engine::type_ops::const_fold::fold_int_expression(text, &resolve)
         {
             return Some(PhpType::literal_int(value.to_string()));
         }
         // An expression over integers whose values are unknown (`$n - 1`)
         // is still an `int`, as long as no operator can turn it into a float.
-        if crate::type_engine::types::const_fold::is_int_expression(text, &resolve) {
+        if crate::type_engine::type_ops::const_fold::is_int_expression(text, &resolve) {
             return Some(PhpType::int());
         }
     }

@@ -102,12 +102,12 @@ impl Backend {
                 this_type: None,
             };
             let evaluated =
-                crate::type_engine::types::conditional::evaluate_nested_conditionals_text(
+                crate::type_engine::type_ops::conditional::evaluate_nested_conditionals_text(
                     ret,
                     &bound.parameters,
                     at,
                     None,
-                    crate::type_engine::types::conditional::ConditionalClassContext {
+                    crate::type_engine::type_ops::conditional::ConditionalClassContext {
                         calling: rctx.current_class.map(|c| c.fqn().as_str()),
                         declaring: Some(owner.fqn().as_str()),
                         written_class: Some(&|name: &str| rctx.written_names().resolve_class(name)),

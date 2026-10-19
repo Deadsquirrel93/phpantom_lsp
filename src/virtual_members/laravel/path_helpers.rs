@@ -163,7 +163,7 @@ fn path_helper_root(backend: &Backend, content: &str) -> Option<PathBuf> {
     if !content.contains("_path(") {
         return None;
     }
-    if !backend.resolved_class_cache.read().is_laravel() {
+    if !backend.resolved_class_cache.read().laravel().is_enabled() {
         return None;
     }
     backend.workspace.workspace_root.read().clone()

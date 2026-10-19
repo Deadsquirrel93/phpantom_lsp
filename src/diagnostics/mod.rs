@@ -310,9 +310,15 @@ impl Backend {
         start_byte: usize,
         end_byte: usize,
     ) -> Option<Range> {
-        let virtual_php_handle = self.blade_virtual_content.read();
-        if let Some(virtual_php) = virtual_php_handle.get(uri)
-            && let Some(map) = self.blade_source_maps.read().get(uri)
+        let blade = self
+            .files
+            .read()
+            .get(uri)
+            .and_then(|state| state.blade.clone());
+        if let Some(crate::file_state::BladeFileState {
+            virtual_php,
+            source_map: map,
+        }) = &blade
         {
             if start_byte > virtual_php.len() || end_byte > virtual_php.len() {
                 return None;
@@ -364,7 +370,6 @@ pub(crate) fn offset_range_to_lsp_range(
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
-    use std::sync::atomic::Ordering;
 
     use super::*;
 
@@ -376,13 +381,9 @@ mod tests {
         backend.update_ast(uri, content);
 
         // First 6 lines are prologue (including wrapper function declaration).
-        let virtual_php = {
-            let vc_handle = backend.blade_virtual_content.read();
-            vc_handle
-                .get(uri)
-                .cloned()
-                .expect("Virtual content should exist")
-        };
+        let virtual_php = backend
+            .blade_virtual_php_arc(uri)
+            .expect("Virtual content should exist");
 
         // Find start of line 5 (0-indexed).
         let mut offset = 0;
@@ -433,9 +434,7 @@ mod tests {
 
         let backend = crate::Backend::new_test();
         backend.init_complete.store(true, Ordering::Release);
-        backend
-            .supports_pull_diagnostics
-            .store(true, Ordering::Release);
+        backend.client_caps.write().pull_diagnostics = true;
 
         let uri = "file:///defer.php";
         backend.update_ast(uri, "<?php\nclass A { public function f(): void {} }\n");
@@ -460,7 +459,11 @@ mod tests {
     #[test]
     fn observed_slow_diagnostics_report_every_collector() {
         let backend = Backend::new_test();
-        backend.resolved_class_cache.write().set_laravel(true);
+        backend
+            .resolved_class_cache
+            .write()
+            .laravel_mut()
+            .set_enabled(true);
 
         let uri = "file:///app/Http/observed.php";
         let php = "<?php\nclass Observed { public function run(): void { config('app.name'); } }\n";
@@ -517,9 +520,7 @@ mod tests {
     #[tokio::test]
     async fn assemble_and_push_reports_change_only_on_difference() {
         let backend = Backend::new_test();
-        backend
-            .supports_pull_diagnostics
-            .store(true, Ordering::Release);
+        backend.client_caps.write().pull_diagnostics = true;
         let uri = "file:///test.php";
 
         let diag = |line: u32| Diagnostic {
@@ -583,9 +584,7 @@ mod tests {
     #[tokio::test]
     async fn reopened_file_never_recycles_a_result_id() {
         let backend = Backend::new_test();
-        backend
-            .supports_pull_diagnostics
-            .store(true, Ordering::Release);
+        backend.client_caps.write().pull_diagnostics = true;
         let uri = "file:///reopen.php";
         let result_id = || backend.diag.result_ids.lock().get(uri).copied();
 

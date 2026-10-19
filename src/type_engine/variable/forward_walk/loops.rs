@@ -65,10 +65,10 @@ pub(crate) fn walk_loop_body_to_fixed_point<'b>(
     // ── Initial walk (always performed) ─────────────────────────
     let initial_ctx = if re_walks > 0 { discovery_ctx } else { ctx };
     let mut previous_entry = (re_walks > 0).then(|| scope.clone());
-    clear_exit_frame();
+    clear_exit_frame(ctx.flow);
     walk_body_forward(body_stmts.iter().copied(), scope, initial_ctx);
     if fold_exit_edges {
-        drain_continue_edges(scope);
+        drain_continue_edges(ctx.flow, scope);
     }
     let mut walked_at_cursor = re_walks == 0;
 
@@ -102,24 +102,24 @@ pub(crate) fn walk_loop_body_to_fixed_point<'b>(
         // Use the real context on the final iteration so diagnostic
         // snapshots and cursor handling are correct.
         let is_final = iteration + 1 >= re_walks;
-        clear_exit_frame();
+        clear_exit_frame(ctx.flow);
         walk_body_forward(
             body_stmts.iter().copied(),
             scope,
             if is_final { ctx } else { discovery_ctx },
         );
         if fold_exit_edges {
-            drain_continue_edges(scope);
+            drain_continue_edges(ctx.flow, scope);
         }
         walked_at_cursor = is_final;
     }
 
     if !walked_at_cursor && discovery_ctx.cursor_offset != ctx.cursor_offset {
         *scope = merged_loop_entry_scope(pre_loop_scope, scope, &mut seed);
-        clear_exit_frame();
+        clear_exit_frame(ctx.flow);
         walk_body_forward(body_stmts.iter().copied(), scope, ctx);
         if fold_exit_edges {
-            drain_continue_edges(scope);
+            drain_continue_edges(ctx.flow, scope);
         }
     }
 }

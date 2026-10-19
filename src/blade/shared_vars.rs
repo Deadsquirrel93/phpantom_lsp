@@ -69,7 +69,8 @@ impl Backend {
     /// The resolved registrations, built once per provider scan.
     fn blade_shared_var_groups(&self) -> Arc<Vec<SharedVarGroup>> {
         if let Some(cached) = self
-            .laravel_string_key_cache
+            .laravel
+            .string_key_cache
             .read()
             .shared_view_vars
             .clone()
@@ -78,9 +79,10 @@ impl Backend {
         }
         // One builder resolves while the rest wait, rather than every
         // diagnostic worker repeating the same parse of the same providers.
-        let _guard = self.laravel_string_key_build_locks.shared_view_vars.lock();
+        let _guard = self.laravel.string_key_build_locks.shared_view_vars.lock();
         if let Some(cached) = self
-            .laravel_string_key_cache
+            .laravel
+            .string_key_cache
             .read()
             .shared_view_vars
             .clone()
@@ -88,13 +90,13 @@ impl Backend {
             return cached;
         }
         let groups = Arc::new(self.build_shared_var_groups());
-        self.laravel_string_key_cache.write().shared_view_vars = Some(Arc::clone(&groups));
+        self.laravel.string_key_cache.write().shared_view_vars = Some(Arc::clone(&groups));
         groups
     }
 
     fn build_shared_var_groups(&self) -> Vec<SharedVarGroup> {
         let (shared, composers) = {
-            let resources = self.laravel_provider_resources.read();
+            let resources = self.laravel.provider_resources.read();
             (
                 resources.shared_view_vars.clone(),
                 resources.view_composers.clone(),
@@ -239,7 +241,7 @@ impl Backend {
                         )
                     };
                     let ty =
-                        crate::type_engine::variable::foreach_resolution::resolve_expression_type(
+                        crate::type_engine::variable::iterable_elements::resolve_expression_type(
                             expr, &var_ctx,
                         )
                         .unwrap_or_else(PhpType::mixed);

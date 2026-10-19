@@ -4,6 +4,7 @@
 
 use tower_lsp::lsp_types::TextEdit;
 
+use crate::code_actions::indent_of_line_at;
 use crate::php_type::PhpType;
 use crate::text_position::{byte_range_to_lsp_range, line_ending};
 
@@ -56,7 +57,7 @@ pub(super) fn build_strip_return_expr_edit(
     }
 
     let nl = line_ending(content);
-    let indent = line_indent(content, start);
+    let indent = indent_of_line_at(content, start);
     let Some(head_end) = statement.braceless_after.map(|offset| offset as usize) else {
         return Some(TextEdit {
             range,
@@ -68,7 +69,7 @@ pub(super) fn build_strip_return_expr_edit(
     // layout, unless a comment sits between it and the head.
     let gap = &content[head_end..start];
     if gap.contains('\n') && gap.trim().is_empty() {
-        let outer = line_indent(content, head_end);
+        let outer = indent_of_line_at(content, head_end);
         return Some(TextEdit {
             range: byte_range_to_lsp_range(content, head_end, end),
             new_text: format!(" {{{nl}{indent}{expr_text};{nl}{indent}return;{nl}{outer}}}"),
@@ -78,13 +79,6 @@ pub(super) fn build_strip_return_expr_edit(
         range,
         new_text: format!("{{ {expr_text}; return; }}"),
     })
-}
-
-/// The whitespace that starts the line holding byte `offset`.
-fn line_indent(content: &str, offset: usize) -> &str {
-    let line_start = content[..offset].rfind('\n').map_or(0, |nl| nl + 1);
-    let line = &content[line_start..];
-    &line[..line.len() - line.trim_start_matches([' ', '\t']).len()]
 }
 
 /// Build a list of `TextEdit`s that change the return type of `target` to

@@ -117,7 +117,8 @@ fn non_full_indexed_implementation_uses_ready_gti_without_fallback() {
     config.indexing.strategy = Some(IndexingStrategy::Composer);
     backend.set_config(config);
     backend
-        .workspace_indexed
+        .workspace_index
+        .indexed
         .store(true, std::sync::atomic::Ordering::Release);
 
     backend.symbols.fqn_uri_index.write().insert(

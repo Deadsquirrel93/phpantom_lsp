@@ -24,14 +24,14 @@ use crate::type_engine::resolver::{Loaders, SourceImports, VarResolutionCtx, Wri
 
 mod arguments;
 mod cursor_declarations;
-mod guards;
+mod reentry;
 mod template_bounds;
 
 pub(crate) use arguments::*;
 use cursor_declarations::*;
-use guards::*;
+use reentry::*;
 #[cfg(test)]
-pub(crate) use guards::{reset_test_scope_cache_hits, test_scope_cache_hits};
+pub(crate) use reentry::{reset_test_scope_cache_hits, test_scope_cache_hits};
 pub(crate) use template_bounds::*;
 
 /// Build a [`VarClassStringResolver`] closure from a [`VarResolutionCtx`].
@@ -348,9 +348,10 @@ pub(in crate::type_engine) fn resolve_variable_in_statements<'b>(
         // another resolve_variable_types call, which would start a
         // second top-level walk on the same file content.
         if let Some(_tl_guard) = try_acquire_top_level_guard(ctx.content) {
+            let flow = super::forward_walk::WalkFlow::default();
             let tl_fw_ctx = super::forward_walk::ForwardWalkCtx {
                 cursor_offset: u32::MAX,
-                ..super::forward_walk::ForwardWalkCtx::fresh_from_var_ctx(ctx)
+                ..super::forward_walk::ForwardWalkCtx::fresh_from_var_ctx(ctx, &flow)
             };
             let tl_scope =
                 super::forward_walk::top_level_scope_for_globals(stmts.iter().copied(), &tl_fw_ctx);
@@ -462,7 +463,8 @@ pub(in crate::type_engine) fn resolve_variable_in_statements<'b>(
         // Fallback: top_level_scope was not pre-computed (should not
         // happen in normal flow, but be defensive).  Run a
         // position-aware forward walk.
-        let fw_ctx = super::forward_walk::ForwardWalkCtx::fresh_from_var_ctx(ctx);
+        let flow = super::forward_walk::WalkFlow::default();
+        let fw_ctx = super::forward_walk::ForwardWalkCtx::fresh_from_var_ctx(ctx, &flow);
         if let Some(fw_results) =
             super::forward_walk::resolve_in_top_level(ctx.var_name, stmts.iter().copied(), &fw_ctx)
         {
@@ -490,9 +492,10 @@ fn try_resolve_in_function(
     }
 
     // ── Forward walker (sole resolver) ──
+    let flow = super::forward_walk::WalkFlow::default();
     let fw_ctx = super::forward_walk::ForwardWalkCtx {
         top_level_scope: ctx.top_level_scope.clone(),
-        ..super::forward_walk::ForwardWalkCtx::fresh_from_var_ctx(ctx)
+        ..super::forward_walk::ForwardWalkCtx::fresh_from_var_ctx(ctx, &flow)
     };
     Some(
         super::forward_walk::resolve_in_function_body(ctx.var_name, func, &fw_ctx)
@@ -567,9 +570,10 @@ fn resolve_variable_in_members<'b>(
                 let blk_start = block.left_brace.start.offset;
                 let blk_end = block.right_brace.end.offset;
                 if ctx.cursor_offset >= blk_start && ctx.cursor_offset <= blk_end {
+                    let flow = super::forward_walk::WalkFlow::default();
                     let fw_ctx = super::forward_walk::ForwardWalkCtx {
                         top_level_scope: ctx.top_level_scope.clone(),
-                        ..super::forward_walk::ForwardWalkCtx::fresh_from_var_ctx(ctx)
+                        ..super::forward_walk::ForwardWalkCtx::fresh_from_var_ctx(ctx, &flow)
                     };
                     return super::forward_walk::resolve_in_method_body(
                         ctx.var_name,
@@ -622,9 +626,10 @@ fn resolve_variable_in_property_hooks(
             continue;
         }
 
+        let flow = super::forward_walk::WalkFlow::default();
         let fw_ctx = super::forward_walk::ForwardWalkCtx {
             top_level_scope: ctx.top_level_scope.clone(),
-            ..super::forward_walk::ForwardWalkCtx::fresh_from_var_ctx(ctx)
+            ..super::forward_walk::ForwardWalkCtx::fresh_from_var_ctx(ctx, &flow)
         };
 
         let mut scope = super::forward_walk::seed_property_hook_scope(property_hint, hook, &fw_ctx);
@@ -633,7 +638,6 @@ fn resolve_variable_in_property_hooks(
             // `resolve_in_method_body` does: this is a transient lookup,
             // not the authoritative scope build.
             let _suspend = super::forward_walk::suspend_snapshot_recording();
-            let _barrier = super::forward_walk::suspend_return_edges();
             super::forward_walk::walk_body_forward(block.statements.iter(), &mut scope, &fw_ctx);
         }
 
@@ -661,9 +665,10 @@ fn resolve_abstract_method_param(
             continue;
         }
 
+        let flow = super::forward_walk::WalkFlow::default();
         let fw_ctx = super::forward_walk::ForwardWalkCtx {
             top_level_scope: ctx.top_level_scope.clone(),
-            ..super::forward_walk::ForwardWalkCtx::fresh_from_var_ctx(ctx)
+            ..super::forward_walk::ForwardWalkCtx::fresh_from_var_ctx(ctx, &flow)
         };
 
         let trait_prototype =

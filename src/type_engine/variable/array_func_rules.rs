@@ -90,7 +90,9 @@ pub(in crate::type_engine) trait ArrayFuncArgs {
     /// it accepts (`None` when none pass) and whether it can reject any.
     /// `None` when `guard` is not a type check.
     fn guard_split(&self, guard: &str, subject: &PhpType) -> Option<(Option<PhpType>, bool)> {
-        crate::type_engine::types::narrowing::split_type_by_guard_name(guard, subject, None)
+        crate::type_engine::type_ops::condition_facts::split_type_by_guard_name(
+            guard, subject, None,
+        )
     }
 }
 
@@ -888,7 +890,7 @@ fn callback_guard_names(args: &dyn ArrayFuncArgs, index: usize) -> Option<Vec<St
         .map(|member| {
             let content = member.as_literal()?.string_content()?;
             let name = content.trim_start_matches('\\');
-            crate::type_engine::types::narrowing::type_guard_kind_from_name(name)?;
+            crate::type_engine::type_ops::condition_facts::type_guard_kind_from_name(name)?;
             Some(name.to_string())
         })
         .collect()

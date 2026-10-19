@@ -523,7 +523,7 @@ impl Backend {
             && let Some(func_info) = fl(func_name, 0)
         {
             if func_info.conditional_return.is_some()
-                || crate::type_engine::types::call_site_returns::has_call_site_return(func_name)
+                || crate::type_engine::type_ops::call_site_returns::has_call_site_return(func_name)
             {
                 let var_resolver = build_var_resolver(ctx);
                 // `is <Type>` conditions on an argument that isn't a
@@ -565,7 +565,7 @@ impl Backend {
                     // its filter produces) is decided the same way: at
                     // the call site.
                     .or_else(|| {
-                        crate::type_engine::types::call_site_returns::call_site_return_type(
+                        crate::type_engine::type_ops::call_site_returns::call_site_return_type(
                             func_name,
                             &func_info.parameters,
                             text_args,

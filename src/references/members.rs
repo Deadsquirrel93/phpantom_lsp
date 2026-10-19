@@ -38,7 +38,7 @@ impl Backend {
         include_declaration: bool,
     ) -> Vec<Location> {
         let targets = {
-            let index = self.laravel_macros.read();
+            let index = self.laravel.macros.read();
             index.targets_at(uri, span_start, name)
         };
         if targets.is_empty() {
@@ -155,7 +155,7 @@ impl Backend {
         let Some(targets) = targets else {
             return;
         };
-        let index = self.laravel_macros.read();
+        let index = self.laravel.macros.read();
         for target in targets.indexed() {
             if !index.has_macro(target, name) {
                 continue;
@@ -180,7 +180,7 @@ impl Backend {
         locations: &mut Vec<Location>,
         name: &str,
     ) {
-        let index = self.laravel_macros.read();
+        let index = self.laravel.macros.read();
         let Some((uri, offset)) = index.unique_definition_for_name(name) else {
             return;
         };

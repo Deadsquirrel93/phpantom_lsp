@@ -305,10 +305,7 @@ impl Backend {
         // Per the LSP spec, servers must only use
         // window/workDoneProgress/create when the client signals
         // support via the window.workDoneProgress capability.
-        if !self
-            .supports_work_done_progress
-            .load(std::sync::atomic::Ordering::Relaxed)
-        {
+        if !self.caps().work_done_progress {
             return None;
         }
 

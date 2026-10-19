@@ -330,7 +330,7 @@ impl Analysis<'_, '_> {
     /// The classes `expr` holds where it is written.
     fn classes_of(&self, expr: &Expression<'_>) -> Vec<String> {
         let offset = expr.span().start.offset;
-        let Some(ty) = crate::type_engine::variable::foreach_resolution::resolve_expression_type(
+        let Some(ty) = crate::type_engine::variable::iterable_elements::resolve_expression_type(
             expr,
             &self.var_ctx(offset),
         ) else {

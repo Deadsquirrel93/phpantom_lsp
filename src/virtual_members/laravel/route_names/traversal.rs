@@ -132,15 +132,13 @@ pub(super) struct MacroScope {
 impl MacroScope {
     /// The router macros registered in `backend`'s project.
     pub(super) fn for_backend(backend: &Backend) -> Self {
-        if !backend
-            .laravel_has_macros
-            .load(std::sync::atomic::Ordering::Relaxed)
-        {
+        if !backend.laravel.macros.has_any() {
             return Self::default();
         }
         Self {
             bodies: backend
-                .laravel_macros
+                .laravel
+                .macros
                 .read()
                 .macro_closures_on(ROUTER_MACRO_TARGETS),
             ..Self::default()

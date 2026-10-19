@@ -362,7 +362,7 @@ fn read_out_type(
 
         let mut returns = Vec::new();
         crate::return_collection::collect_returns(body.statements.iter(), &mut returns);
-        let exit_ctx = crate::type_engine::types::narrowing::ExitCtx {
+        let exit_ctx = crate::type_engine::type_ops::condition_facts::ExitCtx {
             current_class,
             all_classes: &file_ctx.classes,
             class_loader: &resolved_class_loader,
@@ -377,10 +377,11 @@ fn read_out_type(
         // The walker reads a position no path reaches as the state before
         // the statement that left, so a body whose every path returns
         // would add a stale reading from its closing brace.
-        let falls_through = !crate::type_engine::types::narrowing::statements_unconditionally_exit(
-            body.statements.iter(),
-            &exit_ctx,
-        );
+        let falls_through =
+            !crate::type_engine::type_ops::condition_facts::statements_unconditionally_exit(
+                body.statements.iter(),
+                &exit_ctx,
+            );
         let exits = returns
             .iter()
             .map(|&(_, _, _, return_keyword)| return_keyword as u32)

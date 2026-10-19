@@ -212,7 +212,7 @@ impl Backend {
     /// Read the shared translation catalog, building it only on a cache miss.
     pub(crate) fn cached_translations(&self) -> Arc<TranslationCatalog> {
         self.cached_laravel_enumeration(
-            &self.laravel_string_key_build_locks.translations,
+            &self.laravel.string_key_build_locks.translations,
             |cache| cache.translations.clone(),
             |cache, translations| cache.translations = Some(translations),
             || Arc::new(self.build_translation_catalog()),
@@ -220,7 +220,7 @@ impl Backend {
     }
 
     fn build_translation_catalog(&self) -> TranslationCatalog {
-        let mut roots = self.laravel_provider_resources.read().trans_dirs.clone();
+        let mut roots = self.laravel.provider_resources.read().trans_dirs.clone();
         let workspace_root = self.workspace.workspace_root.read().clone();
         if let Some(root) = &workspace_root {
             let overrides: Vec<_> = roots

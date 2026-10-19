@@ -116,12 +116,12 @@ fn resolve_array_key_type(
 ) -> Vec<ResolvedType> {
     // Split off the *last* bracket segment so a nested access resolves its
     // base (`$a["x"]` of `$a["x"]["y"]`) through the same dispatcher.
-    let Some((base_var, segment)) = narrowing::split_trailing_bracket(key) else {
+    let Some((base_var, segment)) = condition_facts::split_trailing_bracket(key) else {
         return Vec::new();
     };
     // A variable index names no shape entry, so only the container's
     // element type describes it.
-    let key_name = narrowing::bracket_segment_literal(segment);
+    let key_name = condition_facts::bracket_segment_literal(segment);
 
     // Only the leading variable of a path is ever assigned in the scope, so
     // a compound base has to be resolved the same way this key is.  Each
@@ -190,7 +190,7 @@ fn resolve_member_key_type(
     // number of segments in the key.
     let resolved_prefix;
     let obj_types: &[ResolvedType] = match scope.get(obj_var) {
-        [] if narrowing::is_member_path_key(obj_var) => {
+        [] if condition_facts::is_member_path_key(obj_var) => {
             resolved_prefix = resolve_synthetic_key_type(obj_var, scope, ctx);
             &resolved_prefix
         }

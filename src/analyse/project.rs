@@ -124,7 +124,7 @@ pub(crate) fn parse_user_files(
 /// would report (or fix against) false positives.  A project that is not
 /// Laravel has nothing to discover.
 pub(crate) fn discover_laravel_resources(backend: &Backend) {
-    if !backend.resolved_class_cache.read().is_laravel() {
+    if !backend.resolved_class_cache.read().laravel().is_enabled() {
         return;
     }
     let providers = backend.laravel_providers();

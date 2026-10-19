@@ -388,13 +388,12 @@ impl Backend {
         let class_ctx = detect_class_name_context(content, position);
         let keyword_ctx = {
             let cursor_offset = position_to_offset(content, position);
-            let maps = self.symbol_maps.read();
-            let map = maps.get(current_uri);
+            let map = self.symbol_map_for(current_uri);
             crate::completion::keyword_completion::build_keyword_context(
                 content,
                 position,
                 cursor_offset,
-                map.map(|m| m.as_ref()),
+                map.as_deref(),
                 &ctx.classes,
             )
         };

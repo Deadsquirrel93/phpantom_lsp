@@ -150,12 +150,10 @@ impl Backend {
         let has_macros = !index.is_empty();
         let new_targets = index.target_fqns();
         let target_count = new_targets.len();
-        let old_targets = self.laravel_macros.read().target_fqns();
-        *self.laravel_macros.write() = index;
-        self.laravel_has_macros
-            .store(has_macros, std::sync::atomic::Ordering::Relaxed);
-        *self.laravel_macro_seeds.write() = seeds;
-        *self.laravel_macro_mixin_uris.write() = mixin_uris;
+        let old_targets = self.laravel.macros.read().target_fqns();
+        self.laravel.macros.replace(index, has_macros);
+        *self.laravel.macro_seeds.write() = seeds;
+        *self.laravel.macro_mixin_uris.write() = mixin_uris;
 
         // Evict every class that had macros before or has them now, so a
         // rebuild triggered by a provider edit replaces stale cached merges
@@ -226,7 +224,7 @@ impl Backend {
         content: &str,
         providers: &super::ProvidersOnce<'_>,
     ) {
-        if !self.resolved_class_cache.read().is_laravel() {
+        if !self.resolved_class_cache.read().laravel().is_enabled() {
             return;
         }
         // Re-run the full date-factory scan when the edited file is one that
@@ -236,7 +234,7 @@ impl Backend {
         // `Date::use()` / `DateFactory::use()` call is reflected, and an edit
         // to an unrelated file can neither override the configured class nor
         // leave a stale one behind.
-        if self.laravel_date_seed_uris.read().contains(uri) {
+        if self.laravel.date_seed_uris.read().contains(uri) {
             self.build_laravel_date_class(providers.get());
         }
         // A `Macroable::mixin()` registration pulls its macros from another
@@ -248,7 +246,7 @@ impl Backend {
         // whole index (which also refreshes the dependency set).  Mixin
         // registrations are rare, so the occasional full rebuild is cheap.
         if memchr::memmem::find(content.as_bytes(), b"mixin(").is_some()
-            || self.laravel_macro_mixin_uris.read().contains(uri)
+            || self.laravel.macro_mixin_uris.read().contains(uri)
         {
             self.build_laravel_macro_index(providers.get());
             return;
@@ -258,7 +256,7 @@ impl Backend {
         // files feed the index, so the index is rebuilt.  When the references
         // are unchanged the edit can only affect the seed's own
         // registrations, which the single-file path below picks up.
-        let prev_refs = self.laravel_macro_seeds.read().get(uri).cloned();
+        let prev_refs = self.laravel.macro_seeds.read().get(uri).cloned();
         if let Some(prev_refs) = prev_refs {
             let refs = if self.is_laravel_provider_list_uri(uri) {
                 crate::virtual_members::laravel::parse_provider_class_list(content)
@@ -270,7 +268,7 @@ impl Backend {
                 return;
             }
         }
-        let had = self.laravel_macros.read().files.has_uri(uri);
+        let had = self.laravel.macros.read().files.has_uri(uri);
         let has_token = memchr::memmem::find(content.as_bytes(), b"macro(").is_some();
         if !had && !has_token {
             return;
@@ -285,14 +283,13 @@ impl Backend {
         self.expand_facade_macros(&mut regs);
 
         let targets = {
-            let mut index = self.laravel_macros.write();
+            let mut index = self.laravel.macros.write();
             // Capture the pre-edit targets too, so a class whose last macro
             // this edit removed is also evicted below.
             let mut targets = index.target_fqns();
             index.files.set_file(uri.to_string(), regs);
             index.rebuild();
-            self.laravel_has_macros
-                .store(!index.is_empty(), std::sync::atomic::Ordering::Relaxed);
+            self.laravel.macros.set_has_any(!index.is_empty());
             targets.extend(index.target_fqns());
             targets
         };

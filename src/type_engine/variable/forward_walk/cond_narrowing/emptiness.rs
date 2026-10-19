@@ -22,7 +22,7 @@ use super::*;
 pub(super) fn extract_count_emptiness_check(
     expr: &Expression<'_>,
 ) -> Option<(String, EmptyValue, bool, bool)> {
-    let (inner, negated) = narrowing::unwrap_condition_negation(expr);
+    let (inner, negated) = condition_facts::unwrap_condition_negation(expr);
     let Expression::Binary(bin) = inner else {
         return None;
     };
@@ -383,7 +383,7 @@ pub(crate) fn apply_switch_arm_narrowing(
 
     // `switch ($x['type'])` discriminates the shapes `$x` can be, which is
     // only visible once the offset has a type of its own to narrow.
-    if narrowing::split_trailing_bracket(&var_name).is_some() {
+    if condition_facts::split_trailing_bracket(&var_name).is_some() {
         seed_synthetic_key_if_needed(&var_name, scope, ctx);
     }
     retain_literals_in_scope(&var_name, scope, &keep);
@@ -402,7 +402,7 @@ pub(super) fn apply_literal_order_narrowing(
     ctx: &ForwardWalkCtx<'_>,
     truthy: bool,
 ) {
-    let (inner, negated) = narrowing::unwrap_condition_negation(condition);
+    let (inner, negated) = condition_facts::unwrap_condition_negation(condition);
     let Expression::Binary(bin) = inner else {
         return;
     };

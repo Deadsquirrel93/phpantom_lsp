@@ -47,8 +47,8 @@ impl Backend {
                 configured = Some(class);
             }
         }
-        *self.laravel_date_seed_uris.write() = seed_uris;
-        let previous = self.laravel_date_class.write().replace(configured.clone());
+        *self.laravel.date_seed_uris.write() = seed_uris;
+        let previous = self.laravel.date_class.write().replace(configured.clone());
         // `now()` reaches the configured class through this slot rather than
         // through a lookup of the provider that set it, so a cached receiver
         // resolution records no dependency on it.

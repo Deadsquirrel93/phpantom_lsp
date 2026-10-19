@@ -57,7 +57,7 @@ pub use shared_vec::*;
 /// and `@return DateTimeImmutable` inside `namespace App` names an
 /// `App\DateTimeImmutable` that may not exist at all.  The parser has no
 /// class loader, so it records the type here, and loading the declaration
-/// decides (see `type_engine::types::docblock_narrowing`).
+/// decides (see `type_engine::type_ops::docblock_narrowing`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct UnverifiedDocType {
     /// The method or property the type belongs to, or the function itself.

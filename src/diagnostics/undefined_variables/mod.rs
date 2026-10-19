@@ -63,7 +63,7 @@ use crate::scope_collector::{
     collect_hook_scope_with_resolver, hook_body_span,
 };
 
-use super::helpers::{SUPERGLOBALS, make_diagnostic};
+use super::helpers::{FileDiagnosticContext, SUPERGLOBALS, make_diagnostic};
 
 /// Emit [`mago_syntax::walker::Walker`] overrides that stop traversal at
 /// nested variable scopes (closures, arrow functions, named function
@@ -109,9 +109,22 @@ impl Backend {
         content: &str,
         out: &mut Vec<Diagnostic>,
     ) {
-        // Gather file-level context for FQN resolution of function and
-        // class names inside the by-ref resolver.
-        let file_ctx = self.file_context(uri);
+        let ctx = FileDiagnosticContext::gather(self, uri);
+        self.collect_undefined_variable_diagnostics_with_context(&ctx, uri, content, out);
+    }
+
+    /// [`Self::collect_undefined_variable_diagnostics`] over an
+    /// already-gathered [`FileDiagnosticContext`].
+    pub(crate) fn collect_undefined_variable_diagnostics_with_context(
+        &self,
+        pass: &FileDiagnosticContext,
+        uri: &str,
+        content: &str,
+        out: &mut Vec<Diagnostic>,
+    ) {
+        // The file-level context resolves function and class names inside
+        // the by-ref resolver.
+        let file_ctx = &pass.file;
 
         with_parsed_program(content, "unknown_variable", |program, content| {
             let mut ctx = DiagnosticCtx {

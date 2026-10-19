@@ -206,7 +206,7 @@ fn named_function_call<'b>(
     // argument, or a builtin whose arguments decide its result) is
     // authoritative, so it is tried before the declared type.
     if func_info.conditional_return.is_some()
-        || crate::type_engine::types::call_site_returns::has_call_site_return(name)
+        || crate::type_engine::type_ops::call_site_returns::has_call_site_return(name)
     {
         let var_resolver = build_var_resolver_from_ctx(ctx);
         let rctx = ctx.as_resolution_ctx();
@@ -218,7 +218,7 @@ fn named_function_call<'b>(
         let arg_texts = extract_arg_texts_from_ast(argument_list, ctx.content);
         let text_args = arg_texts.join(", ");
         let resolved_type = func_info.conditional_return.as_ref().and_then(|cond| {
-            let tpl = crate::type_engine::types::conditional::TemplateContext {
+            let tpl = crate::type_engine::type_ops::conditional::TemplateContext {
                 defaults: None,
                 params: &func_info.template_params,
                 bindings: &func_info.template_bindings,
@@ -248,7 +248,7 @@ fn named_function_call<'b>(
         .or_else(|| {
             let walker_types = walker_arg_types(argument_list, ctx);
             let arg_ty_resolver = |t: &str| walker_types(t).or_else(|| arg_ty_resolver(t));
-            crate::type_engine::types::call_site_returns::call_site_return_type(
+            crate::type_engine::type_ops::call_site_returns::call_site_return_type(
                 name,
                 &func_info.parameters,
                 &text_args,

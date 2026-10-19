@@ -90,14 +90,11 @@ impl Backend {
     /// instead (typically in a service provider).  Returns `None` when the
     /// project has no macros or the member is not a recognized macro.
     pub(super) fn macro_definition_location(&self, fqn: &str, name: &str) -> Option<Location> {
-        if !self
-            .laravel_has_macros
-            .load(std::sync::atomic::Ordering::Relaxed)
-        {
+        if !self.laravel.macros.has_any() {
             return None;
         }
         let (uri, offset) = {
-            let index = self.laravel_macros.read();
+            let index = self.laravel.macros.read();
             let (uri, offset) = index.definition(fqn, name)?;
             (uri.to_string(), offset)
         };

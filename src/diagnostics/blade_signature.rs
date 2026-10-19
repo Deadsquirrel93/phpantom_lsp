@@ -43,7 +43,12 @@ impl Backend {
     /// than the virtual PHP: the declarations are docblock text, and the
     /// ranges are the template's own from the start, so nothing has to go
     /// back through the source map.
-    pub(super) fn collect_blade_signature_diagnostics(&self, uri: &str, out: &mut Vec<Diagnostic>) {
+    pub(super) fn collect_blade_signature_diagnostics(
+        &self,
+        ctx: &super::helpers::FileDiagnosticContext,
+        uri: &str,
+        out: &mut Vec<Diagnostic>,
+    ) {
         if !self.is_blade_file(uri) {
             return;
         }
@@ -88,8 +93,7 @@ impl Backend {
 
         let view_names = self.view_names_for_blade_uri(uri);
         let qualify = self.blade_type_qualifier(view_names.first().map_or("", String::as_str));
-        let file_ctx = self.file_context(uri);
-        let class_loader = self.resolved_class_loader(&file_ctx);
+        let class_loader = self.resolved_class_loader(&ctx.file);
 
         for (name, declared) in declarations {
             let Some((layout, inherited)) = chain.iter().find_map(|(layout, declarations)| {

@@ -790,7 +790,7 @@ fn apply_post_merge_stages(
     // Whether Laravel-specific resolution should run.  A throwaway
     // cache defaults to `true`, so behaviour is unchanged for
     // cache-less code paths and tests.
-    let is_laravel = cache.read().is_laravel();
+    let is_laravel = cache.read().laravel().is_enabled();
 
     // ── Pre-provider patches ────────────────────────────────────────
     // Inject missing `@mixin` annotations before virtual member

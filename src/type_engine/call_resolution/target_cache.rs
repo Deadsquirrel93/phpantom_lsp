@@ -416,13 +416,12 @@ pub(crate) struct TypeEngineCaches {
 /// Activate every request-scoped type-engine memo for the current
 /// thread, returning one RAII guard that clears them all on drop.
 ///
-/// Called from [`Backend::with_file_content`], which every LSP handler
-/// goes through, and from the few entry points that fetch their own file
-/// content (completion, completion/code-action resolve, the diagnostic
-/// pass, and the `analyse` CLI).  Nested activation is a no-op, so an
-/// inner pass cannot clobber the memos an outer one installed.
+/// Every LSP request enters these through [`RequestScope`]; the
+/// diagnostic pass and the `analyse` CLI activate them directly.  Nested
+/// activation is a no-op, so an inner pass cannot clobber the memos an
+/// outer one installed.
 ///
-/// [`Backend::with_file_content`]: Backend::with_file_content
+/// [`RequestScope`]: crate::backend::requests::RequestScope
 pub(crate) fn activate_type_engine_caches() -> TypeEngineCaches {
     TypeEngineCaches {
         _callable_target: with_callable_target_cache(),

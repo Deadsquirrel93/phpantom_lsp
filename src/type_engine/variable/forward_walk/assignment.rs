@@ -4,7 +4,7 @@ use mago_span::HasSpan;
 
 use crate::atom::{Atom, atom, bytes_to_str};
 use crate::php_type::{LiteralValue, PhpType, TypeKind};
-use crate::type_engine::types::narrowing;
+use crate::type_engine::type_ops::condition_facts;
 use crate::types::{ClassInfo, ResolvedType};
 
 use super::super::rhs_resolution::{
@@ -276,7 +276,7 @@ pub(crate) fn process_assignment_expr<'b>(
             {
                 return;
             }
-            if let Some(key) = narrowing::expr_to_subject_key(assignment.lhs) {
+            if let Some(key) = condition_facts::expr_to_subject_key(assignment.lhs) {
                 // A write that dispatches to `__set` is opaque: the
                 // magic setter may transform, reroute, or drop the
                 // value, and a later read goes through `__get`, which
@@ -677,7 +677,8 @@ pub(crate) fn process_compound_assignment<'b>(
         // operators below read the target's current type, which a member
         // path the scope has never seen does not have.
         _ if matches!(assignment.operator, AssignmentOperator::Coalesce(_)) => {
-            match crate::type_engine::types::narrowing::expr_to_subject_key(assignment.lhs) {
+            match crate::type_engine::type_ops::condition_facts::expr_to_subject_key(assignment.lhs)
+            {
                 Some(key) => key,
                 None => return,
             }

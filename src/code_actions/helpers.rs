@@ -234,13 +234,10 @@ pub(crate) fn visit_file_text_edits(
 /// Return the leading whitespace of the line containing `offset`.
 ///
 /// This is the raw indentation of that line, without adding an extra level.
-pub(crate) fn indent_of_line_at(content: &str, offset: usize) -> String {
-    let before = &content[..offset.min(content.len())];
-    let line_start = before.rfind('\n').map_or(0, |p| p + 1);
-    content[line_start..offset.min(content.len())]
-        .chars()
-        .take_while(|c| c.is_whitespace())
-        .collect()
+pub(crate) fn indent_of_line_at(content: &str, offset: usize) -> &str {
+    let offset = offset.min(content.len());
+    let line = &content[crate::text_position::find_line_start(content, offset)..offset];
+    &line[..line.len() - line.trim_start_matches([' ', '\t']).len()]
 }
 
 /// Detect the file's indentation unit (a tab, two spaces, or four spaces).
@@ -276,7 +273,7 @@ pub(crate) fn detect_indent_from_members<'a>(
     if let Some(first) = members.first() {
         let indent = indent_of_line_at(content, first.span().start.offset as usize);
         if !indent.is_empty() {
-            return indent;
+            return indent.to_string();
         }
     }
 

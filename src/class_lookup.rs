@@ -1,19 +1,25 @@
 //! Class lookup by name/offset and subtype-relationship checks.
 //!
-//! These helpers answer "which class is this?" and, through
-//! [`subtyping`], "is this class a subtype of that one?" against an
+//! These helpers answer "which class is this?", through [`subtyping`]
+//! "is this class a subtype of that one?", and through [`compatibility`]
+//! "can a value of this type be passed where that one is declared?" against an
 //! already-loaded slice of [`ClassInfo`] values (or via a `class_loader`
 //! closure for cross-file lookups). Cross-file/PSR-4/stub resolution
 //! itself lives in [`crate::resolution`]; this module is the shared
 //! kernel that resolution and the completion/diagnostics pipelines both
 //! call into.
 
+mod compatibility;
 mod subtyping;
 
 use std::sync::Arc;
 
 use crate::types::ClassInfo;
 
+pub(crate) use compatibility::{
+    first_rejected_callable_param, is_type_compatible, missing_required_shape_keys,
+    shape_breaks_list_order,
+};
 pub(crate) use subtyping::{
     evaluate_constant_shape_key, is_subclass_of, is_subtype_of, is_subtype_of_named,
     is_subtype_of_names, is_subtype_of_typed,

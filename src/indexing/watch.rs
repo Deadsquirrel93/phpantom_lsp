@@ -83,7 +83,7 @@ impl Backend {
         params: &DidChangeWatchedFilesParams,
         root: &std::path::Path,
     ) -> bool {
-        let is_laravel = self.resolved_class_cache.read().is_laravel();
+        let is_laravel = self.resolved_class_cache.read().laravel().is_enabled();
         let changes = self.spell_changes_as_indexed(&params.changes);
         let mut batch = self.classify_watched_changes(&changes, root, is_laravel);
         if batch.is_empty() {
@@ -91,7 +91,7 @@ impl Backend {
         }
 
         if batch.translations_changed {
-            self.laravel_string_key_cache.write().translations = None;
+            self.laravel.string_key_cache.write().translations = None;
         }
 
         if batch.config_changed {
@@ -155,7 +155,7 @@ impl Backend {
         let is_open = |uri: &str| self.open_files.read().contains_key(uri);
         let laravel_config = self.config().laravel;
         let filters = self.index_filters();
-        let translations = self.laravel_string_key_cache.read().translations.clone();
+        let translations = self.laravel.string_key_cache.read().translations.clone();
         for change in changes {
             let path_str = change.uri.path();
             if path_str.ends_with("/composer.json") || path_str.ends_with("/composer.lock") {
@@ -261,9 +261,8 @@ impl Backend {
                 }
                 if change.typ == FileChangeType::CHANGED {
                     let canonical_uri = crate::util::path_to_uri(&file_path);
-                    let indexed = self.symbol_maps.read();
-                    if !indexed.contains_key(&uri_str)
-                        && !indexed.contains_key(canonical_uri.as_str())
+                    if self.symbol_map_for(&uri_str).is_none()
+                        && self.symbol_map_for(&canonical_uri).is_none()
                     {
                         continue;
                     }
@@ -344,9 +343,9 @@ impl Backend {
         if self.reindex_files_batch(php_changes) || touches_config {
             self.clear_not_found_caches();
             self.clear_resolved_class_cache();
-            self.auth_user_type_cache.write().clear();
-            *self.storage_disk_type_cache.write() = None;
-            self.laravel_aliases.invalidate();
+            self.laravel.auth_user_type_cache.write().clear();
+            *self.laravel.storage_disk_type_cache.write() = None;
+            self.laravel.aliases.invalidate();
             self.member_completion_cache.lock().clear();
         }
     }
@@ -475,7 +474,7 @@ impl Backend {
     ) -> (Registration, crate::WatchedFileInputs) {
         let index_filters = self.index_filters();
         let extra_extensions = index_filters.extra_extensions().to_vec();
-        let is_laravel = self.resolved_class_cache.read().is_laravel();
+        let is_laravel = self.resolved_class_cache.read().laravel().is_enabled();
 
         // Create, change, and delete: what every watcher but the two
         // Composer ones asks for.
@@ -559,10 +558,7 @@ impl Backend {
     /// [`Self::reregister_watched_files_if_changed`] knows what the client
     /// was last told.
     pub(crate) fn initial_watched_file_registration(&self) -> Option<Registration> {
-        if !self
-            .supports_watched_files_dynamic_registration
-            .load(Ordering::Acquire)
-        {
+        if !self.caps().watched_files_dynamic_registration {
             return None;
         }
         let (registration, inputs) = self.build_watched_file_registration();
@@ -576,10 +572,7 @@ impl Backend {
     /// the registration that carries it, taking the workspace watchers
     /// down with it.
     fn watchable_followed_links(&self) -> Vec<std::path::PathBuf> {
-        if !self
-            .supports_relative_pattern_watchers
-            .load(Ordering::Acquire)
-        {
+        if !self.caps().relative_pattern_watchers {
             return Vec::new();
         }
         self.followed_links().link_paths()
@@ -597,10 +590,7 @@ impl Backend {
     /// A client that did not opt in to dynamic registration of watchers
     /// has none to keep current, and is never sent one.
     pub(crate) fn reregister_watched_files_if_changed(&self) {
-        if !self
-            .supports_watched_files_dynamic_registration
-            .load(Ordering::Acquire)
-        {
+        if !self.caps().watched_files_dynamic_registration {
             return;
         }
         let (registration, inputs) = self.build_watched_file_registration();
@@ -626,7 +616,7 @@ impl Backend {
         let Ok(runtime) = tokio::runtime::Handle::try_current() else {
             return;
         };
-        let backend = self.clone_for_diagnostic_worker();
+        let backend = self.clone_for_blocking();
         runtime.spawn(async move {
             let Some(client) = &backend.client else {
                 return;

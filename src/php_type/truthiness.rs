@@ -193,7 +193,7 @@ impl PhpType {
                     out.push(PhpType::literal_int("0"));
                 }
             }
-            TypeKind::Named(name) => match keyword_lowercase(name).as_str() {
+            TypeKind::Named(name) => with_keyword_lowercase(name, |lower| match lower {
                 "int" | "integer" | "non-negative-int" | "non-positive-int" => {
                     out.push(PhpType::literal_int("0"));
                 }
@@ -224,7 +224,7 @@ impl PhpType {
                 ]),
                 _ if self.is_array_like() => out.push(PhpType::array_shape(Vec::new())),
                 _ => out.push(self.clone()),
-            },
+            }),
             // `[]` is the only falsy array, whatever the array was declared
             // to hold.
             _ if self.is_array_like() => out.push(PhpType::array_shape(Vec::new())),

@@ -27,7 +27,9 @@ use crate::atom::bytes_to_str;
 use crate::docblock::{extract_var_type, get_docblock_text_for_node};
 use crate::parser::extract_hint_type;
 use crate::php_type::{PhpType, TypeKind};
-use crate::text_position::{byte_range_to_lsp_range, offset_to_position};
+use crate::text_position::{
+    byte_range_to_lsp_range, find_line_end, find_line_start, offset_to_position,
+};
 
 // ── Data types ──────────────────────────────────────────────────────────────
 
@@ -354,22 +356,6 @@ fn find_insertion_offset<'a>(members: &Sequence<'a, ClassLikeMember<'a>>, conten
         // No properties at all — shouldn't happen because we check for
         // qualifying properties, but handle gracefully.
         0
-    }
-}
-
-fn find_line_start(content: &str, offset: usize) -> usize {
-    content[..offset]
-        .rfind('\n')
-        .map(|pos| pos + 1)
-        .unwrap_or(0)
-}
-
-/// Find the end of the line at or after the given offset (past the newline).
-fn find_line_end(content: &str, offset: usize) -> usize {
-    if let Some(nl) = content[offset..].find('\n') {
-        offset + nl + 1
-    } else {
-        content.len()
     }
 }
 

@@ -86,7 +86,7 @@ pub(crate) fn widen_by_ref_captures_by_later_writes(
 
         let probe_ctx = ctx.with_cursor_offset(u32::MAX);
         let _suspend = suspend_snapshot_recording();
-        let _barrier = suspend_return_edges();
+        let _barrier = suspend_return_edges(ctx.flow);
         let mut widened: Vec<(String, Option<Vec<ResolvedType>>)> = Vec::new();
         for (expr, written) in writes.found {
             let mut probe = outer.clone();

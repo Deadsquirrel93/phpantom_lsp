@@ -24,10 +24,12 @@ use crate::parser::with_parsed_program;
 use crate::php_type::{PhpType, TypeKind};
 use crate::return_collection::collect_returns;
 use crate::type_engine::resolver::{CtxLoaders, LendsLoaders, Loaders, VarResolutionCtx};
-use crate::type_engine::variable::foreach_resolution::resolve_expression_type;
+use crate::type_engine::variable::iterable_elements::resolve_expression_type;
 use crate::types::ClassInfo;
 
-use super::helpers::{collect_type_check, template_bounds, template_bounds_in_scope};
+use super::helpers::{
+    FileDiagnosticContext, collect_type_check, template_bounds, template_bounds_in_scope,
+};
 use super::type_errors::is_type_compatible;
 
 /// Diagnostic code used for return type mismatch diagnostics.
@@ -61,12 +63,25 @@ impl Backend {
         content: &str,
         out: &mut Vec<Diagnostic>,
     ) {
-        collect_type_check(
+        let ctx = FileDiagnosticContext::gather(self, uri);
+        self.collect_return_type_diagnostics_with_context(&ctx, uri, content, out);
+    }
+
+    /// [`Self::collect_return_type_diagnostics`] over an already-gathered
+    /// [`FileDiagnosticContext`].
+    pub(crate) fn collect_return_type_diagnostics_with_context(
+        &self,
+        ctx: &FileDiagnosticContext,
+        uri: &str,
+        content: &str,
+        out: &mut Vec<Diagnostic>,
+    ) {
+        out.extend(collect_type_check(
             self,
+            &ctx.file,
             uri,
             content,
             TYPE_MISMATCH_RETURN_CODE,
-            out,
             // Walk the AST, find return statements in method/function
             // bodies, resolve their types, and pair them with the
             // declared return type.
@@ -124,7 +139,7 @@ impl Backend {
                 };
                 Some(((ret.start, ret.end), message))
             },
-        );
+        ));
     }
 }
 

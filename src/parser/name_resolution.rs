@@ -13,7 +13,7 @@ use crate::Backend;
 use crate::atom::{Atom, atom};
 use crate::names::{lookup_import, resolve_to_fqn};
 use crate::php_type::PhpType;
-use crate::type_engine::types::docblock_narrowing;
+use crate::type_engine::type_ops::docblock_narrowing;
 use crate::types::{
     ClassInfo, DocTypeSlot, DocblockMembers, FunctionInfo, MethodInfo, NamespaceSpan,
     ParameterInfo, SeeRef, TypeAliasDef, UnverifiedDocType,
@@ -443,7 +443,7 @@ impl Backend {
         // A member signature is read from every file that uses the class,
         // where the alias names it would no longer be in scope.
         if !all_alias_names.is_empty() {
-            crate::type_engine::types::aliases::expand_local_type_aliases(classes);
+            crate::type_engine::type_ops::aliases::expand_local_type_aliases(classes);
         }
     }
 

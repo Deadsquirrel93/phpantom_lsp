@@ -1,8 +1,9 @@
-//! Type narrowing for variable resolution.
+//! What a runtime check says about a variable's type.
 //!
-//! This module contains the logic for narrowing a variable's type based on
-//! runtime checks that appear before the cursor position.  Supported
-//! patterns include:
+//! This module reads a condition and works out the narrowing it implies:
+//! the facts, and how they apply to a candidate type or class list.  The
+//! forward walker's `cond_narrowing` module applies them to the scope at
+//! each branch.  Supported patterns include:
 //!
 //!   - `if ($var instanceof ClassName)` — narrows inside the then-body
 //!   - `if (!$var instanceof ClassName)` — narrows inside the else-body
@@ -28,18 +29,18 @@
 //!   - `is_string($var)`, `is_int($var)`, `is_bool($var)`, etc. —
 //!     narrows to the corresponding scalar type.
 
-mod assertions;
+mod assert_annotations;
+mod builtin_checks;
+mod class_checks;
 mod conditional_returns;
 mod exits;
-mod guards;
-mod instanceof;
 mod resolve;
 
-pub(in crate::type_engine) use assertions::*;
+pub(in crate::type_engine) use assert_annotations::*;
+pub(in crate::type_engine) use builtin_checks::*;
+pub(in crate::type_engine) use class_checks::*;
 pub(in crate::type_engine) use conditional_returns::*;
 pub(in crate::type_engine) use exits::*;
-pub(in crate::type_engine) use guards::*;
-pub(in crate::type_engine) use instanceof::*;
 pub(in crate::type_engine) use resolve::*;
 // The symbol-map extractor builds the same bracket-index text the
 // narrowing keys use, so the two sides cannot drift apart.

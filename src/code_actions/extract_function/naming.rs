@@ -449,16 +449,3 @@ pub(crate) fn trim_selection(content: &str, start: usize, end: usize) -> Option<
 }
 
 // ─── Indentation helpers ────────────────────────────────────────────────────
-
-/// Find the end of the line containing `offset` (after the `\n`).
-pub(crate) fn find_line_end(content: &str, offset: usize) -> usize {
-    match content[offset..].find('\n') {
-        Some(pos) => offset + pos + 1,
-        None => content.len(),
-    }
-}
-
-/// Find the start of the line containing `offset`.
-pub(crate) fn find_line_start(content: &str, offset: usize) -> usize {
-    content[..offset].rfind('\n').map_or(0, |p| p + 1)
-}

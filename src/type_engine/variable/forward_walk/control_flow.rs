@@ -254,7 +254,7 @@ pub(crate) fn process_switch<'b>(
         }
         let arm_jumps_out = branch_exits_stmts(stmts.iter().copied(), &case_scope, ctx);
         falls_into_next = !arm_jumps_out;
-        let exit_frame = ExitFrameGuard::push();
+        let exit_frame = ExitFrameGuard::push(ctx.flow);
         walk_body_forward(stmts.iter().copied(), &mut case_scope, ctx);
         let arm_exits = exit_frame.pop();
         // The cursor sits in this arm, so what the arm knows at the

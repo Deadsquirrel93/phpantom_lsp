@@ -31,7 +31,7 @@ pub(super) fn exclude_classes_in_scope(
         results = named;
     }
     for cls in classes {
-        narrowing::exclude_instance_of(cls, var_ctx, &mut results);
+        condition_facts::exclude_instance_of(cls, var_ctx, &mut results);
         scope.record_exclusion(var_name, cls);
     }
     if !results.is_empty() {
@@ -198,11 +198,11 @@ pub(super) fn commit_chain_instanceof<'b>(
         for var_name in var_names {
             // Compound OR instanceof: `$x instanceof A || $x instanceof B`
             if let Some(classes) =
-                narrowing::try_extract_compound_or_instanceof(operand, var_name, &names)
+                condition_facts::try_extract_compound_or_instanceof(operand, var_name, &names)
                 && !classes.is_empty()
             {
                 let var_ctx = build_var_ctx(var_name, ctx, &scope_resolver);
-                let union = narrowing::resolve_class_names_to_union(&classes, &var_ctx);
+                let union = condition_facts::resolve_class_names_to_union(&classes, &var_ctx);
                 if !union.is_empty() {
                     let entry = alternative_results.entry(var_name.clone()).or_default();
                     ResolvedType::extend_unique(
@@ -227,7 +227,7 @@ pub(super) fn commit_chain_instanceof<'b>(
                     // of them is excluded.
                     exclude_classes_in_scope(var_name, &classes, &var_ctx, scope);
                 } else {
-                    let union = narrowing::resolve_class_names_to_union(&classes, &var_ctx);
+                    let union = condition_facts::resolve_class_names_to_union(&classes, &var_ctx);
                     if !union.is_empty() {
                         let entry = alternative_results.entry(var_name.clone()).or_default();
                         ResolvedType::extend_unique(
@@ -243,7 +243,7 @@ pub(super) fn commit_chain_instanceof<'b>(
             // holding the class name, so what it narrows to is whatever
             // that value's type says the class is.
             if let Some((rhs, negated)) =
-                narrowing::try_extract_dynamic_instanceof(operand, var_name)
+                condition_facts::try_extract_dynamic_instanceof(operand, var_name)
             {
                 let targets = dynamic_instanceof_targets(rhs, scope, ctx);
                 if !targets.is_empty() {
@@ -255,7 +255,7 @@ pub(super) fn commit_chain_instanceof<'b>(
                         for target in &targets {
                             let mut single = Vec::new();
                             ResolvedType::apply_narrowing(&mut single, |classes| {
-                                narrowing::apply_instanceof_inclusion(
+                                condition_facts::apply_instanceof_inclusion(
                                     target, false, &var_ctx, classes,
                                 )
                             });
@@ -286,15 +286,15 @@ pub(super) fn commit_chain_instanceof<'b>(
 
             // Single instanceof (including negated, is_a, get_class),
             // or a boolean that stands for one.
-            if let Some(extraction) = narrowing::try_extract_instanceof_with_negation(
-                operand, var_name, &names,
-            )
-            .or_else(|| {
-                alias_extractions[op_idx]
-                    .iter()
-                    .find(|a| a.subject == *var_name)
-                    .map(|a| a.extraction.clone())
-            }) {
+            if let Some(extraction) =
+                condition_facts::try_extract_instanceof_with_negation(operand, var_name, &names)
+                    .or_else(|| {
+                        alias_extractions[op_idx]
+                            .iter()
+                            .find(|a| a.subject == *var_name)
+                            .map(|a| a.extraction.clone())
+                    })
+            {
                 let var_ctx = build_var_ctx(var_name, ctx, &scope_resolver);
                 if extraction.negated {
                     // Negated instanceof: apply exclusion to the current
@@ -311,7 +311,7 @@ pub(super) fn commit_chain_instanceof<'b>(
                     // produces `[Foo]`; for `&& instanceof Bar` it
                     // accumulates `[Foo, Bar]`.
                     let mut single = Vec::new();
-                    narrowing::include_instance_of(
+                    condition_facts::include_instance_of(
                         &extraction.class_type,
                         extraction.exact,
                         &var_ctx,
@@ -388,7 +388,7 @@ pub(super) fn include_unloadable_class_in_scope(
     scope: &mut ScopeState,
 ) {
     let mut results = scope.get(var_name).to_vec();
-    narrowing::include_instance_of(class_type, false, var_ctx, &mut results);
+    condition_facts::include_instance_of(class_type, false, var_ctx, &mut results);
     scope.set(var_name, results);
 }
 
@@ -748,10 +748,10 @@ fn filter_to_checked_classes(
                 }
                 continue;
             }
-            if !narrowing::can_share_instance(cls, checked_cls) {
+            if !condition_facts::can_share_instance(cls, checked_cls) {
                 continue;
             }
-            let both = narrowing::class_first_intersection(
+            let both = condition_facts::class_first_intersection(
                 (rt.type_string.clone(), cls),
                 (checked.type_string.clone(), checked_cls),
             );
@@ -830,7 +830,7 @@ fn include_checked_classes(
     };
     let var_ctx = build_var_ctx(var_name, ctx, scope_resolver);
     ResolvedType::apply_narrowing(&mut results, |classes| {
-        narrowing::apply_instanceof_inclusion(&union_type, false, &var_ctx, classes)
+        condition_facts::apply_instanceof_inclusion(&union_type, false, &var_ctx, classes)
     });
     // Instanceof guarantees non-null — strip bare `null` entries that were
     // preserved by `apply_narrowing`'s `None => true` rule.

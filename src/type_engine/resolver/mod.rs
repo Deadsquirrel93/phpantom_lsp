@@ -17,8 +17,8 @@
 //!   expression parsing, array access segment walking).
 //! - [`super::variable::resolution`]: Variable type resolution via
 //!   assignment scanning and parameter type hints.
-//! - [`super::types::narrowing`]: instanceof / assert / custom type guard
-//!   narrowing.
+//! - [`super::type_ops::condition_facts`]: what instanceof / assert / custom
+//!   type guard conditions say about a variable.
 //! - [`super::variable::closure_resolution`]: Closure and arrow-function
 //!   parameter resolution.
 //! - [`crate::inheritance`]: Class inheritance merging (traits, mixins,
@@ -35,7 +35,7 @@
 //! classification of a subject that resolved to no class in
 //! [`subject_outcome`].
 
-mod array_access;
+mod array_access_subject;
 mod chain_keys;
 mod context;
 mod subject_outcome;
@@ -44,9 +44,9 @@ mod written_names;
 
 pub(crate) use chain_keys::is_narrowable_call;
 pub(crate) use context::{
-    CtxLoaders, FunctionLoaderFn, LendsLoaders, Loaders, OwnedLoaders, ResolutionCtx,
-    ScopeVarResolverFn, SourceImports, VarResolutionCtx, with_chain_resolution_cache,
-    with_isolated_chain_cache,
+    ChainCacheGuard, CtxLoaders, FunctionLoaderFn, LendsLoaders, Loaders, OwnedLoaders,
+    ResolutionCtx, ScopeVarResolverFn, SourceImports, VarResolutionCtx,
+    with_chain_resolution_cache, with_isolated_chain_cache,
 };
 pub(crate) use subject_outcome::{SubjectOutcome, resolve_subject_outcome};
 pub(crate) use variable_subjects::resolve_dynamic_member_name;
@@ -285,7 +285,13 @@ fn resolve_target_classes_expr_inner(
 
         // ── Array access on variable or call expression ─────────
         SubjectExpr::ArrayAccess { base, segments } => {
-            array_access::resolve_array_access_subject(expr, base, segments, access_kind, ctx)
+            array_access_subject::resolve_array_access_subject(
+                expr,
+                base,
+                segments,
+                access_kind,
+                ctx,
+            )
         }
 
         // ── Bare variable ───────────────────────────────────────

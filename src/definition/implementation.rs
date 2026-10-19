@@ -567,11 +567,11 @@ impl Backend {
             direct_only,
         };
         if self.config().indexing.strategy() == IndexingStrategy::Full
-            && !self.workspace_indexed.load(Ordering::Acquire)
+            && !self.workspace_index.indexed.load(Ordering::Acquire)
         {
             self.ensure_workspace_indexed_for_request();
         }
-        let workspace_index_ready = self.workspace_indexed.load(Ordering::Acquire);
+        let workspace_index_ready = self.workspace_index.indexed.load(Ordering::Acquire);
 
         // A target that ships in a Composer package is answered from the
         // class index rather than from the project-only workspace index,

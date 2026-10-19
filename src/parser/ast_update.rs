@@ -2,9 +2,9 @@
 //!
 //! This module contains the `update_ast` method that parses a PHP file
 //! into an [`AstIndexUpdate`], which [`super::ast_publish`] then publishes
-//! to all the backend maps (uri_classes_index, use_map, namespace_map,
-//! global_functions, global_defines, fqn_uri_index, symbol_maps) in a
-//! single pass.  The names the parsed declarations spell are qualified by
+//! to all the backend indexes (uri_classes_index, global_functions,
+//! global_defines, fqn_uri_index, and the file's `FileState`) in a single
+//! pass.  The names the parsed declarations spell are qualified by
 //! [`super::name_resolution`].
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -107,7 +107,8 @@ impl Backend {
             |lowering| Arc::clone(&lowering.virtual_php),
         );
 
-        self.laravel_string_key_cache
+        self.laravel
+            .string_key_cache
             .write()
             .invalidate_for_uri(uri, content);
         self.refresh_blade_discovery(uri);
@@ -169,8 +170,8 @@ impl Backend {
             None => {
                 // Parser panicked — store a single "Parse failed" error
                 // so the syntax-error diagnostic collector can report it.
-                self.parse_errors.write().insert(
-                    uri.to_string(),
+                self.publish_parse_failure(
+                    uri,
                     vec![("Parse failed (internal error)".to_string(), 0, 0)],
                 );
                 false
@@ -215,7 +216,8 @@ impl Backend {
         }
 
         let injected = self
-            .blade_injected_vars
+            .blade
+            .injected_vars
             .read()
             .get(uri)
             .cloned()
@@ -224,7 +226,7 @@ impl Backend {
         // Read under the guard rather than cloned: the set is small but
         // this runs on every keystroke in a template, and nothing the
         // preprocessor does can write it back.
-        let directives = self.blade_directives.read();
+        let directives = self.blade.directives.read();
         let (virtual_php, source_map) = crate::blade::preprocessor::preprocess_with_vars(
             content,
             &injected.vars,
@@ -309,7 +311,7 @@ impl Backend {
         // was last published (the fresh re-inference pass, if one already
         // landed) until its own next parse computes a lowering against the
         // current scope.
-        let injected_vars = self.blade_injected_vars.read();
+        let injected_vars = self.blade.injected_vars.read();
 
         let mut updates = Vec::new();
         let mut failures = Vec::new();
@@ -342,27 +344,21 @@ impl Backend {
         drop(open_uris);
         drop(injected_vars);
 
-        if !failures.is_empty() {
-            let mut parse_errors = self.parse_errors.write();
-            for (uri, errors) in failures {
-                parse_errors.insert(uri, errors);
-            }
+        for (uri, errors) in failures {
+            self.publish_parse_failure(&uri, errors);
         }
 
         // Invalidate the reverse pivot index when a background-indexed file
         // declares a many-to-many relationship, so its target models pick up
         // its pivot accessors on the next class load.
-        if !self
-            .laravel_pivots_dirty
-            .load(std::sync::atomic::Ordering::Relaxed)
+        if !self.laravel.pivots.is_dirty()
             && updates.iter().any(|u| {
                 u.classes
                     .iter()
                     .any(crate::virtual_members::laravel::class_declares_pivot_relationship)
             })
         {
-            self.laravel_pivots_dirty
-                .store(true, std::sync::atomic::Ordering::Relaxed);
+            self.laravel.pivots.mark_dirty();
             self.clear_resolved_member_files();
         }
 

@@ -532,7 +532,7 @@ fn a_definition_outside_the_workspace_hovers_without_a_path() {
     let uri = "file:///elsewhere/Provider.php";
     backend.update_ast(uri, provider);
     {
-        let mut index = backend.laravel_gates.write();
+        let mut index = backend.laravel.gates.write();
         index.files.set_file(
             uri.to_string(),
             crate::virtual_members::laravel::scan_gate_registrations(provider),

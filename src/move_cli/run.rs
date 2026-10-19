@@ -3,7 +3,6 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::Ordering;
 
 use tower_lsp::lsp_types::{
     DocumentChangeOperation, DocumentChanges, OneOf, ResourceOp, TextEdit, Url, WorkspaceEdit,
@@ -69,7 +68,7 @@ pub async fn execute(options: &MoveOptions) -> Result<MoveSummary, String> {
 
     let backend = Backend::new_headless_refactoring();
     crate::analyse::open_headless_project(&backend, &root, cfg).await;
-    backend.supports_file_rename.store(true, Ordering::Release);
+    backend.client_caps.write().file_rename = true;
     backend.ensure_workspace_indexed();
 
     let from = resolve_source(&backend, &root, &options.from)?;

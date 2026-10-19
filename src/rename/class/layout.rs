@@ -2,8 +2,6 @@
 //! its file, and the file itself, which a rename or move carries along
 //! to the path [`psr4_path_for_class`] gives the new name.
 
-use std::sync::atomic::Ordering;
-
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
@@ -206,7 +204,7 @@ impl Backend {
         old_fqn: &str,
         new_short_name: &str,
     ) -> Option<(Url, Url)> {
-        if !self.supports_file_rename.load(Ordering::Acquire) {
+        if !self.caps().file_rename {
             return None;
         }
 
@@ -244,7 +242,7 @@ impl Backend {
         old_fqn: &str,
         new_fqn: &str,
     ) -> Option<(Url, Url)> {
-        if !self.supports_file_rename.load(Ordering::Acquire) {
+        if !self.caps().file_rename {
             return None;
         }
 

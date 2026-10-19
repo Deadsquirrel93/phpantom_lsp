@@ -550,7 +550,7 @@ pub(crate) fn find_callable_params_on_method_fw(
     if let Some(params) = callable_param_hints(hint) {
         return params;
     }
-    crate::type_engine::types::aliases::expand_member_type_aliases(
+    crate::type_engine::type_ops::aliases::expand_member_type_aliases(
         hint,
         class,
         ctx.all_classes,

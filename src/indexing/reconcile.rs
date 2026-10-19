@@ -135,8 +135,8 @@ impl Backend {
         for path in self.symbols.autoload_constant_index.read().values() {
             note(&crate::util::path_to_uri(path), &mut filtered);
         }
-        for uri in self.symbol_maps.read().keys() {
-            note(uri, &mut filtered);
+        for uri in self.uris_with_symbol_maps() {
+            note(&uri, &mut filtered);
         }
         for uri in self.parsed_uris.read().iter() {
             note(uri, &mut filtered);

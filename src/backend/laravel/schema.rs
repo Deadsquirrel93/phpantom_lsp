@@ -9,13 +9,13 @@ use crate::Backend;
 
 impl Backend {
     pub(crate) fn reload_laravel_schema_index(&self, root: &std::path::Path) {
-        if !self.resolved_class_cache.read().is_laravel() {
+        if !self.resolved_class_cache.read().laravel().is_enabled() {
             return;
         }
 
         let laravel_config = self.config().laravel;
         let index = if laravel_config.schema.enabled() || laravel_config.migrations.enabled() {
-            let bp_macros = self.laravel_macros.read().blueprint_macro_closures();
+            let bp_macros = self.laravel.macros.read().blueprint_macro_closures();
             match crate::virtual_members::laravel::database_schema::load_schema_index(
                 root,
                 &laravel_config,
@@ -36,14 +36,15 @@ impl Backend {
 
         self.resolved_class_cache
             .write()
+            .laravel_mut()
             .set_schema_index(index.clone());
-        *self.schema_index.write() = index;
+        *self.laravel.schema_index.write() = index;
         self.clear_resolved_class_cache();
         self.member_completion_cache.lock().clear();
     }
 
     pub(crate) fn update_laravel_migrations(&self, changes: &[(PathBuf, FileChangeType)]) {
-        if !self.resolved_class_cache.read().is_laravel() {
+        if !self.resolved_class_cache.read().laravel().is_enabled() {
             return;
         }
 
@@ -70,7 +71,7 @@ impl Backend {
         }
 
         let updated = {
-            let mut index = self.schema_index.write();
+            let mut index = self.laravel.schema_index.write();
             let mut any_changed = false;
             for (path, content) in contents {
                 match content {
@@ -84,7 +85,10 @@ impl Backend {
             any_changed.then(|| index.clone())
         };
         if let Some(index) = updated {
-            self.resolved_class_cache.write().set_schema_index(index);
+            self.resolved_class_cache
+                .write()
+                .laravel_mut()
+                .set_schema_index(index);
             self.clear_resolved_class_cache();
             self.member_completion_cache.lock().clear();
         }

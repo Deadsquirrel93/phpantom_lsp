@@ -13,7 +13,7 @@ use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::resolver::VarResolutionCtx;
 use crate::types::{ClassInfo, ParameterInfo, SharedVec};
 
-use super::assertions::{
+use super::assert_annotations::{
     find_method_in_chain_where, resolve_instance_receiver_class, resolve_static_receiver_class,
 };
 

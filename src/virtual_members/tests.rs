@@ -799,7 +799,7 @@ fn trait_property_tag_beats_schema_column_end_to_end() {
         ),
     );
     let cache = crate::virtual_members::new_resolved_class_cache();
-    cache.write().set_schema_index(schema);
+    cache.write().laravel_mut().set_schema_index(schema);
 
     let resolved =
         crate::virtual_members::resolve_class_fully_cached(&event, &class_loader, &cache);

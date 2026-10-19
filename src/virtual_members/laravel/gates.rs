@@ -493,7 +493,8 @@ pub(crate) fn policy_class_for_model(
     let model_fqn = model_fqn.trim_start_matches('\\');
 
     let registered = backend
-        .laravel_gates
+        .laravel
+        .gates
         .read()
         .policy_for(model_fqn)
         .map(str::to_string);
@@ -611,7 +612,7 @@ pub(crate) fn model_policy_abilities(
 /// offers and what the unknown-ability diagnostic judges an ability against
 /// when the call names no model.
 pub(crate) fn enumerate_gate_abilities(backend: &crate::Backend) -> Vec<String> {
-    let mut names = backend.laravel_gates.read().definition_names();
+    let mut names = backend.laravel.gates.read().definition_names();
 
     for policy in project_policy_classes(backend) {
         names.extend(
@@ -719,7 +720,7 @@ fn declaring_policy_class(
 /// not the application's, and loading every `*Policy` in `vendor/` would cost
 /// far more than the abilities are worth.
 fn policy_class_fqns(backend: &crate::Backend) -> Vec<String> {
-    let mut fqns = backend.laravel_gates.read().registered_policy_fqns();
+    let mut fqns = backend.laravel.gates.read().registered_policy_fqns();
     {
         let index = backend.symbols.fqn_uri_index.read();
         for (fqn, uri) in index.iter() {

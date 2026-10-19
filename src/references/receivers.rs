@@ -468,7 +468,7 @@ impl Backend {
         if self.skip_reference_index {
             return false;
         }
-        let Some(symbol_map) = self.symbol_maps.read().get(uri).cloned() else {
+        let Some(symbol_map) = self.symbol_map_for(uri) else {
             return false;
         };
         if symbol_map.member_access_indices.is_empty() {

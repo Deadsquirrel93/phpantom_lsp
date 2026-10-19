@@ -438,7 +438,7 @@ pub(super) fn each_variable_type(
     part: IterationPart,
     var_ctx: &VarResolutionCtx<'_>,
 ) -> PhpType {
-    use crate::type_engine::variable::foreach_resolution as iter;
+    use crate::type_engine::variable::iterable_elements as iter;
 
     let derived = iter::resolve_expression_type(collection, var_ctx).and_then(|collection_ty| {
         let iter_ctx = iter::IterableCtx::from_var_ctx(var_ctx);
@@ -489,7 +489,7 @@ pub(super) fn data_shape_entries(
     expr: &Expression<'_>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Option<Vec<(String, PhpType)>> {
-    let ty = crate::type_engine::variable::foreach_resolution::resolve_expression_type(expr, ctx)?;
+    let ty = crate::type_engine::variable::iterable_elements::resolve_expression_type(expr, ctx)?;
     array_shape_entries(&ty).or_else(|| arrayable_shape_entries(&ty, ctx))
 }
 

@@ -177,7 +177,7 @@ fn build_info_for_function_like<'a>(
         .map(parse_doc_throws_from_info)
         .unwrap_or_default();
 
-    let indent = indent_of_line_at(content, docblock_start);
+    let indent = indent_of_line_at(content, docblock_start).to_string();
 
     // Compute LSP position for throws analysis.
     let docblock_position = offset_to_position(content, docblock_start);

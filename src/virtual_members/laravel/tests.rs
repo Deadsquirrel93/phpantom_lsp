@@ -302,7 +302,7 @@ fn schema_id_column_takes_precedence_over_implicit_primary_key() {
         parse_schema_dump("primary", "CREATE TABLE users (id bigint NOT NULL);"),
     );
     let cache = crate::virtual_members::new_resolved_class_cache();
-    cache.write().set_schema_index(schema);
+    cache.write().laravel_mut().set_schema_index(schema);
 
     let result = provider.provide(&user, &no_loader, Some(&cache));
     let ids: Vec<_> = result
@@ -332,7 +332,7 @@ fn synthesizes_schema_columns_with_cast_source_precedence() {
         ),
     );
     let cache = crate::virtual_members::new_resolved_class_cache();
-    cache.write().set_schema_index(schema);
+    cache.write().laravel_mut().set_schema_index(schema);
 
     let result = provider.provide(&user, &no_loader, Some(&cache));
     let email = result
@@ -382,7 +382,7 @@ fn cast_source_includes_attribute_default() {
         ),
     );
     let cache = crate::virtual_members::new_resolved_class_cache();
-    cache.write().set_schema_index(schema);
+    cache.write().laravel_mut().set_schema_index(schema);
 
     let result = provider.provide(&user, &no_loader, Some(&cache));
     let active = result
@@ -419,7 +419,7 @@ fn schema_timestamp_columns_keep_database_source_and_configured_date_type() {
         ),
     );
     let cache = crate::virtual_members::new_resolved_class_cache();
-    cache.write().set_schema_index(schema);
+    cache.write().laravel_mut().set_schema_index(schema);
 
     let result = provider.provide(&user, &no_loader, Some(&cache));
     let created_at = result
@@ -457,7 +457,7 @@ fn schema_lookup_uses_snake_plural_table_convention() {
         ),
     );
     let cache = crate::virtual_members::new_resolved_class_cache();
-    cache.write().set_schema_index(schema);
+    cache.write().laravel_mut().set_schema_index(schema);
 
     let result = provider.provide(&category, &no_loader, Some(&cache));
     assert!(result.properties.iter().any(|p| p.name == "label"));
@@ -478,7 +478,7 @@ fn schema_lookup_skips_convention_when_get_table_is_overridden() {
         ),
     );
     let cache = crate::virtual_members::new_resolved_class_cache();
-    cache.write().set_schema_index(schema);
+    cache.write().laravel_mut().set_schema_index(schema);
 
     let result = provider.provide(&user, &no_loader, Some(&cache));
     assert!(!result.properties.iter().any(|p| p.name == "email"));
@@ -500,7 +500,7 @@ fn explicit_table_still_allows_schema_lookup_when_get_table_exists() {
         ),
     );
     let cache = crate::virtual_members::new_resolved_class_cache();
-    cache.write().set_schema_index(schema);
+    cache.write().laravel_mut().set_schema_index(schema);
 
     let result = provider.provide(&user, &no_loader, Some(&cache));
     assert!(result.properties.iter().any(|p| p.name == "email"));
@@ -1459,7 +1459,7 @@ fn schema_backed_modern_accessor_keeps_accessor_source() {
     assert!(tables[0].column("name").is_some());
     let schema = SchemaIndex::from_tables(Some("primary".to_string()), tables);
     let cache = crate::virtual_members::new_resolved_class_cache();
-    cache.write().set_schema_index(schema);
+    cache.write().laravel_mut().set_schema_index(schema);
 
     let result = provider.provide(&user, &no_loader, Some(&cache));
     let prop = result

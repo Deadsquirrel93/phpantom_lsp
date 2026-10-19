@@ -159,9 +159,8 @@ impl Backend {
         let file_use_map = &block.use_map;
         let file_namespace = &block.namespace;
 
-        let symbol_map = match self.symbol_maps.read().get(uri) {
-            Some(sm) => sm.clone(),
-            None => return,
+        let Some(symbol_map) = self.symbol_map_for(uri) else {
+            return;
         };
         let Some(source) = symbol_map.source(content) else {
             return;

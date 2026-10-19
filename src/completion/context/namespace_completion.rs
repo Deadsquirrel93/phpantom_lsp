@@ -199,9 +199,9 @@ impl Backend {
 
         // ── 2. namespace_map (already-opened files) ─────────────────
         {
-            let nmap = self.file_namespaces.read();
-            for spans in nmap.values() {
-                for span in spans {
+            let files = self.files.read();
+            for state in files.values() {
+                for span in &state.namespaces {
                     if let Some(ns) = &span.namespace {
                         insert_if_under_psr4(ns, &mut namespaces, &psr4_prefixes);
                     }

@@ -64,7 +64,7 @@ fn global_constant_type(name: &str, offset: u32, ctx: &VarResolutionCtx<'_>) -> 
                 .flatten()
                 .or_else(|| crate::Backend::resolve_arg_text_to_type(text, &rctx))
         };
-        crate::type_engine::types::const_fold::folded_constant_type(
+        crate::type_engine::type_ops::const_fold::folded_constant_type(
             strip_fqn_prefix(name),
             &value,
             &resolve,

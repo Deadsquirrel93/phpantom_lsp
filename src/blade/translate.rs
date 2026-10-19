@@ -14,7 +14,7 @@ impl Backend {
     /// Check whether a URI refers to a Blade template file.
     /// Returns true if the URI ends with `.blade.php` OR was opened with `languageId == "blade"`.
     pub(crate) fn is_blade_file(&self, uri: &str) -> bool {
-        crate::blade::is_blade_file(uri) || self.blade_uris.read().contains(uri)
+        crate::blade::is_blade_file(uri) || self.blade.uris.read().contains(uri)
     }
 
     /// Translate a position from an original Blade file to the virtual PHP file.
@@ -23,7 +23,7 @@ impl Backend {
         uri: &str,
         pos: tower_lsp::lsp_types::Position,
     ) -> tower_lsp::lsp_types::Position {
-        if let Some(map) = self.blade_source_maps.read().get(uri) {
+        if let Some(map) = self.blade_source_map(uri) {
             map.blade_to_php(pos)
         } else {
             pos
@@ -36,7 +36,7 @@ impl Backend {
         uri: &str,
         pos: tower_lsp::lsp_types::Position,
     ) -> tower_lsp::lsp_types::Position {
-        if let Some(map) = self.blade_source_maps.read().get(uri) {
+        if let Some(map) = self.blade_source_map(uri) {
             map.php_to_blade(pos)
         } else {
             pos
@@ -55,7 +55,7 @@ impl Backend {
         uri: &str,
         pos: tower_lsp::lsp_types::Position,
     ) -> Option<tower_lsp::lsp_types::Position> {
-        match self.blade_source_maps.read().get(uri) {
+        match self.blade_source_map(uri) {
             Some(map) => map.try_php_to_blade(pos),
             None => Some(pos),
         }

@@ -78,7 +78,8 @@ pub(crate) fn discover_folio_mounts(backend: &Backend) -> Vec<FolioMount> {
     };
 
     let mut mounts: Vec<FolioMount> = backend
-        .laravel_provider_resources
+        .laravel
+        .provider_resources
         .read()
         .folio_mounts
         .clone();

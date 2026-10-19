@@ -34,7 +34,7 @@ use crate::code_actions::render_docblock;
 use crate::docblock::{extract_var_type, get_docblock_text_for_node};
 use crate::parser::extract_hint_type;
 use crate::php_type::PhpType;
-use crate::text_position::offset_to_position;
+use crate::text_position::{find_line_end, offset_to_position};
 
 // ── Data types ──────────────────────────────────────────────────────────────
 
@@ -466,15 +466,6 @@ fn find_accessor_insertion_offset<'a>(
 
     let end = last_method_end.or(last_member_end).unwrap_or(0);
     find_line_end(content, end as usize)
-}
-
-/// Find the end of the line at or after the given offset (past the newline).
-fn find_line_end(content: &str, offset: usize) -> usize {
-    if let Some(nl) = content[offset..].find('\n') {
-        offset + nl + 1
-    } else {
-        content.len()
-    }
 }
 
 /// Check if the modifier list includes `readonly`.

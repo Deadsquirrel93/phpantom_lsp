@@ -510,7 +510,7 @@ fn class_signature(
     }
 
     let backend = backend?;
-    let index = backend.laravel_commands.read();
+    let index = backend.laravel.commands.read();
     let entry = index.get_by_fqn(&class.fqn())?;
     Some(entry.signature.clone())
 }

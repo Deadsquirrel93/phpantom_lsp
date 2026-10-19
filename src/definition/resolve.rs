@@ -14,7 +14,6 @@
 //! declaration) is also handled here, against the precomputed symbol map's
 //! variable-definition index.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::symbol_map::VarDefKind;
@@ -53,7 +52,7 @@ impl Backend {
         }
 
         // Laravel config fallback: declaration sites in config/*.php
-        if self.resolved_class_cache.read().is_laravel()
+        if self.resolved_class_cache.read().laravel().is_enabled()
             && let Some(loc) =
                 laravel::resolve_config_key_definition_fallback(self, uri, content, position)
         {
@@ -82,7 +81,7 @@ impl Backend {
         uri: &str,
         offset: u32,
     ) -> Option<crate::symbol_map::SymbolSpan> {
-        let map = self.symbol_maps.read().get(uri).cloned()?;
+        let map = self.symbol_map_for(uri)?;
         if let Some(span) = map.lookup(offset) {
             return Some(span.clone());
         }
@@ -143,8 +142,7 @@ impl Backend {
         var_name: &str,
         cursor_offset: u32,
     ) -> Option<crate::symbol_map::VarDefSite> {
-        let maps = self.symbol_maps.read();
-        let map = maps.get(uri)?;
+        let map = self.symbol_map_for(uri)?;
         let scope_start = map.find_enclosing_scope(cursor_offset);
         map.find_var_definition(var_name, cursor_offset, scope_start)
             .cloned()
@@ -159,8 +157,7 @@ impl Backend {
         var_name: &str,
         cursor_offset: u32,
     ) -> Option<VarDefKind> {
-        let maps = self.symbol_maps.read();
-        let map = maps.get(uri)?;
+        let map = self.symbol_map_for(uri)?;
         map.var_def_kind_at(var_name, cursor_offset).cloned()
     }
 
@@ -197,8 +194,7 @@ impl Backend {
         var_name: &str,
         cursor_offset: u32,
     ) -> Option<u32> {
-        let maps = self.symbol_maps.read();
-        let map = maps.get(uri)?;
+        let map = self.symbol_map_for(uri)?;
         let def = map.var_def_at(var_name, cursor_offset)?;
         if matches!(
             def.kind,
@@ -408,7 +404,7 @@ impl Backend {
             }
 
             SymbolKind::LaravelStringKey { kind, key, .. } => {
-                if !self.resolved_class_cache.read().is_laravel() {
+                if !self.resolved_class_cache.read().laravel().is_enabled() {
                     return None;
                 }
                 let locs = laravel::resolve_laravel_string_key(self, kind, key, uri);
@@ -550,25 +546,11 @@ impl Backend {
         name: &str,
         cursor_offset: u32,
     ) -> Option<crate::symbol_map::TemplateParamDef> {
-        let maps = self.symbol_maps.read();
-        let map = maps.get(uri)?;
+        let map = self.symbol_map_for(uri)?;
         map.find_template_def(name, cursor_offset).cloned()
     }
 
     // ─── Word Extraction & FQN Resolution ───────────────────────────────────
-
-    /// Resolve a short or partially-qualified name to a fully-qualified name
-    /// using the file's `use` map and namespace context.
-    ///
-    /// This is a thin wrapper around [`crate::names::resolve_to_fqn`] kept
-    /// for API compatibility with callers that use `Self::resolve_to_fqn`.
-    pub fn resolve_to_fqn(
-        name: &str,
-        use_map: &HashMap<String, String>,
-        namespace: &Option<String>,
-    ) -> String {
-        crate::names::resolve_to_fqn(name, use_map, namespace)
-    }
 
     /// Resolve a class definition in a file on disk.
     ///

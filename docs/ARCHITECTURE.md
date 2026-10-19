@@ -8,7 +8,7 @@ PHPantom is a language server for PHP projects. It provides completion, go-to-de
 
 1. **Parsing** PHP files into lightweight `ClassInfo` / `FunctionInfo` structures (not a full AST — just the information needed for IDE features).
 2. **Caching** parsed results in an in-memory `uri_classes_index` keyed by file URI.
-3. **Building** a precomputed symbol map (`symbol_maps`) during parsing for O(log n) go-to-definition lookups and call-site detection for signature help.
+3. **Building** a precomputed symbol map (part of each file's `FileState`) during parsing for O(log n) go-to-definition lookups and call-site detection for signature help.
 4. **Resolving** symbols on demand through a multi-phase lookup chain.
 5. **Merging** inherited members (from parent classes, traits, interfaces, and mixins) at resolution time.
 
@@ -137,7 +137,7 @@ tests/
 
 **The shared type engine lives under `type_engine/`.** `type_engine/resolver/`,
 `type_engine/variable/` (including the `forward_walk/` forward walker),
-`type_engine/call_resolution/`, `type_engine/types/`, and the subject
+`type_engine/call_resolution/`, `type_engine/type_ops/`, and the subject
 extraction/resolution files are the project's single type-resolution engine —
 they answer "what is the type of this expression here?" and are consumed by
 diagnostics, hover, go-to-definition, and signature help, not just completion
@@ -215,7 +215,7 @@ The definition subsystem uses a **three-tier** approach, from fastest to slowest
 
 ### Tier 1: Precomputed Symbol Map (primary)
 
-During `update_ast`, every navigable symbol occurrence in a file is recorded as a `SymbolSpan` in a sorted vec stored in `symbol_maps` (keyed by file URI). Each span records the byte range and a `SymbolKind` variant:
+During `update_ast`, every navigable symbol occurrence in a file is recorded as a `SymbolSpan` in a sorted vec stored in the file's `FileState` (`Backend::files`, keyed by file URI). Each span records the byte range and a `SymbolKind` variant:
 
 | `SymbolKind`        | What it captures                                                                                                                |
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
@@ -415,7 +415,7 @@ not: whether that class narrows the hint takes the class hierarchy. There it
 lets the docblock win and records the type with the hint qualified
 (`ClassInfo::unverified_doc_types`, `FunctionInfo::unverified_doc_types`).
 Loading the declaration puts the hint back unless the docblock class narrows
-it (`type_engine/types/docblock_narrowing.rs`): `Backend::link_loaded_class`
+it (`type_engine/type_ops/docblock_narrowing.rs`): `Backend::link_loaded_class`
 for every class the loader returns and the open file's own classes, and
 `Backend::verify_function_doc_types` for a function. The forward walker reads
 a parameter's docblock again inside the body, and checks it the same way.
@@ -515,16 +515,15 @@ Every phase that successfully parses a file caches the result in `uri_classes_in
 ### Index Write Sites
 
 **`update_ast_inner`** (`didOpen`/`didChange`): writes all three class
-maps plus `file_imports`, `file_namespaces`, `resolved_names`,
-`symbol_maps`, `parse_errors`.
+maps plus the file's `FileState` (symbol map, imports, namespaces,
+resolved names, parse errors, a template's lowering), replaced as a whole.
 
 **`parse_and_cache_content_versioned`** (lazy loading): writes only
-`uri_classes_index`, `fqn_class_index`, `fqn_uri_index`. Editor-only
-maps (`file_imports`, `file_namespaces`, etc.) are skipped for lazily
-loaded files to reduce memory usage.
+`uri_classes_index`, `fqn_class_index`, `fqn_uri_index`. The editor-only
+`FileState` is skipped for lazily loaded files to reduce memory usage.
 
-**`clear_file_maps`** (`didClose`): removes `uri_classes_index`,
-`symbol_maps`, `file_imports`, `resolved_names`, `file_namespaces`.
+**`clear_file_maps`** (`didClose`): removes `uri_classes_index` and the
+file's `FileState`.
 Keeps `fqn_class_index` and `fqn_uri_index` so cross-file resolution
 survives file close.
 
@@ -1286,7 +1285,7 @@ deduplicate differently. The server therefore treats push as a compatibility
 fallback for older clients rather than mixing both transports for the same
 native diagnostic set.
 
-Each worker is created during `initialized` via `clone_for_diagnostic_worker`, which builds a shallow clone of the `Backend`. All `Arc`-wrapped fields (maps, caches, the notify/pending slots) are shared by `Arc::clone`, so every worker sees all mutations the main `Backend` makes. The PHPStan and PHPCS workers each have their own notify handle, pending-URI slot, and diagnostic cache so they run independently of each other and of the native diagnostic worker.
+Each worker is created during `initialized` via `clone_for_blocking`, which hands it a `Backend` sharing the main one's `BackendState`, so every worker sees all mutations the main `Backend` makes. The PHPStan and PHPCS workers each have their own notify handle, pending-URI slot, and diagnostic cache so they run independently of each other and of the native diagnostic worker.
 
 Non-`Arc` fields are snapshotted at spawn time: `php_version`, `vendor_uri_prefixes`, and `vendor_dir_paths`. These fields are only written during `initialized` (before the workers are spawned) and never change afterwards. If a future feature adds runtime PHP version changes, the workers would need to be notified or re-cloned. This invariant ("init-time fields are write-once") should be verified before adding any post-init mutation to these fields.
 

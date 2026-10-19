@@ -2,8 +2,6 @@
 //! collector table, the deferred-edit resolution, and the post-processing
 //! every offered edit goes through (template translation, line endings).
 
-use std::sync::atomic::Ordering;
-
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
@@ -130,11 +128,10 @@ impl Backend {
         let adjusted = skip_leading_whitespace(content, params);
         let params = adjusted.as_ref().unwrap_or(params);
 
-        // Parse the file once and share the result across every collector
-        // below.  Each collector resolves cursor context by walking the
-        // AST via `with_parsed_program(content, …)`; without this guard
-        // they would each re-parse the same file from scratch.
-        let _parse_guard = crate::parser::with_parse_cache(content);
+        // Inside a request this re-enters the scope `with_file_content`
+        // opened; called on its own it still parses the file once for every
+        // collector below instead of once each.
+        let _scope = self.enter_request_scope_borrowed(content);
 
         let is_template = self.is_blade_file(uri);
         for collector in COLLECTORS {
@@ -157,7 +154,7 @@ impl Backend {
             }
         }
 
-        if !self.supports_code_action_resolve.load(Ordering::Acquire) {
+        if !self.caps().code_action_resolve {
             actions.retain_mut(|action| match action {
                 CodeActionOrCommand::CodeAction(action) => {
                     self.inline_deferred_edit(action, content)
@@ -264,17 +261,12 @@ impl Backend {
         data: &CodeActionData,
         content: &str,
     ) -> Option<WorkspaceEdit> {
-        // Parse the file once and share it across the resolve handler below.
-        // Resolving an extract action, for example, walks the AST several
-        // times (scope map, return analysis, parameter order, return type);
-        // without this guard each walk would re-parse the same file.
-        let _parse_guard = crate::parser::with_parse_cache(content);
-
         // Resolving an action can need types (an extracted function's
-        // return type, a docblock's inferred `@return`).  This handler
-        // fetches its own file content, so it activates the type-engine
-        // resolvers itself rather than going through `with_file_content`.
-        let _resolver_guard = crate::type_engine::call_resolution::activate_type_engine_caches();
+        // return type, a docblock's inferred `@return`) and walks the AST
+        // several times.  This handler fetches its own file content, so it
+        // enters the request scope itself rather than through
+        // `with_file_content`.
+        let _scope = self.enter_request_scope_borrowed(content);
 
         let result = match data.action_kind.as_str() {
             // ── PHPStan quickfixes ──────────────────────────────────

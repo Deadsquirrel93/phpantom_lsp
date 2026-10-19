@@ -9,9 +9,9 @@ use mago_syntax::cst::binary::{Binary, BinaryOperator};
 use mago_syntax::cst::unary::UnaryPrefixOperator;
 use mago_syntax::cst::{Expression, Literal, Variable};
 
-use crate::php_type::{PhpType, TypeKind, keyword_lowercase};
+use crate::php_type::{PhpType, TypeKind, with_keyword_lowercase};
 use crate::type_engine::resolver::VarResolutionCtx;
-use crate::type_engine::types::const_fold::{self, BitwiseOp};
+use crate::type_engine::type_ops::const_fold::{self, BitwiseOp};
 use crate::types::ResolvedType;
 
 use super::resolve_rhs_expression;
@@ -204,19 +204,21 @@ fn classify_php_type(ty: &PhpType, saw_float: &mut bool, saw_int: &mut bool) -> 
     }
     match ty.kind() {
         TypeKind::Named(n) => {
-            let lower = keyword_lowercase(n);
-            if lower == "bool" || lower == "boolean" || lower == "true" || lower == "false" {
-                *saw_int = true;
-            } else if lower == "numeric" || n == "number" {
-                *saw_int = true;
-                *saw_float = true;
-            } else if lower == "null" {
+            with_keyword_lowercase(n, |lower| match lower {
+                "bool" | "boolean" | "true" | "false" => {
+                    *saw_int = true;
+                    Some(())
+                }
+                "numeric" | "number" => {
+                    *saw_int = true;
+                    *saw_float = true;
+                    Some(())
+                }
                 // null coerces to 0 (int) in arithmetic; ignore it so that
                 // `int|null` classifies as int-like.
-            } else {
-                return None; // mixed, string, object, etc.
-            }
-            Some(())
+                "null" => Some(()),
+                _ => None, // mixed, string, object, etc.
+            })
         }
         TypeKind::Union(members) => {
             for member in members {

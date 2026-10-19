@@ -108,7 +108,7 @@ pub(super) fn resolve_rhs_array_access<'b>(
 
     // Expand type aliases so that shape/generic extraction can see the
     // underlying type (e.g. a `@phpstan-type` alias).
-    if let Some(expanded) = crate::type_engine::types::aliases::resolve_type_alias_typed(
+    if let Some(expanded) = crate::type_engine::type_ops::aliases::resolve_type_alias_typed(
         &current,
         &ctx.current_class.fqn(),
         ctx.all_classes,
@@ -133,7 +133,7 @@ pub(super) fn resolve_rhs_array_access<'b>(
 
         // After each segment, the resulting type might itself be an
         // alias (e.g. a shape value defined as another alias).
-        if let Some(expanded) = crate::type_engine::types::aliases::resolve_type_alias_typed(
+        if let Some(expanded) = crate::type_engine::type_ops::aliases::resolve_type_alias_typed(
             &current,
             &ctx.current_class.fqn(),
             ctx.all_classes,
@@ -313,7 +313,7 @@ fn index_segment(
             ctx.class_loader,
             ctx.resolved_class_cache,
         );
-        crate::type_engine::variable::foreach_resolution::extract_iterable_element_type_from_class(
+        crate::type_engine::variable::iterable_elements::extract_iterable_element_type_from_class(
             &merged,
             ctx.class_loader,
         )

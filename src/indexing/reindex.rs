@@ -140,7 +140,7 @@ impl Backend {
                 // A deleted file no longer declares the config keys it wrote
                 // at runtime.  A file that was merely changed re-registers
                 // them when it is re-parsed below.
-                self.laravel_runtime_config_keys.write().remove(uri);
+                self.laravel.runtime_config_keys.write().remove(uri);
                 // The Laravel registries a file fed (macros, storage drivers,
                 // commands, morph aliases, gates, provider resources) are
                 // refreshed only when the file is parsed, which a deleted
@@ -210,9 +210,10 @@ impl Backend {
         // them up in its own walk, but one in flight may already be past
         // them.
         if self
-            .workspace_indexed
+            .workspace_index
+            .indexed
             .load(std::sync::atomic::Ordering::Acquire)
-            || self.workspace_index_lock.is_locked()
+            || self.workspace_index.lock.is_locked()
         {
             let reparse: Vec<(String, PathBuf)> = changes
                 .iter()

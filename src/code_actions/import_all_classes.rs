@@ -123,9 +123,8 @@ impl Backend {
         content: &str,
         params: &CodeActionParams,
     ) -> bool {
-        let symbol_map = match self.symbol_maps.read().get(uri) {
-            Some(sm) => sm.clone(),
-            None => return false,
+        let Some(symbol_map) = self.symbol_map_for(uri) else {
+            return false;
         };
 
         let request_start =
@@ -287,9 +286,8 @@ impl Backend {
         uri: &str,
         content: &str,
     ) -> Vec<(ImportBlock, Vec<(String, ClassRefContext)>)> {
-        let symbol_map = match self.symbol_maps.read().get(uri) {
-            Some(sm) => sm.clone(),
-            None => return Vec::new(),
+        let Some(symbol_map) = self.symbol_map_for(uri) else {
+            return Vec::new();
         };
 
         let blocks = self.import_blocks(uri);

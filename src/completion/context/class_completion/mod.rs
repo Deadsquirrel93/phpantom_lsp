@@ -580,9 +580,9 @@ impl Backend {
 
         // 1. Some open file declares this FQN as its namespace.
         {
-            let nmap = self.file_namespaces.read();
-            for spans in nmap.values() {
-                for span in spans {
+            let files = self.files.read();
+            for state in files.values() {
+                for span in &state.namespaces {
                     if span.namespace.as_deref() == Some(fqn) {
                         return true;
                     }

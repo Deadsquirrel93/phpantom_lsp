@@ -12,7 +12,7 @@ use crate::atom::atom;
 use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::resolver::{Loaders, ResolutionCtx, with_isolated_chain_cache};
 use crate::type_engine::variable::forward_walk::{
-    ForwardWalkCtx, ScopeState, suspend_diagnostic_scope, suspend_return_edges, walk_body_forward,
+    ForwardWalkCtx, ScopeState, WalkFlow, suspend_diagnostic_scope, walk_body_forward,
 };
 use crate::types::*;
 
@@ -388,7 +388,6 @@ fn walk_closure_body_locals(
     // `out_param::read_out_type`, which walks another file's body for the
     // same reason.
     let _isolated = (suspend_diagnostic_scope(), with_isolated_chain_cache());
-    let _barrier = suspend_return_edges();
 
     crate::parser::with_parsed_program(
         &wrapped,
@@ -432,6 +431,7 @@ fn walk_closure_body_locals(
                 in_loop: false,
                 template_markers: None,
                 cursor_scope: None,
+                flow: &WalkFlow::default(),
             };
 
             let mut scope = ScopeState::new();

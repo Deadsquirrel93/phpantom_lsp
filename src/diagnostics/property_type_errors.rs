@@ -26,9 +26,9 @@ use crate::class_lookup::find_class_at_offset;
 use crate::parser::{for_each_nested_statement_list, with_parsed_program};
 use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::resolver::VarResolutionCtx;
-use crate::type_engine::variable::foreach_resolution::resolve_expression_type;
+use crate::type_engine::variable::iterable_elements::resolve_expression_type;
 
-use super::helpers::{TypeCheckCtx, collect_type_check};
+use super::helpers::{FileDiagnosticContext, TypeCheckCtx, collect_type_check};
 use super::type_errors::is_type_compatible;
 
 /// Diagnostic code used for property type mismatch diagnostics.
@@ -275,12 +275,25 @@ impl Backend {
         content: &str,
         out: &mut Vec<Diagnostic>,
     ) {
-        collect_type_check(
+        let ctx = FileDiagnosticContext::gather(self, uri);
+        self.collect_property_type_diagnostics_with_context(&ctx, uri, content, out);
+    }
+
+    /// [`Self::collect_property_type_diagnostics`] over an already-gathered
+    /// [`FileDiagnosticContext`].
+    pub(crate) fn collect_property_type_diagnostics_with_context(
+        &self,
+        ctx: &FileDiagnosticContext,
+        uri: &str,
+        content: &str,
+        out: &mut Vec<Diagnostic>,
+    ) {
+        out.extend(collect_type_check(
             self,
+            &ctx.file,
             uri,
             content,
             TYPE_MISMATCH_PROPERTY_CODE,
-            out,
             |ctx| {
                 with_parsed_program(content, "property_type_diagnostics", |program, _content| {
                     let mut resolved: Vec<ResolvedPropertyAssignment> = Vec::new();
@@ -317,6 +330,6 @@ impl Backend {
                     ),
                 ))
             },
-        );
+        ));
     }
 }

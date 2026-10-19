@@ -12,7 +12,7 @@ enum PropertyTest {
     /// The property passed (or, when `expect_match` is false, failed) a
     /// type guard such as `is_string()`.
     Guard {
-        kind: narrowing::TypeGuardKind,
+        kind: condition_facts::TypeGuardKind,
         expect_match: bool,
     },
     /// The property is identical (or, when `expect_equal` is false, not
@@ -44,7 +44,7 @@ impl PropertyTest {
         class_loader: &dyn Fn(&str) -> Option<Arc<crate::types::ClassInfo>>,
     ) -> bool {
         match self {
-            PropertyTest::Guard { kind, expect_match } => narrowing::guard_outcome_possible(
+            PropertyTest::Guard { kind, expect_match } => condition_facts::guard_outcome_possible(
                 prop_type,
                 *kind,
                 *expect_match,
@@ -69,7 +69,7 @@ pub(super) fn extract_property_check(
     operand: &Expression<'_>,
     truthy: bool,
 ) -> Option<PropertyCheck> {
-    let (inner, negated) = narrowing::unwrap_condition_negation(operand);
+    let (inner, negated) = condition_facts::unwrap_condition_negation(operand);
     // Whether the branch being narrowed is the one where the check held.
     let holds = truthy != negated;
 
@@ -79,7 +79,7 @@ pub(super) fn extract_property_check(
             let key = collect_condition_property_keys(inner)
                 .into_iter()
                 .find(|k| k.contains("->"))?;
-            let (kind, guard_negated) = narrowing::try_extract_type_guard(inner, &key)?;
+            let (kind, guard_negated) = condition_facts::try_extract_type_guard(inner, &key)?;
             let (subject, property) = split_property_key(&key)?;
             Some(PropertyCheck {
                 subject,
@@ -121,7 +121,7 @@ fn property_key_operand<'b>(
     rhs: &'b Expression<'b>,
 ) -> Option<(String, &'b Expression<'b>)> {
     for (candidate, other) in [(lhs, rhs), (rhs, lhs)] {
-        if let Some(key) = narrowing::expr_to_subject_key(candidate)
+        if let Some(key) = condition_facts::expr_to_subject_key(candidate)
             && key.contains("->")
         {
             return Some((key, other));

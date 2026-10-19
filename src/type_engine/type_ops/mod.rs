@@ -1,12 +1,13 @@
-//! Type resolution sub-modules.
+//! Operations on types that do not walk a function body.
 //!
-//! This group contains modules related to type resolution:
+//! This group contains:
 //! - **aliases**: expanding `@phpstan-type` aliases into member signatures
 //! - **docblock_narrowing**: keeping a docblock class only where it narrows
 //!   the native hint, which takes the class hierarchy
 //! - **resolution**: Type-hint string to `ClassInfo` mapping (unions,
 //!   intersections, generics, type aliases, object shapes, property types)
-//! - **narrowing**: instanceof / assert / custom type guard narrowing
+//! - **condition_facts**: what an instanceof check, an assertion, or a
+//!   type-check call says about a variable
 //! - **conditional**: PHPStan conditional return type resolution at call sites
 //! - **call_site_returns**: builtin return types decided by a call's
 //!   arguments (a flag bit, an options array, an object argument), which a
@@ -16,8 +17,8 @@
 
 pub mod aliases;
 pub mod call_site_returns;
+pub mod condition_facts;
 pub mod conditional;
 pub mod const_fold;
 pub mod docblock_narrowing;
-pub mod narrowing;
 pub mod resolution;

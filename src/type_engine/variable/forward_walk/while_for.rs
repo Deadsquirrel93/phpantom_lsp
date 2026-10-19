@@ -14,7 +14,7 @@ pub(crate) fn process_while<'b>(
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
-    let depth_guard = LoopDepthGuard::enter();
+    let depth_guard = LoopDepthGuard::enter(ctx.flow);
     let loop_depth = depth_guard.depth();
 
     // Hard limit: skip the body entirely at excessive nesting depth.
@@ -57,7 +57,7 @@ pub(crate) fn process_while<'b>(
     let assignment_depth =
         clamp_iterations_for_depth(assignment_map_depth(&body_stmts), loop_depth);
 
-    let exit_frame = ExitFrameGuard::push();
+    let exit_frame = ExitFrameGuard::push(ctx.flow);
     walk_loop_body_to_fixed_point(
         &body_stmts,
         scope,
@@ -127,7 +127,7 @@ pub(crate) fn process_for<'b>(
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
-    let depth_guard = LoopDepthGuard::enter();
+    let depth_guard = LoopDepthGuard::enter(ctx.flow);
     let loop_depth = depth_guard.depth();
 
     // Hard limit: skip the body entirely at excessive nesting depth.
@@ -177,7 +177,7 @@ pub(crate) fn process_for<'b>(
         loop_depth,
     );
 
-    let exit_frame = ExitFrameGuard::push();
+    let exit_frame = ExitFrameGuard::push(ctx.flow);
     walk_loop_body_to_fixed_point(
         &body_stmts,
         scope,
@@ -331,7 +331,7 @@ pub(crate) fn process_do_while<'b>(
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
-    let depth_guard = LoopDepthGuard::enter();
+    let depth_guard = LoopDepthGuard::enter(ctx.flow);
     let loop_depth = depth_guard.depth();
 
     // Hard limit: skip the body entirely at excessive nesting depth.
@@ -347,7 +347,7 @@ pub(crate) fn process_do_while<'b>(
     let assignment_depth =
         clamp_iterations_for_depth(assignment_map_depth(&body_stmts), loop_depth);
 
-    let exit_frame = ExitFrameGuard::push();
+    let exit_frame = ExitFrameGuard::push(ctx.flow);
     walk_loop_body_to_fixed_point(
         &body_stmts,
         scope,

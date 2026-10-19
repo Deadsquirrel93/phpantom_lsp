@@ -1,10 +1,11 @@
-//! Shared subject type resolution utility.
+//! The type of a subject a feature already holds as text.
 //!
-//! Resolves a subject string (`$this`, `self`, `static`, `parent`,
-//! bare class names, or `$variable`) to a [`PhpType`].  This is the
-//! single point of truth for all features that need to answer "what
-//! type does this subject refer to?" without the full completion
-//! resolver pipeline.
+//! The last step after [`subject_extraction`](super::subject_extraction)
+//! finds a subject's text and [`subject_expr`](super::subject_expr) parses
+//! it.  The class keywords (`self`, `static`, `parent`, `$this`) and a bare
+//! class name on static access are answered here from the enclosing class
+//! and the imports; a variable goes to the forward walker and anything else
+//! to the shared chain resolver, so this adds no resolution of its own.
 //!
 //! Consumers: deprecated diagnostics, find-references, code actions.
 

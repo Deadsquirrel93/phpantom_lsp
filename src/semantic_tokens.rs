@@ -136,7 +136,7 @@ impl Backend {
         uri: &str,
         content: &str,
     ) -> Option<SemanticTokensResult> {
-        let symbol_map = self.symbol_maps.read().get(uri)?.clone();
+        let symbol_map = self.symbol_map_for(uri)?;
         let ctx = self.file_context(uri);
         let mode = self.config().semantic_tokens.mode();
 
@@ -212,7 +212,7 @@ impl Backend {
             {
                 tokens.extend(Self::collect_blade_tokens(
                     &blade_content,
-                    &self.blade_directives.read(),
+                    &self.blade.directives.read(),
                 ));
             }
 

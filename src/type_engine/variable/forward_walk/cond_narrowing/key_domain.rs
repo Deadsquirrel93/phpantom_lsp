@@ -35,7 +35,7 @@ pub(super) fn apply_key_domain_narrowing<'b>(
                 && let Some(array) = call.argument_list.arguments.iter().nth(1)
             {
                 narrow_key(
-                    narrowing::argument_value(array),
+                    condition_facts::argument_value(array),
                     key_expr,
                     false,
                     scope,

@@ -18,7 +18,7 @@ use crate::parser::with_parsed_program;
 use crate::php_type::PhpType;
 use crate::return_collection::collect_returns;
 use crate::type_engine::resolver::{Loaders, SourceImports, VarResolutionCtx};
-use crate::type_engine::variable::foreach_resolution::resolve_expression_type;
+use crate::type_engine::variable::iterable_elements::resolve_expression_type;
 use crate::types::{ClassInfo, FunctionLoader};
 
 // ── Return type inference result ────────────────────────────────────────────

@@ -75,7 +75,8 @@ pub(crate) fn find_json_trans_references(
     let parent = path.parent()?;
     if !parent.ends_with("lang")
         && !backend
-            .laravel_provider_resources
+            .laravel
+            .provider_resources
             .read()
             .trans_dirs
             .iter()

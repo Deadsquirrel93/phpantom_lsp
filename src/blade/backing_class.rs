@@ -231,7 +231,8 @@ impl Backend {
         }
 
         let namespaces = self
-            .laravel_provider_resources
+            .laravel
+            .provider_resources
             .read()
             .class_component_namespaces
             .clone();
@@ -615,7 +616,8 @@ mod tests {
         let (mappings, _) = crate::composer::parse_composer_json(dir.path());
         let backend = Backend::new_test_with_workspace(dir.path().to_path_buf(), mappings);
         backend
-            .laravel_provider_resources
+            .laravel
+            .provider_resources
             .write()
             .class_component_namespaces
             .push((

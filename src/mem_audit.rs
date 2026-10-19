@@ -1278,10 +1278,12 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
 
     let mut imports = Sz::default();
     {
-        let m = backend.file_imports.read();
-        imports += map_buckets::<String, HashMap<String, String>>(m.capacity());
-        for (uri, im) in m.iter() {
+        let m = backend.files.read();
+        imports += map_buckets::<String, Arc<crate::file_state::FileState>>(m.capacity());
+        for (uri, state) in m.iter() {
+            let im = &state.use_map;
             imports.add(uri.capacity());
+            imports.add(ARC + size_of::<crate::file_state::FileState>());
             imports += map_buckets::<String, String>(im.capacity());
             for (k, v) in im {
                 imports.add(k.capacity());
@@ -1292,17 +1294,15 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
     let mut rnames = Sz::default();
     let mut n_rname_entries = 0usize;
     {
-        let m = backend.resolved_names.read();
-        rnames += map_buckets::<String, Arc<crate::names::OwnedResolvedNames>>(m.capacity());
-        for (uri, rn) in m.iter() {
-            rnames.add(uri.capacity());
+        let m = backend.files.read();
+        for rn in m.values().filter_map(|state| state.resolved_names.as_ref()) {
             let (entries, bytes) = rn.audit_heap();
             n_rname_entries += entries;
             rnames.add(ARC + bytes);
         }
     }
     eprintln!(
-        "── file_imports {:.1} MB ({} allocs) | resolved_names {:.1} MB ({} entries)",
+        "── file states + imports {:.1} MB ({} allocs) | resolved_names {:.1} MB ({} entries)",
         mb(imports.bytes),
         imports.allocs,
         mb(rnames.bytes),
@@ -1317,11 +1317,13 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
     let mut n_spans = 0usize;
     let n_syms;
     {
-        let m = backend.symbol_maps.read();
-        n_syms = m.len();
-        sym += map_buckets::<String, Arc<crate::symbol_map::SymbolMap>>(m.capacity());
-        for (uri, sm) in m.iter() {
-            sym.add(uri.capacity());
+        let m = backend.files.read();
+        let maps: Vec<&Arc<crate::symbol_map::SymbolMap>> = m
+            .values()
+            .filter_map(|state| state.symbol_map.as_ref())
+            .collect();
+        n_syms = maps.len();
+        for sm in maps {
             sym.add(ARC + size_of::<crate::symbol_map::SymbolMap>());
             n_spans += sm.spans.len();
             span_structs.add(sm.spans.capacity() * size_of::<crate::symbol_map::SymbolSpan>());
@@ -1516,7 +1518,7 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
     }
     let mut laravel_keys = Sz::default();
     {
-        let c = backend.laravel_string_key_cache.read();
+        let c = backend.laravel.string_key_cache.read();
         if let Some(keys) = &c.config_keys {
             laravel_keys += vs(keys);
         }
@@ -1582,16 +1584,18 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
     let mut blade = Sz::default();
     let n_blade;
     {
-        let m = backend.blade_virtual_content.read();
-        n_blade = m.len();
-        misc += map_buckets::<String, Arc<String>>(m.capacity());
-        for (k, v) in m.iter() {
-            blade.add(k.capacity());
-            blade.add(v.capacity());
+        let m = backend.files.read();
+        let lowerings: Vec<&crate::file_state::BladeFileState> = m
+            .values()
+            .filter_map(|state| state.blade.as_ref())
+            .collect();
+        n_blade = lowerings.len();
+        for lowering in lowerings {
+            blade.add(ARC + lowering.virtual_php.capacity());
         }
     }
     {
-        let m = backend.blade_injected_vars.read();
+        let m = backend.blade.injected_vars.read();
         misc += map_buckets::<String, crate::blade::call_site_inference::BladeScope>(m.capacity());
         for (k, scope) in m.iter() {
             blade.add(k.capacity());
@@ -1682,6 +1686,16 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
     // the final reference, so these are lower bounds for stores that
     // share data, and exact for stores that own theirs.
     eprintln!("── drop-and-measure (exact bytes released per store):");
+    // Drop one part of every file's state, keeping the rest, so each part
+    // is measured on its own.
+    fn clear_file_state_field(
+        backend: &Backend,
+        clear: impl Fn(&mut crate::file_state::FileState),
+    ) {
+        for state in backend.files.write().values_mut() {
+            clear(Arc::make_mut(state));
+        }
+    }
     let probe = |label: &str, f: &mut dyn FnMut()| {
         let (before, before_n) = live_heap();
         f();
@@ -1692,26 +1706,23 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
             before_n.saturating_sub(after_n),
         );
     };
-    probe("blade_source_maps", &mut || {
-        *backend.blade_source_maps.write() = Default::default()
-    });
-    probe("blade_virtual_content", &mut || {
-        *backend.blade_virtual_content.write() = Default::default()
+    probe("blade lowerings", &mut || {
+        clear_file_state_field(backend, |state| state.blade = None)
     });
     probe("schema_index", &mut || {
-        *backend.schema_index.write() = Default::default()
+        *backend.laravel.schema_index.write() = Default::default()
     });
     probe("laravel_macros", &mut || {
-        *backend.laravel_macros.write() = Default::default()
+        *backend.laravel.macros.write() = Default::default()
     });
     probe("laravel_provider_resources", &mut || {
-        *backend.laravel_provider_resources.write() = Default::default()
+        *backend.laravel.provider_resources.write() = Default::default()
     });
     probe("laravel_provider_scans", &mut || {
-        *backend.laravel_provider_scans.write() = Default::default()
+        *backend.laravel.provider_scans.write() = Default::default()
     });
     probe("laravel_string_key_cache", &mut || {
-        *backend.laravel_string_key_cache.write() = Default::default()
+        *backend.laravel.string_key_cache.write() = Default::default()
     });
     probe("member_completion_cache", &mut || {
         *backend.member_completion_cache.lock() = Default::default()
@@ -1720,28 +1731,28 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
         backend.member_ref_counts.clear_cached()
     });
     probe("auth_user_type_cache", &mut || {
-        *backend.auth_user_type_cache.write() = Default::default()
+        *backend.laravel.auth_user_type_cache.write() = Default::default()
     });
     probe("storage_disk_type_cache", &mut || {
-        *backend.storage_disk_type_cache.write() = None
+        *backend.laravel.storage_disk_type_cache.write() = None
     });
     probe("parse_errors", &mut || {
-        *backend.parse_errors.write() = Default::default()
+        clear_file_state_field(backend, |state| state.parse_errors = Default::default())
     });
     probe("file_namespaces", &mut || {
-        *backend.file_namespaces.write() = Default::default()
+        clear_file_state_field(backend, |state| state.namespaces = Default::default())
     });
     probe("resolved_names", &mut || {
-        *backend.resolved_names.write() = Default::default()
+        clear_file_state_field(backend, |state| state.resolved_names = None)
     });
     probe("file_imports", &mut || {
-        *backend.file_imports.write() = Default::default()
+        clear_file_state_field(backend, |state| state.use_map = Default::default())
     });
     probe("file_symbol_imports", &mut || {
-        *backend.file_symbol_imports.write() = Default::default()
+        clear_file_state_field(backend, |state| state.symbol_imports = Default::default())
     });
     probe("symbol_maps", &mut || {
-        *backend.symbol_maps.write() = Default::default()
+        clear_file_state_field(backend, |state| state.symbol_map = None)
     });
     probe("reference_index", &mut || {
         let uris: Vec<Arc<str>> = backend
@@ -1801,19 +1812,19 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
         *backend.parsed_uris.write() = Default::default()
     });
     probe("laravel_aliases", &mut || {
-        backend.laravel_aliases.invalidate()
+        backend.laravel.aliases.invalidate()
     });
     probe("laravel seed/mixin/pivot/command sets", &mut || {
-        *backend.laravel_macro_seeds.write() = Default::default();
-        *backend.laravel_macro_mixin_uris.write() = Default::default();
-        *backend.laravel_date_seed_uris.write() = Default::default();
-        *backend.laravel_pivots.write() = Default::default();
-        *backend.laravel_commands.write() = Default::default();
-        *backend.laravel_gates.write() = Default::default();
-        *backend.laravel_runtime_config_keys.write() = Default::default();
+        *backend.laravel.macro_seeds.write() = Default::default();
+        *backend.laravel.macro_mixin_uris.write() = Default::default();
+        *backend.laravel.date_seed_uris.write() = Default::default();
+        *backend.laravel.pivots.write() = Default::default();
+        *backend.laravel.commands.write() = Default::default();
+        *backend.laravel.gates.write() = Default::default();
+        *backend.laravel.runtime_config_keys.write() = Default::default();
     });
     probe("blade_uris", &mut || {
-        *backend.blade_uris.write() = Default::default()
+        *backend.blade.uris.write() = Default::default()
     });
     probe("phar_archives", &mut || {
         *backend.phar_archives.write() = Default::default()

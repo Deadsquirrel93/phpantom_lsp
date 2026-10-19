@@ -148,9 +148,7 @@ impl Backend {
         content: &str,
         out: &mut Vec<Diagnostic>,
     ) {
-        let Some(ctx) = FileDiagnosticContext::gather(self, uri) else {
-            return;
-        };
+        let ctx = FileDiagnosticContext::gather(self, uri);
         self.collect_unknown_member_diagnostics_with_context(&ctx, uri, content, out);
     }
 

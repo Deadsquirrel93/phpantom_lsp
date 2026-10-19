@@ -33,10 +33,7 @@ impl Backend {
     ) {
         // The action creates a file, which only a client that accepts the
         // `create` resource operation can apply.
-        if !self
-            .supports_file_create
-            .load(std::sync::atomic::Ordering::Acquire)
-        {
+        if !self.caps().file_create {
             return;
         }
 

@@ -7,7 +7,6 @@
 
 use std::cell::OnceCell;
 use std::collections::HashMap;
-use std::sync::atomic::Ordering;
 
 use tower_lsp::lsp_types::*;
 
@@ -100,9 +99,7 @@ impl Backend {
             // holding them for the walk would block every parse of an edit
             // for as long as the workspace takes to list.
             let mut uris: std::collections::HashSet<String> = std::collections::HashSet::new();
-            uris.extend(self.file_namespaces.read().keys().cloned());
-            uris.extend(self.file_imports.read().keys().cloned());
-            uris.extend(self.symbol_maps.read().keys().cloned());
+            uris.extend(self.files.read().keys().cloned());
             uris.extend(self.symbols.uri_classes_index.read().keys().cloned());
             uris.extend(self.open_files.read().keys().cloned());
             let workspace_root = self.workspace.workspace_root.read().clone();
@@ -213,7 +210,7 @@ impl Backend {
         // operations to move the directory.
         if let Some(ops) = self.build_namespace_psr4_rename_ops(old_prefix, new_prefix)
             && !ops.is_empty()
-            && self.supports_file_rename.load(Ordering::Acquire)
+            && self.caps().file_rename
         {
             let renames = ops.iter().map(|(old_uri, new_uri)| {
                 ResourceOp::Rename(RenameFile {
@@ -337,11 +334,10 @@ impl Backend {
         new_prefix: &str,
         edits: &mut Vec<TextEdit>,
     ) -> bool {
-        let symbol_map = match self.symbol_maps.read().get(file_uri) {
-            Some(sm) => sm.clone(),
+        let Some(symbol_map) = self.symbol_map_for(file_uri) else {
             // No map means no offsets to mistrust: this file's namespace
             // and use-statement edits come from scanning `content`.
-            None => return true,
+            return true;
         };
 
         if !symbol_map.matches_source(content) {

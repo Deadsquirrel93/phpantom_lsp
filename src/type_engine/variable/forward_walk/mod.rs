@@ -314,7 +314,7 @@ pub(crate) fn resolve_in_method_body<'b>(
         // to it, not to any closure being walked for its by-reference
         // captures further out.
         let _suspend = suspend_snapshot_recording();
-        let _barrier = suspend_return_edges();
+        let _barrier = suspend_return_edges(ctx.flow);
         let mut scope = seed_body_scope(parameters, &body, method_span_start, owner, ctx);
         walk_body_forward(body.iter().copied(), &mut scope, ctx);
         scope
@@ -392,7 +392,7 @@ pub(crate) fn top_level_scope_for_globals<'b>(
         // (return-type inference of a called function), whose offsets
         // would otherwise collide with the outer file's.
         let _suspend = suspend_snapshot_recording();
-        let _barrier = suspend_return_edges();
+        let _barrier = suspend_return_edges(ctx.flow);
         walk_body_forward(statements.iter().copied(), &mut scope, ctx);
         scope
     })

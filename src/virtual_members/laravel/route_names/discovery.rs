@@ -49,7 +49,8 @@ pub(crate) fn find_route_registration_references(
     let is_route_file = uri.contains("/routes/")
         || crate::util::uri_to_path(uri).is_some_and(|path| {
             backend
-                .laravel_provider_resources
+                .laravel
+                .provider_resources
                 .read()
                 .route_files
                 .contains(&path)
@@ -596,7 +597,8 @@ pub(crate) fn enumerate_all_routes(backend: &Backend) -> RouteDiscovery {
 
     // Copied out so the lock is not held across the file reads.
     let provider_route_files = backend
-        .laravel_provider_resources
+        .laravel
+        .provider_resources
         .read()
         .route_files
         .clone();

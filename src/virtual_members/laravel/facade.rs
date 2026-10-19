@@ -95,7 +95,12 @@ fn accessor_class(
     match class.laravel()?.facade_accessor? {
         FacadeAccessor::Class(fqn) => Some(Cow::Borrowed(fqn.as_str())),
         FacadeAccessor::Alias(key) => cache
-            .and_then(|cache| cache.read().container_alias_concrete_fqn(key.as_str()))
+            .and_then(|cache| {
+                cache
+                    .read()
+                    .laravel()
+                    .container_alias_concrete_fqn(key.as_str())
+            })
             .map(Cow::Owned),
     }
 }

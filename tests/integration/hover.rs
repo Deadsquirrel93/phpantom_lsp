@@ -9790,6 +9790,31 @@ function test() {
     }
 }
 
+/// A reparse that leaves every class signature alone keeps the resolved
+/// child class cached, so `parent::` in an inherited initializer must still
+/// be read on the class that declares it, not on the child.
+#[test]
+fn hover_inherited_parent_constant_survives_reparse() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class G { const X = 1; }
+class P extends G { const X = 2; const Y = parent::X; }
+class C extends P {}
+function test() {
+    $y = C::Y;
+    echo $y;
+}
+"#;
+
+    let col = content.lines().nth(6).unwrap().find("$y").unwrap() as u32 + 1;
+    for _ in 0..2 {
+        let hover = hover_at(&backend, uri, content, 6, col).expect("expected hover");
+        let text = hover_text(&hover);
+        assert!(text.contains("$y = 1\n"), "$y should be 1, got: {text}");
+    }
+}
+
 #[test]
 fn hover_variable_assigned_from_typed_class_constant_keeps_literal() {
     let backend = create_test_backend();

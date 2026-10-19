@@ -1229,7 +1229,7 @@ pub(crate) fn absorb_scalar_refinements(types: &mut Vec<PhpType>) {
         types.iter().enumerate().any(|(index, ty)| {
             keep[index]
                 && matches!(ty.kind(), TypeKind::Named(name)
-                    if names.contains(&keyword_lowercase(name).as_str()))
+                    if with_keyword_lowercase(name, |lower| names.contains(&lower)))
         })
     };
     let has_int = has_kept_name(&["int", "integer"]);

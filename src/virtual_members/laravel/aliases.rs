@@ -225,7 +225,8 @@ impl Backend {
     pub(crate) fn container_binding_target(&self, key: &str) -> Option<ContainerBindingTarget> {
         let fqn = self.container_alias_concrete_fqn(key)?;
         let site = self
-            .laravel_provider_resources
+            .laravel
+            .provider_resources
             .read()
             .bindings
             .get(key)
@@ -317,11 +318,11 @@ impl Backend {
     fn laravel_aliases(&self) -> Arc<LaravelAliases> {
         use std::sync::atomic::Ordering;
 
-        if let Some(cached) = self.laravel_aliases.peek() {
+        if let Some(cached) = self.laravel.aliases.peek() {
             return cached;
         }
 
-        let cell = Arc::as_ptr(&self.laravel_aliases) as usize;
+        let cell = Arc::as_ptr(&self.laravel.aliases) as usize;
         // Break re-entry: the build reads framework source via
         // `find_or_load_class`, whose miss path falls back to
         // `resolve_laravel_alias` and lands back here on this same thread.
@@ -332,13 +333,13 @@ impl Backend {
             return empty_aliases();
         }
 
-        let _build = self.laravel_aliases.build.lock();
+        let _build = self.laravel.aliases.build.lock();
         // Another thread may have published while we waited for the lock.
-        if let Some(cached) = self.laravel_aliases.peek() {
+        if let Some(cached) = self.laravel.aliases.peek() {
             return cached;
         }
 
-        let generation = self.laravel_aliases.generation.load(Ordering::Acquire);
+        let generation = self.laravel.aliases.generation.load(Ordering::Acquire);
         let built = {
             let _marker = BuildMarker::enter(cell);
             Arc::new(build_laravel_aliases(self))
@@ -346,8 +347,8 @@ impl Backend {
         // An invalidation that landed mid-build read state the project has
         // already moved past: hand the tables to this caller, but leave the
         // slot empty so the next reader builds them against what arrived.
-        if self.laravel_aliases.generation.load(Ordering::Acquire) == generation {
-            *self.laravel_aliases.tables.write() = Some(Arc::clone(&built));
+        if self.laravel.aliases.generation.load(Ordering::Acquire) == generation {
+            *self.laravel.aliases.tables.write() = Some(Arc::clone(&built));
         }
         built
     }
@@ -365,7 +366,7 @@ fn build_laravel_aliases(backend: &Backend) -> LaravelAliases {
     // (`$this->app->singleton('sentry', fn () => new HubAdapter())`).  These
     // are registered after the core aliases at runtime, so a provider that
     // rebinds a core key wins here too.
-    for (key, binding) in backend.laravel_provider_resources.read().bindings.iter() {
+    for (key, binding) in backend.laravel.provider_resources.read().bindings.iter() {
         container.insert(key.clone(), binding.class.clone());
     }
 

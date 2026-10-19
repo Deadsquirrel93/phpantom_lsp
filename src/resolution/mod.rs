@@ -69,7 +69,7 @@ mod inflight;
 mod lazy_parse;
 mod loaders;
 
-pub(crate) use classes::needs_linking;
+pub(crate) use classes::{ClassLoadHooks, needs_linking};
 pub(crate) use constants::{DefineSearch, unversioned_php_version_constant_type};
 pub(crate) use inflight::ParseInflight;
 pub(crate) use loaders::FileLoaders;

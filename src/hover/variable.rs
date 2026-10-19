@@ -98,9 +98,7 @@ impl Backend {
         // $this resolves to the enclosing class, but not inside static methods.
         if name == "this" {
             let in_static = self
-                .symbol_maps
-                .read()
-                .get(uri)
+                .symbol_map_for(uri)
                 .is_some_and(|map| map.is_in_static_method(cursor_offset));
             if !in_static && let Some(cc) = current_class {
                 let ns_line = namespace_line(cc.file_namespace.as_deref());

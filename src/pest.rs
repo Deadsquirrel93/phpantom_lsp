@@ -154,7 +154,11 @@ impl Backend {
     /// `uses()` and by its test directory's `Pest.php`, or `None` when
     /// nothing is.
     pub(crate) fn pest_uses_for(&self, uri: &str) -> Option<Arc<[String]>> {
-        let own = self.file_pest_uses.read().get(uri).cloned();
+        let own = self
+            .files
+            .read()
+            .get(uri)
+            .and_then(|state| state.pest_uses.clone());
         let Some(config) = self.pest_config_for(uri) else {
             return own;
         };

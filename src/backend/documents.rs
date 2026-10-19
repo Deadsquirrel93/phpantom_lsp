@@ -19,7 +19,7 @@ impl Backend {
         // Track files opened with languageId "blade" so they get
         // Blade preprocessing even without a .blade.php extension.
         if doc.language_id == "blade" && !crate::blade::is_blade_file(&uri) {
-            self.blade_uris.write().insert(uri.clone());
+            self.blade.uris.write().insert(uri.clone());
         }
 
         self.open_files

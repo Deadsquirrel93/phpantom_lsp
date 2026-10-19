@@ -38,6 +38,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Classes in files that are not UTF-8.** A class, function or constant declared in a Latin-1 or Windows-1252 file now resolves, instead of showing up in workspace symbols but being reported as unknown wherever it is used.
+- **Inherited constants that read `parent::` after an edit.** A constant whose initializer reads `parent::X`, used through a subclass, no longer takes the subclass's parent's value once the file has been edited.
+- **Same answers in the browser build.** Go-to-definition, rename, hover, signature help, and highlights in the WebAssembly build now resolve types as thoroughly as the language server does.
 - **`@see` links in hover.** A `@see` reference now links to the class it names, through the declaring file's `use` imports, rather than to another class with the same short name. Go-to-definition and type hierarchy no longer land in the wrong file in the same situation.
 - **Stale diagnostics after a quick edit.** An editor that pulls diagnostics no longer occasionally keeps showing the previous set when it asks for them just as a new set finishes.
 - **Completion after an emoji.** Member, variable, array-key, class-name and PHPDoc tag completion now work on a line that has an emoji or other character outside the Basic Multilingual Plane before the cursor.

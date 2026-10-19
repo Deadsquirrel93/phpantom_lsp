@@ -638,7 +638,7 @@ fn patch_print_r(func: &mut FunctionInfo) {
 ///
 /// The stubs declare `string[]|false`; each entry is the name of a class-like
 /// keyed by that same name. Whether the `false` can happen is decided at the
-/// call site (see `type_engine::types::call_site_returns`).
+/// call site (see `type_engine::type_ops::call_site_returns`).
 fn patch_class_relation(func: &mut FunctionInfo, name_type: &str) {
     func.return_type = Some(PhpType::parse(&format!("array<string, {name_type}>|false")));
 }

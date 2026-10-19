@@ -113,7 +113,7 @@ impl Backend {
             }
             LaravelStringKind::Trans => ("Trans", self.translation_hover_detail(key)),
             LaravelStringKind::Command => {
-                let index = self.laravel_commands.read();
+                let index = self.laravel.commands.read();
                 let detail = if let Some(entry) = index.get(key) {
                     let mut parts = Vec::new();
                     if let Some(fqn) = &entry.fqn {
@@ -144,7 +144,7 @@ impl Backend {
                 ("Command", detail)
             }
             LaravelStringKind::MorphAlias => {
-                let index = self.laravel_morph_map.read();
+                let index = self.laravel.morph_map.read();
                 let detail = match index.get(key) {
                     Some(target) => {
                         let mut detail = format!("Maps to `{}`", target.fqn);
@@ -243,7 +243,8 @@ impl Backend {
         let mut parts = Vec::new();
 
         let definition = self
-            .laravel_gates
+            .laravel
+            .gates
             .read()
             .definition(ability)
             .map(|target| (target.uri.clone(), target.signature.clone()));

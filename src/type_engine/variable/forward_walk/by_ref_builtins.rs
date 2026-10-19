@@ -169,7 +169,8 @@ pub(super) fn process_extract_call<'b>(
         None => Some(ExtractMode::Overwrite),
         Some(flags) => extract_flags_value(flags).and_then(ExtractMode::from_flags),
     };
-    let prefix = prefix_arg.and_then(crate::type_engine::types::narrowing::string_literal_value);
+    let prefix =
+        prefix_arg.and_then(crate::type_engine::type_ops::condition_facts::string_literal_value);
     let mode = match mode {
         Some(mode) if !unpacked && (prefix.is_some() || !mode.is_prefixed()) => mode,
         _ => {
@@ -559,8 +560,8 @@ fn preg_flag_bits<'b>(
     let var_ctx =
         ctx.var_ctx_for_with_scope("", ctx.cursor_offset, &scope_resolver, Some(scope.proofs()));
     let flags =
-        crate::type_engine::variable::foreach_resolution::resolve_expression_type(expr, &var_ctx)
+        crate::type_engine::variable::iterable_elements::resolve_expression_type(expr, &var_ctx)
             .as_ref()
-            .and_then(crate::type_engine::types::const_fold::literal_int_value)?;
+            .and_then(crate::type_engine::type_ops::const_fold::literal_int_value)?;
     crate::type_engine::regex_shape::flags_are_modelled(flags).then_some(flags)
 }

@@ -9,17 +9,18 @@ use super::*;
 /// [`Backend::file_context`](crate::Backend) to replace the repeated
 /// lock-and-unwrap boilerplate that was duplicated across completion,
 /// definition, and implementation handlers.
+#[derive(Default)]
 pub(crate) struct FileContext {
     /// Classes extracted from the file's AST (from `uri_classes_index`).
     pub classes: Vec<Arc<ClassInfo>>,
     /// Class import table mapping short names to fully-qualified names
-    /// (from `file_imports`).
+    /// (from the file's `FileState`).
     pub use_map: HashMap<String, String>,
-    /// The file's function and constant imports (from
-    /// `file_symbol_imports`).  Like `use_map`, every block's imports;
+    /// The file's function and constant imports.  Like `use_map`, every
+    /// block's imports;
     /// see [`symbol_imports_at`](Self::symbol_imports_at).
     pub symbol_imports: SymbolImports,
-    /// The file's declared namespace, if any (from `file_namespaces`).
+    /// The file's declared namespace, if any.
     ///
     /// This is the *first* `namespace` block's name. A file may declare
     /// several, so consumers that know the byte offset they are resolving
@@ -255,8 +256,8 @@ pub struct NamespaceSpan {
     ///
     /// PHP scopes an import to the block that declares it, so a file with
     /// several blocks needs one table per block.  Left empty when the file
-    /// has a single block, whose imports are the file-wide `file_imports`
-    /// table, so the common case stores them once.
+    /// has a single block, whose imports are the file-wide import table, so
+    /// the common case stores them once.
     pub use_map: HashMap<String, String>,
     /// The `use function` and `use const` imports declared inside this
     /// block, stored the same way as [`use_map`](Self::use_map).

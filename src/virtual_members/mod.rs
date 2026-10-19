@@ -55,8 +55,8 @@ pub mod phpdoc;
 pub mod resolve;
 
 pub use cache::{
-    ResolvedClassCache, ResolvedClassCacheKey, active_resolved_class_cache, evict_fqn,
-    new_resolved_class_cache, with_active_resolved_class_cache,
+    ResolvedCacheGuard, ResolvedClassCache, ResolvedClassCacheKey, active_resolved_class_cache,
+    evict_fqn, new_resolved_class_cache, with_active_resolved_class_cache,
 };
 pub(crate) use cache::{
     TransformFingerprint, intern_transformed_method, intern_transformed_property,
