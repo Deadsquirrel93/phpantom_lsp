@@ -101,31 +101,4 @@ including two spaces. Use it and delete the local copy.
 
 ## Miscellaneous
 
-### B646. An import used only by a `::` access at the end of the file is reported unused
-
-**Impact: Low · Complexity: Medium**
-
-```php
-<?php
-namespace App;
-use App\Services\Mailer;   // reported unused until the member is typed
-$mailer = Mailer::
-```
-
-**Blocked upstream** on
-[carthage-software/mago#2589](https://github.com/carthage-software/mago/issues/2589).
-Don't work on this until a mago release fixes it.
-
-mago's `recover_incomplete` parse keeps `$this->` at the end of the file
-with a `Missing` member, but has no recovery for a `::` missing its member:
-it reports `UnexpectedEndOfFile(OneOf([]))` and drops the whole statement
-(inside a call, `foo(Mailer::` keeps `foo()` with no arguments). So
-`collect_unused_import_diagnostics` (`diagnostics/unused_imports.rs`) never
-sees the class it names. This can't be worked around in
-`parser/recovery.rs`. A placeholder member written over the whitespace
-after `::` would be reported as an unknown member, and one appended past
-the end of the text would have a span outside the content.
-
-Once mago keeps the statement, add `Mailer::` cases (with and without a
-trailing newline, and inside a call) to the recovery tests and the
-unused-import tests.
+No outstanding items.

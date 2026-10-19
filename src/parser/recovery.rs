@@ -149,6 +149,19 @@ mod tests {
     }
 
     #[test]
+    fn a_static_access_cut_off_before_its_member_is_kept() {
+        let head = "<?php\nnamespace App;\nuse App\\Services\\Mailer;\n";
+        for last in [
+            "$mailer = Mailer::\n",
+            "$mailer = Mailer::",
+            "foo(Mailer::\n",
+            "foo(Mailer::",
+        ] {
+            assert!(keeps(&format!("{head}{last}"), last.trim_end()), "{last:?}");
+        }
+    }
+
+    #[test]
     fn a_body_the_end_of_the_file_cuts_off_is_kept() {
         assert!(keeps(
             "<?php\nfunction f() {\n    foo(1\n\n\n\n",
