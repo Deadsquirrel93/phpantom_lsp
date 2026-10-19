@@ -8,6 +8,7 @@ use mago_syntax::cst::*;
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
+use crate::class_lookup::Fqn;
 use crate::php_type::PhpType;
 use crate::types::{ClassInfo, ResolvedType};
 
@@ -91,7 +92,7 @@ pub(super) fn resolve_rhs_static_call(
     let Some(cls_name) = class_name else {
         return vec![];
     };
-    let Some(owner) = (ctx.file.class_loader)(&cls_name).or_else(|| {
+    let Some(owner) = (ctx.file.class_loader)(Fqn::new(&cls_name)).or_else(|| {
         crate::class_lookup::find_class_by_fqn(ctx.file.all_classes, &cls_name).map(Arc::clone)
     }) else {
         return vec![];

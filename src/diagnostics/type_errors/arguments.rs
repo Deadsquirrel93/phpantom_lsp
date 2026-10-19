@@ -4,7 +4,6 @@
 
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 
 use mago_span::HasSpan;
 use mago_syntax::cst::PartialArgument;
@@ -16,21 +15,22 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
+use crate::class_lookup::{
+    Fqn, ResolvedClassLoader, first_rejected_callable_param, missing_required_shape_keys,
+    shape_breaks_list_order,
+};
 use crate::parser::{with_parse_cache, with_parsed_program};
 use crate::php_type::{PhpType, TypeKind, is_array_like_name};
 use crate::resolution::FileLoaders;
 use crate::symbol_map::CallSite;
 use crate::type_engine::variable::iterable_elements::resolve_expression_type;
-use crate::types::{ClassInfo, FileContext, ParameterInfo, ResolvedCallableTarget};
+use crate::types::{FileContext, ParameterInfo, ResolvedCallableTarget};
 
 use super::super::helpers::{
     CallTargetCache, FileDiagnosticContext, is_position_independent_call_expression,
     make_diagnostic,
 };
 use super::{TYPE_MISMATCH_ARGUMENT_CODE, has_strict_types, is_type_compatible};
-use crate::class_lookup::{
-    first_rejected_callable_param, missing_required_shape_keys, shape_breaks_list_order,
-};
 
 // ── Resolved argument info ──────────────────────────────────────────────────
 
@@ -429,7 +429,7 @@ impl Backend {
                         if name.contains("__anonymous@") {
                             return name.to_string();
                         }
-                        if let Some(cls) = resolved_class_loader(name) {
+                        if let Some(cls) = resolved_class_loader(Fqn::new(name)) {
                             cls.fqn().to_string()
                         } else {
                             name.to_string()
@@ -541,7 +541,7 @@ struct ArgumentCheck<'a> {
     backend: &'a Backend,
     uri: &'a str,
     content: &'a str,
-    class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &'a ResolvedClassLoader<'a>,
     strict_types: bool,
     downgrade_nullable_mismatch: bool,
 }
@@ -565,11 +565,12 @@ impl<'a> CheckedCall<'a> {
     fn new(
         target: &'a ResolvedCallableTarget,
         args: &'a ResolvedCallArgs,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        class_loader: &ResolvedClassLoader<'_>,
     ) -> Self {
         let context_class = target.owner_class.map(|fqn| fqn.to_string());
         let context_parent = context_class.as_ref().and_then(|fqn| {
-            class_loader(fqn).and_then(|cls| cls.parent_class.as_ref().map(|p| p.to_string()))
+            class_loader(Fqn::new(fqn))
+                .and_then(|cls| cls.parent_class.as_ref().map(|p| p.to_string()))
         });
         Self {
             target,
@@ -803,7 +804,7 @@ impl ArgumentCheck<'_> {
         let Some(model_fqn) = extract_model_property_from_array_type(param_type) else {
             return;
         };
-        let Some(cls) = (self.class_loader)(&model_fqn) else {
+        let Some(cls) = (self.class_loader)(Fqn::new(&model_fqn)) else {
             return;
         };
         let resolved = crate::virtual_members::resolve_class_fully_cached(

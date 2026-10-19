@@ -19,6 +19,7 @@ use std::sync::Arc;
 
 use crate::Backend;
 use crate::atom::{Atom, atom};
+use crate::class_lookup::Fqn;
 use crate::php_type::PhpType;
 use crate::types::*;
 
@@ -298,7 +299,7 @@ fn infer_body_return_type(
     // that offset would land on the wrong location.  Resolve the class
     // that actually declares the method and read *its* file.
     let declaring_class = backend.find_or_load_class(class_fqn).map(|receiver| {
-        let loader = |name: &str| backend.find_or_load_class(name);
+        let loader = |name: Fqn<'_>| backend.find_or_load_class(&name);
         crate::hover::find_declaring_class(
             &receiver,
             &method.name,

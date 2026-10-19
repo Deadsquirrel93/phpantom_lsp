@@ -6,6 +6,7 @@
 use super::laravel::laravel_helper_call_class;
 use super::literals::resolve_hint_keywords;
 use super::*;
+use crate::class_lookup::Fqn;
 use crate::type_engine::call_resolution::{
     facade_concrete_owner, is_reflected_property_call, is_reflected_property_class,
     resolve_reflected_property_at_call, resolve_reflected_property_at_new,
@@ -766,7 +767,7 @@ impl Backend {
         let fqn = ctx.written_names().resolve_class(class_name);
         let cls_arc = crate::class_lookup::find_class_by_fqn(ctx.file.all_classes, &fqn)
             .map(Arc::clone)
-            .or_else(|| (ctx.file.class_loader)(&fqn));
+            .or_else(|| (ctx.file.class_loader)(Fqn::new(&fqn)));
         let cls_arc = match cls_arc {
             Some(c) => c,
             None => return vec![],

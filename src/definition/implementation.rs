@@ -40,7 +40,7 @@ use super::member::MemberKind;
 use super::{class_keyword_location, point_location};
 use crate::Backend;
 use crate::atom::Atom;
-use crate::class_lookup::find_class_at_offset;
+use crate::class_lookup::{Fqn, ResolvedClassLoader, find_class_at_offset};
 use crate::config::IndexingStrategy;
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind};
 use crate::text_position::position_to_offset;
@@ -51,7 +51,7 @@ use crate::util::short_name;
 struct ImplementorQuery<'a> {
     target_short: &'a str,
     target_fqn: &'a str,
-    class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &'a ResolvedClassLoader<'a>,
     include_abstract: bool,
     direct_only: bool,
 }
@@ -115,7 +115,7 @@ impl Backend {
                     let target = match ssp_kind {
                         SelfStaticParentKind::Parent => current_class
                             .and_then(|cc| cc.parent_class.as_deref())
-                            .and_then(|p| class_loader(p).map(Arc::unwrap_or_clone)),
+                            .and_then(|p| class_loader(Fqn::new(p)).map(Arc::unwrap_or_clone)),
                         _ => current_class.cloned(),
                     };
                     return target
@@ -166,7 +166,7 @@ impl Backend {
         let resolved_class_loader = self.resolved_class_loader(ctx);
 
         let fqn = ctx.resolve_name_at(name, name_offset);
-        let target = resolved_class_loader(&fqn)
+        let target = resolved_class_loader(Fqn::new(&fqn))
             .or_else(|| class_loader(name))
             .map(Arc::unwrap_or_clone)?;
         self.class_implementation(uri, content, target, &resolved_class_loader)
@@ -181,7 +181,7 @@ impl Backend {
         uri: &str,
         content: &str,
         target: ClassInfo,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        class_loader: &ResolvedClassLoader<'_>,
     ) -> Option<Vec<Location>> {
         // Final classes cannot be extended, so there are no implementations.
         if target.is_final {
@@ -205,7 +205,7 @@ impl Backend {
         &self,
         target: &ClassInfo,
         target_fqn: &str,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        class_loader: &ResolvedClassLoader<'_>,
         project_only: bool,
     ) -> Vec<Arc<ClassInfo>> {
         if target.is_final {
@@ -256,7 +256,7 @@ impl Backend {
         content: &str,
         current_class: &ClassInfo,
         member_name: &str,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        class_loader: &ResolvedClassLoader<'_>,
     ) -> Option<Vec<Location>> {
         // For interfaces, abstract classes, and traits, the forward
         // direction applies: find concrete implementors that define the
@@ -346,7 +346,7 @@ impl Backend {
         content: &str,
         interface_class: &ClassInfo,
         member_name: &str,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        class_loader: &ResolvedClassLoader<'_>,
     ) -> Option<Vec<Location>> {
         let target_fqn = interface_class.fqn().to_string();
         let descendants =
@@ -554,7 +554,7 @@ impl Backend {
         &self,
         target_short: &str,
         target_fqn: &str,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        class_loader: &ResolvedClassLoader<'_>,
         include_abstract: bool,
         direct_only: bool,
         project_only: bool,
@@ -605,7 +605,7 @@ impl Backend {
             {
                 continue;
             }
-            if let Some(cls) = class_loader(child_fqn) {
+            if let Some(cls) = class_loader(Fqn::new(child_fqn)) {
                 if !direct_only {
                     if cls.kind == ClassLikeKind::Interface {
                         continue;
@@ -824,7 +824,11 @@ impl Backend {
                 if !mentions_needle(stub_source.as_bytes()) {
                     return true;
                 }
-                candidates.extend(stub_names.iter().filter_map(|name| class_loader(name)));
+                candidates.extend(
+                    stub_names
+                        .iter()
+                        .filter_map(|name| class_loader(Fqn::new(name))),
+                );
                 false
             });
             pending_files.retain(|path| {
@@ -893,7 +897,7 @@ impl Backend {
                         .iter()
                         .flatten()
                         .filter(|child| !descendants.contains(*child))
-                        .filter_map(|child| class_loader(child)),
+                        .filter_map(|child| class_loader(Fqn::new(child))),
                 );
             }
         }
@@ -920,7 +924,7 @@ impl Backend {
         cls: &ClassInfo,
         target_short: &str,
         target_fqn: &str,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        class_loader: &ResolvedClassLoader<'_>,
         direct_only: bool,
     ) -> bool {
         // Skip the target class itself — compare by FQN so that
@@ -1017,14 +1021,14 @@ impl Backend {
         target_short: &str,
         target_fqn: &str,
         has_fqn: bool,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        class_loader: &ResolvedClassLoader<'_>,
         depth: u32,
     ) -> bool {
         if depth >= MAX_INHERITANCE_DEPTH {
             return false;
         }
 
-        let Some(iface_cls) = class_loader(iface_name) else {
+        let Some(iface_cls) = class_loader(Fqn::new(iface_name)) else {
             return false;
         };
 
@@ -1082,7 +1086,7 @@ pub(crate) fn member_implementation_providers(
     member_name: &str,
     member_kind: MemberKind,
     descendants: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Vec<Arc<ClassInfo>> {
     let declares = |cls: &ClassInfo| {
         cls.kind != ClassLikeKind::Interface

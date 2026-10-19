@@ -13,9 +13,9 @@
 //! expanded by the caller before the check, which knows nothing of them.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 
 use super::is_subtype_of_typed;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::php_type::{
     CallableType, LiteralValue, PhpType, ShapeEntry, ShapeParts, TypeKind,
     int_literal_is_within_range, int_refinement, is_array_like_name, shape_key_type,
@@ -27,10 +27,7 @@ use crate::types::{ClassInfo, Visibility};
 /// the project cannot load.  Covers both `Foo` and `Foo<Bar>`: a generic
 /// whose base name is unresolvable is just as unverifiable as a plain one,
 /// and so is the `class-string<T>` of an enclosing template `T`.
-fn is_unloadable_short_name(
-    ty: &PhpType,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> bool {
+fn is_unloadable_short_name(ty: &PhpType, class_loader: &ResolvedClassLoader<'_>) -> bool {
     let name = match ty.kind() {
         TypeKind::Named(n) => n.as_str(),
         TypeKind::Generic(g) => g.name.as_str(),
@@ -42,7 +39,7 @@ fn is_unloadable_short_name(
     !name.contains('\\')
         && !crate::php_type::is_builtin_non_class_type(name)
         && !is_array_like_name(name)
-        && class_loader(name).is_none()
+        && class_loader(Fqn::new(name)).is_none()
 }
 
 /// Returns `true` when the type is an array that says nothing about its
@@ -219,7 +216,7 @@ fn shape_keys(entries: &[ShapeEntry]) -> Vec<String> {
 fn shape_is_compatible(
     arg: &ShapeParts<'_>,
     param: &ShapeParts<'_>,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     strict_types: bool,
 ) -> bool {
     let arg_keys = shape_keys(arg.entries);
@@ -282,7 +279,7 @@ fn shape_is_compatible(
 fn shape_fits_array(
     arg: &ShapeParts<'_>,
     demand: &ArrayDemand<'_>,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     strict_types: bool,
 ) -> bool {
     if demand.non_empty && arg.entries.is_empty() {
@@ -327,7 +324,7 @@ fn shape_fits_array(
 fn as_generic_ancestor(
     arg: &PhpType,
     ancestor_name: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<PhpType> {
     let (name, args): (&str, &[PhpType]) = match arg.kind() {
         TypeKind::Named(name) => (name.as_str(), &[]),
@@ -340,8 +337,8 @@ fn as_generic_ancestor(
     {
         return None;
     }
-    let class = class_loader(name)?;
-    let ancestor = class_loader(ancestor_name)?;
+    let class = class_loader(Fqn::new(name))?;
+    let ancestor = class_loader(Fqn::new(ancestor_name))?;
     if ancestor.template_params.is_empty() || class.fqn() == ancestor.fqn() {
         return None;
     }
@@ -375,14 +372,14 @@ fn bind_up_to_ancestor(
     ancestor: &ClassInfo,
     subs: &HashMap<String, PhpType>,
     visited: &mut HashSet<crate::atom::Atom>,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     depth: u32,
 ) -> Option<HashMap<String, PhpType>> {
     if depth > crate::types::MAX_INHERITANCE_DEPTH {
         return None;
     }
     for name in current.parent_class.iter().chain(current.interfaces.iter()) {
-        let Some(next) = class_loader(name) else {
+        let Some(next) = class_loader(Fqn::new(name)) else {
             continue;
         };
         if !visited.insert(next.fqn()) {
@@ -448,7 +445,7 @@ fn may_name_same_class(a: &PhpType, b: &PhpType) -> bool {
 pub(crate) fn first_rejected_callable_param<'a>(
     arg_sig: &'a CallableType,
     param_sig: &'a CallableType,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     strict_types: bool,
 ) -> Option<(usize, &'a PhpType, &'a PhpType)> {
     let accepting = &arg_sig.params;
@@ -528,7 +525,7 @@ pub(crate) fn first_rejected_callable_param<'a>(
 pub(crate) fn is_type_compatible(
     arg_type: &PhpType,
     param_type: &PhpType,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     strict_types: bool,
 ) -> bool {
     Compat {
@@ -541,7 +538,7 @@ pub(crate) fn is_type_compatible(
 /// The settings one compatibility check runs under.
 #[derive(Clone, Copy)]
 struct Compat<'l> {
-    class_loader: &'l dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &'l ResolvedClassLoader<'l>,
     strict_types: bool,
 }
 
@@ -955,7 +952,7 @@ impl Compat<'_> {
                 // Bare `object` type — stay permissive
                 return Some(true);
             };
-            if let Some(cls) = (self.class_loader)(class_name)
+            if let Some(cls) = (self.class_loader)(Fqn::new(class_name))
                 && crate::class_lookup::is_subtype_of(&cls, "Stringable", self.class_loader)
             {
                 return Some(true);
@@ -1103,7 +1100,10 @@ impl Compat<'_> {
             if let TypeKind::Literal(lit) = arg_type.kind()
                 && let Some(prop_name) = lit.string_content()
             {
-                let Some(cls) = model.base_name().and_then(|name| (self.class_loader)(name)) else {
+                let Some(cls) = model
+                    .base_name()
+                    .and_then(|name| (self.class_loader)(Fqn::new(name)))
+                else {
                     return Some(true);
                 };
                 let resolved = crate::virtual_members::resolve_class_fully_maybe_cached(
@@ -1150,7 +1150,7 @@ impl Compat<'_> {
         // phase.  Stay silent (MAYBE) when the base types are compatible.
         if let TypeKind::Generic(g) = param_type.kind()
             && (g.name.eq_ignore_ascii_case("iterable")
-                || class_loader(&g.name).is_some_and(|cls| {
+                || class_loader(Fqn::new(&g.name)).is_some_and(|cls| {
                     crate::class_lookup::is_subtype_of(&cls, "Traversable", class_loader)
                 }))
         {
@@ -1167,7 +1167,7 @@ impl Compat<'_> {
             // Object-like args: check hierarchy for Traversable.
             // Can't load → stay permissive; bare `object` → stay permissive.
             if let Some(class_name) = arg_type.base_name() {
-                match class_loader(class_name) {
+                match class_loader(Fqn::new(class_name)) {
                     Some(cls) => {
                         if crate::class_lookup::is_subtype_of(&cls, "Traversable", class_loader) {
                             return Some(true);
@@ -1369,7 +1369,7 @@ impl Compat<'_> {
         // (e.g. you cannot pass a Collection to array_map()).
         if is_bare_array(param_type)
             && let Some(class_name) = arg_type.base_name()
-            && let Some(cls) = class_loader(class_name)
+            && let Some(cls) = class_loader(Fqn::new(class_name))
             && (crate::class_lookup::is_subtype_of(&cls, "ArrayAccess", class_loader)
                 || crate::class_lookup::is_subtype_of(&cls, "Arrayable", class_loader))
         {
@@ -1417,7 +1417,7 @@ impl Compat<'_> {
         }
         // A class we can't load (likely unindexed vendor code) — stay
         // permissive rather than risk a false positive.
-        let Some(cls) = (self.class_loader)(class_name) else {
+        let Some(cls) = (self.class_loader)(Fqn::new(class_name)) else {
             return Some(true);
         };
         let resolved = crate::virtual_members::resolve_class_fully_maybe_cached(

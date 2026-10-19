@@ -3,6 +3,7 @@
 
 use std::sync::Arc;
 
+use crate::class_lookup::ResolvedClassLoader;
 use crate::docblock;
 use crate::parser::preceding_docblock_text;
 use crate::php_type::{PhpType, TypeKind, is_keyword_type};
@@ -138,14 +139,14 @@ pub(in crate::type_engine::variable) fn param_docblock_narrows_hint(
     decl_start: usize,
     current_class: &ClassInfo,
     content: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     source_class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> bool {
     use crate::type_engine::type_ops::docblock_narrowing;
     if !docblock_narrowing::hint_names_classes(written) {
         return true;
     }
-    let native = crate::names::resolve_php_type_names(written, source_class_loader);
+    let native = crate::names::resolve_php_type_names(written, source_class_loader, class_loader);
     let declared_templates = std::cell::OnceCell::new();
     let not_a_class = |name: &str| {
         current_class.template_params.iter().any(|t| t == name)

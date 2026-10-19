@@ -2,11 +2,9 @@
 //! operators over them, and the `self`/`static`/`parent` keywords a hint or
 //! constant initializer spells.
 
-use std::sync::Arc;
-
 use crate::Backend;
 use crate::atom::atom;
-use crate::class_lookup::is_self_or_static;
+use crate::class_lookup::{ResolvedClassLoader, is_self_or_static};
 use crate::php_type::PhpType;
 use crate::text_scan::{find_matching_forward, is_whole_string_literal};
 use crate::type_engine::resolver::ResolutionCtx;
@@ -55,7 +53,7 @@ pub(super) fn qualify_class_keyword<'t>(
 pub(super) fn resolve_hint_keywords(
     hint: PhpType,
     owner: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     replace_self: impl FnOnce(PhpType) -> PhpType,
 ) -> PhpType {
     let resolved = if hint.is_parent_ref() {

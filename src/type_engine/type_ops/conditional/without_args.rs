@@ -4,11 +4,11 @@
 
 use std::borrow::Cow;
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use crate::atom::atom;
+use crate::class_lookup::ResolvedClassLoader;
 use crate::php_type::{PhpType, TypeKind};
-use crate::types::{ClassInfo, ParameterInfo};
+use crate::types::ParameterInfo;
 
 use super::arg_form::condition_result_from_text;
 use super::{this_condition_holds, type_condition_result, union_branch_types};
@@ -56,7 +56,7 @@ pub struct ThisContext<'a> {
     pub this_type: &'a PhpType,
     /// The class `self` names inside the condition.
     pub declaring_class_name: &'a str,
-    pub class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    pub class_loader: &'a ResolvedClassLoader<'a>,
 }
 
 /// Like [`resolve_conditional_without_args`], but also accepts optional

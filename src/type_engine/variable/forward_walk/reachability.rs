@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use super::*;
 use crate::atom::{Atom, bytes_to_str};
+use crate::class_lookup::Fqn;
 use crate::type_engine::type_ops::condition_facts::find_method_in_chain_where;
 use crate::type_engine::type_ops::condition_facts::{argument_value, string_literal_value};
 use crate::types::ClassInfo;
@@ -227,9 +228,8 @@ fn static_class_of(expr: &Expression<'_>, ctx: &ForwardWalkCtx<'_>) -> Option<Ar
             if !crate::parser::is_class_fetch(access) {
                 return None;
             }
-            ctx.written_names()
-                .static_receiver_class(access.class, ctx.file.class_loader)
+            ctx.written_names().static_receiver_class(access.class)
         }
-        _ => string_literal_value(expr).and_then(|name| (ctx.file.class_loader)(&name)),
+        _ => string_literal_value(expr).and_then(|name| (ctx.file.class_loader)(Fqn::new(&name))),
     }
 }

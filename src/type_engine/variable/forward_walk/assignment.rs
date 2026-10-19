@@ -3,6 +3,7 @@ use super::*;
 use mago_span::HasSpan;
 
 use crate::atom::{Atom, atom, bytes_to_str};
+use crate::class_lookup::Fqn;
 use crate::php_type::{LiteralValue, PhpType, TypeKind};
 use crate::type_engine::type_ops::condition_facts;
 use crate::types::{ClassInfo, ResolvedType};
@@ -551,7 +552,7 @@ fn adopt_declared_type_args(
     if let TypeKind::Generic(g) = declared.kind()
         && g.args.len() == created.args.len()
         && crate::util::short_name(&g.name).eq_ignore_ascii_case(&cls.name)
-        && (ctx.file.class_loader)(&g.name).is_some_and(|c| c.fqn() == cls.fqn())
+        && (ctx.file.class_loader)(Fqn::new(&g.name)).is_some_and(|c| c.fqn() == cls.fqn())
     {
         rt.type_string = declared;
     }

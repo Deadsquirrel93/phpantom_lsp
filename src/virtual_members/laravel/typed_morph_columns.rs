@@ -7,6 +7,7 @@ use mago_span::HasSpan;
 use mago_syntax::cst::{Expression, Node};
 
 use crate::Backend;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::php_type::{PhpType, TypeKind};
 use crate::symbol_map::{MorphColumnReceiver, MorphColumnSite, SymbolMap, SymbolSpan};
 use crate::type_engine::resolver::ResolutionCtx;
@@ -168,7 +169,7 @@ fn has_morph_column(ty: &PhpType, site: &MorphColumnSite, ctx: &ResolutionCtx<'_
         super::ELOQUENT_MODEL_FQN,
         ctx.file.class_loader,
     ) {
-        let Some(class) = (ctx.file.class_loader)(name) else {
+        let Some(class) = (ctx.file.class_loader)(Fqn::new(name)) else {
             return false;
         };
         // Qualified columns only refer to this model when their table matches.
@@ -207,11 +208,7 @@ fn has_morph_column(ty: &PhpType, site: &MorphColumnSite, ctx: &ResolutionCtx<'_
     false
 }
 
-fn model_table_matches(
-    class: &ClassInfo,
-    table: &str,
-    loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> bool {
+fn model_table_matches(class: &ClassInfo, table: &str, loader: &ResolvedClassLoader<'_>) -> bool {
     let mut declared_match = None;
     if !collect_table_metadata(class, table, loader, &mut declared_match, 0) {
         return false;
@@ -224,7 +221,7 @@ fn model_table_matches(
 fn collect_table_metadata(
     class: &ClassInfo,
     requested: &str,
-    loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    loader: &ResolvedClassLoader<'_>,
     declared_match: &mut Option<bool>,
     depth: u32,
 ) -> bool {
@@ -252,7 +249,7 @@ fn collect_table_metadata(
         }
     }
     for name in &class.used_traits {
-        if let Some(trait_info) = loader(name)
+        if let Some(trait_info) = loader(Fqn::new(name))
             && !collect_table_metadata(&trait_info, requested, loader, declared_match, depth + 1)
         {
             return false;
@@ -260,7 +257,7 @@ fn collect_table_metadata(
     }
     class.parent_class.as_ref().is_none_or(|name| {
         name.as_str() == super::ELOQUENT_MODEL_FQN
-            || loader(name).is_some_and(|parent| {
+            || loader(Fqn::new(name)).is_some_and(|parent| {
                 collect_table_metadata(&parent, requested, loader, declared_match, depth + 1)
             })
     })

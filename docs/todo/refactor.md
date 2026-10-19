@@ -211,38 +211,4 @@ Each item must include:
 
 # Outstanding items
 
-### Type call arguments from the AST, not their text
-
-`resolve_arg_text_to_type` (`type_engine/call_resolution/arg_text_types.rs`),
-`type_ops/conditional/text_args.rs` and `const_fold.rs` work out an argument's
-type from its source text, re-detecting closures, first-class callables,
-array literals and casts by scanning strings. `text_args: &str` is threaded
-through `owner_method_call.rs`, `template_binding.rs` and `out_param.rs`.
-This is a second resolution path next to `resolve_rhs_expression`, and it
-pulls `type_engine` up into `completion::source::helpers` (18 calls, e.g.
-`extract_closure_params_from_text`). Pass the argument expressions instead
-and resolve them through `resolve_rhs_expression`, then delete the text
-path and the `completion` imports it needed.
-
-Files: `src/type_engine/call_resolution/arg_text_types.rs`,
-`src/type_engine/type_ops/conditional/text_args.rs`,
-`src/type_engine/type_ops/const_fold.rs`, and the callers that
-pass `text_args`.
-
-### Distinct types for source names, FQNs and URIs
-
-Class loaders are all `dyn Fn(&str) -> Option<Arc<ClassInfo>>`, and the
-only thing that tells a name as written from a resolved FQN is a leading
-`\`, added with a `format!` in `load_resolved_name`. `find_or_load_class`
-accepts short, qualified and `\`-prefixed names alike. There are about 220
-hand-stripped leading backslashes (`trim_start_matches('\\')`,
-`strip_prefix('\\')`), `find_class_by_name` and `find_class_by_fqn`
-disagree on case sensitivity, and URIs are plain `&str` in more than 500
-signatures. Introduce `SourceName`, `Fqn` and `Uri` newtypes and convert
-one subsystem at a time, starting with the class-loader closures in
-`src/class_lookup.rs` and `src/resolution/loaders.rs`. Write a short
-module doc there that says which of the roughly 20 loader entry points to
-use when. This is large; plan it as several PRs.
-
-Files: `src/class_lookup.rs`, `src/resolution/`, `src/util.rs`, then
-callers subsystem by subsystem.
+No outstanding items.

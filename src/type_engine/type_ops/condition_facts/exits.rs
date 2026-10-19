@@ -11,6 +11,7 @@ use mago_span::{HasSpan, Span};
 use mago_syntax::cst::*;
 
 use crate::atom::bytes_to_str;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::php_type::PhpType;
 use crate::type_engine::resolver::{FunctionLoaderFn, ScopeVarResolverFn};
 use crate::types::{ClassInfo, ResolvedType};
@@ -168,7 +169,7 @@ pub(in crate::type_engine) struct ExitCtx<'a> {
     /// The file's classes, so a name resolves to the one its own
     /// namespace block declares.
     pub all_classes: &'a [Arc<ClassInfo>],
-    pub class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    pub class_loader: &'a ResolvedClassLoader<'a>,
     /// See [`FileCtx::source_class_loader`](crate::type_engine::resolver::FileCtx::source_class_loader).
     pub source_class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     /// See [`FileCtx::source_imports`](crate::type_engine::resolver::FileCtx::source_imports).
@@ -386,7 +387,7 @@ fn class_has_never_method(class_name: &str, method_name: &str, ctx: &ExitCtx<'_>
     {
         return is_never;
     }
-    let Some(class_info) = (ctx.class_loader)(class_name) else {
+    let Some(class_info) = (ctx.class_loader)(Fqn::new(class_name)) else {
         return false;
     };
     if let Some(is_never) = declared_method_returns_never(&class_info, method_name) {

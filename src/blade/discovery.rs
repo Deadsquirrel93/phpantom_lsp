@@ -18,6 +18,7 @@ use std::sync::Arc;
 use super::component_tags::kebab_case;
 use super::preprocessor::{ComponentBinding, ComponentParameter, ComponentTarget};
 use crate::Backend;
+use crate::class_lookup::Fqn;
 use crate::composer::psr4_directories_for_namespace;
 
 /// The namespace tail Laravel looks for class-based components under when no
@@ -261,7 +262,7 @@ impl Backend {
     /// passing attributes to it is passing them to the attribute bag.
     fn component_signature(&self, fqn: &str, method: &str) -> Option<Vec<ComponentParameter>> {
         let class = self.find_or_load_class(fqn.trim_matches('\\'))?;
-        let loader = |name: &str| self.find_or_load_class(name);
+        let loader = |name: Fqn<'_>| self.find_or_load_class(&name);
         let resolved = crate::virtual_members::resolve_class_fully_maybe_cached(
             &class,
             &loader,

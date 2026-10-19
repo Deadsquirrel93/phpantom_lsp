@@ -26,13 +26,13 @@
 
 use std::borrow::Cow;
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use mago_syntax::cst::*;
 
 use crate::atom::atom;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::php_type::{PhpType, TypeKind};
-use crate::types::{ClassInfo, ParameterInfo};
+use crate::types::ParameterInfo;
 
 mod arg_form;
 mod text_args;
@@ -139,11 +139,7 @@ pub struct ConditionalClassContext<'a> {
 impl ConditionalClassContext<'_> {
     /// The FQN of a class a call-site argument names as written, with
     /// `self`/`static`/`parent` meaning the calling class.
-    fn resolve_written(
-        &self,
-        name: &str,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    ) -> String {
+    fn resolve_written(&self, name: &str, class_loader: &ResolvedClassLoader<'_>) -> String {
         if let Some(calling) = resolve_self_keyword(name, self.calling) {
             return crate::names::resolve_name_via_loader(&calling, class_loader);
         }
@@ -162,7 +158,7 @@ fn this_condition_holds(
     condition: &PhpType,
     negated: bool,
     declaring: Option<&str>,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<bool> {
     let condition = match declaring {
         Some(declaring) => Cow::Owned(condition.replace_bare_self(declaring)),
@@ -181,7 +177,7 @@ fn this_condition_holds(
 pub(in crate::type_engine) fn condition_holds_for_type(
     arg_ty: &PhpType,
     condition: &PhpType,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<bool> {
     type_condition_result(arg_ty, condition, class_loader)
 }
@@ -198,7 +194,7 @@ pub(in crate::type_engine) fn condition_holds_for_type(
 fn type_condition_result(
     arg_ty: &PhpType,
     condition: &PhpType,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<bool> {
     if arg_ty.is_mixed() || arg_ty.is_untyped() {
         return None;
@@ -325,7 +321,7 @@ pub(crate) fn bind_callable_condition_templates(
 fn callable_condition_result(
     arg: &crate::php_type::CallableType,
     cond: &crate::php_type::CallableType,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<bool> {
     let is_closure = |kind: &str| kind.eq_ignore_ascii_case("Closure");
     if is_closure(&cond.kind) && !is_closure(&arg.kind) {
@@ -362,7 +358,7 @@ fn class_condition_result(
     arg_ty: &PhpType,
     arg_category: &str,
     condition: &PhpType,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<bool> {
     let cond_name = condition.base_name()?;
     // A scalar, an array or null is never an instance of a class.
@@ -375,8 +371,10 @@ fn class_condition_result(
     // Beyond that the hierarchy has to be readable for the failed check to
     // mean anything: an unindexed class refutes nothing.
     let arg_name = arg_ty.base_name()?;
-    let (Some(arg_class), Some(cond_class)) = (class_loader(arg_name), class_loader(cond_name))
-    else {
+    let (Some(arg_class), Some(cond_class)) = (
+        class_loader(Fqn::new(arg_name)),
+        class_loader(Fqn::new(cond_name)),
+    ) else {
         return None;
     };
     // The same class with type arguments that provably don't line up in
@@ -466,7 +464,7 @@ pub fn evaluate_nested_conditionals_text(
     text_args: &str,
     var_resolver: VarClassStringResolver<'_>,
     class_ctx: ConditionalClassContext<'_>,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     tpl: &TemplateContext<'_>,
 ) -> PhpType {
     let recurse = |inner: &PhpType| {

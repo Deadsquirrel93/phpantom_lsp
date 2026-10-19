@@ -20,6 +20,7 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::symbol_map::{ClassRefContext, SymbolKind};
 use crate::types::{ClassInfo, ClassLikeKind};
 use crate::util::short_name;
@@ -167,7 +168,7 @@ fn check_kind_in_context(
     class: &ClassInfo,
     ctx: ClassRefContext,
     fqn: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<(DiagnosticSeverity, String)> {
     let kind = class.kind;
 
@@ -374,14 +375,14 @@ fn check_kind_in_context(
 /// Walks the parent class chain and interface hierarchy, using the
 /// provided class loader to resolve names.  A visited set prevents
 /// infinite loops from cyclic hierarchies.
-fn is_throwable(class: &ClassInfo, class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>) -> bool {
+fn is_throwable(class: &ClassInfo, class_loader: &ResolvedClassLoader<'_>) -> bool {
     let mut visited = HashSet::new();
     is_throwable_inner(class, class_loader, &mut visited)
 }
 
 fn is_throwable_inner(
     class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     visited: &mut HashSet<String>,
 ) -> bool {
     let fqn = class.fqn().to_string();
@@ -407,7 +408,7 @@ fn is_throwable_inner(
         if iface_short == "throwable" {
             return true;
         }
-        if let Some(iface) = class_loader(iface_name)
+        if let Some(iface) = class_loader(Fqn::new(iface_name))
             && is_throwable_inner(&iface, class_loader, visited)
         {
             return true;
@@ -425,7 +426,7 @@ fn is_throwable_inner(
         {
             return true;
         }
-        if let Some(parent) = class_loader(parent_name)
+        if let Some(parent) = class_loader(Fqn::new(parent_name))
             && is_throwable_inner(&parent, class_loader, visited)
         {
             return true;

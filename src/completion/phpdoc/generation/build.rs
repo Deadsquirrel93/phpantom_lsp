@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use tower_lsp::lsp_types::Position;
 
+use crate::class_lookup::{ResolvedClassLoader, SourceClassLoader};
 use crate::completion::phpdoc::context::{DocblockContext, SymbolInfo};
 use crate::completion::source::comment_position::position_to_byte_offset;
 use crate::completion::source::throws_analysis::{self, ThrowsContext};
@@ -289,7 +290,8 @@ pub(super) fn build_docblock(
     use_map: &HashMap<String, String>,
     file_namespace: &Option<String>,
     local_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &SourceClassLoader<'_>,
+    resolved_class_loader: &ResolvedClassLoader<'_>,
     backend: Option<&crate::Backend>,
     function_loader: FunctionLoader<'_>,
 ) -> String {
@@ -304,6 +306,7 @@ pub(super) fn build_docblock(
             file_namespace,
             local_classes,
             class_loader,
+            resolved_class_loader,
             backend,
             function_loader,
         ),
@@ -331,12 +334,14 @@ fn build_function(
     use_map: &HashMap<String, String>,
     file_namespace: &Option<String>,
     local_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &SourceClassLoader<'_>,
+    resolved_class_loader: &ResolvedClassLoader<'_>,
     backend: Option<&crate::Backend>,
     function_loader: FunctionLoader<'_>,
 ) -> String {
     let throws_ctx = ThrowsContext {
         class_loader,
+        resolved_class_loader,
         function_loader,
         use_map,
         local_classes,
@@ -375,12 +380,10 @@ fn build_function(
         let offset = position_to_byte_offset(content, position).min(content.len());
         let content = throws_analysis::with_open_docblock_blanked(content, offset);
         let body_inferred = crate::code_actions::phpstan::fix_return_type::enrichment_return_type(
-            &content,
+            FileCtx::new(&content, local_classes, resolved_class_loader, class_loader)
+                .with_imports(Some(use_map))
+                .with_backend(backend),
             decl_offset,
-            local_classes,
-            class_loader,
-            Some(use_map),
-            backend,
             function_loader,
         );
         // Filter out types that don't need a @return tag (void, scalars
@@ -394,8 +397,13 @@ fn build_function(
         // doesn't produce anything useful.
         match inferred {
             Some(t) => Some(
-                crate::names::shorten_type_for_file(&t, use_map, file_namespace, class_loader)
-                    .to_string(),
+                crate::names::shorten_type_for_file(
+                    &t,
+                    use_map,
+                    file_namespace,
+                    resolved_class_loader,
+                )
+                .to_string(),
             ),
             None => form
                 .enrich(
@@ -505,14 +513,12 @@ fn build_var(
 /// to the same `resolve_variable_type` that powers hover.
 pub(crate) fn infer_inline_variable_type(
     sym: &SymbolInfo,
-    content: &str,
     position: Position,
-    file_ctx: &crate::types::FileContext,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    backend: Option<&crate::Backend>,
+    file: FileCtx<'_>,
     function_loader: FunctionLoaderFn<'_>,
 ) -> Option<PhpType> {
-    let all_classes = &file_ctx.classes;
+    let content = file.content;
+    let all_classes = file.all_classes;
     let var_name = sym.variable_name.as_deref()?;
 
     // The cursor is at the `/**` trigger, which is above the variable
@@ -538,20 +544,11 @@ pub(crate) fn infer_inline_variable_type(
 
     let current_class = crate::class_lookup::find_class_at_offset(all_classes, cursor_offset);
 
-    let resolved_class_loader =
-        |name: &str| crate::class_lookup::load_resolved_name(name, class_loader);
     crate::type_engine::variable::resolution::resolve_variable_php_type(VarQuery {
         loaders: crate::type_engine::resolver::Loaders::with_function(function_loader),
         ..VarQuery::new(
             var_name,
-            FileCtx::new(
-                effective_content,
-                all_classes,
-                &resolved_class_loader,
-                class_loader,
-            )
-            .with_imports(Some(&file_ctx.use_map))
-            .with_backend(backend),
+            file.with_source(effective_content, all_classes),
             current_class,
             cursor_offset,
         )

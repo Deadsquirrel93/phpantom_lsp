@@ -12,6 +12,7 @@ use tower_lsp::lsp_types::*;
 
 use super::helpers;
 use crate::Backend;
+use crate::class_lookup::Fqn;
 
 /// The [`crate::symbol_map::LaravelStringKind`]s
 /// [`Backend::collect_invalid_laravel_string_key_diagnostics`] can judge.
@@ -619,7 +620,7 @@ impl Backend {
         .top_level_class_names()
         .into_iter()
         .next()?;
-        Some(resolved_class_loader(&name)?.fqn().to_string())
+        Some(resolved_class_loader(Fqn::new(&name))?.fqn().to_string())
     }
 
     /// Whether `literal` names no template this project ships, as a

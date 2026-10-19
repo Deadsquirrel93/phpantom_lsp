@@ -48,7 +48,12 @@ pub(crate) struct FileContext {
 /// A class loader per `namespace` block of a file (see
 /// [`Backend::class_loaders`](crate::Backend::class_loaders)), as trait
 /// objects so it can be handed through non-generic walkers.
-pub type BlockClassLoaders<'a> = PerBlock<'a, &'a (dyn Fn(&str) -> Option<Arc<ClassInfo>> + 'a)>;
+pub type BlockClassLoaders<'a> = PerBlock<'a, &'a crate::class_lookup::SourceClassLoader<'a>>;
+
+/// [`BlockClassLoaders`] for already-resolved names (see
+/// [`Backend::resolved_class_loaders`](crate::Backend::resolved_class_loaders)).
+pub type BlockResolvedClassLoaders<'a> =
+    PerBlock<'a, &'a crate::class_lookup::ResolvedClassLoader<'a>>;
 
 /// The `use` imports of each `namespace` block of a file, built by
 /// [`FileContext::block_imports`].
@@ -100,7 +105,14 @@ impl<'a, T> PerBlock<'a, T> {
 impl<L: Fn(&str) -> Option<Arc<ClassInfo>>> PerBlock<'_, L> {
     /// These loaders as trait objects.
     pub fn as_dyn(&self) -> BlockClassLoaders<'_> {
-        self.map(|loader| loader as &dyn Fn(&str) -> Option<Arc<ClassInfo>>)
+        self.map(|loader| loader as &crate::class_lookup::SourceClassLoader<'_>)
+    }
+}
+
+impl<L: Fn(crate::class_lookup::Fqn<'_>) -> Option<Arc<ClassInfo>>> PerBlock<'_, L> {
+    /// These resolved-name loaders as trait objects.
+    pub fn as_dyn_resolved(&self) -> BlockResolvedClassLoaders<'_> {
+        self.map(|loader| loader as &crate::class_lookup::ResolvedClassLoader<'_>)
     }
 }
 

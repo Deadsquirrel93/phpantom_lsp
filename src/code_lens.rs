@@ -9,6 +9,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::atom::Atom;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::definition::implementation::member_implementation_providers;
 use crate::definition::member::MemberKind;
 use crate::inheritance::find_declaring_ancestor;
@@ -82,7 +83,7 @@ impl Backend {
         let index = LineIndex::new(content);
 
         let mut lenses = Vec::new();
-        let class_loader = |name: &str| self.find_or_load_class(name);
+        let class_loader = |name: Fqn<'_>| self.find_or_load_class(&name);
 
         for class in &classes {
             let class_fqn = class.fqn();
@@ -451,7 +452,7 @@ impl Backend {
     fn implementation_lens_descendants(
         &self,
         class: &ClassInfo,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        class_loader: &ResolvedClassLoader<'_>,
     ) -> Option<Vec<Arc<ClassInfo>>> {
         if !(class.kind == ClassLikeKind::Interface || class.is_abstract)
             || class.keyword_offset == 0
@@ -522,8 +523,8 @@ impl Backend {
         class_fqn: &str,
         member: Option<&str>,
     ) -> Option<Vec<Location>> {
-        let class_loader = |name: &str| self.find_or_load_class(name);
-        let class = class_loader(class_fqn)?;
+        let class_loader = |name: Fqn<'_>| self.find_or_load_class(&name);
+        let class = class_loader(Fqn::new(class_fqn))?;
         let descendants = self.implementation_descendants(&class, class_fqn, &class_loader, true);
         Some(match member {
             None => self.class_implementation_locations(uri, content, &class, &descendants),
@@ -723,7 +724,7 @@ impl Backend {
         current_uri: &str,
         current_content: &str,
     ) -> Option<Prototype> {
-        let class_loader = |name: &str| self.find_or_load_class(name);
+        let class_loader = |name: Fqn<'_>| self.find_or_load_class(&name);
         let declares = |candidate: &ClassInfo| {
             candidate
                 .methods

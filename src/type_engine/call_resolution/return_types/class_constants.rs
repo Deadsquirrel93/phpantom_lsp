@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use crate::Backend;
 use crate::atom::atom;
-use crate::class_lookup::{is_class_keyword, is_self_or_static};
+use crate::class_lookup::{Fqn, is_class_keyword, is_self_or_static};
 use crate::php_type::PhpType;
 use crate::type_engine::resolver::ResolutionCtx;
 use crate::types::*;
@@ -112,7 +112,9 @@ fn static_access_class(class_part: &str, ctx: &ResolutionCtx<'_>) -> Option<Arc<
     } else {
         ctx.written_names().resolve_class(class_part)
     };
-    (ctx.file.class_loader)(class_name.strip_prefix('\\').unwrap_or(&class_name))
+    (ctx.file.class_loader)(Fqn::new(
+        class_name.strip_prefix('\\').unwrap_or(&class_name),
+    ))
 }
 
 /// The type a class constant holds, read from its initializer where that
@@ -214,7 +216,7 @@ fn constant_declaring_class(
     };
     // `merged` carries every inherited constant, so whether it declares this
     // one is read off the class as it was parsed.
-    if class_loader(&merged.fqn()).is_none_or(|own| declares_or_uses(&own)) {
+    if class_loader(Fqn::new(&merged.fqn())).is_none_or(|own| declares_or_uses(&own)) {
         return None;
     }
     if let Some((_, parent)) = ancestors(merged, class_loader).find(|(_, p)| declares_or_uses(p)) {

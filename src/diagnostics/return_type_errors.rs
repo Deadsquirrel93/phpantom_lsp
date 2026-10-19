@@ -19,7 +19,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
-use crate::class_lookup::find_class_at_offset;
+use crate::class_lookup::{Fqn, ResolvedClassLoader, SourceClassLoader, find_class_at_offset};
 use crate::parser::with_parsed_program;
 use crate::php_type::{PhpType, TypeKind};
 use crate::return_collection::collect_returns;
@@ -182,8 +182,8 @@ fn resolve_return_and_push(
     current_class: &ClassInfo,
     content: &str,
     file_ctx: &crate::types::FileContext,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    resolved_class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &SourceClassLoader<'_>,
+    resolved_class_loader: &ResolvedClassLoader<'_>,
     loaders: Loaders<'_>,
     backend: &Backend,
     out: &mut Vec<ResolvedReturn>,
@@ -292,7 +292,7 @@ fn resolve_return_and_push(
             }
 
             // Resolve short class names to FQN.
-            let ty = resolve_class_names(ty, resolved_class_loader);
+            let ty = resolve_class_names(ty, &|name| resolved_class_loader(Fqn::new(name)));
 
             out.push(ResolvedReturn {
                 ty: Some(ty),
@@ -351,8 +351,8 @@ fn process_top_level_statement(
     uri: &str,
     content: &str,
     file_ctx: &crate::types::FileContext,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    resolved_class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &SourceClassLoader<'_>,
+    resolved_class_loader: &ResolvedClassLoader<'_>,
     function_loader: &dyn Fn(&str, u32) -> Option<crate::types::FunctionInfo>,
     constant_loader: &dyn Fn(&str, u32) -> Option<Option<String>>,
     backend: &Backend,
@@ -528,8 +528,8 @@ fn process_class_member(
     member: &mago_syntax::cst::class_like::member::ClassLikeMember<'_>,
     content: &str,
     file_ctx: &crate::types::FileContext,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    resolved_class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &SourceClassLoader<'_>,
+    resolved_class_loader: &ResolvedClassLoader<'_>,
     function_loader: &dyn Fn(&str, u32) -> Option<crate::types::FunctionInfo>,
     constant_loader: &dyn Fn(&str, u32) -> Option<Option<String>>,
     backend: &Backend,
@@ -606,7 +606,7 @@ fn process_class_member(
             if name.contains("__anonymous@") {
                 return name.to_string();
             }
-            if let Some(cls) = resolved_class_loader(name) {
+            if let Some(cls) = resolved_class_loader(Fqn::new(name)) {
                 cls.fqn().to_string()
             } else {
                 name.to_string()

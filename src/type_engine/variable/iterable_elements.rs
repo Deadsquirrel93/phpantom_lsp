@@ -10,6 +10,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::inheritance::ancestry::ClassLoader;
 
 use crate::php_type::{PhpType, TypeKind};
@@ -43,7 +44,7 @@ pub(crate) fn resolve_expression_type<'b>(
 pub(crate) struct IterableCtx<'a> {
     pub current_class: &'a ClassInfo,
     pub all_classes: &'a [Arc<ClassInfo>],
-    pub class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    pub class_loader: &'a ResolvedClassLoader<'a>,
     pub resolved_class_cache: Option<&'a crate::virtual_members::ResolvedClassCache>,
 }
 
@@ -171,7 +172,7 @@ fn key_domain(ty: &PhpType) -> Option<PhpType> {
 /// caller.  A single-argument binding names the value alone.
 fn declared_traversal_of_generic(
     iter_type: &PhpType,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<(Option<PhpType>, PhpType)> {
     let generic = match iter_type.kind() {
         TypeKind::Generic(generic) => generic,
@@ -183,7 +184,7 @@ fn declared_traversal_of_generic(
     {
         return None;
     }
-    let class = class_loader(name)?;
+    let class = class_loader(Fqn::new(name))?;
     if class.template_params.len() != generic.args.len() {
         return None;
     }
@@ -214,7 +215,7 @@ fn declared_traversal_of_generic(
 /// its traversal binding.  See [`declared_traversal_of_generic`].
 pub(crate) fn generic_traversal_value_type(
     iter_type: &PhpType,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<PhpType> {
     declared_traversal_of_generic(iter_type, class_loader).map(|(_, value)| value)
 }
@@ -273,7 +274,7 @@ fn resolve_iterable_slot_via_class(
 
     if classes.is_empty() {
         // Try direct class loader as fallback (handles FQN names).
-        let cls = (ctx.class_loader)(class_name)?;
+        let cls = (ctx.class_loader)(Fqn::new(class_name))?;
         return extract(&merged(&cls), ctx.class_loader);
     }
 
@@ -343,7 +344,7 @@ const ITERABLE_IFACE_NAMES: &[&str] = &[
 /// members).
 pub(crate) fn extract_iterable_element_type_from_class(
     class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<PhpType> {
     if let Some(value) = declared_iterable_arg(class, class_loader, iterable_value_arg) {
         return Some(value);
@@ -414,7 +415,7 @@ fn iterable_key_arg(args: &[PhpType]) -> Option<&PhpType> {
 ///    for collection subclasses like `@extends Collection<int, User>`.
 fn declared_iterable_arg(
     class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     pick: fn(&[PhpType]) -> Option<&PhpType>,
 ) -> Option<PhpType> {
     let usable = |args: &[PhpType]| {
@@ -433,7 +434,7 @@ fn declared_iterable_arg(
                 .iter()
                 .filter(|(name, args)| !is_known(name) && pick(args).is_some())
                 .filter(|(name, _)| {
-                    class_loader(name)
+                    class_loader(Fqn::new(name))
                         .is_some_and(|iface| is_transitive_iterable(&iface, class_loader))
                 })
                 .find_map(|(_, args)| usable(args))
@@ -500,7 +501,7 @@ fn is_unbounded_template_placeholder(ty: &PhpType) -> bool {
 /// the callers' `current()`/`key()` fallbacks never fire for such classes.
 fn class_directly_implements(
     class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     iface_name: &str,
 ) -> bool {
     let implements_here = |class: &ClassInfo| {
@@ -521,7 +522,7 @@ fn class_directly_implements(
         if !visited.insert(name.clone()) {
             break;
         }
-        let Some(parent) = class_loader(&name) else {
+        let Some(parent) = class_loader(Fqn::new(&name)) else {
             break;
         };
         if implements_here(&parent) {
@@ -536,7 +537,7 @@ fn class_directly_implements(
 /// interface `target` by walking its interface-extends chain.
 fn interface_extends_named(
     iface_name: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     target: &str,
 ) -> bool {
     let mut visited = std::collections::HashSet::new();
@@ -545,14 +546,14 @@ fn interface_extends_named(
 
 fn interface_extends_named_inner(
     iface_name: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     target: &str,
     visited: &mut std::collections::HashSet<String>,
 ) -> bool {
     if !visited.insert(iface_name.to_string()) {
         return false;
     }
-    let Some(iface) = class_loader(iface_name) else {
+    let Some(iface) = class_loader(Fqn::new(iface_name)) else {
         return false;
     };
     // Interfaces record the interfaces they extend in `interfaces`, and
@@ -584,7 +585,7 @@ fn interface_extends_named_inner(
 /// parameters (so `list<User>` returns `None` → fallback to `int`).
 pub(in crate::type_engine) fn extract_iterable_key_type_from_class(
     class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<PhpType> {
     if let Some(key) = declared_iterable_arg(class, class_loader, iterable_key_arg) {
         return Some(key);
@@ -622,17 +623,14 @@ fn is_traversal_name(short: &str) -> bool {
 
 /// Check whether an interface transitively extends a known iterable
 /// interface (e.g. `TypedCollection extends IteratorAggregate`).
-fn is_transitive_iterable(
-    iface: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> bool {
+fn is_transitive_iterable(iface: &ClassInfo, class_loader: &ResolvedClassLoader<'_>) -> bool {
     let mut visited = std::collections::HashSet::new();
     is_transitive_iterable_inner(iface, class_loader, &mut visited)
 }
 
 fn is_transitive_iterable_inner(
     iface: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     visited: &mut std::collections::HashSet<String>,
 ) -> bool {
     // Recurse through a parent name, guarding against cyclic hierarchies.
@@ -640,7 +638,7 @@ fn is_transitive_iterable_inner(
         if !visited.insert(name.to_string()) {
             return false;
         }
-        class_loader(name)
+        class_loader(Fqn::new(name))
             .is_some_and(|parent| is_transitive_iterable_inner(&parent, class_loader, visited))
     };
 

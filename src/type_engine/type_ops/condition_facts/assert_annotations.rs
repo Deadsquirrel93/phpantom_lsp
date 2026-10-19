@@ -5,6 +5,7 @@
 use std::sync::Arc;
 
 use crate::atom::{Atom, atom, bytes_to_str};
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::{AssertionKind, ClassInfo, ParameterInfo, SharedVec, TypeAssertion};
 
@@ -127,8 +128,7 @@ pub(super) fn resolve_static_receiver_class(
     class_expr: &Expression<'_>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Option<Arc<ClassInfo>> {
-    ctx.written_names()
-        .static_receiver_class(class_expr, ctx.file.class_loader)
+    ctx.written_names().static_receiver_class(class_expr)
 }
 
 /// Resolve the receiver class of an instance method call (the `$x` in
@@ -147,11 +147,11 @@ pub(super) fn resolve_instance_receiver_class(
     // Variable names carry the leading `$` (e.g. `$this`, `$obj`).
     let name = bytes_to_str(dv.name);
     if name == "$this" {
-        return (ctx.file.class_loader)(&ctx.current_class.fqn());
+        return (ctx.file.class_loader)(Fqn::new(&ctx.current_class.fqn()));
     }
     let resolver = ctx.scope_var_resolver?;
     let first = resolver(name).into_iter().next()?;
-    (ctx.file.class_loader)(&first.type_string.to_string())
+    (ctx.file.class_loader)(Fqn::new(&first.type_string.to_string()))
 }
 
 /// The assertions an instance method call carries, for either arrow.
@@ -231,7 +231,7 @@ fn build_method_assertion_info<'a>(
 pub(in crate::type_engine) fn find_assertion_method_in_chain(
     class: &ClassInfo,
     method_name: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     visited: &mut Vec<Atom>,
     depth: usize,
 ) -> Option<(Arc<crate::types::MethodInfo>, Atom)> {
@@ -277,7 +277,7 @@ fn bind_ancestor_templates(
 pub(in crate::type_engine) fn find_method_in_chain_where(
     class: &ClassInfo,
     method_name: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     carries_metadata: &dyn Fn(&crate::types::MethodInfo) -> bool,
     visited: &mut Vec<Atom>,
     depth: usize,
@@ -306,7 +306,7 @@ pub(in crate::type_engine) fn find_method_in_chain_where(
 
     // Traits mixed into this class.
     for trait_name in &class.used_traits {
-        if let Some(trait_class) = class_loader(trait_name)
+        if let Some(trait_class) = class_loader(Fqn::new(trait_name))
             && let Some(method) = find_method_in_chain_where(
                 &trait_class,
                 method_name,
@@ -322,7 +322,7 @@ pub(in crate::type_engine) fn find_method_in_chain_where(
 
     // Parent class chain.
     if let Some(parent) = class.parent_class.as_ref()
-        && let Some(parent_class) = class_loader(parent)
+        && let Some(parent_class) = class_loader(Fqn::new(parent))
         && let Some(found) = find_method_in_chain_where(
             &parent_class,
             method_name,
@@ -340,7 +340,7 @@ pub(in crate::type_engine) fn find_method_in_chain_where(
     // predicate's `@phpstan-assert` tags normally live (`Scope` declares
     // them and `MutatingScope` implements them).
     for interface_name in &class.interfaces {
-        if let Some(interface) = class_loader(interface_name)
+        if let Some(interface) = class_loader(Fqn::new(interface_name))
             && let Some(found) = find_method_in_chain_where(
                 &interface,
                 method_name,

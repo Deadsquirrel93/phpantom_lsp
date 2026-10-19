@@ -192,6 +192,7 @@ fn generates_function_snippet_no_indent_in_continuation() {
         &file_ns,
         &[],
         &no_classes,
+        &crate::test_fixtures::no_loader,
         None,
         None,
     );
@@ -231,6 +232,7 @@ fn snippet_escapes_dollar_in_param_names() {
         &file_ns,
         &[],
         &no_classes,
+        &crate::test_fixtures::no_loader,
         None,
         None,
     );
@@ -286,6 +288,7 @@ fn generates_function_snippet_skips_fully_typed_params() {
         &file_ns,
         &[],
         &loader,
+        &crate::test_fixtures::no_loader,
         None,
         None,
     );
@@ -330,6 +333,7 @@ fn generates_function_snippet_for_untyped_params() {
         &file_ns,
         &[],
         &no_classes,
+        &crate::test_fixtures::no_loader,
         None,
         None,
     );
@@ -379,6 +383,7 @@ fn generates_function_snippet_for_array_param_and_return() {
         &file_ns,
         &[],
         &no_classes,
+        &crate::test_fixtures::no_loader,
         None,
         None,
     );
@@ -412,6 +417,7 @@ fn generates_void_function_snippet_without_return() {
         &file_ns,
         &[],
         &no_classes,
+        &crate::test_fixtures::no_loader,
         None,
         None,
     );
@@ -444,6 +450,7 @@ fn paramless_void_generates_summary_skeleton() {
         &file_ns,
         &[],
         &no_classes,
+        &crate::test_fixtures::no_loader,
         None,
         None,
     );
@@ -623,6 +630,7 @@ fn param_names_are_space_aligned() {
         &file_ns,
         &[],
         &no_classes,
+        &crate::test_fixtures::no_loader,
         None,
         None,
     );
@@ -679,6 +687,7 @@ fn param_names_aligned_with_mixed_enrichment_widths() {
         &file_ns,
         &[],
         &loader,
+        &crate::test_fixtures::no_loader,
         None,
         None,
     );
@@ -757,6 +766,7 @@ fn blank_separator_between_tag_groups() {
         &file_ns,
         &[],
         &no_classes,
+        &crate::test_fixtures::no_loader,
         None,
         None,
     );

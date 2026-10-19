@@ -2,10 +2,9 @@
 //! class-string and member-existence guards, `in_array` element
 //! narrowing, and guard-clause (early-return) narrowing.
 
-use std::sync::Arc;
-
 use crate::atom::{Atom, atom, bytes_to_str};
 use crate::ci_map::fold;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::{ClassInfo, ClassLikeKind, ResolvedType};
 
@@ -581,7 +580,7 @@ pub(crate) fn try_extract_type_guard(
 /// `None` means no loader was available, in which case a class type is
 /// assumed iterable — a guard that has already passed at runtime is
 /// better evidence than an unresolvable name.
-pub(crate) type GuardClassLoader<'a> = Option<&'a dyn Fn(&str) -> Option<Arc<ClassInfo>>>;
+pub(crate) type GuardClassLoader<'a> = Option<&'a ResolvedClassLoader<'a>>;
 
 /// Check whether a `PhpType` matches a given type-guard kind.
 ///
@@ -670,7 +669,7 @@ fn type_is_iterable(ty: &PhpType, class_loader: GuardClassLoader<'_>) -> bool {
         return true;
     }
     match class_loader {
-        Some(loader) => loader(name)
+        Some(loader) => loader(Fqn::new(name))
             .is_some_and(|cls| crate::class_lookup::is_subtype_of(&cls, TRAVERSABLE_FQN, loader)),
         None => true,
     }
@@ -860,10 +859,7 @@ fn filter_type_by_guard(
 /// enum) and declares none drops out.  Any other class or interface may
 /// have a callable subclass, so it survives as that subclass would:
 /// `Route&callable`.
-fn narrow_classes_to_callable(
-    ty: &PhpType,
-    loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> Option<PhpType> {
+fn narrow_classes_to_callable(ty: &PhpType, loader: &ResolvedClassLoader<'_>) -> Option<PhpType> {
     let members: Vec<PhpType> = match ty.kind() {
         TypeKind::Nullable(inner) => inner.union_members().into_iter().cloned().collect(),
         _ => ty.union_members().into_iter().cloned().collect(),
@@ -872,8 +868,12 @@ fn narrow_classes_to_callable(
     let mut kept: Vec<PhpType> = Vec::with_capacity(members.len());
     for member in members {
         let class = match member.kind() {
-            TypeKind::Named(name) if !crate::php_type::is_keyword_type(name) => loader(name),
-            TypeKind::Generic(g) if !crate::php_type::is_keyword_type(&g.name) => loader(&g.name),
+            TypeKind::Named(name) if !crate::php_type::is_keyword_type(name) => {
+                loader(Fqn::new(name))
+            }
+            TypeKind::Generic(g) if !crate::php_type::is_keyword_type(&g.name) => {
+                loader(Fqn::new(&g.name))
+            }
             _ => None,
         };
         let Some(class) = class else {
@@ -904,7 +904,7 @@ fn narrow_classes_to_callable(
 }
 
 /// Whether `class`, a trait it uses, or an ancestor declares `__invoke`.
-fn declares_invoke(class: &ClassInfo, loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>) -> bool {
+fn declares_invoke(class: &ClassInfo, loader: &ResolvedClassLoader<'_>) -> bool {
     if class.get_method_ci("__invoke").is_some() {
         return true;
     }
@@ -920,7 +920,7 @@ fn declares_invoke(class: &ClassInfo, loader: &dyn Fn(&str) -> Option<Arc<ClassI
             continue;
         }
         seen.push(name);
-        let Some(cls) = loader(&name) else {
+        let Some(cls) = loader(Fqn::new(&name)) else {
             continue;
         };
         if cls.get_method_ci("__invoke").is_some() {

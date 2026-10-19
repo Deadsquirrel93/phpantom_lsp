@@ -23,7 +23,7 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::class_lookup::find_class_at_offset;
+use crate::class_lookup::{ResolvedClassLoader, find_class_at_offset};
 use crate::symbol_map::{ClassRefContext, SymbolKind};
 use crate::type_engine::resolver::{ResolutionCtx, SubjectOutcome, resolve_subject_outcome};
 use crate::types::AccessKind;
@@ -386,7 +386,7 @@ fn deprecated_diagnostic(
 fn is_within_deprecated_scope(
     backend: &Backend,
     local_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     cache: &ResolvedClassCache,
     content: &str,
     offset: u32,

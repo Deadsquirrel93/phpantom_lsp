@@ -7,6 +7,7 @@ use std::collections::HashMap;
 
 use crate::Backend;
 use crate::atom::{Atom, AtomMap};
+use crate::class_lookup::Fqn;
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::*;
 
@@ -424,7 +425,8 @@ fn drop_bindings_outside_bounds(
                 TypeKind::Generic(g) if !crate::php_type::is_keyword_type(&g.name) => g.name,
                 _ => return None,
             };
-            if template_params.contains(&name) || (ctx.file.class_loader)(&name).is_none() {
+            if template_params.contains(&name) || (ctx.file.class_loader)(Fqn::new(&name)).is_none()
+            {
                 return None;
             }
             names.push(name);
@@ -831,6 +833,7 @@ mod class_template_sub_tests {
 
     use super::build_call_template_subs;
     use crate::atom::atom;
+    use crate::class_lookup::Fqn;
     use crate::php_type::PhpType;
     use crate::type_engine::resolver::{FileCtx, ResolutionCtx};
     use crate::types::ClassInfo;
@@ -846,9 +849,14 @@ mod class_template_sub_tests {
             ..ClassInfo::default()
         };
         let classes = Vec::new();
-        let class_loader = |_: &str| -> Option<Arc<ClassInfo>> { None };
+        let class_loader = |_: Fqn<'_>| -> Option<Arc<ClassInfo>> { None };
         let ctx = ResolutionCtx::new(
-            FileCtx::new("", &classes, &class_loader, &class_loader),
+            FileCtx::new(
+                "",
+                &classes,
+                &class_loader,
+                crate::test_fixtures::fqn_source_loader(&class_loader),
+            ),
             None,
             0,
         );

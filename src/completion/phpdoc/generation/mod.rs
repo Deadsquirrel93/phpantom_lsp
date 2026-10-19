@@ -48,6 +48,7 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 
 use super::context::DocblockContext;
+use crate::class_lookup::{ResolvedClassLoader, SourceClassLoader};
 use crate::completion::source::throws_analysis::{self, ThrowsContext};
 use crate::completion::use_edit::{analyze_use_block, build_use_edit};
 use crate::types::{ClassInfo, FunctionLoader};
@@ -72,7 +73,8 @@ pub fn try_generate_docblock(
     use_map: &HashMap<String, String>,
     file_namespace: &Option<String>,
     local_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &SourceClassLoader<'_>,
+    resolved_class_loader: &ResolvedClassLoader<'_>,
     backend: Option<&crate::Backend>,
     function_loader: FunctionLoader<'_>,
     uri: &str,
@@ -110,6 +112,7 @@ pub fn try_generate_docblock(
         file_namespace,
         local_classes,
         class_loader,
+        resolved_class_loader,
         backend,
         function_loader,
     );
@@ -122,6 +125,7 @@ pub fn try_generate_docblock(
     let additional_edits = if matches!(context, DocblockContext::FunctionOrMethod) {
         let throws_ctx = ThrowsContext {
             class_loader,
+            resolved_class_loader,
             function_loader,
             use_map,
             local_classes,
@@ -174,7 +178,8 @@ pub fn try_generate_docblock_on_enter(
     use_map: &HashMap<String, String>,
     file_namespace: &Option<String>,
     local_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &SourceClassLoader<'_>,
+    resolved_class_loader: &ResolvedClassLoader<'_>,
     backend: Option<&crate::Backend>,
     function_loader: FunctionLoader<'_>,
     uri: &str,
@@ -217,6 +222,7 @@ pub fn try_generate_docblock_on_enter(
         file_namespace,
         local_classes,
         class_loader,
+        resolved_class_loader,
         backend,
         function_loader,
     );
@@ -234,6 +240,7 @@ pub fn try_generate_docblock_on_enter(
     if matches!(context, DocblockContext::FunctionOrMethod) {
         let throws_ctx = ThrowsContext {
             class_loader,
+            resolved_class_loader,
             function_loader,
             use_map,
             local_classes,

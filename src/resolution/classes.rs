@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use crate::Backend;
 use crate::class_loader_memo;
+use crate::class_lookup::Fqn;
 use crate::composer;
 use crate::php_type::{PhpType, is_builtin_non_class_type};
 use crate::types::ClassInfo;
@@ -139,10 +140,9 @@ impl Backend {
         // The classes read are loaded unlinked: linking only reads their
         // alias definitions and ancestors, and two classes may read each
         // other.
-        let loader = |name: &str| {
-            let name = name.strip_prefix('\\').unwrap_or(name);
+        let loader = |name: Fqn<'_>| {
             sources.borrow_mut().push(name.to_string());
-            let found = self.find_indexed_class(&PhpType::parse(name));
+            let found = self.find_indexed_class(&PhpType::parse(&name));
             missed.set(missed.get() || found.is_none());
             found
         };

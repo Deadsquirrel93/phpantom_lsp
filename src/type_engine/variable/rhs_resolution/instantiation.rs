@@ -8,6 +8,7 @@ use mago_syntax::cst::*;
 
 use crate::Backend;
 use crate::atom::{atom, bytes_to_str};
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::{ClassInfo, ResolvedType};
 
@@ -197,7 +198,7 @@ pub(crate) fn class_string_generic_binding(
 pub(crate) fn remap_inherited_ctor_subs(
     child: &ClassInfo,
     raw_subs: &HashMap<String, PhpType>,
-    class_loader: &dyn Fn(&str) -> Option<std::sync::Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> HashMap<String, PhpType> {
     // Walk up the extends chain to find the class that originally declares
     // the constructor, building a cumulative mapping from ancestor template
@@ -221,7 +222,7 @@ pub(crate) fn remap_inherited_ctor_subs(
             Some(ref p) => *p,
             None => break,
         };
-        let parent = match class_loader(&parent_name) {
+        let parent = match class_loader(Fqn::new(&parent_name)) {
             Some(p) => p,
             None => break,
         };

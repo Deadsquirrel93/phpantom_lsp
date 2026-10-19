@@ -5,6 +5,7 @@
 use std::sync::Arc;
 
 use crate::atom::atom;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::resolver::ResolutionCtx;
 use crate::types::{ClassInfo, MAX_INHERITANCE_DEPTH, ResolvedType};
@@ -136,7 +137,7 @@ fn is_framework_relation_method(
     method: &str,
     ctx: &ForwardWalkCtx<'_>,
 ) -> bool {
-    let Some(raw) = (ctx.file.class_loader)(&class.fqn()) else {
+    let Some(raw) = (ctx.file.class_loader)(Fqn::new(&class.fqn())) else {
         return false;
     };
     if let Some(framework) = declared_relation_method(&raw, method, ctx.file.class_loader, 0) {
@@ -151,8 +152,11 @@ fn is_framework_relation_method(
             &receiver.type_string,
             ctx.file.class_loader,
         )
-        .and_then(|related| related.base_name().and_then(ctx.file.class_loader))
-        {
+        .and_then(|related| {
+            related
+                .base_name()
+                .and_then(|name| (ctx.file.class_loader)(Fqn::new(name)))
+        }) {
             related
         } else {
             return false;
@@ -161,7 +165,7 @@ fn is_framework_relation_method(
         crate::virtual_members::laravel::model_builder_type(&model, ctx.file.class_loader);
     builder
         .base_name()
-        .and_then(ctx.file.class_loader)
+        .and_then(|name| (ctx.file.class_loader)(Fqn::new(name)))
         .is_some_and(|builder| {
             declared_relation_method(&builder, method, ctx.file.class_loader, 0) == Some(true)
         })
@@ -172,7 +176,7 @@ fn is_framework_relation_method(
 fn declared_relation_method(
     class: &ClassInfo,
     method: &str,
-    loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    loader: &ResolvedClassLoader<'_>,
     depth: u32,
 ) -> Option<bool> {
     if depth >= MAX_INHERITANCE_DEPTH {
@@ -205,7 +209,7 @@ fn declared_relation_method(
         }) {
             continue;
         }
-        if let Some(class) = loader(name)
+        if let Some(class) = loader(Fqn::new(name))
             && let Some(result) = declared_relation_method(&class, method, loader, depth + 1)
         {
             return Some(result);
@@ -214,7 +218,7 @@ fn declared_relation_method(
     class
         .parent_class
         .as_ref()
-        .and_then(|name| loader(name))
+        .and_then(|name| loader(Fqn::new(name)))
         .and_then(|parent| declared_relation_method(&parent, method, loader, depth + 1))
 }
 
@@ -523,7 +527,7 @@ fn relation_callback_type(
 fn morph_candidate_builders(
     candidates: &PhpType,
     fallback: &PhpType,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> PhpType {
     // Laravel casts `$types` to an array, so a `null` candidate adds no
     // model: the callback only runs for the others.
@@ -540,7 +544,7 @@ fn morph_candidate_builders(
         TypeKind::Literal(value) => value
             .string_content()
             .and_then(|name| {
-                class_loader(&name).filter(|model| {
+                class_loader(Fqn::new(&name)).filter(|model| {
                     model
                         .fqn()
                         .eq_ignore_ascii_case(name.trim_start_matches('\\'))
@@ -561,7 +565,7 @@ fn morph_candidate_builders(
 fn morph_model_builders(
     model: &PhpType,
     fallback: &PhpType,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> PhpType {
     if let TypeKind::Union(parts) = model.kind() {
         return PhpType::union(
@@ -573,7 +577,7 @@ fn morph_model_builders(
     }
     model
         .base_name()
-        .and_then(class_loader)
+        .and_then(|name| class_loader(Fqn::new(name)))
         .filter(|model| {
             model.fqn() == ELOQUENT_MODEL_FQN || extends_eloquent_model(model, class_loader)
         })

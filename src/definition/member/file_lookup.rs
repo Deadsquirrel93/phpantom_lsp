@@ -10,6 +10,7 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::Position;
 
 use crate::Backend;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::types::ClassInfo;
 use crate::util::short_name;
 
@@ -31,12 +32,12 @@ impl Backend {
     pub(in crate::definition) fn reload_raw_class(
         candidate: &ClassInfo,
         all_classes: &[Arc<ClassInfo>],
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        class_loader: &ResolvedClassLoader<'_>,
     ) -> Option<ClassInfo> {
         let fqn = candidate.fqn();
         crate::class_lookup::find_class_by_name(all_classes, &fqn)
             .map(|arc| ClassInfo::clone(arc))
-            .or_else(|| class_loader(&fqn).map(Arc::unwrap_or_clone))
+            .or_else(|| class_loader(Fqn::new(&fqn)).map(Arc::unwrap_or_clone))
     }
 
     /// Find the file URI and content for the file that contains a given class.

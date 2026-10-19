@@ -4,18 +4,16 @@
 //! [`super::call_site_inference`] resolves their types against the caller's
 //! scope.
 
-use std::sync::Arc;
-
 use mago_span::HasSpan;
 use mago_syntax::cst::literal::{Literal, LiteralString};
 use mago_syntax::cst::sequence::TokenSeparatedSequence;
 use mago_syntax::cst::*;
 
 use crate::atom::{bytes_to_str, literal_bytes_to_str};
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::php_type::{PhpType, TypeKind};
 use crate::symbol_map::extraction::laravel::is_render_each_method;
 use crate::type_engine::resolver::VarResolutionCtx;
-use crate::types::ClassInfo;
 use crate::virtual_members::laravel::is_view_facade;
 
 use super::call_site_inference::ByteRange;
@@ -460,11 +458,8 @@ pub(super) fn each_variable_type(
 /// namespace: an injected `@var User $user` in a template's prologue means
 /// the global `\User`, and a template's contract is qualified the same way
 /// before a call site is judged against it.
-pub(super) fn qualify_class_names(
-    ty: PhpType,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> PhpType {
-    ty.resolve_names(&|name: &str| match class_loader(name) {
+pub(super) fn qualify_class_names(ty: PhpType, class_loader: &ResolvedClassLoader<'_>) -> PhpType {
+    ty.resolve_names(&|name: &str| match class_loader(Fqn::new(name)) {
         Some(cls) => format!("\\{}", cls.fqn()),
         None => name.to_string(),
     })
@@ -522,7 +517,7 @@ fn arrayable_shape_entries(
     ty: &PhpType,
     ctx: &VarResolutionCtx<'_>,
 ) -> Option<Vec<(String, PhpType)>> {
-    let class = (ctx.file.class_loader)(ty.base_name()?)?;
+    let class = (ctx.file.class_loader)(Fqn::new(ty.base_name()?))?;
     let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
         &class,
         ctx.file.class_loader,

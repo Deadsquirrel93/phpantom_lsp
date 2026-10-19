@@ -38,6 +38,7 @@ use mago_syntax::parser::parse_file_content;
 use super::file_contributions::{Contribution, FileContributions};
 use super::helpers::string_literal_at;
 use crate::atom::{bytes_to_str, literal_bytes_to_str};
+use crate::class_lookup::Fqn;
 use crate::names::OwnedResolvedNames;
 use crate::types::{ClassInfo, MethodInfo};
 
@@ -525,7 +526,7 @@ fn load_policy(backend: &crate::Backend, fqn: &str) -> Option<Arc<ClassInfo>> {
 
 /// Merge a policy's parent chain and traits into it.
 fn resolve_policy(backend: &crate::Backend, class: &ClassInfo) -> Arc<ClassInfo> {
-    let class_loader = |name: &str| backend.find_or_load_class(name);
+    let class_loader = |name: Fqn<'_>| backend.find_or_load_class(&name);
     crate::virtual_members::resolve_class_fully_cached(
         class,
         &class_loader,

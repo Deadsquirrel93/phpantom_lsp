@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::Backend;
+use crate::class_lookup::{Fqn, ResolvedClassLoader, SourceClassLoader};
 use crate::definition::member::MemberKind;
 use crate::php_type::PhpType;
 use crate::type_engine::resolver::{CtxLoaders, FileCtx, Loaders, ResolutionCtx, VarResolutionCtx};
@@ -43,7 +44,7 @@ impl Backend {
     pub(crate) fn resolved_class_loader<'a>(
         &'a self,
         ctx: &'a FileContext,
-    ) -> impl Fn(&str) -> Option<Arc<ClassInfo>> + 'a {
+    ) -> impl Fn(Fqn<'_>) -> Option<Arc<ClassInfo>> + 'a {
         self.resolved_class_loader_with(&ctx.classes)
     }
 
@@ -54,7 +55,7 @@ impl Backend {
     pub(crate) fn resolved_class_loaders<'a>(
         &'a self,
         ctx: &'a FileContext,
-    ) -> crate::types::PerBlock<'a, impl Fn(&str) -> Option<Arc<ClassInfo>> + 'a> {
+    ) -> crate::types::PerBlock<'a, impl Fn(Fqn<'_>) -> Option<Arc<ClassInfo>> + 'a> {
         ctx.per_block(|_, _| self.resolved_class_loader_with(&ctx.classes))
     }
 
@@ -70,8 +71,7 @@ impl Backend {
     /// Only hand this loader names spelled in source.  An already-resolved
     /// global FQN (`Redis`, from `use Redis as PhpRedis;` or `\Redis`)
     /// would be re-resolved through the file's imports and namespace; look
-    /// one up with [`load_resolved_name`](crate::class_lookup::load_resolved_name)
-    /// or the [resolved loader](Self::resolved_class_loader_with).
+    /// one up with the [resolved loader](Self::resolved_class_loader_with).
     ///
     /// Useful when the class list differs from what is stored in a
     /// `FileContext` (e.g. after re-parsing patched content for error
@@ -140,9 +140,9 @@ impl Backend {
     pub(crate) fn resolved_class_loader_with<'a>(
         &'a self,
         classes: &'a [Arc<ClassInfo>],
-    ) -> impl Fn(&str) -> Option<Arc<ClassInfo>> + 'a {
-        move |name: &str| {
-            let fqn = name.strip_prefix('\\').unwrap_or(name);
+    ) -> impl Fn(Fqn<'_>) -> Option<Arc<ClassInfo>> + 'a {
+        move |fqn: Fqn<'_>| {
+            let fqn = fqn.as_str();
             // Container keys and the configured-date sentinel are never
             // class names; `find_or_load_class` routes them itself.
             if fqn.contains('.')
@@ -179,11 +179,10 @@ impl Backend {
         class_loader: F,
     ) -> impl Fn(&str) -> Option<Arc<ClassInfo>> + 'a
     where
-        F: Fn(&str) -> Option<Arc<ClassInfo>> + 'a,
+        F: Fn(Fqn<'_>) -> Option<Arc<ClassInfo>> + 'a,
     {
         move |target: &str| {
-            let facade =
-                crate::class_lookup::load_resolved_name(target, &|name| class_loader(name))?;
+            let facade = class_loader(Fqn::new(target))?;
             let target_fqn = facade.fqn().to_string();
             let concrete = self
                 .facade_macro_concrete(&target_fqn)
@@ -297,11 +296,11 @@ impl Backend {
             placeholders: ctx.per_block(|_, namespace| {
                 crate::class_lookup::placeholder_in_namespace(namespace.as_deref())
             }),
-            // A macro target is a resolved name, which every block's
-            // loader reads the same way, so one resolver serves them all.
-            macro_this_resolver: Box::new(self.laravel_macro_this_resolver(
-                self.class_loader_with(&ctx.classes, &ctx.use_map, &ctx.namespace),
-            )),
+            // A macro target is a resolved name, which means the same class
+            // in every block, so one resolver serves them all.
+            macro_this_resolver: Box::new(
+                self.laravel_macro_this_resolver(self.resolved_class_loader_with(&ctx.classes)),
+            ),
             config_resolver: Box::new(move |key: &str| self.resolve_config_type(key)),
             trans_resolver: Box::new(move |key: &str| self.resolve_trans_type(key)),
         }
@@ -358,7 +357,7 @@ impl Backend {
         {
             let target = self.facade_macro_concrete(&target).unwrap_or(target);
             if let Some(class) = self.find_or_load_class(&target) {
-                let class_loader = self.class_loader(&ctx);
+                let class_loader = self.resolved_class_loader(&ctx);
                 return Some(crate::virtual_members::resolve_class_fully_maybe_cached(
                     &class,
                     &class_loader,
@@ -532,7 +531,7 @@ impl Backend {
         name: &str,
     ) -> Option<(Arc<ClassInfo>, MemberKind)> {
         let class = crate::class_lookup::find_documented_class_at_offset(&file.classes, offset)?;
-        let class_loader = self.class_loader(file);
+        let class_loader = self.resolved_class_loader(file);
         let resolved = crate::virtual_members::resolve_class_fully_cached(
             class,
             &class_loader,
@@ -552,7 +551,8 @@ impl Backend {
     }
 }
 
-type BoxedClassLoader<'a> = Box<dyn Fn(&str) -> Option<Arc<ClassInfo>> + 'a>;
+type BoxedClassLoader<'a> = Box<SourceClassLoader<'a>>;
+type BoxedResolvedClassLoader<'a> = Box<ResolvedClassLoader<'a>>;
 type BoxedFunctionLoader<'a> = Box<dyn Fn(&str, u32) -> Option<FunctionInfo> + 'a>;
 type BoxedConstantLoader<'a> = Box<dyn Fn(&str, u32) -> Option<Option<String>> + 'a>;
 type BoxedKeyResolver<'a> = Box<dyn Fn(&str) -> Option<PhpType> + 'a>;
@@ -573,7 +573,7 @@ pub(crate) struct FileLoaders<'a> {
     file: &'a FileContext,
     class_loaders: PerBlock<'a, BoxedClassLoader<'a>>,
     /// A resolved name means the same class in every block.
-    resolved_class_loader: BoxedClassLoader<'a>,
+    resolved_class_loader: BoxedResolvedClassLoader<'a>,
     function_loaders: PerBlock<'a, BoxedFunctionLoader<'a>>,
     constant_loaders: PerBlock<'a, BoxedConstantLoader<'a>>,
     placeholders: PerBlock<'a, ClassInfo>,
@@ -585,15 +585,12 @@ pub(crate) struct FileLoaders<'a> {
 impl<'a> FileLoaders<'a> {
     /// The class loader for names as written in the block containing
     /// `offset`.
-    pub(crate) fn class_loader_at(
-        &self,
-        offset: u32,
-    ) -> &(dyn Fn(&str) -> Option<Arc<ClassInfo>> + 'a) {
+    pub(crate) fn class_loader_at(&self, offset: u32) -> &SourceClassLoader<'a> {
         self.class_loaders.at(offset).as_ref()
     }
 
     /// The class loader for already-resolved names.
-    pub(crate) fn resolved_class_loader(&self) -> &(dyn Fn(&str) -> Option<Arc<ClassInfo>> + 'a) {
+    pub(crate) fn resolved_class_loader(&self) -> &ResolvedClassLoader<'a> {
         self.resolved_class_loader.as_ref()
     }
 

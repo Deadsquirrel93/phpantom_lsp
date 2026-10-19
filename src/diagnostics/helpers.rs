@@ -9,6 +9,7 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::class_lookup::ResolvedClassLoader;
 use crate::php_type::PhpType;
 use crate::resolution::FileLoaders;
 use crate::symbol_map::SymbolMap;
@@ -195,7 +196,7 @@ pub(crate) fn template_bounds(
 pub(crate) fn template_bounds_in_scope(
     class: &ClassInfo,
     method: Option<&MethodInfo>,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     cache: &crate::virtual_members::ResolvedClassCache,
 ) -> HashMap<String, PhpType> {
     let mut bounds = template_bounds(&class.template_params, &class.template_param_bounds);

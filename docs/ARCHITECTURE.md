@@ -384,8 +384,8 @@ two kinds, and each kind has one rule:
   `resolve_written_type`.
 - **Resolved names** (`ClassInfo::fqn()`, `parent_class`, stored member
   types, any type the engine produced) are exactly the FQN they spell, so a
-  bare `Redis` is the global class. Look them up with the resolved loader
-  or `class_lookup::load_resolved_name`.
+  bare `Redis` is the global class. Look them up with the resolved loader,
+  which only accepts a `class_lookup::Fqn`.
 
 A written name that no class answers to still has to come out as the FQN PHP
 reads it, or the resolved loader would later read the bare spelling as a
@@ -428,18 +428,21 @@ The type engine contexts (`ResolutionCtx`, `VarResolutionCtx`,
   goes through the imports, else the name is qualified with the current
   namespace. Hand it only written names: a resolved global `Exception` read
   through it inside `namespace App` is `App\Exception`.
-- **`class_loader`** (`Backend::resolved_class_loader_with`) looks the
-  name up as an FQN, in the index and then among the caller's own classes
+- **`class_loader`** (`Backend::resolved_class_loader_with`) takes an
+  `Fqn` and looks the name up as exactly that FQN, in the index and then among the caller's own classes
   (a re-parse of patched content holds classes the index does not). A miss
   is final: it is never retried against a file's imports or namespace.
 - **`source_imports`** is the block's `use` table, which
   `resolve_code_class_name` qualifies a name no class answers to with. It is
   `None` only where no file context exists; a miss then keeps its spelling.
 
-`class_lookup::load_resolved_name` looks a resolved name up as the explicit
-`\Name` with whichever loader it is given, so a source loader cannot read it
-through the imports. Every loader, a test's plain map included, has to accept
-that leading `\`. `resolve_class_fully` wraps its loader this way.
+The two loaders have distinct types (`class_lookup::ResolvedClassLoader`
+and `class_lookup::SourceClassLoader`), so handing one where the other is
+expected does not compile. `Fqn::new` strips a leading `\` once, so a
+resolved loader never sees one and no caller strips it by hand. Wrapping a
+written name in `Fqn::new` is the one remaining way to mix the two up; the
+module doc of `src/class_lookup.rs` says which loader entry point to use
+when.
 
 Rules for code that touches names:
 

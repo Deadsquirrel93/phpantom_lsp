@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use super::{VarQuery, enrich_builder_type_in_scope};
 use crate::atom::atom;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::php_type::PhpType;
 use crate::test_fixtures::make_class;
 
@@ -16,11 +17,16 @@ fn query<'a>(
     cursor_offset: u32,
     current_class: &'a ClassInfo,
     all_classes: &'a [Arc<ClassInfo>],
-    class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &'a ResolvedClassLoader<'a>,
 ) -> VarQuery<'a> {
     VarQuery::new(
         var_name,
-        FileCtx::new(content, all_classes, class_loader, class_loader),
+        FileCtx::new(
+            content,
+            all_classes,
+            class_loader,
+            crate::test_fixtures::fqn_source_loader(class_loader),
+        ),
         Some(current_class),
         cursor_offset,
     )
@@ -32,7 +38,8 @@ fn make_model(name: &str) -> ClassInfo {
     class
 }
 
-fn model_loader(name: &str) -> Option<Arc<ClassInfo>> {
+fn model_loader(name: Fqn<'_>) -> Option<Arc<ClassInfo>> {
+    let name = name.as_str();
     if name == "Illuminate\\Database\\Eloquent\\Model" {
         Some(Arc::new(make_class(
             "Illuminate\\Database\\Eloquent\\Model",
@@ -302,7 +309,8 @@ function test() {
         Arc::new(builder.clone()),
         Arc::new(factory.clone()),
     ];
-    let class_loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let class_loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         match name {
             "Processor" => Some(Arc::new(processor.clone())),
             "Builder" => Some(Arc::new(builder.clone())),
@@ -434,7 +442,8 @@ function test() {
     let factory_base_c = factory_base.clone();
     let model_base_c = model_base.clone();
     let has_factory_c = has_factory_trait.clone();
-    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+    let class_loader = move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         match name.trim_start_matches('\\') {
             "User" | "App\\Models\\User" => Some(Arc::new(user_c.clone())),
             "UserFactory" | "Database\\Factories\\UserFactory" => {
@@ -1164,7 +1173,8 @@ function test() {
 "#;
     let user = make_class("User");
     let all_classes: Vec<Arc<ClassInfo>> = vec![Arc::new(user.clone())];
-    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+    let class_loader = move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "User" {
             Some(Arc::new(make_class("User")))
         } else {
@@ -1403,7 +1413,8 @@ class LoggedConnection extends BaseConnector {
         Arc::new(base.clone()),
         Arc::new(logged.clone()),
     ];
-    let class_loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let class_loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         match name {
             "Response" => Some(Arc::new(response.clone())),
             "BaseConnector" => Some(Arc::new(base.clone())),
@@ -1631,7 +1642,8 @@ fn resolve_with_declared_symbols(content: &str, var_name: &str) -> String {
         .map(Arc::new)
         .collect();
     let functions = backend.parse_functions(content);
-    let class_loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let class_loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         let name = name.trim_start_matches('\\');
         classes
             .iter()
@@ -2253,7 +2265,8 @@ function run() {
     let mut end_node = make_class("ExecutionEndNode");
     end_node.parent_class = Some(atom("Node"));
     let all_classes: Vec<Arc<ClassInfo>> = vec![Arc::new(node.clone()), Arc::new(end_node.clone())];
-    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+    let class_loader = move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         match name {
             "Node" => Some(Arc::new(node.clone())),
             "ExecutionEndNode" => Some(Arc::new(end_node.clone())),
@@ -2293,7 +2306,8 @@ function test() {
 "#;
     let acc = make_class("Accumulator");
     let all_classes: Vec<Arc<ClassInfo>> = vec![Arc::new(acc.clone())];
-    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+    let class_loader = move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "Accumulator" {
             Some(Arc::new(make_class("Accumulator")))
         } else {

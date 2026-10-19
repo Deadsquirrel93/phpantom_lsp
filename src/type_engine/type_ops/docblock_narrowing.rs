@@ -18,6 +18,7 @@
 
 use std::sync::Arc;
 
+use crate::class_lookup::ResolvedClassLoader;
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::{ClassInfo, DocTypeSlot, FunctionInfo, UnverifiedDocType};
 
@@ -66,7 +67,7 @@ pub(crate) fn hint_names_classes(native: &PhpType) -> bool {
 /// `class_loader` takes resolved names.
 pub(crate) fn verify_class(
     class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<ClassInfo> {
     let mut verified: Option<ClassInfo> = None;
     for unverified in class.unverified_doc_types.iter() {
@@ -123,10 +124,7 @@ pub(crate) fn verify_class(
 
 /// [`verify_class`] for a function's own
 /// [`FunctionInfo::unverified_doc_types`].
-pub(crate) fn verify_function(
-    function: &mut FunctionInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) {
+pub(crate) fn verify_function(function: &mut FunctionInfo, class_loader: &ResolvedClassLoader<'_>) {
     let not_a_class = |name: &str| function.template_params.iter().any(|t| t == name);
     let losing: Vec<(DocTypeSlot, PhpType)> = function
         .unverified_doc_types
@@ -169,7 +167,7 @@ pub(crate) fn narrows_native(
     settled: &PhpType,
     native: &PhpType,
     not_a_class: &dyn Fn(&str) -> bool,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> bool {
     !hint_names_classes(native)
         || alternatives(settled)

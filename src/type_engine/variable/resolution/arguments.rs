@@ -7,6 +7,7 @@ use super::*;
 use mago_span::HasSpan;
 
 use crate::atom::{atom, bytes_to_str};
+use crate::class_lookup::Fqn;
 use crate::php_type::PhpType;
 use crate::type_engine::resolver::VarResolutionCtx;
 use crate::types::ResolvedType;
@@ -87,7 +88,7 @@ pub(crate) fn extract_native_type_from_rhs<'b>(
                     let owner =
                         crate::class_lookup::find_class_by_fqn(ctx.file.all_classes, &cls_name)
                             .cloned()
-                            .or_else(|| (ctx.file.class_loader)(&cls_name));
+                            .or_else(|| (ctx.file.class_loader)(Fqn::new(&cls_name)));
                     owner.and_then(|o| {
                         o.get_method(&method_name)
                             .and_then(|m| m.return_type.clone())

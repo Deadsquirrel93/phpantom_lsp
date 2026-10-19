@@ -20,7 +20,7 @@ use std::sync::Arc;
 
 use super::aliases::resolve_type_alias_typed;
 use crate::atom::atom;
-use crate::class_lookup::find_or_load_resolved;
+use crate::class_lookup::{ResolvedClassLoader, find_or_load_resolved};
 use crate::php_type::{PhpType, TypeKind, is_builtin_non_class_type};
 use crate::types::*;
 use crate::util::short_name;
@@ -34,7 +34,7 @@ pub(crate) fn resolve_property_types(
     prop_name: &str,
     class_info: &ClassInfo,
     all_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Vec<Arc<ClassInfo>> {
     // Resolve inheritance so that inherited (and generic-substituted)
     // properties are visible.  For example, if `ConfigWrapper extends
@@ -63,7 +63,7 @@ pub(crate) fn resolve_property_types(
 pub(crate) fn lookup_class_declaration(
     name: &str,
     all_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<Arc<ClassInfo>> {
     find_or_load_resolved(name, all_classes, class_loader)
 }
@@ -89,7 +89,7 @@ pub(crate) fn type_hint_to_classes_typed(
     ty: &PhpType,
     owning_class_name: &str,
     all_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Vec<Arc<ClassInfo>> {
     type_hint_to_classes_typed_depth(ty, owning_class_name, all_classes, class_loader, 0, false)
 }
@@ -109,7 +109,7 @@ pub(crate) fn type_hint_to_classes_typed_returned(
     ty: &PhpType,
     owning_class_name: &str,
     all_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Vec<Arc<ClassInfo>> {
     type_hint_to_classes_typed_depth(ty, owning_class_name, all_classes, class_loader, 0, true)
 }
@@ -125,7 +125,7 @@ pub(crate) fn resolved_types_for_hint(
     hint: crate::php_type::PhpType,
     owning_class_name: &str,
     all_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Vec<crate::types::ResolvedType> {
     let hint = if laravel::has_model_type_operator(&hint) && !owning_class_name.is_empty() {
         laravel::expand_model_type(
@@ -154,7 +154,7 @@ fn type_hint_to_classes_typed_depth(
     ty: &PhpType,
     owning_class_name: &str,
     all_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     depth: u8,
     produced: bool,
 ) -> Vec<Arc<ClassInfo>> {
@@ -360,7 +360,7 @@ fn resolve_named_type(
     generic_args: &[PhpType],
     owning_class_name: &str,
     all_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     depth: u8,
     produced: bool,
 ) -> Vec<Arc<ClassInfo>> {

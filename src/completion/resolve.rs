@@ -28,6 +28,7 @@ use serde::{Deserialize, Serialize};
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::class_lookup::Fqn;
 use crate::hover::{MemberKindForOrigin, find_declaring_class, hover_for_function};
 use crate::types::*;
 
@@ -178,12 +179,13 @@ impl Backend {
         let mut seen_declaring: Vec<String> = Vec::new();
 
         for class_name in &all_class_names {
-            let class_info: Option<Arc<ClassInfo>> = class_loader(class_name).or_else(|| {
-                ctx.classes
-                    .iter()
-                    .find(|c| c.fqn() == class_name.as_str())
-                    .cloned()
-            });
+            let class_info: Option<Arc<ClassInfo>> =
+                class_loader(Fqn::new(class_name)).or_else(|| {
+                    ctx.classes
+                        .iter()
+                        .find(|c| c.fqn() == class_name.as_str())
+                        .cloned()
+                });
 
             let Some(class_info) = class_info else {
                 continue;
@@ -291,7 +293,7 @@ impl Backend {
         content: &str,
     ) {
         let class_loader = self.resolved_class_loader(ctx);
-        if let Some(cls) = class_loader(&data.member_name) {
+        if let Some(cls) = class_loader(Fqn::new(&data.member_name)) {
             let hover = self.hover_for_class_info(&cls, &data.uri, content);
             if let Some(md) = extract_hover_markdown(hover) {
                 set_documentation(item, md);

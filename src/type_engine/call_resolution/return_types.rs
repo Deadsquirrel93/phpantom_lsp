@@ -12,11 +12,11 @@ mod literals;
 mod operands;
 
 use crate::atom::atom;
+use crate::class_lookup::{Fqn, ResolvedClassLoader, find_class_by_name};
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::Backend;
-use crate::class_lookup::find_class_by_name;
 use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::subject_expr::SubjectExpr;
 use crate::type_engine::variable::array_func_rules::{
@@ -56,7 +56,7 @@ pub(crate) struct MethodReturnCtx<'a> {
     /// All classes known in the current file.
     pub all_classes: &'a [Arc<ClassInfo>],
     /// Cross-file class resolution callback for already-resolved names.
-    pub class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    pub class_loader: &'a ResolvedClassLoader<'a>,
     /// Server state for project-wide answers.  See
     /// [`FileCtx::backend`](crate::type_engine::resolver::FileCtx::backend).
     pub backend: Option<&'a Backend>,
@@ -183,7 +183,7 @@ fn resolve_conditional_return_hint(
     template_subs: &HashMap<String, PhpType>,
     call_site: crate::type_engine::conditional_resolution::ConditionalClassContext<'_>,
     owner: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<PhpType> {
     let cond = method.conditional_return()?;
     let bound_cond = crate::type_engine::conditional_resolution::bind_callable_condition_templates(
@@ -242,7 +242,7 @@ impl Backend {
     pub(crate) fn configured_laravel_date_return(
         owner: &ClassInfo,
         method_name: &str,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        class_loader: &ResolvedClassLoader<'_>,
     ) -> Option<(Arc<ClassInfo>, PhpType)> {
         if !matches!(
             owner.fqn().as_str(),
@@ -253,7 +253,9 @@ impl Backend {
         let return_type = owner
             .get_method_ci(method_name)
             .and_then(|method| method.return_type.as_ref())?;
-        let date_class = class_loader(crate::virtual_members::laravel::CONFIGURED_DATE_CLASS_FQN)?;
+        let date_class = class_loader(Fqn::new(
+            crate::virtual_members::laravel::CONFIGURED_DATE_CLASS_FQN,
+        ))?;
         let return_type = replace_support_carbon_return(return_type, date_class.fqn().as_str())?;
 
         Some((date_class, return_type))
@@ -740,7 +742,7 @@ fn is_valid_virtual_narrowing(
     native_type: &PhpType,
     owner_class: &ClassInfo,
     all_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> bool {
     // `mixed` and `void` impose no constraint — any type is valid.
     if native_type.is_mixed() || native_type.is_void() {
@@ -787,7 +789,7 @@ fn is_type_subclass_of(
     candidate_type: &PhpType,
     ancestor_name: &str,
     all_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> bool {
     // Cannot extract a base name → not a class type → not a subclass.
     if candidate_type.base_name().is_none() {
@@ -795,8 +797,8 @@ fn is_type_subclass_of(
     }
 
     // Build a combined loader that checks local classes first.
-    let combined_loader = |name: &str| -> Option<Arc<ClassInfo>> {
-        find_class_by_name(all_classes, name)
+    let combined_loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        find_class_by_name(all_classes, &name)
             .cloned()
             .or_else(|| class_loader(name))
     };
@@ -804,7 +806,7 @@ fn is_type_subclass_of(
     // Check if the candidate can be resolved at all.  When it cannot,
     // give the benefit of the doubt (e.g. trust an @method tag).
     if let Some(base) = candidate_type.base_name()
-        && combined_loader(base).is_none()
+        && combined_loader(Fqn::new(base)).is_none()
     {
         return true;
     }

@@ -19,6 +19,7 @@ use mago_syntax::cst::literal::Literal;
 use mago_syntax::cst::statement::Statement;
 
 use crate::atom::bytes_to_str;
+use crate::class_lookup::ResolvedClassLoader;
 
 /// Diagnostic code used for argument type mismatch diagnostics.
 pub(crate) const TYPE_MISMATCH_ARGUMENT_CODE: &str = "type_mismatch_argument";
@@ -53,7 +54,7 @@ pub(super) fn has_strict_types(program: &Program<'_>) -> bool {
 pub(super) fn is_type_compatible(
     arg_type: &crate::php_type::PhpType,
     param_type: &crate::php_type::PhpType,
-    class_loader: &dyn Fn(&str) -> Option<std::sync::Arc<crate::types::ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     strict_types: bool,
 ) -> bool {
     use crate::virtual_members::laravel::{expand_model_type, has_model_type_operator};

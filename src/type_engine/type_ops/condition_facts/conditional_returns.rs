@@ -3,12 +3,11 @@
 //! have returned with such an argument, which narrows the argument after
 //! the call.
 
-use std::sync::Arc;
-
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
 use crate::atom::bytes_to_str;
+use crate::class_lookup::ResolvedClassLoader;
 use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::resolver::VarResolutionCtx;
 use crate::types::{ClassInfo, ParameterInfo, SharedVec};
@@ -158,7 +157,7 @@ pub(in crate::type_engine) fn never_ruled_out_members(
     return_type: &PhpType,
     param_name: &str,
     arg_ty: &PhpType,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Vec<PhpType> {
     let members = split_into_runtime_members(arg_ty);
     // A type with nothing to choose between says nothing: ruling its only
@@ -216,7 +215,7 @@ fn evaluate_conditional_for(
     ty: &PhpType,
     param_name: &str,
     arg_ty: &PhpType,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<PhpType> {
     let TypeKind::Conditional(cond) = ty.kind() else {
         return Some(ty.clone());
@@ -248,7 +247,7 @@ fn evaluate_conditional_for(
 fn condition_result_for_member(
     member: &PhpType,
     condition: &PhpType,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<bool> {
     if condition.is_true() || condition.is_false() {
         if member.is_true() || member.is_false() {

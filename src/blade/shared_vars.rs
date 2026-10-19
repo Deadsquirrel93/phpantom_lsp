@@ -24,6 +24,7 @@ use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
 use crate::Backend;
+use crate::class_lookup::Fqn;
 use crate::parser::with_parsed_program;
 use crate::php_type::PhpType;
 use crate::type_engine::resolver::{FileCtx, LendsLoaders, VarResolutionCtx};
@@ -247,7 +248,9 @@ impl Backend {
                             expr, &var_ctx,
                         )
                         .unwrap_or_else(PhpType::mixed);
-                    let ty = ty.resolve_names(&|name: &str| match resolved_class_loader(name) {
+                    let ty = ty.resolve_names(&|name: &str| match resolved_class_loader(Fqn::new(
+                        name,
+                    )) {
                         Some(class) => format!("\\{}", class.fqn()),
                         None => name.to_string(),
                     });

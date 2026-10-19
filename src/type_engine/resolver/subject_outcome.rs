@@ -5,6 +5,7 @@
 use std::sync::Arc;
 
 use crate::atom::atom;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::inheritance::resolve_property_type_hint;
 use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::subject_expr::SubjectExpr;
@@ -329,7 +330,7 @@ fn declared_return_type_of(
 /// that resolve successfully.
 fn check_unresolvable_class_name(
     raw_type: &PhpType,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<PhpType> {
     if raw_type.all_members_scalar() || raw_type.is_mixed() {
         return None;
@@ -338,7 +339,7 @@ fn check_unresolvable_class_name(
     let effective = raw_type.non_null_type().unwrap_or_else(|| raw_type.clone());
     let base = effective.base_name()?;
 
-    if class_loader(base).is_none() {
+    if class_loader(Fqn::new(base)).is_none() {
         Some(PhpType::named(atom(base)))
     } else {
         None

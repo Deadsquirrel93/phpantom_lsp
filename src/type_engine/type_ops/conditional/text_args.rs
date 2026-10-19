@@ -4,12 +4,12 @@
 //! resolved type.
 
 use std::borrow::Cow;
-use std::sync::Arc;
 
 use crate::atom::atom;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::php_type::{ConditionalType, PhpType, TypeKind};
 use crate::text_scan::split_top_level_commas;
-use crate::types::{ClassInfo, ParameterInfo};
+use crate::types::ParameterInfo;
 
 use super::arg_form::{condition_result_from_text, literal_condition_result};
 use super::without_args::try_resolve_with_template_default;
@@ -32,7 +32,7 @@ pub fn resolve_conditional_with_text_args_and_defaults(
     text_args: &str,
     var_resolver: VarClassStringResolver<'_>,
     class_ctx: ConditionalClassContext<'_>,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     tpl: &TemplateContext<'_>,
 ) -> Option<PhpType> {
     TextArgs {
@@ -55,7 +55,7 @@ struct TextArgs<'a> {
     text_args: &'a str,
     var_resolver: VarClassStringResolver<'a>,
     class_ctx: ConditionalClassContext<'a>,
-    class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &'a ResolvedClassLoader<'a>,
     tpl: &'a TemplateContext<'a>,
 }
 
@@ -388,7 +388,7 @@ impl TextArgs<'_> {
             None
         } else {
             class_string_bound_name.map(|name| {
-                if let Some(cls) = crate::class_lookup::load_resolved_name(name, class_loader) {
+                if let Some(cls) = class_loader(Fqn::new(name)) {
                     cls.fqn().to_string()
                 } else {
                     // Concrete class that can't be resolved
@@ -566,7 +566,7 @@ fn param_default_text(param: Option<&ParameterInfo>) -> Option<&str> {
 /// read as a literal value is left as written.
 fn condition_constants_as_values(
     condition: &PhpType,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     tpl: &TemplateContext<'_>,
 ) -> Option<PhpType> {
     let resolve = tpl.arg_type_resolver?;
@@ -579,7 +579,7 @@ fn condition_constants_as_values(
                 TypeKind::Named(name)
                     if !member.is_keyword()
                         && !tpl.params.contains(name)
-                        && class_loader(name).is_none() =>
+                        && class_loader(Fqn::new(name)).is_none() =>
                 {
                     resolve(name).filter(|ty| {
                         ty.as_literal().is_some() || ty.is_true() || ty.is_false() || ty.is_null()
@@ -613,7 +613,7 @@ fn decide_template_offset_condition(
     params: &[ParameterInfo],
     text_args: &str,
     tpl: &TemplateContext<'_>,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<bool> {
     let parsed = PhpType::try_parse(subject)?;
     let TypeKind::IndexAccess(base, index) = parsed.kind() else {
@@ -797,21 +797,18 @@ fn class_const_matches(
 ///
 /// A string names a class by its FQN at runtime, whatever namespace the call
 /// is written in, so it is looked up as a resolved name.
-fn class_named_by_string(
-    name: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> Option<String> {
+fn class_named_by_string(name: &str, class_loader: &ResolvedClassLoader<'_>) -> Option<String> {
     if name.is_empty() {
         return None;
     }
-    crate::class_lookup::load_resolved_name(name, class_loader).map(|cls| cls.fqn().to_string())
+    class_loader(Fqn::new(name)).map(|cls| cls.fqn().to_string())
 }
 
 /// [`class_named_by_string`] for the text-argument path, where the argument is
 /// still the quoted source text.
 fn class_named_by_quoted_string(
     arg_text: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<String> {
     let name = crate::util::unescape_php_string_literal(arg_text.trim())?;
     class_named_by_string(&name, class_loader)
@@ -819,8 +816,8 @@ fn class_named_by_quoted_string(
 
 /// The FQN of the class a resolved `name` names, or `name` itself when no
 /// class loads.
-fn resolved_class_fqn(name: &str, class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>) -> String {
-    crate::class_lookup::load_resolved_name(name, class_loader)
+fn resolved_class_fqn(name: &str, class_loader: &ResolvedClassLoader<'_>) -> String {
+    class_loader(Fqn::new(name))
         .map(|cls| cls.fqn().to_string())
         .unwrap_or_else(|| name.to_string())
 }

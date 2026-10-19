@@ -348,7 +348,7 @@ impl Backend {
             None => crate::type_engine::variable::forward_walk::build_diagnostic_scopes(
                 content,
                 &ctx.file.classes,
-                &class_loaders.as_dyn(),
+                &class_loaders.as_dyn_resolved(),
                 &source_class_loaders.as_dyn(),
                 &ctx.file.block_imports(),
                 Some(self),
@@ -359,7 +359,7 @@ impl Backend {
                 crate::type_engine::variable::forward_walk::build_diagnostic_scopes_for_offsets(
                     content,
                     &ctx.file.classes,
-                    &class_loaders.as_dyn(),
+                    &class_loaders.as_dyn_resolved(),
                     &source_class_loaders.as_dyn(),
                     &ctx.file.block_imports(),
                     Some(self),

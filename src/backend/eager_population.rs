@@ -21,6 +21,7 @@ use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 use crate::Backend;
+use crate::class_lookup::Fqn;
 
 /// How long the receiver warm-up may run before it stops where it is.
 ///
@@ -66,7 +67,7 @@ impl Backend {
             // `populate_from_sorted` fans the list out over its own
             // large-stack workers, so this needs no wrapper thread of
             // its own.
-            let class_loader = |name: &str| backend.find_or_load_class(name);
+            let class_loader = |name: Fqn<'_>| backend.find_or_load_class(&name);
             crate::virtual_members::populate_from_sorted(
                 &sorted_fqns,
                 &backend.resolved_class_cache,

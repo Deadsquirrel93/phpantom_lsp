@@ -154,6 +154,7 @@ impl Backend {
 
         let ctx = self.file_context_at(uri, cursor_offset);
         let class_loader = self.class_loader(&ctx);
+        let resolved_class_loader = self.resolved_class_loader(&ctx);
         let function_loader = self.function_loader(&ctx);
 
         let facts = analyse_body(
@@ -161,6 +162,7 @@ impl Backend {
             content,
             &ctx.classes,
             &class_loader,
+            &resolved_class_loader,
             Some(self),
             Some(&function_loader),
             &ctx.use_map,
@@ -171,8 +173,14 @@ impl Backend {
             return;
         }
 
-        let new_docblock =
-            build_updated_docblock(&info, &facts, &class_loader, &ctx.use_map, &ctx.namespace);
+        let new_docblock = build_updated_docblock(
+            &info,
+            &facts,
+            &class_loader,
+            &resolved_class_loader,
+            &ctx.use_map,
+            &ctx.namespace,
+        );
         if new_docblock == info.docblock_text {
             return;
         }

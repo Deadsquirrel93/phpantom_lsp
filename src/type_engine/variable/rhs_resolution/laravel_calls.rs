@@ -9,6 +9,7 @@ use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
 use crate::atom::bytes_to_str;
+use crate::class_lookup::Fqn;
 use crate::php_type::PhpType;
 use crate::types::{ClassInfo, ResolvedType};
 use crate::virtual_members::laravel::validated_shape;
@@ -39,7 +40,7 @@ pub(super) fn laravel_helper_call(
         let arg_texts = extract_arg_texts_from_ast(argument_list, ctx.file.content);
         if let Some(first_arg) = arg_texts.first()
             && let Some(alias) = crate::util::unescape_php_string_literal(first_arg.trim())
-            && let Some(cls) = (ctx.file.class_loader)(&alias)
+            && let Some(cls) = (ctx.file.class_loader)(Fqn::new(&alias))
         {
             return Some(ResolvedType::from_classes(vec![cls]));
         }
@@ -63,9 +64,9 @@ pub(super) fn laravel_helper_call(
     if matches!(
         normalized_func,
         "now" | "today" | "Illuminate\\Support\\now" | "Illuminate\\Support\\today"
-    ) && let Some(cls) =
-        (ctx.file.class_loader)(crate::virtual_members::laravel::CONFIGURED_DATE_CLASS_FQN)
-    {
+    ) && let Some(cls) = (ctx.file.class_loader)(Fqn::new(
+        crate::virtual_members::laravel::CONFIGURED_DATE_CLASS_FQN,
+    )) {
         return Some(ResolvedType::from_classes(vec![cls]));
     }
 
@@ -78,7 +79,8 @@ pub(super) fn laravel_helper_call(
         if crate::virtual_members::laravel::view_helper_returns_view(
             normalized_func,
             arg_texts.first().map(String::as_str).unwrap_or(""),
-        ) && let Some(cls) = (ctx.file.class_loader)(crate::virtual_members::laravel::VIEW_FQN)
+        ) && let Some(cls) =
+            (ctx.file.class_loader)(Fqn::new(crate::virtual_members::laravel::VIEW_FQN))
         {
             return Some(ResolvedType::from_classes(vec![cls]));
         }

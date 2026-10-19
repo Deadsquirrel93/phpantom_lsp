@@ -5,6 +5,7 @@
 use std::sync::Arc;
 
 use crate::Backend;
+use crate::class_lookup::ResolvedClassLoader;
 use crate::php_type::PhpType;
 use crate::type_engine::subject_expr::{BracketSegment, SubjectExpr};
 use crate::types::*;
@@ -195,7 +196,7 @@ fn resolved_array_access_type_to_resolved(
     resolved: PhpType,
     current_class: Option<&ClassInfo>,
     all_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Vec<ResolvedType> {
     let current_class_fqn = current_class.map(|c| c.fqn());
     let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(

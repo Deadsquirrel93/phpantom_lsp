@@ -10,10 +10,10 @@
 //! Consumers: deprecated diagnostics, find-references, code actions.
 
 use crate::atom::atom;
+use crate::class_lookup::{ResolvedClassLoader, find_class_at_offset};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::class_lookup::find_class_at_offset;
 use crate::names::resolve_to_fqn;
 use crate::php_type::PhpType;
 use crate::type_engine::resolver::{FileCtx, Loaders};
@@ -32,7 +32,7 @@ pub(crate) struct SubjectResolutionCtx<'a> {
     /// File content.
     pub content: &'a str,
     /// Class loader for already-resolved names.
-    pub class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    pub class_loader: &'a ResolvedClassLoader<'a>,
     /// See [`FileCtx::source_class_loader`](crate::type_engine::resolver::FileCtx::source_class_loader).
     pub source_class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     /// Server state for project-wide answers.  See

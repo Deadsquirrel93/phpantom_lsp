@@ -1,4 +1,5 @@
 use super::*;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::code_actions::render_docblock;
 use crate::php_type::TypeKind;
 
@@ -53,10 +54,13 @@ pub(crate) fn build_docblock_for_extraction(
     return_type_hint: &PhpType,
     raw_return_type: &PhpType,
     member_indent: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     use_map: &std::collections::HashMap<String, String>,
     file_namespace: &Option<String>,
 ) -> String {
+    // The extracted types come from the type engine, so every name in them
+    // is resolved.
+    let class_loader = &|name: &str| class_loader(Fqn::new(name));
     let mut tags: Vec<String> = Vec::new();
     let shorten = |ty: &PhpType| {
         ty.resolve_names(&|n| crate::names::shorten_from_fqn(n, use_map, file_namespace))

@@ -55,7 +55,7 @@ pub(in crate::type_engine) use written_names::WrittenNames;
 use std::sync::Arc;
 
 use crate::Backend;
-use crate::class_lookup::{find_class_by_name, is_self_or_static, resolve_class_keyword};
+use crate::class_lookup::{Fqn, find_class_by_name, is_self_or_static, resolve_class_keyword};
 use crate::inheritance::resolve_property_type_hint;
 use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::subject_expr::SubjectExpr;
@@ -267,7 +267,7 @@ fn resolve_target_classes_expr_inner(
             // Both are source-level references: PHP resolves an
             // unqualified name through the imports, else the current
             // namespace, never a global class of the same short name.
-            class_loader(&ctx.written_names().resolve_class(name))
+            class_loader(Fqn::new(&ctx.written_names().resolve_class(name)))
                 .map(ResolvedType::from_arc)
                 .into_iter()
                 .collect()
@@ -308,7 +308,7 @@ fn resolve_target_classes_expr_inner(
             if let Some(cls) = find_class_by_name(all_classes, &text) {
                 return vec![ResolvedType::from_arc(Arc::clone(cls))];
             }
-            class_loader(&text)
+            class_loader(Fqn::new(&text))
                 .map(ResolvedType::from_arc)
                 .into_iter()
                 .collect()
@@ -343,7 +343,7 @@ fn resolve_static_access_subject(
         // `Foo::` is a source-level reference: PHP resolves an
         // unqualified name through the imports, else the current
         // namespace, never a global class of the same short name.
-        class_loader(&ctx.written_names().resolve_class(class))
+        class_loader(Fqn::new(&ctx.written_names().resolve_class(class)))
             .into_iter()
             .collect()
     };
@@ -592,10 +592,10 @@ pub(in crate::type_engine) fn resolve_static_owner_class(
         resolve_self_static_class(rctx)
     } else if let Some(resolved_name) = resolve_class_keyword(class, rctx.current_class) {
         // parent — load via class_loader so we get the full parent ClassInfo
-        (rctx.file.class_loader)(&resolved_name)
+        (rctx.file.class_loader)(Fqn::new(&resolved_name))
     } else {
         let fqn = rctx.written_names().resolve_class(class);
-        (rctx.file.class_loader)(&fqn).or_else(|| {
+        (rctx.file.class_loader)(Fqn::new(&fqn)).or_else(|| {
             resolved_to_arcs(resolve_target_classes(
                 class,
                 crate::AccessKind::DoubleColon,

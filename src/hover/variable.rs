@@ -5,11 +5,10 @@
 //! parameters and scalar types.  Union types are shown as separate code
 //! blocks divided by a horizontal rule.
 
-use std::sync::Arc;
-
 use tower_lsp::lsp_types::Hover;
 
 use crate::Backend;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::php_type::PhpType;
 use crate::symbol_map::{SymbolSpan, VarDefKind};
 use crate::type_engine::resolver::FileCtx;
@@ -175,7 +174,7 @@ impl Backend {
 pub(super) fn build_variable_hover_body(
     var_name: &str,
     ty: &PhpType,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     template_line: Option<&str>,
 ) -> String {
     // A template bounded by a union is still the one template.
@@ -233,7 +232,7 @@ pub(super) fn build_variable_hover_body(
 /// from the FQN string itself.
 fn resolve_type_namespace_structured(
     ty: &PhpType,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<String> {
     // A template's name is not in any namespace, whatever its bound is.
     if ty.as_template_param().is_some() {
@@ -241,7 +240,7 @@ fn resolve_type_namespace_structured(
     }
     let base = ty.base_name()?;
 
-    if let Some(cls) = class_loader(base) {
+    if let Some(cls) = class_loader(Fqn::new(base)) {
         return cls
             .file_namespace
             .as_ref()

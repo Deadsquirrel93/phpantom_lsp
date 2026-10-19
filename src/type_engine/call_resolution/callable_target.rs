@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use crate::Backend;
 use crate::atom::atom;
-use crate::class_lookup::{find_class_at_offset, resolve_class_keyword};
+use crate::class_lookup::{Fqn, ResolvedClassLoader, find_class_at_offset, resolve_class_keyword};
 use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::subject_expr::SubjectExpr;
 use crate::types::*;
@@ -438,12 +438,12 @@ impl Backend {
     /// `Gift` instead of the raw `T`.
     fn resolve_constructor_callable(
         class_name: &str,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        class_loader: &ResolvedClassLoader<'_>,
         cache: &crate::virtual_members::ResolvedClassCache,
         args_text: Option<&str>,
         rctx: &ResolutionCtx<'_>,
     ) -> Option<ResolvedCallableTarget> {
-        let ci = class_loader(class_name)?;
+        let ci = class_loader(Fqn::new(class_name))?;
         let merged = crate::virtual_members::resolve_class_fully_cached(&ci, class_loader, cache);
         let ctor = match merged.get_method("__construct") {
             Some(c) => c.clone(),
@@ -618,7 +618,7 @@ impl Backend {
             namespace,
         );
         let current_class = find_class_at_offset(&file_ctx.classes, cursor_offset);
-        let laravel_macro_this_resolver = self.laravel_macro_this_resolver(&class_loader);
+        let laravel_macro_this_resolver = self.laravel_macro_this_resolver(&resolved_class_loader);
 
         let rctx = self.resolution_ctx_at(
             FileCtx::new(

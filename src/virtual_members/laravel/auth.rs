@@ -29,6 +29,7 @@
 //!   not itself guarantee.
 
 use crate::atom::atom;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use std::sync::Arc;
 
 use crate::Backend;
@@ -73,7 +74,7 @@ pub(crate) fn patch_auth_user_class(backend: &Backend, loaded: Arc<ClassInfo>) -
 
     // Context-free FQN loader for the compatibility filter: configured models
     // and the `Authenticatable` contract are fully-qualified here.
-    let loader = |name: &str| backend.find_or_load_class(name);
+    let loader = |name: Fqn<'_>| backend.find_or_load_class(&name);
     let Some(model_type) = resolve_auth_user_type(backend, None, &loader) else {
         return loaded;
     };
@@ -117,7 +118,7 @@ fn refine_user_return_type(method: &mut MethodInfo, model_type: &PhpType) -> boo
 pub(crate) fn resolve_auth_user_type(
     backend: &Backend,
     guard: Option<&str>,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<PhpType> {
     let key = guard.unwrap_or("").to_string();
     if let Some(cached) = backend.laravel.auth_user_type_cache.read().get(&key) {
@@ -145,7 +146,7 @@ pub(crate) fn resolve_auth_user_type(
 fn compute_auth_user_type(
     backend: &Backend,
     guard: Option<&str>,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<PhpType> {
     let content = read_auth_config(backend)?;
     let tree = parse_config_tree(&content)?;
@@ -161,7 +162,7 @@ fn compute_auth_user_type(
 /// configures, so widening the floor to them would only add framework noise.
 fn project_auth_implementors(
     backend: &Backend,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Vec<String> {
     // Resolve implementors first so its internal index reads are released
     // before we take the `fqn_uri_index` read guard below.  `project_only`
@@ -216,12 +217,9 @@ fn read_auth_config(backend: &Backend) -> Option<String> {
 /// Resolve a configured model name to its canonical FQN, keeping it only if it
 /// is a subtype of [`AUTHENTICATABLE_FQN`].  This both filters misreads and
 /// canonicalizes short names written against a `use` statement.
-fn resolve_model_fqn(
-    name: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> Option<String> {
+fn resolve_model_fqn(name: &str, class_loader: &ResolvedClassLoader<'_>) -> Option<String> {
     let normalized = name.trim_start_matches('\\');
-    let class_info = class_loader(normalized)?;
+    let class_info = class_loader(Fqn::new(normalized))?;
     if crate::class_lookup::is_subtype_of(&class_info, AUTHENTICATABLE_FQN, class_loader) {
         Some(class_info.fqn().to_string())
     } else {

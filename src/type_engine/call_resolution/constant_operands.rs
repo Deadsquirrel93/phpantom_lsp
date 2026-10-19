@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::atom::Atom;
+use crate::class_lookup::Fqn;
 use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::resolver::ResolutionCtx;
 use crate::types::ClassInfo;
@@ -278,5 +279,5 @@ fn load_operand_class(class_part: &str, ctx: &ResolutionCtx<'_>) -> Option<Arc<C
         .unwrap_or_else(|| class_part.strip_prefix('\\').unwrap_or(class_part));
     crate::class_lookup::find_class_by_fqn(ctx.file.all_classes, class_name)
         .cloned()
-        .or_else(|| (ctx.file.class_loader)(class_name))
+        .or_else(|| (ctx.file.class_loader)(Fqn::new(class_name)))
 }

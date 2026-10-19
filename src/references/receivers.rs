@@ -316,7 +316,7 @@ impl Backend {
         });
         if needs_variable_scopes {
             let class_loaders = self.resolved_class_loaders(&file_ctx);
-            let class_loaders = class_loaders.as_dyn();
+            let class_loaders = class_loaders.as_dyn_resolved();
             let source_class_loaders = self.class_loaders(&file_ctx);
             let source_class_loaders = source_class_loaders.as_dyn();
             let function_loader = self.function_loader(&file_ctx);

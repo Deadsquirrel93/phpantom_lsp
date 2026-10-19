@@ -3,6 +3,7 @@
 //! component namespaces, and Blade directives.
 
 use crate::Backend;
+use crate::class_lookup::Fqn;
 
 impl Backend {
     pub(crate) fn build_provider_resources(&self, providers: &super::LaravelProviders) {
@@ -190,7 +191,7 @@ impl Backend {
     /// templates have.
     fn blade_compiler_methods(&self) -> Option<std::collections::HashSet<String>> {
         let class = self.find_or_load_class("Illuminate\\View\\Compilers\\BladeCompiler")?;
-        let loader = |name: &str| self.find_or_load_class(name);
+        let loader = |name: Fqn<'_>| self.find_or_load_class(&name);
         let merged = crate::inheritance::resolve_class_with_inheritance(&class, &loader);
         Some(
             merged
@@ -350,7 +351,7 @@ impl Backend {
         let Some(class) = self.find_or_load_class(fqn) else {
             return Default::default();
         };
-        let loader = |name: &str| self.find_or_load_class(name);
+        let loader = |name: Fqn<'_>| self.find_or_load_class(&name);
         let merged = crate::inheritance::resolve_class_with_inheritance(&class, &loader);
         crate::virtual_members::laravel::ClassContext::from_class(&merged)
     }

@@ -56,6 +56,7 @@ use mago_syntax::cst::*;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::class_lookup::Fqn;
 use crate::parser::with_parsed_program;
 use crate::scope_collector::{
     AccessKind, ByRefCallKind, ByRefResolver, FrameKind, ScopeBody, ScopeMap,
@@ -197,7 +198,7 @@ impl Backend {
         )?;
         let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
             &cls,
-            &|name| self.find_or_load_class(name),
+            &|name: Fqn<'_>| self.find_or_load_class(&name),
             Some(&self.resolved_class_cache),
         );
         Some(by_ref_positions(

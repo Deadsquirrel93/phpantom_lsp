@@ -20,6 +20,7 @@ use mago_syntax::cst::sequence::TokenSeparatedSequence;
 use mago_syntax::cst::*;
 
 use crate::atom::{atom, bytes_to_str};
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::resolver::ResolutionCtx;
 use crate::virtual_members::laravel::ELOQUENT_BUILDER_FQN;
@@ -510,13 +511,13 @@ pub(in crate::type_engine) fn resolve_receiver_types(
 pub(in crate::type_engine) fn find_owner_by_name(
     fqn: &str,
     all_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<Arc<ClassInfo>> {
     all_classes
         .iter()
         .find(|c| c.fqn().eq_ignore_ascii_case(fqn))
         .map(Arc::clone)
-        .or_else(|| class_loader(fqn))
+        .or_else(|| class_loader(Fqn::new(fqn)))
 }
 
 /// Every class the class expression of a static call or `new` names.
@@ -677,7 +678,7 @@ fn resolve_closure_this_class(
         return Some(Arc::clone(cls));
     }
 
-    let resolved = (ctx.file.class_loader)(type_str)?;
+    let resolved = (ctx.file.class_loader)(Fqn::new(type_str))?;
     Some(crate::virtual_members::resolve_class_fully_maybe_cached(
         &resolved,
         ctx.file.class_loader,
@@ -705,7 +706,7 @@ fn resolve_closure_this_class(
 pub(in crate::type_engine) fn inferred_type_is_more_specific(
     explicit_hint: &PhpType,
     inferred: &PhpType,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> bool {
     if let TypeKind::Union(parts) = inferred.kind() {
         return parts
@@ -737,7 +738,7 @@ pub(in crate::type_engine) fn inferred_type_is_more_specific(
 
     let explicit_base = explicit_base.trim_start_matches('\\');
     explicit_base.eq_ignore_ascii_case(inferred_base.trim_start_matches('\\'))
-        || class_loader(explicit_base).is_some_and(|explicit| {
+        || class_loader(Fqn::new(explicit_base)).is_some_and(|explicit| {
             crate::class_lookup::is_subtype_of_typed(
                 inferred,
                 &PhpType::named(explicit.fqn()),
@@ -784,7 +785,7 @@ fn describes_elements(ty: &PhpType, allow_iterable: bool) -> bool {
 /// not bare `Builder`.
 pub(in crate::type_engine) fn build_receiver_self_type(
     receiver: &ClassInfo,
-    _class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    _class_loader: &ResolvedClassLoader<'_>,
 ) -> PhpType {
     let fqn = receiver.fqn();
 

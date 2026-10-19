@@ -1,6 +1,9 @@
 use super::text_args::class_const_condition_parts;
 use super::*;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
+use crate::types::ClassInfo;
 use crate::types::ClassLikeKind;
+use std::sync::Arc;
 
 /// A single required parameter with the given name (including `$`).
 fn param(name: &str) -> ParameterInfo {
@@ -35,7 +38,7 @@ fn resolve_word_count(text_args: &str) -> Option<String> {
         "($format is 0 ? int : ($format is 1 ? list<string> : ($format is 2 ? array<int, string> : list<string>|int)))",
     );
     let params = [param("$string"), param_with_default("$format", "0")];
-    let loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>> = &|_| None;
+    let loader: &ResolvedClassLoader<'_> = &|_| None;
     let tpl = TemplateContext::with_params(&[]);
     resolve_conditional_with_text_args_and_defaults(
         &cond,
@@ -102,7 +105,7 @@ fn non_literal_argument_leaves_value_condition_undecided() {
 fn resolve_pathinfo(text_args: &str) -> Option<String> {
     let cond = PhpType::parse("($flags is 15 ? Shape : string)");
     let params = [param("$path"), param_with_default("$flags", "PATHINFO_ALL")];
-    let loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>> = &|_| None;
+    let loader: &ResolvedClassLoader<'_> = &|_| None;
     let resolver = |t: &str| match t.trim() {
         "PATHINFO_ALL" => Some(PhpType::literal_int("15")),
         "PATHINFO_FILENAME" => Some(PhpType::literal_int("8")),
@@ -165,7 +168,7 @@ fn omitted_default_self_const_resolves_against_declaring_class() {
         param("$id"),
         param_with_default("$mode", "self::EXCEPTION_ON_INVALID_REFERENCE"),
     ];
-    let loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>> = &|_| None;
+    let loader: &ResolvedClassLoader<'_> = &|_| None;
     // Fully qualified, so a call site inside a namespace does not read
     // the declaring class relative to its own.
     let resolver = |t: &str| match t.trim() {
@@ -205,7 +208,7 @@ fn omitted_default_self_const_resolves_against_declaring_class() {
 #[test]
 fn boolean_literal_arguments_decide_is_true_conditions() {
     let params = [param("$value"), param_with_default("$flag", "false")];
-    let loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>> = &|_| None;
+    let loader: &ResolvedClassLoader<'_> = &|_| None;
     let tpl = TemplateContext::with_params(&[]);
     let resolve = |cond: &str, text_args: &str| {
         resolve_conditional_with_text_args_and_defaults(
@@ -241,7 +244,7 @@ fn boolean_literal_arguments_decide_is_true_conditions() {
 #[test]
 fn is_true_condition_needs_a_resolved_boolean_value() {
     let params = [param("$flag")];
-    let loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>> = &|_| None;
+    let loader: &ResolvedClassLoader<'_> = &|_| None;
     let resolve = |resolved: PhpType| {
         let resolver = |_: &str| Some(resolved.clone());
         let tpl = TemplateContext {
@@ -301,7 +304,7 @@ fn resolve_fetch(text_args: &str) -> Option<String> {
         "($mode is PDO::FETCH_OBJ ? \\stdClass|false : ($mode is PDO::FETCH_ASSOC ? array<string, mixed>|false : mixed))",
     );
     let params = [param("$mode")];
-    let loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>> = &|_| None;
+    let loader: &ResolvedClassLoader<'_> = &|_| None;
     let tpl = TemplateContext::with_params(&[]);
     resolve_conditional_with_text_args_and_defaults(
         &cond,
@@ -380,7 +383,7 @@ fn class_const_condition_parts_rejects_non_constants() {
 fn union_scalar_condition_with_string_literal_takes_then() {
     let cond = PhpType::parse("($key is (array|string) ? array-key : ObjectKey)");
     let params = [param("$key")];
-    let loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>> = &|_| None;
+    let loader: &ResolvedClassLoader<'_> = &|_| None;
     let tpl = TemplateContext::with_params(&[]);
     let resolved = resolve_conditional_with_text_args_and_defaults(
         &cond,
@@ -402,7 +405,7 @@ fn union_scalar_condition_with_string_literal_takes_then() {
 fn is_string_condition_uses_resolved_arg_type() {
     let cond = PhpType::parse("($subject is string ? string : list<string>)");
     let params = [param("$subject")];
-    let loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>> = &|_| None;
+    let loader: &ResolvedClassLoader<'_> = &|_| None;
     let resolver = |t: &str| {
         if t == "$obj->toHtml()" {
             Some(PhpType::named(atom("string")))
@@ -433,7 +436,7 @@ fn is_string_condition_uses_resolved_arg_type() {
 #[test]
 fn scalar_conditions_classify_resolved_int_and_float_literals() {
     let params = [param("$value")];
-    let loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>> = &|_| None;
+    let loader: &ResolvedClassLoader<'_> = &|_| None;
 
     for (condition_type, literal, expected) in [
         ("int", PhpType::literal_int("1"), "IntBranch"),
@@ -474,7 +477,7 @@ fn scalar_conditions_classify_resolved_int_and_float_literals() {
 fn undecidable_is_string_condition_unions_branches() {
     let cond = PhpType::parse("($subject is string ? string : list<string>)");
     let params = [param("$subject")];
-    let loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>> = &|_| None;
+    let loader: &ResolvedClassLoader<'_> = &|_| None;
     // Resolver that cannot resolve the argument (returns None).
     let resolver = |_: &str| None;
     let tpl = TemplateContext {
@@ -505,7 +508,7 @@ fn undecidable_is_string_condition_unions_branches() {
 fn closure_arg_refutes_array_or_string_condition() {
     let cond = PhpType::parse("($groupBy is (array|string) ? array-key : Value)");
     let params = [param("$groupBy")];
-    let loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>> = &|_| None;
+    let loader: &ResolvedClassLoader<'_> = &|_| None;
     let resolver = |_: &str| Some(PhpType::named(atom("Closure")));
     let tpl = TemplateContext {
         defaults: None,
@@ -533,7 +536,7 @@ fn closure_arg_refutes_array_or_string_condition() {
 fn is_string_condition_without_resolver_falls_to_else() {
     let cond = PhpType::parse("($subject is string ? string : list<string>)");
     let params = [param("$subject")];
-    let loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>> = &|_| None;
+    let loader: &ResolvedClassLoader<'_> = &|_| None;
     let tpl = TemplateContext::with_params(&[]);
     let resolved = resolve_conditional_with_text_args_and_defaults(
         &cond,
@@ -555,7 +558,7 @@ fn nested_conditional_in_generic_is_evaluated() {
     let ty = PhpType::parse("Collection<($key is (array|string) ? array-key : ObjectKey), Value>");
     assert!(ty.contains_conditional());
     let params = [param("$key")];
-    let loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>> = &|_| None;
+    let loader: &ResolvedClassLoader<'_> = &|_| None;
     let tpl = TemplateContext::with_params(&[]);
     let evaluated = evaluate_nested_conditionals_text(
         &ty,
@@ -582,7 +585,7 @@ fn nested_template_default_conditional_collapses_fully() {
         "Collection<($g is (array|string) ? array-key : (T is \\UnitEnum ? array-key : (T is \\Stringable ? string : T))), V>",
     );
     let params = [param("$g")];
-    let loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>> = &|_| None;
+    let loader: &ResolvedClassLoader<'_> = &|_| None;
     // The closure return type binds T to a nullable string key. As in the
     // real call path, template substitution runs before the evaluator, so
     // every `T` in a branch position is already concrete; only the `T is
@@ -625,7 +628,8 @@ fn nested_template_default_conditional_collapses_fully() {
 /// A loader answering for an Eloquent-shaped hierarchy: `Collection`
 /// implements `Arrayable`, `Order` extends `Model`, and nothing else
 /// relates to anything.
-fn eloquent_loader(name: &str) -> Option<Arc<ClassInfo>> {
+fn eloquent_loader(name: Fqn<'_>) -> Option<Arc<ClassInfo>> {
+    let name = name.as_str();
     let class = |name: &str, parent: Option<&str>, interfaces: &[&str], kind| ClassInfo {
         name: atom(name),
         parent_class: parent.map(atom),
@@ -648,7 +652,7 @@ fn eloquent_loader(name: &str) -> Option<Arc<ClassInfo>> {
 fn resolve_find(arg_type: Option<PhpType>) -> Option<String> {
     let cond = PhpType::parse("($id is array<mixed>|Arrayable ? Collection : Order|null)");
     let params = [param("$id")];
-    let loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>> = &eloquent_loader;
+    let loader: &ResolvedClassLoader<'_> = &eloquent_loader;
     let resolver = |_: &str| arg_type.clone();
     let tpl = TemplateContext {
         defaults: None,
@@ -700,7 +704,7 @@ fn class_condition_is_decided_by_the_resolved_argument_type() {
 fn resolve_is_null(text_args: &str, arg_type: Option<PhpType>) -> Option<String> {
     let cond = PhpType::parse("($callback is null ? Proxy : Value)");
     let params = [param_with_default("$callback", "null")];
-    let loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>> = &|_| None;
+    let loader: &ResolvedClassLoader<'_> = &|_| None;
     let resolver = |_: &str| arg_type.clone();
     let tpl = TemplateContext {
         defaults: None,
@@ -743,7 +747,7 @@ fn is_null_condition_follows_the_resolved_argument_type() {
 fn negated_null_condition_swaps_its_branches() {
     let cond = PhpType::parse("($callback is not null ? Value : Proxy)");
     let params = [param_with_default("$callback", "null")];
-    let loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>> = &|_| None;
+    let loader: &ResolvedClassLoader<'_> = &|_| None;
     let tpl = TemplateContext::with_params(&[]);
     let resolve = |text_args: &str| {
         resolve_conditional_with_text_args_and_defaults(
@@ -768,7 +772,7 @@ fn negated_null_condition_swaps_its_branches() {
 fn value_condition_is_refuted_by_another_kind_of_argument() {
     let cond = PhpType::parse("($into is 'array' ? array<Data> : Collection)");
     let params = [param("$items"), param_with_default("$into", "null")];
-    let loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>> = &|_| None;
+    let loader: &ResolvedClassLoader<'_> = &|_| None;
     let resolver = |_: &str| Some(PhpType::null());
     let tpl = TemplateContext {
         defaults: None,
@@ -799,7 +803,7 @@ fn value_condition_is_refuted_by_another_kind_of_argument() {
 fn template_subject_is_decided_through_its_parameter_binding() {
     let cond = PhpType::parse("(B is true ? Sync : Async)");
     let params = [param("$id"), param_with_default("$wait", "true")];
-    let loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>> = &|_| None;
+    let loader: &ResolvedClassLoader<'_> = &|_| None;
     let bindings = [(atom("B"), atom("$wait"))];
     let tpl = TemplateContext {
         defaults: None,

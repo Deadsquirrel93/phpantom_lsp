@@ -2,11 +2,11 @@
 //! attributes and their array entries, scopes, timestamp constants,
 //! Builder and facade forwarding, and macro registration sites.
 
-use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 
 use super::{MemberKind, MemberLookup};
 use crate::Backend;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::definition::point_location;
 use crate::types::*;
 use crate::virtual_members::ResolvedClassCache;
@@ -65,7 +65,7 @@ impl Backend {
     pub(super) fn find_facade_forwarded_method(
         class: &ClassInfo,
         member_name: &str,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        class_loader: &ResolvedClassLoader<'_>,
         cache: Option<&ResolvedClassCache>,
     ) -> Option<(ClassInfo, String)> {
         let concrete = facade_concrete_class(class, class_loader, cache)?;
@@ -137,7 +137,7 @@ impl Backend {
     pub(super) fn find_builder_forwarded_method(
         class: &ClassInfo,
         member_name: &str,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        class_loader: &ResolvedClassLoader<'_>,
     ) -> Option<(ClassInfo, String)> {
         if !extends_eloquent_model(class, class_loader) {
             return None;
@@ -146,7 +146,7 @@ impl Backend {
         let builder_fqn = custom_builder_fqn(class, class_loader)
             .unwrap_or_else(|| ELOQUENT_BUILDER_FQN.to_string());
 
-        let builder = class_loader(&builder_fqn)?;
+        let builder = class_loader(Fqn::new(&builder_fqn))?;
         let (declaring_class, fqn) =
             Self::find_declaring_class(&builder, member_name, class_loader)?;
 
@@ -178,7 +178,7 @@ impl Backend {
         resolved_candidate: &ClassInfo,
         raw_class: &ClassInfo,
         member_name: &str,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        class_loader: &ResolvedClassLoader<'_>,
     ) -> Option<(ClassInfo, String, String)> {
         // Only applies to the Eloquent Builder class.
         let raw_fqn = raw_class.fqn();
@@ -236,7 +236,7 @@ impl Backend {
             })?;
 
         // Load the model and verify it extends Eloquent Model.
-        let model = class_loader(&model_name)?;
+        let model = class_loader(Fqn::new(&model_name))?;
         if !extends_eloquent_model(&model, class_loader) {
             return None;
         }

@@ -1,4 +1,5 @@
 use super::*;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 
 /// What a member path's declaration promises, ignoring anything the walk
 /// has recorded about the path itself: the type a property goes back to
@@ -268,19 +269,15 @@ fn resolve_member_key_type(
 /// `array<string, Foo>` passes, `T[]` does not.  An unevaluated type
 /// operator (`key-of<X>`, `X[K]`) is excluded whatever it names, since its
 /// meaning is still waiting on the operand.
-fn hint_says_what_it_says(
-    hint: &PhpType,
-    class_loader: &dyn Fn(&str) -> Option<std::sync::Arc<crate::types::ClassInfo>>,
-) -> bool {
+fn hint_says_what_it_says(hint: &PhpType, class_loader: &ResolvedClassLoader<'_>) -> bool {
     !hint.contains_unevaluated_operator() && every_name_is_known(hint, class_loader)
 }
 
 /// Whether every class-like name in `hint` is a keyword or loads.
-fn every_name_is_known(
-    hint: &PhpType,
-    class_loader: &dyn Fn(&str) -> Option<std::sync::Arc<crate::types::ClassInfo>>,
-) -> bool {
-    let known = |name: &str| crate::php_type::is_keyword_type(name) || class_loader(name).is_some();
+fn every_name_is_known(hint: &PhpType, class_loader: &ResolvedClassLoader<'_>) -> bool {
+    let known = |name: &str| {
+        crate::php_type::is_keyword_type(name) || class_loader(Fqn::new(name)).is_some()
+    };
     match hint.kind() {
         TypeKind::Named(name) | TypeKind::StaticType(name) | TypeKind::ThisType(name) => {
             known(name)

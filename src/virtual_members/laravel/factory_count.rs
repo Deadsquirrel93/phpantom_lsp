@@ -25,6 +25,7 @@ use mago_span::HasSpan;
 use mago_syntax::cst::{Argument, ArgumentList, Call, ClassLikeMemberSelector, Expression};
 
 use crate::atom::{atom, bytes_to_str};
+use crate::class_lookup::Fqn;
 use crate::php_type::PhpType;
 use crate::text_scan::split_top_level_commas;
 use crate::type_engine::resolver::ResolutionCtx;
@@ -549,7 +550,7 @@ fn resolve_for_count(
     // may already be a merged class, so the own-member check goes through
     // the loader, which hands back the class as parsed.
     let fqn = factory.fqn();
-    if (ctx.file.class_loader)(fqn.as_str())
+    if (ctx.file.class_loader)(Fqn::new(fqn.as_str()))
         .is_some_and(|raw| raw.get_method_ci(method_name).is_some())
     {
         return None;

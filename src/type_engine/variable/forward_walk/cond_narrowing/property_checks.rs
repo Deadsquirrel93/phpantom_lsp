@@ -1,4 +1,5 @@
 use super::*;
+use crate::class_lookup::ResolvedClassLoader;
 
 /// A check on `subject`'s `property` that a union member may be unable
 /// to pass.
@@ -38,11 +39,7 @@ pub(super) enum ExactValue {
 impl PropertyTest {
     /// Report whether a member declaring `prop_type` for the property
     /// could have reached the branch this check guards.
-    fn admits(
-        &self,
-        prop_type: &PhpType,
-        class_loader: &dyn Fn(&str) -> Option<Arc<crate::types::ClassInfo>>,
-    ) -> bool {
+    fn admits(&self, prop_type: &PhpType, class_loader: &ResolvedClassLoader<'_>) -> bool {
         match self {
             PropertyTest::Guard { kind, expect_match } => condition_facts::guard_outcome_possible(
                 prop_type,

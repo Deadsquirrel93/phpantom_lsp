@@ -1,4 +1,5 @@
 use super::*;
+use crate::class_lookup::Fqn;
 
 /// Remove every class in `classes` from what `var_name` could hold, and
 /// record each exclusion so a later check knows the branch ruled it out.
@@ -110,7 +111,9 @@ fn opaque_named_alternatives(
             let TypeKind::Named(name) = member.kind() else {
                 return None;
             };
-            if crate::php_type::is_keyword_type(name) || (ctx.file.class_loader)(name).is_some() {
+            if crate::php_type::is_keyword_type(name)
+                || (ctx.file.class_loader)(Fqn::new(name)).is_some()
+            {
                 return None;
             }
             if !names.contains(member) {

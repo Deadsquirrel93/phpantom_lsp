@@ -19,6 +19,7 @@ use mago_syntax::walker::Walker;
 use tower_lsp::lsp_types::Position;
 
 use crate::atom::{atom, bytes_to_str};
+use crate::class_lookup::{Fqn, ResolvedClassLoader, SourceClassLoader};
 use crate::completion::source::comment_position::{docblock_start_at, position_to_byte_offset};
 use crate::php_type::PhpType;
 use crate::type_engine::resolver::{FileCtx, Loaders, VarResolutionCtx};
@@ -28,7 +29,9 @@ use crate::types::{ClassInfo, FunctionLoader, PerBlock};
 /// What the analysis resolves the names and calls in a body with.
 pub(crate) struct ThrowsContext<'a> {
     /// Resolves a class name as written in the file to its [`ClassInfo`].
-    pub class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    pub class_loader: &'a SourceClassLoader<'a>,
+    /// Loads a class by its already-resolved name.
+    pub resolved_class_loader: &'a ResolvedClassLoader<'a>,
     /// Resolves a function name to its [`FunctionInfo`](crate::types::FunctionInfo).
     pub function_loader: FunctionLoader<'a>,
     /// Use-statement map for the current file (short name → FQN).
@@ -58,12 +61,14 @@ pub(crate) fn find_uncaught_throw_types_with_context(
 ) -> Vec<PhpType> {
     let no_imports = HashMap::new();
     let no_class = |_: &str| None;
+    let no_resolved_class = |_: Fqn<'_>| None;
     let fallback;
     let ctx = match ctx {
         Some(ctx) => ctx,
         None => {
             fallback = ThrowsContext {
                 class_loader: &no_class,
+                resolved_class_loader: &no_resolved_class,
                 function_loader: None,
                 use_map: &no_imports,
                 local_classes: &[],
@@ -72,8 +77,6 @@ pub(crate) fn find_uncaught_throw_types_with_context(
             &fallback
         }
     };
-    let resolved_class_loader =
-        |name: &str| crate::class_lookup::load_resolved_name(name, ctx.class_loader);
     with_documented_function_body(content, position, |body, content, trivia| {
         // Every receiver is typed from one walk of the body (see
         // `record_scopes`), and a callee's inferred return type is worked
@@ -83,7 +86,7 @@ pub(crate) fn find_uncaught_throw_types_with_context(
         let mut analysis = Analysis {
             content,
             ctx,
-            resolved_class_loader: &resolved_class_loader,
+            resolved_class_loader: ctx.resolved_class_loader,
             placeholder: crate::class_lookup::class_context_placeholder(
                 content,
                 body.span().start.offset,
@@ -237,7 +240,7 @@ struct Analysis<'a, 'c> {
     content: &'a str,
     ctx: &'a ThrowsContext<'c>,
     /// Loads a class by the name the analysis resolved it to.
-    resolved_class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    resolved_class_loader: &'a ResolvedClassLoader<'a>,
     /// What `$this` and `self` are read as outside a class.
     placeholder: ClassInfo,
     /// Each exception class a site can throw, with the site's offset.
@@ -311,7 +314,7 @@ impl Analysis<'_, '_> {
     }
 
     fn canonical(&self, fqn: &str) -> String {
-        (self.resolved_class_loader)(fqn)
+        (self.resolved_class_loader)(Fqn::new(fqn))
             .map(|cls| cls.fqn().to_string())
             .unwrap_or_else(|| fqn.trim_start_matches('\\').to_string())
     }
@@ -349,7 +352,7 @@ impl Analysis<'_, '_> {
     }
 
     fn merged(&self, class_name: &str) -> Option<Arc<ClassInfo>> {
-        let cls = (self.resolved_class_loader)(class_name)?;
+        let cls = (self.resolved_class_loader)(Fqn::new(class_name))?;
         Some(crate::virtual_members::resolve_class_fully_maybe_cached(
             &cls,
             self.resolved_class_loader,
@@ -425,7 +428,7 @@ impl Analysis<'_, '_> {
         if catch_fqn.eq_ignore_ascii_case(thrown) || catch_fqn.eq_ignore_ascii_case("Throwable") {
             return true;
         }
-        match (self.resolved_class_loader)(thrown) {
+        match (self.resolved_class_loader)(Fqn::new(thrown)) {
             Some(thrown_class) => crate::class_lookup::is_subtype_of(
                 &thrown_class,
                 catch_fqn,

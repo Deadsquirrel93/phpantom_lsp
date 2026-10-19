@@ -13,11 +13,12 @@ use mago_syntax::cst::variable::Variable;
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
+use crate::class_lookup::Fqn;
 use crate::code_actions::cursor_context::{FunctionKinds, FunctionLike, find_enclosing_function};
 use crate::parser::with_parsed_program;
 use crate::php_type::PhpType;
 use crate::return_collection::collect_returns;
-use crate::type_engine::resolver::{FileCtx, Loaders, SourceImports, VarResolutionCtx};
+use crate::type_engine::resolver::{FileCtx, Loaders, VarResolutionCtx};
 use crate::type_engine::variable::iterable_elements::resolve_expression_type;
 use crate::types::{ClassInfo, FunctionLoader};
 
@@ -78,7 +79,9 @@ impl Backend {
             .cloned()
             .unwrap_or_default();
         let block = self.import_block_at(uri, offset as usize);
-        let class_loader = self.class_loader_with(&local_classes, &block.use_map, &block.namespace);
+        let class_loader = self.resolved_class_loader_with(&local_classes);
+        let source_class_loader =
+            self.class_loader_with(&local_classes, &block.use_map, &block.namespace);
         let function_loader = self.function_loader_with(
             None,
             &block.use_map,
@@ -87,12 +90,10 @@ impl Backend {
         );
 
         infer_return_type_at(
-            content,
+            FileCtx::new(content, &local_classes, &class_loader, &source_class_loader)
+                .with_imports(Some(&block.use_map))
+                .with_backend(Some(self)),
             offset,
-            &local_classes,
-            &class_loader,
-            Some(&block.use_map),
-            Some(self),
             Some(&function_loader),
             self_as_marker,
         )
@@ -130,17 +131,18 @@ impl Backend {
 ///
 /// The function inferred is the innermost function, method, closure or
 /// arrow function whose declaration contains `offset`.
-#[allow(clippy::too_many_arguments)]
 fn infer_return_type_at(
-    content: &str,
+    file: FileCtx<'_>,
     offset: u32,
-    local_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    source_imports: SourceImports<'_>,
-    backend: Option<&Backend>,
     function_loader: FunctionLoader<'_>,
     self_as_marker: bool,
 ) -> Option<InferredReturnType> {
+    let FileCtx {
+        content,
+        all_classes: local_classes,
+        class_loader,
+        ..
+    } = file;
     let enclosing_class = local_classes.iter().find(|c| {
         !c.name.starts_with("__anonymous@") && offset >= c.start_offset && offset <= c.end_offset
     });
@@ -152,10 +154,6 @@ fn infer_return_type_at(
             &no_class
         }
     };
-    // `class_loader` resolves names as written in source; the types the
-    // engine hands back are already resolved.
-    let resolved_class_loader =
-        |name: &str| crate::class_lookup::load_resolved_name(name, class_loader);
 
     let (mut return_types, has_bare_return, has_return_with_value) =
         with_parsed_program(content, "fix_return_type_infer", |program, _content| {
@@ -193,19 +191,12 @@ fn infer_return_type_at(
 
                 let ctx = VarResolutionCtx {
                     loaders: Loaders::with_function(function_loader),
-                    ..VarResolutionCtx::new(
-                        "",
-                        FileCtx::new(content, local_classes, &resolved_class_loader, class_loader)
-                            .with_imports(source_imports)
-                            .with_backend(backend),
-                        enclosing_class,
-                        start as u32,
-                    )
+                    ..VarResolutionCtx::new("", file, enclosing_class, start as u32)
                 };
 
                 let ty = resolve_expression_type(expr, &ctx).unwrap_or_else(PhpType::mixed);
                 let ty = ty.resolve_names(&|name: &str| {
-                    if let Some(cls) = resolved_class_loader(name) {
+                    if let Some(cls) = class_loader(Fqn::new(name)) {
                         cls.fqn().to_string()
                     } else {
                         name.to_string()
@@ -306,21 +297,13 @@ fn is_this_variable(expr: &Expression<'_>) -> bool {
 /// This is the entry point for docblock generation (`enrichment_plain`
 /// replacement for `@return`); it delegates to [`infer_return_type_at`].
 pub(crate) fn enrichment_return_type(
-    content: &str,
+    file: FileCtx<'_>,
     decl_offset: u32,
-    local_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    source_imports: SourceImports<'_>,
-    backend: Option<&Backend>,
     function_loader: FunctionLoader<'_>,
 ) -> Option<PhpType> {
     let inferred = infer_return_type_at(
-        content,
+        file,
         decl_offset,
-        local_classes,
-        class_loader,
-        source_imports,
-        backend,
         function_loader,
         // Docblock generation wants a concrete written type, not a `$this`
         // marker, so resolve `return $this` to the enclosing class.

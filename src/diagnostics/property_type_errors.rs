@@ -22,7 +22,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
-use crate::class_lookup::find_class_at_offset;
+use crate::class_lookup::{Fqn, find_class_at_offset};
 use crate::parser::{for_each_nested_statement_list, with_parsed_program};
 use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::resolver::{FileCtx, VarResolutionCtx};
@@ -203,7 +203,7 @@ fn check_expression_for_property_assignment(expr: &Expression<'_>, ctx: &mut Pro
             if name.contains("__anonymous@") {
                 return name.to_string();
             }
-            if let Some(cls) = resolved_class_loader(name) {
+            if let Some(cls) = resolved_class_loader(Fqn::new(name)) {
                 cls.fqn().to_string()
             } else {
                 name.to_string()
@@ -248,7 +248,7 @@ fn check_expression_for_property_assignment(expr: &Expression<'_>, ctx: &mut Pro
         if name.contains("__anonymous@") {
             return name.to_string();
         }
-        if let Some(cls) = resolved_class_loader(name) {
+        if let Some(cls) = resolved_class_loader(Fqn::new(name)) {
             cls.fqn().to_string()
         } else {
             name.to_string()

@@ -14,6 +14,7 @@ use crate::Backend;
 use crate::ParseErrorEntry;
 use crate::atom::Atom;
 use crate::ci_map::CiMap;
+use crate::class_lookup::Fqn;
 use crate::names::OwnedResolvedNames;
 use crate::symbol_map::{LaravelStringDependency, SymbolMap};
 use crate::types::{ClassInfo, DefineInfo, FunctionInfo, NamespaceSpan};
@@ -872,7 +873,8 @@ impl Backend {
             crate::toposort::toposort_classes(iter)
         };
 
-        let class_loader = |name: &str| -> Option<Arc<ClassInfo>> { self.find_or_load_class(name) };
+        let class_loader =
+            |name: Fqn<'_>| -> Option<Arc<ClassInfo>> { self.find_or_load_class(&name) };
         crate::virtual_members::populate_from_sorted(
             &sorted,
             &self.resolved_class_cache,

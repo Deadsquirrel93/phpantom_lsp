@@ -9,6 +9,7 @@ use mago_syntax::cst::*;
 
 use crate::Backend;
 use crate::atom::{atom, bytes_to_str, literal_bytes_to_str};
+use crate::class_lookup::Fqn;
 use crate::php_type::{LiteralValue, PhpType, TypeKind};
 use crate::types::ResolvedType;
 
@@ -497,7 +498,7 @@ pub(crate) fn class_string_inner_binding(
         {
             return None;
         }
-        let fqn = match (ctx.file.class_loader)(content) {
+        let fqn = match (ctx.file.class_loader)(Fqn::new(content)) {
             Some(cls) => cls.fqn().to_string(),
             None => content.to_string(),
         };

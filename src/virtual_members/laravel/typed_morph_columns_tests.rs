@@ -1,5 +1,6 @@
 use super::*;
 use crate::atom::atom;
+use crate::class_lookup::Fqn;
 use crate::test_fixtures::make_class;
 use crate::type_engine::resolver::FileCtx;
 
@@ -115,8 +116,17 @@ fn morph_column_cache_rejects_missing_changed_and_outdated_sources() {
 
 #[test]
 fn morph_columns_reject_untyped_and_missing_models() {
-    let loader = |_: &str| None;
-    let ctx = ResolutionCtx::new(FileCtx::new("", &[], &loader, &loader), None, 0);
+    let loader = |_: Fqn<'_>| None;
+    let ctx = ResolutionCtx::new(
+        FileCtx::new(
+            "",
+            &[],
+            &loader,
+            crate::test_fixtures::fqn_source_loader(&loader),
+        ),
+        None,
+        0,
+    );
     let map = symbol_map("<?php Comment::where('subject_type', 'post');");
     let site = &map.morph_column_sites[0];
     for ty in [

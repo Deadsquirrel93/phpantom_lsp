@@ -21,12 +21,10 @@
 
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity};
 
-use std::sync::Arc;
-
 use crate::Backend;
 use crate::blade::signature;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::php_type::PhpType;
-use crate::types::ClassInfo;
 
 use super::helpers::make_diagnostic;
 
@@ -132,12 +130,12 @@ impl Backend {
 
 /// Whether every class name the type mentions names a class that can be
 /// read.
-fn classes_resolve(ty: &PhpType, class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>) -> bool {
+fn classes_resolve(ty: &PhpType, class_loader: &ResolvedClassLoader<'_>) -> bool {
     // `resolve_names` visits exactly the class-like names in the type tree,
     // leaving keywords (`string`, `array`, …) alone.
     let resolved = std::cell::Cell::new(true);
     ty.resolve_names(&|name: &str| {
-        if class_loader(name).is_none() {
+        if class_loader(Fqn::new(name)).is_none() {
             resolved.set(false);
         }
         name.to_string()

@@ -34,6 +34,7 @@ use tower_lsp::lsp_types::*;
 use super::cursor_context::{CursorContext, MemberContext, find_cursor_context};
 use crate::Backend;
 use crate::atom::bytes_to_str;
+use crate::class_lookup::Fqn;
 use crate::code_actions::{CodeActionData, make_code_action_data};
 use crate::text_position::{byte_range_to_lsp_range, offset_to_position};
 use crate::types::{ClassInfo, Visibility};
@@ -244,7 +245,7 @@ impl Backend {
         // Find the enclosing ClassInfo from the uri_classes_index.
         let enclosing = self.class_at_offset(uri, cursor_offset)?;
 
-        let class_loader = |name: &str| self.find_or_load_class(name);
+        let class_loader = |name: Fqn<'_>| self.find_or_load_class(&name);
         let mut best_level: Option<u8> = None;
         let mut interfaces = enclosing.interfaces.clone();
         for (_, parent) in crate::inheritance::ancestors(&enclosing, &class_loader) {

@@ -10,6 +10,7 @@ use mago_syntax::cst::*;
 use super::array_func_rules::{ArrayFuncArgs, array_func_element_type, array_func_raw_type};
 
 use crate::atom::{atom, bytes_to_str, literal_bytes_to_str};
+use crate::class_lookup::Fqn;
 use crate::parser::extract_hint_type;
 use crate::php_type::PhpType;
 
@@ -862,7 +863,7 @@ fn infer_callback_return_type(
     let seed_member = |ty: &PhpType| -> ResolvedType {
         match ty
             .base_name()
-            .and_then(|name| (ctx.file.class_loader)(name))
+            .and_then(|name| (ctx.file.class_loader)(Fqn::new(name)))
         {
             Some(cls) => ResolvedType::from_both_arc(ty.clone(), cls),
             None => ResolvedType::from_type_string(ty.clone()),

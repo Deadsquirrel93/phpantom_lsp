@@ -21,6 +21,7 @@
 //! other consumer sees the base class it always did, which is why the
 //! generic form travels through the shared pipeline unchanged.
 
+use crate::class_lookup::Fqn;
 use crate::php_type::{PhpType, TypeKind, is_builtin_non_class_type};
 use crate::type_engine::resolver::ResolutionCtx;
 use crate::types::{ClassInfo, ResolvedType};
@@ -198,7 +199,7 @@ fn reflected_property_type(receiver: &[ResolvedType], ctx: &ResolutionCtx<'_>) -
         Some((*class_name, name.string_content()?.into_owned()))
     })?;
 
-    let class = (ctx.file.class_loader)(&class_name)?;
+    let class = (ctx.file.class_loader)(Fqn::new(&class_name))?;
     let resolved = crate::virtual_members::resolve_class_fully_maybe_cached(
         &class,
         ctx.file.class_loader,

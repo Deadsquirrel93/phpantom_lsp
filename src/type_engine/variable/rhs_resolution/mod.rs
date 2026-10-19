@@ -60,6 +60,7 @@ use std::sync::Arc;
 use mago_syntax::cst::*;
 
 use crate::atom::bytes_to_str;
+use crate::class_lookup::ResolvedClassLoader;
 use crate::php_type::PhpType;
 use crate::types::{ClassInfo, ResolvedType};
 
@@ -143,7 +144,7 @@ pub(super) fn runtime_named_member_type() -> Vec<ResolvedType> {
 fn resolved_type_with_lookup(
     ty: PhpType,
     all_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> ResolvedType {
     if let Some(base) = ty.base_name() {
         let base = base.strip_prefix('\\').unwrap_or(base);

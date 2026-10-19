@@ -15,6 +15,7 @@ use std::sync::Arc;
 
 use crate::Backend;
 use crate::atom::{Atom, AtomMap, atom};
+use crate::class_lookup::Fqn;
 use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::resolver::ResolutionCtx;
 use crate::type_engine::variable::rhs_resolution::{
@@ -518,7 +519,7 @@ fn bare_wrapper_default(
     if !crate::util::short_name(name).eq_ignore_ascii_case(crate::util::short_name(wrapper_name)) {
         return None;
     }
-    let cls = (ctx.file.class_loader)(name)?;
+    let cls = (ctx.file.class_loader)(Fqn::new(name))?;
     let offset = crate::inheritance::generic_arg_offset(&cls, arity.max(1));
     let param = cls.template_params.get(offset + tpl_position)?;
     cls.template_param_defaults.get(param).cloned()
@@ -536,7 +537,7 @@ fn wrapper_constructor_template(
     if !rest.starts_with(char::is_whitespace) {
         return None;
     }
-    let wrapper_cls = (ctx.file.class_loader)(wrapper_name).or_else(|| {
+    let wrapper_cls = (ctx.file.class_loader)(Fqn::new(wrapper_name)).or_else(|| {
         ctx.file
             .all_classes
             .iter()

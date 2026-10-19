@@ -4,6 +4,7 @@
 use std::sync::Arc;
 
 use crate::Backend;
+use crate::class_lookup::Fqn;
 use crate::types::ClassInfo;
 use crate::virtual_members::laravel::source_may_declare_pivot_relationship;
 
@@ -98,7 +99,7 @@ impl Backend {
                     .flat_map(|(uri, list)| list.iter().map(move |c| (uri.clone(), Arc::clone(c))))
                     .collect()
             };
-            let loader = |name: &str| self.find_or_load_class(name);
+            let loader = |name: Fqn<'_>| self.find_or_load_class(&name);
             crate::virtual_members::laravel::build_pivot_index(&classes, &loader)
         } else {
             crate::virtual_members::laravel::LaravelPivotIndex::default()

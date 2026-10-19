@@ -20,6 +20,7 @@
 //! `Backend`.
 
 use crate::atom::atom;
+use crate::class_lookup::ResolvedClassLoader;
 use std::sync::Arc;
 
 use crate::completion::source::code_context::CodeContext;
@@ -641,7 +642,7 @@ pub(crate) fn try_chained_array_access_with_candidates<'a>(
     segments: &[BracketSegment],
     current_class: Option<&ClassInfo>,
     all_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<PhpType> {
     let current_class_fqn = current_class.map(ClassInfo::fqn);
     let current_class_name = current_class_fqn.as_deref().unwrap_or("");
@@ -673,7 +674,7 @@ fn walk_array_segments(
     segments: &[BracketSegment],
     current_class_name: &str,
     all_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<PhpType> {
     // Expand type aliases before walking segments.  The raw type may
     // be an alias name like `UserData` that resolves to

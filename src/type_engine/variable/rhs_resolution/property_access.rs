@@ -12,6 +12,7 @@ use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
 use crate::atom::{Atom, atom, bytes_to_str};
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::parser::with_parsed_program;
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::{ClassInfo, ResolvedType};
@@ -70,7 +71,7 @@ fn resolve_property_with_hint(
     prop_name: &str,
     owner: &ClassInfo,
     all_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Vec<ResolvedType> {
     let type_hint = crate::inheritance::resolve_property_type_hint(owner, prop_name, class_loader);
     let resolved = crate::type_engine::type_resolution::resolve_property_types(
@@ -328,7 +329,7 @@ fn narrowed_property_read(
             ctx.file.source_class_loader,
             ctx.file.source_imports,
         )
-        && let Some(enum_cls) = class_loader(&enum_name)
+        && let Some(enum_cls) = class_loader(Fqn::new(&enum_name))
         && let Some(literal) = crate::type_engine::call_resolution::enum_case_property_literal(
             &enum_cls,
             bytes_to_str(case.value),
@@ -396,7 +397,7 @@ fn narrowed_property_read(
 fn fits_declared_type(
     assigned: &PhpType,
     declared: &PhpType,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> bool {
     // Structural check covers scalars, unions, intersections, nullable,
     // generic, etc.
@@ -405,7 +406,7 @@ fn fits_declared_type(
     }
     // Nominal check: if both are class-like, walk the class hierarchy.
     if let Some(assigned_base) = assigned.base_name()
-        && let Some(cls) = class_loader(assigned_base)
+        && let Some(cls) = class_loader(Fqn::new(assigned_base))
         && let Some(declared_base) = declared.base_name()
     {
         return crate::class_lookup::is_subtype_of(&cls, declared_base, class_loader);

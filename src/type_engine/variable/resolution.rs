@@ -9,12 +9,11 @@
 //! sits on a declaration, `@template` bounds and `@param` docblocks, and
 //! what a call does with its arguments.
 
-use std::sync::Arc;
-
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
 use crate::atom::{atom, bytes_to_str};
+use crate::class_lookup::ResolvedClassLoader;
 use crate::parser::with_parsed_program;
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::{ClassInfo, ResolvedType};
@@ -74,7 +73,7 @@ pub(super) fn enrich_builder_type_in_scope(
     method_name: &str,
     has_scope_attr: bool,
     current_class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<PhpType> {
     use crate::virtual_members::laravel::{ELOQUENT_BUILDER_FQN, extends_eloquent_model};
 

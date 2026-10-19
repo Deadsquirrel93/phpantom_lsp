@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::Backend;
+use crate::class_lookup::Fqn;
 use crate::php_type::PhpType;
 use crate::types::{ClassInfo, FunctionInfo};
 use crate::util::short_name;
@@ -40,9 +41,7 @@ impl Backend {
         if function.unverified_doc_types.is_empty() {
             return;
         }
-        let loader = |name: &str| {
-            self.find_indexed_class(&PhpType::parse(name.strip_prefix('\\').unwrap_or(name)))
-        };
+        let loader = |name: Fqn<'_>| self.find_indexed_class(&PhpType::parse(&name));
         crate::type_engine::type_ops::docblock_narrowing::verify_function(function, &loader);
     }
 

@@ -15,6 +15,7 @@ use mago_syntax::walker::Walker;
 
 use super::{ForwardWalkCtx, ScopeState};
 use crate::atom::bytes_to_str;
+use crate::class_lookup::Fqn;
 use crate::parser::extract_hint_type;
 use crate::php_type::PhpType;
 use crate::types::{ClassInfo, ClassLikeKind};
@@ -123,7 +124,7 @@ impl ThrowPoints {
 /// either side could be implemented by a subclass of the other, and a class
 /// that cannot be loaded is unknown, so both count as a possible match.
 fn may_catch(catch_name: &str, thrown: &str, ctx: &ForwardWalkCtx<'_>) -> bool {
-    let Some(catch_class) = (ctx.file.class_loader)(catch_name) else {
+    let Some(catch_class) = (ctx.file.class_loader)(Fqn::new(catch_name)) else {
         return true;
     };
     let Some(thrown_class) = load_fqn(thrown, ctx) else {
@@ -146,7 +147,7 @@ fn may_catch(catch_name: &str, thrown: &str, ctx: &ForwardWalkCtx<'_>) -> bool {
 /// A backslash-free name there is a global class, so it must not go
 /// through the current file's `use` map the way a name typed in source does.
 fn load_fqn(name: &str, ctx: &ForwardWalkCtx<'_>) -> Option<Arc<ClassInfo>> {
-    crate::class_lookup::load_resolved_name(name, ctx.file.class_loader)
+    (ctx.file.class_loader)(Fqn::new(name))
 }
 
 struct Collect<'c, 'w> {
@@ -209,7 +210,7 @@ impl Collect<'_, '_> {
     }
 
     fn merged_class(&self, class_name: &str) -> Option<Arc<ClassInfo>> {
-        let cls = (self.ctx.file.class_loader)(class_name)?;
+        let cls = (self.ctx.file.class_loader)(Fqn::new(class_name))?;
         Some(crate::virtual_members::resolve_class_fully_maybe_cached(
             &cls,
             self.ctx.file.class_loader,
@@ -324,7 +325,7 @@ impl<'ast, 'arena> ThrowSiteSink<'ast, 'arena> for Collect<'_, '_> {
         match classes {
             Some(classes) => {
                 for name in classes {
-                    match (self.ctx.file.class_loader)(&name) {
+                    match (self.ctx.file.class_loader)(Fqn::new(&name)) {
                         Some(cls) => self.points.add_class(cls.fqn().to_string()),
                         None => self.points.implicit = true,
                     }

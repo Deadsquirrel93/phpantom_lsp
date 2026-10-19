@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::Backend;
+use crate::class_lookup::{ResolvedClassLoader, SourceClassLoader};
 
 use crate::php_type::PhpType;
 use crate::type_engine::variable::forward_walk::{ExprTypes, ScopeProofs};
@@ -327,13 +328,13 @@ pub(crate) struct FileCtx<'a> {
     /// All classes known in the current file.
     pub all_classes: &'a [Arc<ClassInfo>],
     /// Cross-file class resolution callback for already-resolved names.
-    pub class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    pub class_loader: &'a ResolvedClassLoader<'a>,
     /// Cross-file class resolution callback for names as written in
     /// source (`new Foo`, `Foo::bar()`, `@var Foo`), which resolves them
     /// through the file's imports.  [`class_loader`](Self::class_loader)
     /// is for already-resolved names, where a bare `Redis` is the global
     /// class even when the file imports another `Redis`.
-    pub source_class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    pub source_class_loader: &'a SourceClassLoader<'a>,
     /// The `use` imports of the namespace block the cursor is in, which
     /// [`resolve_code_class_name`](crate::names::resolve_code_class_name)
     /// qualifies a written name no class answers to with.  `None` where
@@ -355,8 +356,8 @@ impl<'a> FileCtx<'a> {
     pub(crate) fn new(
         content: &'a str,
         all_classes: &'a [Arc<ClassInfo>],
-        class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-        source_class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        class_loader: &'a ResolvedClassLoader<'a>,
+        source_class_loader: &'a SourceClassLoader<'a>,
     ) -> Self {
         Self {
             content,
@@ -405,6 +406,7 @@ impl<'a> FileCtx<'a> {
             cursor_offset,
             self.source_imports,
             self.source_class_loader,
+            self.class_loader,
         )
     }
 }

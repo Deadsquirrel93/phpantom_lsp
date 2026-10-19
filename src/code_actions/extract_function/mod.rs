@@ -13,7 +13,6 @@
 // whole shared import surface in with a single `use super::*;`.
 pub(crate) use mago_span::HasSpan;
 pub(crate) use mago_syntax::cst::*;
-pub(crate) use std::sync::Arc;
 pub(crate) use tower_lsp::lsp_types::*;
 
 pub(crate) use crate::Backend;
@@ -31,7 +30,6 @@ pub(crate) use crate::php_type::PhpType;
 pub(crate) use crate::scope_collector::ScopeMap;
 use crate::text_position::{find_line_end, find_line_start, offset_to_position};
 pub(crate) use crate::type_engine::resolver::Loaders;
-pub(crate) use crate::types::ClassInfo;
 
 mod codegen;
 mod context;

@@ -32,6 +32,7 @@ use mago_syntax::cst::statement::Statement;
 
 use crate::Backend;
 use crate::atom::{Atom, atom};
+use crate::class_lookup::Fqn;
 use crate::parser::with_parsed_program;
 use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::conditional_resolution::{
@@ -129,7 +130,7 @@ impl OutParamCallee {
                 (fi.name_offset != 0).then_some((uri, fi.name_offset))
             }
             Self::Method(cls, name) => {
-                let loader = |n: &str| backend.find_or_load_class(n);
+                let loader = |n: Fqn<'_>| backend.find_or_load_class(&n);
                 let declaring = crate::hover::find_declaring_class(
                     cls,
                     name,

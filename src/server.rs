@@ -1079,6 +1079,7 @@ impl LanguageServer for Backend {
             let offset = crate::text_position::position_to_offset(&content, position);
             let ctx = backend.file_context_at(&u, offset);
             let class_loader = backend.class_loader(&ctx);
+            let resolved_class_loader = backend.resolved_class_loader(&ctx);
             let function_loader = backend.function_loader(&ctx);
 
             crate::completion::phpdoc::generation::try_generate_docblock_on_enter(
@@ -1088,6 +1089,7 @@ impl LanguageServer for Backend {
                 &ctx.namespace,
                 &ctx.classes,
                 &class_loader,
+                &resolved_class_loader,
                 Some(&backend),
                 Some(&function_loader),
                 &u,

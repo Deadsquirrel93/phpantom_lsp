@@ -4,12 +4,12 @@
 //! when its declaration says too little.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use mago_syntax::cst::*;
 
 use crate::Backend;
 use crate::atom::atom;
+use crate::class_lookup::ResolvedClassLoader;
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::{ClassInfo, MethodInfo, ResolvedType};
 
@@ -39,7 +39,7 @@ pub(super) fn resolve_conditional_return_for_call(
     var_resolver: crate::type_engine::conditional_resolution::VarClassStringResolver<'_>,
     call_site: crate::type_engine::conditional_resolution::ConditionalClassContext<'_>,
     owner: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     template_subs: &HashMap<String, PhpType>,
     arg_type_resolver: crate::type_engine::conditional_resolution::ArgTypeResolver<'_>,
     replace_self: impl Fn(&PhpType) -> PhpType,

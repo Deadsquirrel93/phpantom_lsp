@@ -8,10 +8,11 @@ use std::sync::Arc;
 use mago_span::HasSpan;
 
 use crate::atom::bytes_to_str;
+use crate::class_lookup::ResolvedClassLoader;
 use crate::parser::with_parsed_program;
 use crate::type_engine::resolver::{FileCtx, Loaders};
 use crate::types::ClassInfo;
-use crate::types::{BlockClassLoaders, BlockImports};
+use crate::types::{BlockClassLoaders, BlockImports, BlockResolvedClassLoaders};
 
 #[cfg(test)]
 thread_local! {
@@ -44,7 +45,7 @@ pub(crate) fn test_body_walks() -> usize {
 pub(crate) fn build_diagnostic_scopes(
     content: &str,
     local_classes: &[Arc<ClassInfo>],
-    class_loaders: &BlockClassLoaders<'_>,
+    class_loaders: &BlockResolvedClassLoaders<'_>,
     source_class_loaders: &BlockClassLoaders<'_>,
     block_imports: &BlockImports<'_>,
     backend: Option<&crate::Backend>,
@@ -97,7 +98,7 @@ pub(crate) fn build_diagnostic_scopes(
 pub(crate) fn build_diagnostic_scopes_for_offsets(
     content: &str,
     local_classes: &[Arc<ClassInfo>],
-    class_loaders: &BlockClassLoaders<'_>,
+    class_loaders: &BlockResolvedClassLoaders<'_>,
     source_class_loaders: &BlockClassLoaders<'_>,
     block_imports: &BlockImports<'_>,
     backend: Option<&crate::Backend>,
@@ -150,7 +151,7 @@ fn scopes_populated() -> bool {
 fn walk_file_for_scopes(
     content: &str,
     local_classes: &[Arc<ClassInfo>],
-    class_loaders: &BlockClassLoaders<'_>,
+    class_loaders: &BlockResolvedClassLoaders<'_>,
     source_class_loaders: &BlockClassLoaders<'_>,
     block_imports: &BlockImports<'_>,
     backend: Option<&crate::Backend>,
@@ -462,13 +463,13 @@ pub(crate) struct DiagnosticWalkCtx<'a> {
     content: &'a str,
     local_classes: &'a [Arc<ClassInfo>],
     /// The loader for the `namespace` block being walked.
-    class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &'a ResolvedClassLoader<'a>,
     /// The block's loader for names as written in source.
     source_class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     /// The block's `use` imports.
     source_imports: &'a std::collections::HashMap<String, String>,
     /// Every block's loader, to switch to at a block boundary.
-    class_loaders: &'a BlockClassLoaders<'a>,
+    class_loaders: &'a BlockResolvedClassLoaders<'a>,
     source_class_loaders: &'a BlockClassLoaders<'a>,
     block_imports: &'a BlockImports<'a>,
     backend: Option<&'a crate::Backend>,

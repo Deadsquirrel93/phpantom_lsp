@@ -1,4 +1,5 @@
 use super::*;
+use crate::class_lookup::Fqn;
 
 /// Apply `@phpstan-assert-if-true` / `@phpstan-assert-if-false` narrowing
 /// from a function or static/instance method call used as a condition.
@@ -116,9 +117,7 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
             };
             // Resolve the receiver to a class, handling `self`, `static`,
             // `parent`, and subclass names.
-            let Some(class_info) = ctx
-                .written_names()
-                .static_receiver_class(static_call.class, ctx.file.class_loader)
+            let Some(class_info) = ctx.written_names().static_receiver_class(static_call.class)
             else {
                 return;
             };
@@ -358,7 +357,7 @@ fn resolve_receiver_class(
     if let TypeKind::Intersection(members) = rt.type_string.kind() {
         return members
             .iter()
-            .find_map(|member| (ctx.file.class_loader)(&member.to_string()));
+            .find_map(|member| (ctx.file.class_loader)(Fqn::new(&member.to_string())));
     }
-    (ctx.file.class_loader)(&rt.type_string.to_string())
+    (ctx.file.class_loader)(Fqn::new(&rt.type_string.to_string()))
 }

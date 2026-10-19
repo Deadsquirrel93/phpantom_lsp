@@ -8,6 +8,7 @@ use std::sync::Arc;
 use mago_span::HasSpan;
 
 use crate::atom::{atom, bytes_to_str};
+use crate::class_lookup::Fqn;
 use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::type_ops::condition_facts;
 
@@ -977,7 +978,7 @@ fn untouched_property_keys(
     }
     let classes: Vec<Arc<crate::types::ClassInfo>> = subject_class_names(subject, scope, ctx)
         .iter()
-        .filter_map(|name| (ctx.file.class_loader)(name))
+        .filter_map(|name| (ctx.file.class_loader)(Fqn::new(name)))
         .collect();
     if classes.is_empty() {
         return Vec::new();
@@ -1024,7 +1025,7 @@ fn inherits_method(cls: &crate::types::ClassInfo, method: &str, ctx: &ForwardWal
     let Some(parent) = cls
         .parent_class
         .as_ref()
-        .and_then(|p| (ctx.file.class_loader)(p))
+        .and_then(|p| (ctx.file.class_loader)(Fqn::new(p)))
     else {
         return false;
     };
@@ -1060,7 +1061,7 @@ fn declares_method(cls: &crate::types::ClassInfo, method: &str, ctx: &ForwardWal
                 return false;
             }
             visited.push(*name);
-            (ctx.file.class_loader)(name).is_some_and(|t| walk(&t, method, ctx, visited))
+            (ctx.file.class_loader)(Fqn::new(name)).is_some_and(|t| walk(&t, method, ctx, visited))
         })
     }
     walk(cls, method, ctx, &mut Vec::new())
@@ -1109,7 +1110,7 @@ fn method_call_effect(
     }
     class_names
         .iter()
-        .map(|name| match (ctx.file.class_loader)(name) {
+        .map(|name| match (ctx.file.class_loader)(Fqn::new(name)) {
             Some(cls) => class_method_effect(&cls, method_name, ctx).0,
             None => CallEffect::Unknown,
         })
@@ -1252,5 +1253,5 @@ fn static_receiver_class(
         ctx.file.source_class_loader,
         ctx.file.source_imports,
     )?;
-    (ctx.file.class_loader)(&name)
+    (ctx.file.class_loader)(Fqn::new(&name))
 }

@@ -22,7 +22,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::atom::{Atom, atom};
-use crate::class_lookup::find_class_by_fqn;
+use crate::class_lookup::{Fqn, ResolvedClassLoader, find_class_by_fqn};
 use crate::php_type::{PhpType, TypeKind, is_builtin_non_class_type};
 use crate::types::*;
 
@@ -152,7 +152,7 @@ impl LocalAliasExpander<'_> {
 /// loaded, with that class's imports rather than the inheriting class's.
 pub(crate) fn link_imported_type_aliases(
     class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> (Option<ClassInfo>, bool) {
     let mut subs = HashMap::new();
     let mut complete = true;
@@ -400,7 +400,7 @@ pub(crate) fn resolve_type_alias_typed(
     ty: &PhpType,
     owning_class_name: &str,
     all_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<PhpType> {
     let mut current = ty.clone();
     let mut last_resolved: Option<PhpType> = None;
@@ -438,7 +438,7 @@ pub(crate) fn expand_nested_type_aliases(
     ty: &PhpType,
     owning_class_name: &str,
     all_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<PhpType> {
     // Aliases are declared on a class in the file, so a file that declares
     // none cannot name one.
@@ -450,7 +450,7 @@ pub(crate) fn expand_nested_type_aliases(
         depth: u8,
         owning_class_name: &str,
         all_classes: &[Arc<ClassInfo>],
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        class_loader: &ResolvedClassLoader<'_>,
     ) -> PhpType {
         if depth >= 10 {
             return ty.clone();
@@ -486,7 +486,7 @@ pub(crate) fn expand_member_type_aliases(
     ty: &PhpType,
     class: &ClassInfo,
     all_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<PhpType> {
     if let Some(expanded) = expand_nested_type_aliases(ty, &class.fqn(), all_classes, class_loader)
     {
@@ -518,7 +518,7 @@ pub(crate) fn expand_member_type_aliases(
             .chain(current.parent_class.iter())
         {
             if visited.insert(*related)
-                && let Some(loaded) = class_loader(related)
+                && let Some(loaded) = class_loader(Fqn::new(related))
             {
                 queue.push(loaded);
             }
@@ -533,7 +533,7 @@ fn resolve_type_alias_once(
     hint: &PhpType,
     owning_class_name: &str,
     all_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<PhpType> {
     let name = match hint.kind() {
         TypeKind::Named(n) => n.as_str(),
@@ -574,7 +574,7 @@ fn resolve_type_alias_once(
 fn expand_type_alias_def(
     def: &TypeAliasDef,
     all_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<PhpType> {
     match def {
         TypeAliasDef::Local(php_type) => Some(php_type.clone()),
@@ -593,7 +593,7 @@ pub(crate) fn resolve_imported_type_alias(
     source_class_name: &str,
     original_name: &str,
     all_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<PhpType> {
     let visiting = std::cell::RefCell::new(Vec::new());
     resolve_imported_alias_in_source(
@@ -621,7 +621,7 @@ fn resolve_imported_alias_in_source(
     source_class_name: &str,
     original_name: &str,
     all_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     visiting: &std::cell::RefCell<Vec<(String, String)>>,
 ) -> Option<PhpType> {
     let lookup = source_class_name
@@ -632,7 +632,7 @@ fn resolve_imported_alias_in_source(
         .iter()
         .find(|c| c.name == lookup)
         .cloned()
-        .or_else(|| class_loader(source_class_name))?;
+        .or_else(|| class_loader(Fqn::new(source_class_name)))?;
     let def = source_class.type_aliases.get(&atom(original_name))?;
 
     let key = (source_class_name.to_string(), original_name.to_string());
@@ -667,7 +667,7 @@ fn resolve_imported_alias_in_source(
 fn expand_aliases_in_source(
     ty: &PhpType,
     source_class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     visiting: &std::cell::RefCell<Vec<(String, String)>>,
 ) -> PhpType {
     if source_class.type_aliases.is_empty() {

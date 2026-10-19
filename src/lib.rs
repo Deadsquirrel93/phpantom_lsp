@@ -336,6 +336,7 @@ pub mod test_fixtures;
 // Re-export public types so that dependents (tests, main) can import them
 // from the crate root, e.g. `use phpantom_lsp::{Backend, AccessKind}`.
 pub use backend::package_origin::ClassCompletionOrigin;
+pub use class_lookup::Fqn;
 pub use completion::target::extract_completion_target;
 pub use types::{AccessKind, ClassInfo, DefineInfo, FunctionInfo, NamespaceSpan, Visibility};
 pub use virtual_members::resolve_class_fully;

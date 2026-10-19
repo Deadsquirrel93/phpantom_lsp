@@ -33,7 +33,7 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::class_lookup::find_class_at_offset;
+use crate::class_lookup::{ResolvedClassLoader, find_class_at_offset};
 use crate::php_type::PhpType;
 use crate::text_position::{position_to_offset, utf16_col_to_char_index};
 use crate::type_engine::resolver::{FileCtx, Loaders};
@@ -521,7 +521,7 @@ impl Backend {
         raw_type: &PhpType,
         prefix_keys: &[String],
         all_classes: &[Arc<ClassInfo>],
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        class_loader: &ResolvedClassLoader<'_>,
     ) -> Option<PhpType> {
         let mut current = raw_type.clone();
         if prefix_keys.is_empty() {

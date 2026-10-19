@@ -5,6 +5,7 @@
 use std::sync::Arc;
 
 use crate::atom::{atom, bytes_to_str, literal_bytes_to_str};
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::{ClassInfo, ResolvedType};
 
@@ -786,7 +787,7 @@ pub(in crate::type_engine) fn narrow_type_by_instanceof(
     if extraction.class_type.is_self_like() || class_name.eq_ignore_ascii_case("parent") {
         return None;
     }
-    loader(class_name)?;
+    loader(Fqn::new(class_name))?;
 
     let members = instanceof_union_members(ty);
     let kept: Vec<PhpType> = members
@@ -848,7 +849,7 @@ fn instanceof_rules_out(
     member: &PhpType,
     extraction: &InstanceofExtraction,
     class_name: &str,
-    loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    loader: &ResolvedClassLoader<'_>,
 ) -> bool {
     if !extraction.exact {
         return crate::class_lookup::is_subtype_of_named(member, class_name, loader);
@@ -858,8 +859,8 @@ fn instanceof_rules_out(
     };
     // The two names may be spelled differently (short vs qualified), so
     // compare what they resolve to rather than how they were written.
-    match loader(member_name) {
-        Some(cls) => loader(class_name).is_some_and(|checked| cls.fqn() == checked.fqn()),
+    match loader(Fqn::new(member_name)) {
+        Some(cls) => loader(Fqn::new(class_name)).is_some_and(|checked| cls.fqn() == checked.fqn()),
         None => {
             member_name.eq_ignore_ascii_case(class_name.strip_prefix('\\').unwrap_or(class_name))
         }
@@ -872,7 +873,7 @@ fn instanceof_member(
     member: &PhpType,
     extraction: &InstanceofExtraction,
     class_name: &str,
-    loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    loader: &ResolvedClassLoader<'_>,
 ) -> Option<PhpType> {
     if !member.is_object_like() {
         // `null`, a scalar and an array all fail `instanceof` outright.
@@ -880,7 +881,8 @@ fn instanceof_member(
     }
     // A member that names no class of its own (`object`, `mixed`) is
     // whatever the check proves.
-    let Some(member_name) = member_class_name(member).filter(|n| loader(n).is_some()) else {
+    let Some(member_name) = member_class_name(member).filter(|n| loader(Fqn::new(n)).is_some())
+    else {
         return Some(extraction.class_type.clone());
     };
     // An exact identity check (`get_class($v) === Foo::class`) admits the
@@ -896,8 +898,8 @@ fn instanceof_member(
     if crate::class_lookup::is_subtype_of_names(class_name, member_name, loader) {
         return Some(extraction.class_type.clone());
     }
-    let member_cls = loader(member_name)?;
-    let checked_cls = loader(class_name)?;
+    let member_cls = loader(Fqn::new(member_name))?;
+    let checked_cls = loader(Fqn::new(class_name))?;
     can_share_instance(&member_cls, &checked_cls).then(|| {
         class_first_intersection(
             (member.clone(), &member_cls),

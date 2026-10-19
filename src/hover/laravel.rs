@@ -7,6 +7,7 @@
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::class_lookup::Fqn;
 use crate::php_type::{PhpType, TypeKind};
 
 use super::formatting::{inline_code, make_hover};
@@ -352,7 +353,7 @@ impl Backend {
 
         let class_loader = self.resolved_class_loader(&ctx);
 
-        let model_class = class_loader(&model_name)?;
+        let model_class = class_loader(Fqn::new(&model_name))?;
         let resolved_model = crate::virtual_members::resolve_class_fully_cached(
             &model_class,
             &class_loader,

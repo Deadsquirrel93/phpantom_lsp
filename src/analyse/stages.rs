@@ -10,6 +10,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::Backend;
+use crate::class_lookup::Fqn;
 use crate::config::Config;
 use crate::types::ClassInfo;
 
@@ -128,7 +129,8 @@ pub(super) fn index_project(
     };
     // `populate_from_sorted` fans the list out over its own large-stack
     // workers, so this needs no wrapper thread of its own.
-    let class_loader = |name: &str| -> Option<Arc<ClassInfo>> { backend.find_or_load_class(name) };
+    let class_loader =
+        |name: Fqn<'_>| -> Option<Arc<ClassInfo>> { backend.find_or_load_class(&name) };
     crate::virtual_members::populate_from_sorted(
         &sorted_fqns,
         &backend.resolved_class_cache,
