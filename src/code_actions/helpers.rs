@@ -144,6 +144,91 @@ pub(crate) fn create_file_edit(
     document_changes_edit([create], content_edit.into_iter().chain(edits))
 }
 
+// ─── Walking an existing edit ─────────────────────────────────────────────────
+
+/// One file's text edits inside a [`WorkspaceEdit`], in whichever of the two
+/// shapes carries them.
+pub(crate) enum FileTextEdits<'a> {
+    /// The edits of a `changes` entry.
+    Plain(&'a mut Vec<TextEdit>),
+    /// The edits of a `TextDocumentEdit`, each plain or annotated.
+    Document(&'a mut Vec<OneOf<TextEdit, AnnotatedTextEdit>>),
+}
+
+impl FileTextEdits<'_> {
+    /// Keep only the edits `keep` returns `true` for, handing it each edit's
+    /// plain [`TextEdit`] (an annotated edit's inner one) to inspect or
+    /// rewrite.
+    pub(crate) fn retain_mut(&mut self, mut keep: impl FnMut(&mut TextEdit) -> bool) {
+        match self {
+            Self::Plain(edits) => edits.retain_mut(keep),
+            Self::Document(edits) => edits.retain_mut(|edit| keep(plain_text_edit(edit))),
+        }
+    }
+
+    /// Run `f` on every edit's plain [`TextEdit`].
+    pub(crate) fn for_each_mut(&mut self, mut f: impl FnMut(&mut TextEdit)) {
+        match self {
+            Self::Plain(edits) => edits.iter_mut().for_each(f),
+            Self::Document(edits) => edits.iter_mut().for_each(|edit| f(plain_text_edit(edit))),
+        }
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        match self {
+            Self::Plain(edits) => edits.is_empty(),
+            Self::Document(edits) => edits.is_empty(),
+        }
+    }
+}
+
+fn plain_text_edit(edit: &mut OneOf<TextEdit, AnnotatedTextEdit>) -> &mut TextEdit {
+    match edit {
+        OneOf::Left(edit) => edit,
+        OneOf::Right(edit) => &mut edit.text_edit,
+    }
+}
+
+/// Call `visit` with every file's text edits in `edit` and the file they go
+/// into, whether `changes` or `document_changes` carries them.
+///
+/// Returns whether `edit` also holds a resource operation (a file
+/// creation, rename, or deletion), which carries no text edits to visit.
+pub(crate) fn visit_file_text_edits(
+    edit: &mut WorkspaceEdit,
+    mut visit: impl FnMut(&Url, FileTextEdits<'_>),
+) -> bool {
+    if let Some(changes) = edit.changes.as_mut() {
+        for (uri, edits) in changes.iter_mut() {
+            visit(uri, FileTextEdits::Plain(edits));
+        }
+    }
+    let mut has_resource_op = false;
+    match edit.document_changes.as_mut() {
+        Some(DocumentChanges::Edits(documents)) => {
+            for document in documents {
+                visit(
+                    &document.text_document.uri,
+                    FileTextEdits::Document(&mut document.edits),
+                );
+            }
+        }
+        Some(DocumentChanges::Operations(operations)) => {
+            for operation in operations {
+                match operation {
+                    DocumentChangeOperation::Edit(document) => visit(
+                        &document.text_document.uri,
+                        FileTextEdits::Document(&mut document.edits),
+                    ),
+                    DocumentChangeOperation::Op(_) => has_resource_op = true,
+                }
+            }
+        }
+        None => {}
+    }
+    has_resource_op
+}
+
 // ─── Indentation helpers ──────────────────────────────────────────────────────
 
 /// Return the leading whitespace of the line containing `offset`.

@@ -16,6 +16,8 @@
 //! - [`signature`]: Signature extraction shared by functions and methods
 //! - [`use_statements`]: `use` statement and namespace extraction
 //! - [`ast_update`]: The `update_ast` orchestrator
+//! - [`file_declarations`]: The top-level walk for a file's class-likes,
+//!   imports, namespace blocks and functions
 //! - [`ast_publish`]: Publishing a batch of parsed files to the indexes
 //! - [`name_resolution`]: Qualifying the names a parsed declaration spells
 //! - [`initializers`]: Qualifying the classes a constant initializer names
@@ -38,6 +40,7 @@ mod attributes;
 mod bracket_recovery;
 mod classes;
 pub(crate) mod error_format;
+mod file_declarations;
 mod functions;
 mod initializers;
 mod name_resolution;
