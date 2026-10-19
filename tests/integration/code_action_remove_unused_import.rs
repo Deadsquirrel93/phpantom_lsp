@@ -247,6 +247,24 @@ class Shop {
     assert_eq!(unused_imports(content), ["Unused import 'Lib\\Unused'"]);
 }
 
+/// A statement the end of the file cuts off, still missing its `)` and
+/// `;`, uses the imports it names.
+#[test]
+fn an_import_used_by_a_call_at_the_end_of_the_file_missing_its_closing_paren_is_used() {
+    let content = r#"<?php
+namespace App;
+
+use App\Http\Controllers\HomeController;
+use App\Http\Controllers\Unused;
+
+Route::get('/', [HomeController::class, 'index']
+"#;
+    assert_eq!(
+        unused_imports(content),
+        ["Unused import 'App\\Http\\Controllers\\Unused'"]
+    );
+}
+
 /// The `Unused import '…'` messages for `content`.
 fn unused_imports(content: &str) -> Vec<String> {
     let backend = create_test_backend();

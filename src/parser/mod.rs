@@ -22,7 +22,7 @@
 //! - [`parse_cache`]: The thread-local cache that shares one parse per pass
 //! - [`recovery`]: Parsing again the code the parser drops mid-edit
 //! - [`bracket_recovery`]: Closing the brackets an unfinished expression
-//!   leaves open before a `}`
+//!   leaves open before a `}` or at the end of the file
 //! - [`namespace_recovery`]: Keeping the braced `namespace` blocks the
 //!   parser drops whole
 //! - [`ast_helpers`]: Small helpers for walking the AST

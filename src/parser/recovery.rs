@@ -4,9 +4,10 @@
 //! Each step rewrites a few bytes of the text without moving any offset,
 //! so the reparse describes the text the caller holds:
 //! [`bracket_recovery`](super::bracket_recovery) closes the brackets an
-//! unfinished expression leaves open before a `}`, and
-//! [`namespace_recovery`](super::namespace_recovery) opens unbraced the
-//! braced `namespace` blocks that still run to the end of the file.
+//! unfinished expression leaves open before a `}` or at the end of the
+//! file, and [`namespace_recovery`](super::namespace_recovery) opens
+//! unbraced the braced `namespace` blocks that still run to the end of the
+//! file.
 
 use mago_allocator::LocalArena;
 use mago_syntax::cst::Program;

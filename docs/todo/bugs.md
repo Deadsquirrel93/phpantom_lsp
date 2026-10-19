@@ -61,29 +61,28 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B637. An import used only by a call at the end of the file still missing its `)` is reported unused
+### B637. An import used only by an empty call at the end of the file is reported unused
 
 **Impact: Low · Complexity: Medium**
 
 ```php
 <?php
 namespace App;
-use App\Http\Controllers\HomeController;   // reported unused until the `)` is typed
-Route::get('/', [HomeController::class, 'index']
+use App\Services\Mailer;   // reported unused until the `)` is typed
+$mailer = new Mailer(
 ```
 
-mago drops a top-level statement that the end of the file cuts off, and it
-does so even once its brackets are closed if the `;` is missing too. Nothing
-in the statement reaches the symbol map, so `collect_unused_import_diagnostics`
-(`diagnostics/unused_imports.rs`) reports every import it names. This is
-typical of a routes file, where the newest statement is the last one.
-`parser/bracket_recovery.rs` closes the brackets a call leaves open before a
-`}` by writing them over the whitespace in front of it. At the end of the
-file that needs room for the closers and a `;`, but a file usually ends in
-a single newline after the text being typed. Fixing it needs either
-recovery upstream in `mago-syntax` or a reparse that may append text past the
-end, with every consumer kept from reading a span beyond the caller's
-content.
+mago drops a top-level statement that the end of the file cuts off. Nothing
+in it reaches the symbol map, so `collect_unused_import_diagnostics`
+(`diagnostics/unused_imports.rs`) reports every import it names.
+`parser/bracket_recovery.rs` keeps the statement by writing the closers and
+a `;` over the whitespace the file ends in. A file usually ends in a single
+newline, which has room for the `;` alone, and the parser takes a `;` for
+the closers only when the call or array already holds an argument. So a call
+whose `(` is the last thing typed, or a file with no whitespace after the
+statement at all, still loses it. Fixing it needs either recovery upstream
+in `mago-syntax` or a reparse that may append text past the end, with every
+consumer kept from reading a span beyond the caller's content.
 
 ### B638. A monorepo's subprojects miss path repositories and are never rescanned after `composer update`
 
