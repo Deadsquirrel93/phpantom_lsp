@@ -90,19 +90,6 @@ are.
 
 ## Miscellaneous
 
-### B643. A pull racing a diagnostics run can answer `Unchanged` and keep stale diagnostics
-
-**Impact: Low · Complexity: Low**
-
-In pull mode, a diagnostics run stores the new set in `last_full`, releases
-that lock, and only then bumps the URI's `resultId`
-(`diagnostics/delivery.rs`). A `textDocument/diagnostic` request landing in
-that gap (`diagnostics/pull.rs`) finds the cache present and the client's
-`previousResultId` still equal to the current one, and answers `Unchanged`
-for a set that just changed. The editor keeps the old diagnostics until
-something else triggers a refresh. Store the set and bump the id as one
-step: under one guard, or bump the id before publishing the set.
-
 ### B645. A class in a non-UTF-8 file is indexed but never loads
 
 **Impact: Low · Complexity: Low**

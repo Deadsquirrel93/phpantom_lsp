@@ -351,17 +351,18 @@ impl Backend {
             // and the `resultId` alone, so a pull still answers
             // `Unchanged` and the caller skips the refresh.  A missing
             // cache entry counts as changed: the client has nothing yet.
-            {
-                let mut cache = self.diag.last_full.lock();
-                if cache.get(uri_str).is_some_and(|prev| *prev == full) {
-                    return false;
-                }
-                cache.insert(uri_str.to_string(), full);
+            //
+            // The set and its `resultId` change under one `last_full`
+            // guard, so a racing pull never sees the new set paired with
+            // the old id (which would answer `Unchanged` for a set that
+            // just changed).
+            let mut cache = self.diag.last_full.lock();
+            if cache.get(uri_str).is_some_and(|prev| *prev == full) {
+                return false;
             }
-            {
-                let id = self.diag.result_id_seq.fetch_add(1, Ordering::Relaxed) + 1;
-                self.diag.result_ids.lock().insert(uri_str.to_string(), id);
-            }
+            cache.insert(uri_str.to_string(), full);
+            let id = self.diag.result_id_seq.fetch_add(1, Ordering::Relaxed) + 1;
+            self.diag.result_ids.lock().insert(uri_str.to_string(), id);
             true
         } else {
             // ── Push mode ───────────────────────────────────────────
