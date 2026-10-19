@@ -61,20 +61,7 @@ No outstanding items.
 
 ## Code actions
 
-### B648. Generated property hooks are indented with four spaces in a two-space file
-
-**Impact: Low · Complexity: Low**
-
-```php
-class User {
-  public string $name;   // "Generate get hook" indents the hook body by 4
-}
-```
-
-`detect_indent_unit` (`code_actions/generate_property_hooks.rs`) returns a
-tab when the property's indentation contains one and four spaces otherwise.
-`code_actions::helpers::indent_unit` already detects a file's unit,
-including two spaces. Use it and delete the local copy.
+No outstanding items.
 
 ## Miscellaneous
 
