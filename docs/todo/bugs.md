@@ -61,27 +61,6 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B641. "Generate promoted constructor" orphans each property's `@var` docblock
-
-**Impact: Low · Complexity: Low**
-
-```php
-class Order {
-    /** @var list<Item> */
-    private array $items;
-    public static int $count = 0;
-}
-```
-
-The action deletes each property's declaration and re-declares it as a
-promoted parameter, but the deleted span (`declaration_span` in
-`generate_constructor.rs`, from `find_line_start` of the member) stops at
-the declaration, so the `/** @var list<Item> */` above it stays. It then
-documents whatever follows, here the static `$count`, whose type it now
-claims is `list<Item>`. "Promote constructor parameter" deletes the docblock
-with the property (`docblock_start_above_offset`,
-`promote_constructor_param.rs`); this action should too.
-
 ### B642. Completion reads the cursor column as a character count, so it misfires after an emoji
 
 **Impact: Low · Complexity: Low**

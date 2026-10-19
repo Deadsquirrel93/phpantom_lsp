@@ -154,7 +154,14 @@ impl Backend {
             // Sort deletions back-to-front so byte offsets stay valid.
             let mut edits: Vec<TextEdit> = Vec::new();
 
+            // Properties declared together (`private int $a, $b;`) share
+            // one declaration span and are adjacent in `props`; delete it
+            // once, since clients reject overlapping edits.
+            let mut last_span = None;
             for prop in props.iter().rev() {
+                if last_span.replace(prop.declaration_span) == Some(prop.declaration_span) {
+                    continue;
+                }
                 edits.push(TextEdit {
                     range: byte_range_to_lsp_range(
                         content,
@@ -241,8 +248,12 @@ fn collect_qualifying_properties<'a>(
         // Compute the declaration span for deletion (promoted variant).
         // Start from the beginning of the line containing the property
         // (to include leading whitespace), end past the trailing newline.
+        // A `/** @var … */` docblock above the declaration goes with it;
+        // left behind it would document whatever member follows.
         let prop_span = member.span();
-        let decl_start = find_line_start(content, prop_span.start.offset as usize);
+        let line_start = find_line_start(content, prop_span.start.offset as usize);
+        let decl_start = super::docblock_edit::docblock_start_above_offset(content, line_start)
+            .unwrap_or(line_start);
         let decl_end = find_line_end(content, prop_span.end.offset as usize);
 
         for item in plain.items.iter() {
