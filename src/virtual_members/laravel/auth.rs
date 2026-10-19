@@ -33,9 +33,10 @@ use std::sync::Arc;
 
 use crate::Backend;
 use crate::php_type::PhpType;
-use crate::types::ClassInfo;
+use crate::types::{ClassInfo, MethodInfo};
 
 use super::config_values::{ConfigNode, parse_config_tree};
+use super::method_refinement::refine_methods;
 
 /// FQN of the auth user contract every configured model must satisfy.
 pub(crate) const AUTHENTICATABLE_FQN: &str = "Illuminate\\Contracts\\Auth\\Authenticatable";
@@ -77,49 +78,33 @@ pub(crate) fn patch_auth_user_class(backend: &Backend, loaded: Arc<ClassInfo>) -
         return loaded;
     };
 
-    let mut patched = (*loaded).clone();
-    let mut changed = false;
-    for method in patched.methods.make_mut().iter_mut() {
-        if method.name.as_str() != "user" {
-            continue;
-        }
-        let method = Arc::make_mut(method);
-        refine_user_return_type(method, &model_type);
-        changed = true;
-    }
-
-    // The `Auth` facade declares `user()` as a `@method` tag, not a real
-    // method; rewrite the parsed tag so the phpdoc provider materializes
-    // the virtual method with the configured model.
-    if let Some(doc) = patched.doc_members.as_ref()
-        && doc.methods.iter().any(|m| m.name.as_str() == "user")
-    {
-        let mut doc = (**doc).clone();
-        for method in &mut doc.methods {
-            if method.name.as_str() != "user" {
-                continue;
-            }
-            refine_user_return_type(Arc::make_mut(method), &model_type);
-            changed = true;
-        }
-        patched.doc_members = Some(Arc::new(doc));
-    }
-
-    if changed { Arc::new(patched) } else { loaded }
+    // The `Auth` facade declares `user()` as a `@method` tag rather than a
+    // real method, so the helper's doc-member pass covers it.
+    refine_methods(
+        loaded,
+        |name| name == "user",
+        |method| refine_user_return_type(method, &model_type),
+    )
 }
 
 /// Replace a `user()` method's return type with the configured model,
-/// preserving the declared `?Authenticatable` nullability.
-fn refine_user_return_type(method: &mut crate::types::MethodInfo, model_type: &PhpType) {
+/// preserving the declared `?Authenticatable` nullability.  Returns whether
+/// the return type changed.
+fn refine_user_return_type(method: &mut MethodInfo, model_type: &PhpType) -> bool {
     let nullable = method
         .return_type
         .as_ref()
         .is_none_or(|rt| rt.accepts_null());
-    method.return_type = Some(if nullable {
+    let refined = if nullable {
         PhpType::nullable(model_type.clone())
     } else {
         model_type.clone()
-    });
+    };
+    if method.return_type.as_ref() == Some(&refined) {
+        return false;
+    }
+    method.return_type = Some(refined);
+    true
 }
 
 /// Resolve (and memoize) the authenticated-user model type for a guard.

@@ -129,6 +129,7 @@ mod higher_order_proxy;
 mod inflector;
 mod macros;
 mod magic_uses;
+mod method_refinement;
 mod model_extraction;
 mod model_provider;
 mod model_type;
