@@ -370,9 +370,12 @@ fn build_function(
         None
     } else {
         // Try body-based inference first (produces richer types like
-        // `list<string>` instead of `array<mixed>`).
+        // `list<string>` instead of `array<mixed>`).  Blanking leaves every
+        // byte offset where it was, so `decl_offset` still applies.
+        let offset = position_to_byte_offset(content, position).min(content.len());
+        let content = throws_analysis::with_open_docblock_blanked(content, offset);
         let body_inferred = crate::code_actions::phpstan::fix_return_type::enrichment_return_type(
-            content,
+            &content,
             decl_offset,
             local_classes,
             class_loader,

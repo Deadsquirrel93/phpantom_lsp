@@ -133,7 +133,7 @@ pub(crate) fn with_documented_function_body<T>(
 /// `content` with the docblock `offset` sits in blanked out when it has not
 /// been closed yet, so the declaration after it parses: completion on `/**`
 /// fires before the editor has closed the comment.
-fn with_open_docblock_blanked(content: &str, offset: usize) -> Cow<'_, str> {
+pub(crate) fn with_open_docblock_blanked(content: &str, offset: usize) -> Cow<'_, str> {
     let Some(open) = docblock_start_at(content, offset) else {
         return Cow::Borrowed(content);
     };

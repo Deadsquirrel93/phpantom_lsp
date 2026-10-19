@@ -61,26 +61,6 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B646. Typing `/**` without auto-close infers no `@return` from the body
-
-**Impact: Low · Complexity: Low**
-
-```php
-/**
-function ids(): array {
-    return [1, 2];
-}
-```
-
-Docblock completion here offers `@return array<mixed>` rather than
-`@return array{1, 2}`, which it does give once the editor has closed the
-block as `/** */`. The still-open `/**` swallows the rest of the file, so
-`enrichment_return_type` (`code_actions/phpstan/fix_return_type/inference.rs`)
-parses text in which the function does not exist. The throws analysis
-avoids this by blanking the open docblock first
-(`with_open_docblock_blanked` in `completion/source/throws_analysis/uncaught.rs`);
-return inference should parse the same blanked text.
-
 ### B637. An import used only by a call still missing its `)` is reported unused
 
 **Impact: Low · Complexity: Medium**

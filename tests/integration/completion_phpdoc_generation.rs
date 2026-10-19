@@ -726,6 +726,30 @@ async fn infers_return_below_long_parameter_list() {
     );
 }
 
+/// The return type is inferred from the body before the editor has closed
+/// the `/**`, though the open comment swallows the function.
+#[tokio::test]
+async fn infers_return_under_open_docblock() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///gen_open_return.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "/**\n",
+        "function ids(): array {\n",
+        "    return [1, 2];\n",
+        "}\n",
+    );
+    let items = complete_at(&backend, &uri, text, 1, 3).await;
+    let item = find_docblock_item(&items).expect("Should produce a docblock generation item");
+
+    let snippet = snippet_text(item);
+    assert!(
+        snippet.contains("array{1, 2}"),
+        "Should infer the return type from the body, got:\n{}",
+        snippet
+    );
+}
+
 /// When `/** */` is auto-closed, the text_edit range covers the full `/** */`.
 #[tokio::test]
 async fn text_edit_covers_autoclosed_block() {
@@ -1201,7 +1225,7 @@ async fn generates_docblock_for_standalone_function() {
         "<?php\n",
         "/**\n",
         "function calculateTotal(array $items, float $taxRate = 0.0): float {\n",
-        "    return 0.0;\n",
+        "    return $taxRate;\n",
         "}\n",
     );
     let items = complete_at(&backend, &uri, text, 1, 3).await;
