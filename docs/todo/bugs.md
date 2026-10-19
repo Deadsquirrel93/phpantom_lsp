@@ -49,7 +49,30 @@ No outstanding items.
 
 ## Blade
 
-No outstanding items.
+### B649. A template's diagnostics are filtered against the wrong ranges
+
+**Impact: Medium · Complexity: Low**
+
+```blade
+@php($user = null)
+@if (false)
+    {{ $user->name }}   {{-- still reported, though this branch never runs --}}
+@endif
+```
+
+After the slow collectors run, `collect_slow_diagnostics_scoped`
+(`diagnostics/collect.rs`) drops every diagnostic that starts inside a
+branch the forward walk found unreachable. The unreachable ranges are
+converted with the free `offset_range_to_lsp_range`, which stays in the
+coordinates of the PHP the template lowers to, while the collectors built
+their diagnostics with `Backend::offset_range_to_lsp_range`, which maps them
+back into the template. The two sets of positions are compared directly, so
+in a template the filter keeps diagnostics from dead branches and can drop
+live ones that happen to line up. Convert the dead ranges with the Backend
+method, or compare in virtual-PHP coordinates before translating. The two
+functions sharing one name in `diagnostics/mod.rs` is what makes this easy
+to get wrong. Rename the free one (e.g. `checked_byte_range_to_lsp_range`)
+so a call site has to choose deliberately.
 
 ## Templates
 
@@ -58,6 +81,23 @@ No outstanding items.
 ## Name resolution
 
 No outstanding items.
+
+## Code actions
+
+### B648. Generated property hooks are indented with four spaces in a two-space file
+
+**Impact: Low · Complexity: Low**
+
+```php
+class User {
+  public string $name;   // "Generate get hook" indents the hook body by 4
+}
+```
+
+`detect_indent_unit` (`code_actions/generate_property_hooks.rs`) returns a
+tab when the property's indentation contains one and four spaces otherwise.
+`code_actions::helpers::indent_unit` already detects a file's unit,
+including two spaces. Use it and delete the local copy.
 
 ## Miscellaneous
 
@@ -86,8 +126,20 @@ use App\Services\Mailer;   // reported unused until the member is typed
 $mailer = Mailer::
 ```
 
-The recovery reparse in `parser/recovery.rs` keeps a statement the end of
-the file cuts off when it is only missing its closers or `;`. A `::` with
-nothing after it is missing an operand instead, and the parser drops the
-whole statement, so `collect_unused_import_diagnostics`
-(`diagnostics/unused_imports.rs`) never sees the class it names.
+**Blocked upstream** on
+[carthage-software/mago#2589](https://github.com/carthage-software/mago/issues/2589).
+Don't work on this until a mago release fixes it.
+
+mago's `recover_incomplete` parse keeps `$this->` at the end of the file
+with a `Missing` member, but has no recovery for a `::` missing its member:
+it reports `UnexpectedEndOfFile(OneOf([]))` and drops the whole statement
+(inside a call, `foo(Mailer::` keeps `foo()` with no arguments). So
+`collect_unused_import_diagnostics` (`diagnostics/unused_imports.rs`) never
+sees the class it names. This can't be worked around in
+`parser/recovery.rs`. A placeholder member written over the whitespace
+after `::` would be reported as an unknown member, and one appended past
+the end of the text would have a span outside the content.
+
+Once mago keeps the statement, add `Mailer::` cases (with and without a
+trailing newline, and inside a call) to the recovery tests and the
+unused-import tests.
