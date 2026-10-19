@@ -115,7 +115,7 @@ impl Backend {
         }
 
         let path = crate::util::uri_to_path(uri)?;
-        std::fs::read_to_string(path).ok().map(Arc::new)
+        crate::util::read_php_source(&path).map(Arc::new)
     }
 
     /// Public helper for tests: get the uri_classes_index entry for a given URI.

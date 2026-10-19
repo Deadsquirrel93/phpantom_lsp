@@ -65,7 +65,7 @@ impl Backend {
                 .get(*name)
                 .cloned();
             if let Some(path) = path
-                && let Ok(content) = std::fs::read_to_string(&path)
+                && let Some(content) = crate::util::read_php_source(&path)
             {
                 self.update_ast(&crate::util::path_to_uri(&path), &content);
                 if let Some(found) = self.symbols.global_defines.read().get(*name).map(&read) {
@@ -88,7 +88,7 @@ impl Backend {
             if self.parsed_uris.read().contains(&uri) {
                 continue;
             }
-            if let Ok(content) = std::fs::read_to_string(path) {
+            if let Some(content) = crate::util::read_php_source(path) {
                 self.update_ast(&uri, &content);
                 if let Some(found) = find_parsed() {
                     return Some(found);

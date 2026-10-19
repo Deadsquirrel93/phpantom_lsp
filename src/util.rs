@@ -112,6 +112,31 @@ pub(crate) fn path_to_uri(path: &Path) -> String {
         .unwrap_or_else(|| format!("file://{}", effective.display()))
 }
 
+/// Read a PHP source file from disk, decoding it the way the workspace
+/// scan does.
+///
+/// Invalid UTF-8 (a Latin-1 or Windows-1252 file) is replaced rather than
+/// rejected, so a class the scan indexed from such a file can also be
+/// loaded.  A read failure is logged the first time it happens for a
+/// path and returns `None`.
+pub(crate) fn read_php_source(path: &Path) -> Option<String> {
+    static REPORTED: std::sync::LazyLock<parking_lot::Mutex<std::collections::HashSet<PathBuf>>> =
+        std::sync::LazyLock::new(Default::default);
+
+    match std::fs::read(path) {
+        Ok(bytes) => Some(match String::from_utf8(bytes) {
+            Ok(text) => text,
+            Err(err) => String::from_utf8_lossy(err.as_bytes()).into_owned(),
+        }),
+        Err(err) => {
+            if REPORTED.lock().insert(path.to_path_buf()) {
+                tracing::warn!("could not read {}: {err}", path.display());
+            }
+            None
+        }
+    }
+}
+
 /// The `file://` URL of `path`, or `None` when the path is not absolute.
 ///
 /// This, [`dir_path_to_url`], [`url_to_path`], [`uri_to_path`] and

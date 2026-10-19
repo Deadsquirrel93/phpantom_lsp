@@ -117,7 +117,7 @@ impl Backend {
             inflight: &self.parse_inflight,
             uri: uri.clone(),
         };
-        let content = std::fs::read_to_string(file_path).ok();
+        let content = crate::util::read_php_source(file_path);
         content.and_then(|c| self.parse_and_cache_content(&c, &uri))
     }
 

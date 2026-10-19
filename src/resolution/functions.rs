@@ -97,7 +97,7 @@ impl Backend {
                     let path = path.clone();
                     drop(idx); // release read lock before parsing
 
-                    if let Ok(content) = std::fs::read_to_string(&path) {
+                    if let Some(content) = crate::util::read_php_source(&path) {
                         let uri = crate::util::path_to_uri(&path);
                         self.update_ast(&uri, &content);
 
@@ -132,7 +132,7 @@ impl Backend {
                     continue;
                 }
 
-                if let Ok(content) = std::fs::read_to_string(path) {
+                if let Some(content) = crate::util::read_php_source(path) {
                     self.update_ast(&uri, &content);
 
                     let fmap = self.symbols.global_functions.read();

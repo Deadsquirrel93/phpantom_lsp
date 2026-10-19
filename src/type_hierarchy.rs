@@ -161,25 +161,25 @@ impl Backend {
         // it searches all files in the uri_classes_index.  If that fails, fall
         // back to get_file_content for files that might be open or on
         // disk.
-        let (class_uri, class_content) = self
-            .find_class_file_content(fqn, "", "")
-            .unwrap_or_else(|| {
-                // Last resort: try to find the URI from the fqn_uri_index
-                // and read from disk / open_files.
-                let uri = self
-                    .symbols
-                    .fqn_uri_index
-                    .read()
-                    .get(fqn)
-                    .cloned()
-                    .unwrap_or_default();
-                let content = if !uri.is_empty() {
-                    self.get_file_content(&uri).unwrap_or_default()
-                } else {
-                    String::new()
-                };
-                (uri, content)
-            });
+        let (class_uri, class_content) =
+            self.find_class_file_content(fqn, "", "")
+                .unwrap_or_else(|| {
+                    // Last resort: try to find the URI from the fqn_uri_index
+                    // and read from disk / open_files.
+                    let uri = self
+                        .symbols
+                        .fqn_uri_index
+                        .read()
+                        .get(fqn)
+                        .cloned()
+                        .unwrap_or_default();
+                    let content = if !uri.is_empty() {
+                        self.get_file_content(&uri).unwrap_or_default()
+                    } else {
+                        String::new()
+                    };
+                    (uri, content)
+                });
 
         build_type_hierarchy_item(class_info, fqn, &class_uri, &class_content)
     }

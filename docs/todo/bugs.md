@@ -101,20 +101,6 @@ including two spaces. Use it and delete the local copy.
 
 ## Miscellaneous
 
-### B645. A class in a non-UTF-8 file is indexed but never loads
-
-**Impact: Low · Complexity: Low**
-
-The workspace scan reads every file as bytes and decodes it with
-`from_utf8_lossy` (`indexing/scan.rs`), so a class in a Latin-1 or
-Windows-1252 file shows up in workspace symbols. Loading it on demand reads
-the file with `read_to_string(...).ok()` (`resolution/lazy_parse.rs`), which
-fails on invalid UTF-8 and is dropped without a log, so every use of the
-class is reported as unknown and go-to-definition finds nothing. The same
-read appears in `backend/file_access.rs`, `resolution/functions.rs` (two
-sites) and `resolution/constants.rs` (two sites). Read bytes and decode
-them the way the scan does, and log a read failure once per file.
-
 ### B646. An import used only by a `::` access at the end of the file is reported unused
 
 **Impact: Low · Complexity: Medium**

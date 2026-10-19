@@ -78,7 +78,9 @@ fn qualify_see_refs(
     for see in refs {
         see.class = match see.written_class() {
             None => None,
-            Some(name) if name.eq_ignore_ascii_case("self") || name.eq_ignore_ascii_case("static") => {
+            Some(name)
+                if name.eq_ignore_ascii_case("self") || name.eq_ignore_ascii_case("static") =>
+            {
                 self_fqn.map(atom)
             }
             Some(name) if name.eq_ignore_ascii_case("parent") => parent_fqn.map(atom),

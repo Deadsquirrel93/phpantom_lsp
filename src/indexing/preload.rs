@@ -61,7 +61,7 @@ impl Backend {
                 p.add_done(1);
             }
             let path = pending[i];
-            if let Ok(content) = std::fs::read_to_string(path) {
+            if let Some(content) = crate::util::read_php_source(path) {
                 let uri = crate::util::path_to_uri(path);
                 self.update_ast(&uri, &content);
             }
@@ -482,7 +482,7 @@ impl Backend {
             files,
             |(uri, _)| uri.as_str(),
             |(_, path)| index_progress_weight_for_path(path),
-            |(_, path)| std::fs::read_to_string(path).ok(),
+            |(_, path)| crate::util::read_php_source(path),
             progress,
         );
     }
