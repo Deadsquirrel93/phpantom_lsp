@@ -61,27 +61,6 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B642. Completion reads the cursor column as a character count, so it misfires after an emoji
-
-**Impact: Low · Complexity: Low**
-
-```php
-$label = '🎉'; $order->
-```
-
-An LSP column counts UTF-16 code units, and a character outside the Basic
-Multilingual Plane (most emoji) is two of them. Several completion paths
-look the column up with `char_indices().nth(position.character)`, which
-counts characters, so after such a character the cursor lands one character
-too far right. The `_x;` that `patch_incomplete_member_access` splices in to
-let the parser recover goes in the wrong place, and member completion after
-`->` on that line comes back empty. The same lookup is in
-`completion/handler/patching.rs` (both patchers), `completion/target.rs`,
-`completion/array_shape.rs` (two sites) and
-`completion/variable/completion.rs`. Convert through
-`position_to_byte_offset` or `utf16_col_to_byte_offset`
-(`text_position.rs`) instead.
-
 ### B643. A pull racing a diagnostics run can answer `Unchanged` and keep stale diagnostics
 
 **Impact: Low · Complexity: Low**

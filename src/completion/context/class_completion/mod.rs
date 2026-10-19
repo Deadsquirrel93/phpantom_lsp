@@ -17,6 +17,7 @@ use std::collections::{HashMap, HashSet};
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::text_position::utf16_col_to_char_index;
 use crate::util::{short_name, strip_fqn_prefix};
 
 mod attributes;
@@ -121,7 +122,7 @@ impl Backend {
 
         let line = lines[position.line as usize];
         let chars: Vec<char> = line.chars().collect();
-        let col = (position.character as usize).min(chars.len());
+        let col = utf16_col_to_char_index(line, position.character);
 
         // Walk backwards through identifier characters (including `\`)
         let mut i = col;

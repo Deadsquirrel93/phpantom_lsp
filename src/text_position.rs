@@ -368,6 +368,23 @@ pub(crate) fn utf16_col_to_byte_offset(line: &str, utf16_col: u32) -> usize {
     line.len()
 }
 
+/// Convert a UTF-16 column offset to a character index within a single
+/// line, for code that walks the line as a `Vec<char>`.
+///
+/// Returns the line's character count if `utf16_col` is past the end.
+pub(crate) fn utf16_col_to_char_index(line: &str, utf16_col: u32) -> usize {
+    let mut col = 0u32;
+    let mut idx = 0usize;
+    for ch in line.chars() {
+        if col >= utf16_col {
+            return idx;
+        }
+        col += ch.len_utf16() as u32;
+        idx += 1;
+    }
+    idx
+}
+
 /// Convert a byte offset within a single line to a UTF-16 column offset.
 ///
 /// This is the inverse of [`utf16_col_to_byte_offset`].  It counts

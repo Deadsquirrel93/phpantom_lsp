@@ -4695,3 +4695,39 @@ async fn test_array_shape_key_completion_unsealed_annotation() {
     let labels: Vec<&str> = items.iter().map(|(label, _)| label.as_str()).collect();
     assert_eq!(labels, vec!["name"], "got {labels:?}");
 }
+
+#[tokio::test]
+async fn test_array_shape_key_completion_after_astral_character() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///array_shape_utf16.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "/** @param array{name: string, age: int} $config */\n",
+        "function show(array $config): void {\n",
+        "    $label = '🎉'; $config['']\n",
+        "}\n",
+    );
+
+    open_php(&backend, &uri, text).await;
+
+    // `    $label = '🎉'; $config['` is 28 UTF-16 units. The edit must
+    // start after the quote and swallow the auto-closed `']`.
+    let result = completion_response(&backend, &uri, 3, 28, None).await;
+    match result {
+        Some(CompletionResponse::Array(items)) => {
+            let item = items
+                .iter()
+                .find(|i| i.label == "name")
+                .unwrap_or_else(|| panic!("Should suggest 'name', got: {:?}", items));
+            match &item.text_edit {
+                Some(CompletionTextEdit::Edit(edit)) => {
+                    assert_eq!(edit.range.start, Position::new(3, 28));
+                    assert_eq!(edit.range.end, Position::new(3, 30));
+                }
+                other => panic!("Expected a text edit, got {:?}", other),
+            }
+        }
+        other => panic!("Expected Array response, got {:?}", other),
+    }
+}

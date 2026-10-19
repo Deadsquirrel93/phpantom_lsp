@@ -1880,3 +1880,76 @@ async fn test_completion_trait_override_restates_variadic_param() {
         "the restated tag should keep the `...`, got: {doc:?}"
     );
 }
+
+// ─── UTF-16 Cursor Columns ──────────────────────────────────────────────────
+
+// An emoji is two UTF-16 code units but one `char`, so a column read as a
+// character count lands one character too far right after it, past the
+// `;` that follows the cursor in these tests.
+
+#[tokio::test]
+async fn test_member_completion_after_astral_character_on_same_line() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///utf16_member.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Order {\n",
+        "    public function total(): int { return 1; }\n",
+        "}\n",
+        "function show(Order $order): void {\n",
+        "    $label = '🎉'; $order->;\n",
+        "}\n",
+    );
+
+    open_php(&backend, &uri, text).await;
+
+    // `    $label = '` is 14 units, the emoji 2, `'; $order->` 11.
+    let result = completion_response(&backend, &uri, 5, 27, None).await;
+    match result {
+        Some(CompletionResponse::Array(items)) => {
+            let names: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                names.iter().any(|n| n.starts_with("total(")),
+                "Should contain 'total', got: {:?}",
+                names
+            );
+        }
+        other => panic!("Expected Array response, got {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn test_variable_completion_range_after_astral_character() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///utf16_variable.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "function show(int $userId): void {\n",
+        "    $label = '🎉'; $us;\n",
+        "}\n",
+    );
+
+    open_php(&backend, &uri, text).await;
+
+    // `    $label = '🎉'; ` is 19 units, `$us` 3.
+    let result = completion_response(&backend, &uri, 2, 22, None).await;
+    match result {
+        Some(CompletionResponse::Array(items))
+        | Some(CompletionResponse::List(CompletionList { items, .. })) => {
+            let item = items
+                .iter()
+                .find(|i| i.label == "$userId")
+                .unwrap_or_else(|| panic!("Should suggest $userId, got: {:?}", items));
+            match &item.text_edit {
+                Some(CompletionTextEdit::Edit(edit)) => {
+                    assert_eq!(edit.range.start, Position::new(2, 19));
+                    assert_eq!(edit.range.end, Position::new(2, 22));
+                }
+                other => panic!("Expected a text edit, got {:?}", other),
+            }
+        }
+        other => panic!("Expected Array response, got {:?}", other),
+    }
+}

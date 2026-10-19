@@ -37,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Completion after an emoji.** Member, variable, array-key, class-name and PHPDoc tag completion now work on a line that has an emoji or other character outside the Basic Multilingual Plane before the cursor.
 - **Monorepo subprojects are indexed like standalone projects.** In a workspace without a root `composer.json`, each subproject's local path-repository modules now resolve, its vendor classes rank below project code in completion, and a `composer update` in it is picked up without a restart.
 - **Warnings for files PHPantom could not read.** A `composer.json` with a syntax error, a `.phpantom.toml` edit that no longer parses, a broken phar, and a Laravel schema dump or migration that fails to load are now reported in the PHPantom output log instead of being silently skipped.
 - **`@phpstan-ignore` reasons with commas.** Adding an identifier to an ignore comment, or removing one from it, keeps each reason with its own identifier, even when the reason contains commas or parentheses.
