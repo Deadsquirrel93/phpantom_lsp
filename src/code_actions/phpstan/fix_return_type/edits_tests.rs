@@ -96,6 +96,86 @@ fn strips_return_in_if_block_last_statement() {
     assert_eq!(edit.new_text, "$this->doWork();");
 }
 
+fn apply_strip(content: &str, line: usize) -> String {
+    let edit = strip(content, line).unwrap();
+    crate::text_position::apply_text_edits(content, &[edit])
+}
+
+#[test]
+fn braces_a_braceless_if_body_on_its_own_line() {
+    let content = "<?php\nclass A {\n    public function run(): void {\n        if ($this->ready())\n            return $this->save();\n        $this->log();\n    }\n}\n";
+    assert_eq!(
+        apply_strip(content, 4),
+        "<?php\nclass A {\n    public function run(): void {\n        if ($this->ready()) {\n            $this->save();\n            return;\n        }\n        $this->log();\n    }\n}\n"
+    );
+}
+
+#[test]
+fn braces_a_braceless_if_body_on_the_same_line() {
+    let content = "<?php\nfunction foo(): void {\n    if ($x) return $v;\n    bar();\n}\n";
+    assert_eq!(
+        apply_strip(content, 2),
+        "<?php\nfunction foo(): void {\n    if ($x) { $v; return; }\n    bar();\n}\n"
+    );
+}
+
+#[test]
+fn braces_braceless_elseif_and_else_bodies() {
+    let content = "<?php\nfunction foo(): void {\n    if ($a) bar();\n    elseif ($b) return $v;\n    else\n        return $w;\n    bar();\n}\n";
+    assert_eq!(
+        apply_strip(content, 3),
+        "<?php\nfunction foo(): void {\n    if ($a) bar();\n    elseif ($b) { $v; return; }\n    else\n        return $w;\n    bar();\n}\n"
+    );
+    assert_eq!(
+        apply_strip(content, 5),
+        "<?php\nfunction foo(): void {\n    if ($a) bar();\n    elseif ($b) return $v;\n    else {\n        $w;\n        return;\n    }\n    bar();\n}\n"
+    );
+}
+
+#[test]
+fn braces_a_braceless_body_behind_a_comment_on_its_line() {
+    let content =
+        "<?php\nfunction foo(): void {\n    if ($x) // done\n        return $v;\n    bar();\n}\n";
+    assert_eq!(
+        apply_strip(content, 3),
+        "<?php\nfunction foo(): void {\n    if ($x) // done\n        { $v; return; }\n    bar();\n}\n"
+    );
+}
+
+#[test]
+fn braceless_if_body_as_the_last_statement_needs_no_return() {
+    let content = "<?php\nfunction foo(): void {\n    if ($x) return $v;\n}\n";
+    assert_eq!(
+        apply_strip(content, 2),
+        "<?php\nfunction foo(): void {\n    if ($x) $v;\n}\n"
+    );
+}
+
+#[test]
+fn keeps_the_return_of_a_loop_that_ends_the_function() {
+    let content = "<?php\nfunction foo(array $a): void {\n    foreach ($a as $x) return $x;\n}\n";
+    assert_eq!(
+        apply_strip(content, 2),
+        "<?php\nfunction foo(array $a): void {\n    foreach ($a as $x) { $x; return; }\n}\n"
+    );
+    let content =
+        "<?php\nfunction foo(array $a): void {\n    while (true) {\n        return 1;\n    }\n}\n";
+    assert_eq!(
+        apply_strip(content, 3),
+        "<?php\nfunction foo(array $a): void {\n    while (true) {\n        1;\n        return;\n    }\n}\n"
+    );
+}
+
+#[test]
+fn a_closure_in_a_loop_ends_with_its_last_statement() {
+    let content = "<?php\nfunction run(): void {\n    foreach ([1] as $x) {\n        $f = function (): void {\n            return 42;\n        };\n    }\n}\n";
+    let message =
+        "Anonymous function with return type void returns int but should not return anything.";
+    let target = target_function(content, 4, Anchor::Return, message).unwrap();
+    let edit = build_strip_return_expr_edit(content, &target).unwrap();
+    assert_eq!(edit.new_text, "42;");
+}
+
 #[test]
 fn last_statement_of_a_method_followed_by_another() {
     // What comes after the method's closing brace is not in the method.

@@ -23,7 +23,9 @@ use super::target::TargetFunction;
 ///   `return;` on the next line).
 ///
 /// When the return is the last statement before the function's closing
-/// `}`, the bare `return;` is omitted since it would be redundant.
+/// `}`, outside any loop, the bare `return;` is omitted since it would be
+/// redundant.  When the return is the braceless body of an `if`, `else`,
+/// loop or the like, the two statements get braces around them.
 ///
 /// `None` for a diagnostic on an arrow function, which has no `return` to
 /// remove.
@@ -45,15 +47,44 @@ pub(super) fn build_strip_return_expr_edit(
     }
 
     let expr_text = &content[value.start.offset as usize..value.end.offset as usize];
-    let new_text = if is_last_statement_in_function(content, end, target.body_end? as usize) {
-        format!("{};", expr_text)
-    } else {
-        let line_start = content[..start].rfind('\n').map_or(0, |nl| nl + 1);
-        let indent = &content[line_start..start];
-        format!("{};{}{}return;", expr_text, line_ending(content), indent)
-    };
+    if !statement.in_loop && is_last_statement_in_function(content, end, target.body_end? as usize)
+    {
+        return Some(TextEdit {
+            range,
+            new_text: format!("{};", expr_text),
+        });
+    }
 
-    Some(TextEdit { range, new_text })
+    let nl = line_ending(content);
+    let indent = line_indent(content, start);
+    let Some(head_end) = statement.braceless_after.map(|offset| offset as usize) else {
+        return Some(TextEdit {
+            range,
+            new_text: format!("{expr_text};{nl}{indent}return;"),
+        });
+    };
+    // The two statements take the place of one, so the body they make up
+    // needs braces.  A body on its own line gets a block in the usual
+    // layout, unless a comment sits between it and the head.
+    let gap = &content[head_end..start];
+    if gap.contains('\n') && gap.trim().is_empty() {
+        let outer = line_indent(content, head_end);
+        return Some(TextEdit {
+            range: byte_range_to_lsp_range(content, head_end, end),
+            new_text: format!(" {{{nl}{indent}{expr_text};{nl}{indent}return;{nl}{outer}}}"),
+        });
+    }
+    Some(TextEdit {
+        range,
+        new_text: format!("{{ {expr_text}; return; }}"),
+    })
+}
+
+/// The whitespace that starts the line holding byte `offset`.
+fn line_indent(content: &str, offset: usize) -> &str {
+    let line_start = content[..offset].rfind('\n').map_or(0, |nl| nl + 1);
+    let line = &content[line_start..];
+    &line[..line.len() - line.trim_start_matches([' ', '\t']).len()]
 }
 
 /// Build a list of `TextEdit`s that change the return type of `target` to

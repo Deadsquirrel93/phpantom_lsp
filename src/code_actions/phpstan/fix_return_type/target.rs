@@ -67,6 +67,21 @@ pub(in crate::code_actions::phpstan) struct ReturnStatement {
     pub(in crate::code_actions::phpstan) value: Option<Span>,
     /// Whether that value is the `null` literal.
     pub(in crate::code_actions::phpstan) returns_null: bool,
+    /// For a `return` that is the whole body of an `if`, `elseif`, `else`,
+    /// loop or `declare` written without braces, where the head of that
+    /// construct ends: just past its `)`, `else` or `do`.
+    pub(in crate::code_actions::phpstan) braceless_after: Option<u32>,
+    /// Whether a loop in its function holds it, so that the function goes
+    /// on past it even when no statement follows.
+    pub(in crate::code_actions::phpstan) in_loop: bool,
+}
+
+/// A `return` statement [`find_target`] found a function by, with what
+/// holds it.
+struct FoundReturn<'ast, 'arena> {
+    statement: &'ast Return<'arena>,
+    braceless_after: Option<u32>,
+    in_loop: bool,
 }
 
 impl TargetFunction {
@@ -74,7 +89,7 @@ impl TargetFunction {
         program: &Program<'_>,
         content: &str,
         function: FunctionLike<'_, '_>,
-        statement: Option<&Return<'_>>,
+        found: Option<FoundReturn<'_, '_>>,
     ) -> Self {
         let span = function.span();
         let params_end = match function {
@@ -93,17 +108,19 @@ impl TargetFunction {
                 .map(|return_type| (return_type.colon, return_type.hint.span())),
             body_end: function.body().map(|block| block.right_brace.start.offset),
             docblock: FunctionDocblock::of(program, content, span),
-            statement: statement.map(|statement| ReturnStatement {
-                start: statement.r#return.span.start.offset,
-                end: match statement.terminator {
+            statement: found.map(|found| ReturnStatement {
+                start: found.statement.r#return.span.start.offset,
+                end: match found.statement.terminator {
                     Terminator::Semicolon(semicolon) => Some(semicolon.end.offset),
                     _ => None,
                 },
-                value: statement.value.map(|value| value.span()),
+                value: found.statement.value.map(|value| value.span()),
                 returns_null: matches!(
-                    statement.value,
+                    found.statement.value,
                     Some(Expression::Literal(Literal::Null(_)))
                 ),
+                braceless_after: found.braceless_after,
+                in_loop: found.in_loop,
             }),
         }
     }
@@ -188,17 +205,24 @@ fn find_target<'ast, 'arena>(
     line: RangeInclusive<u32>,
     anchor: Anchor,
     anonymous: bool,
-) -> Option<(FunctionLike<'ast, 'arena>, Option<&'ast Return<'arena>>)> {
+) -> Option<(
+    FunctionLike<'ast, 'arena>,
+    Option<FoundReturn<'ast, 'arena>>,
+)> {
     let crosses_line = |start: u32, end: u32| start <= *line.end() && *line.start() <= end;
     let wanted = |function: FunctionLike<'_, '_>| function.is_anonymous() == anonymous;
 
     // Each node comes with the function its `return` statements belong to:
     // none at the top level or in a property hook, which returns the
-    // property's type and has no return type of its own.
-    let mut pending = vec![(Node::Program(program), None)];
+    // property's type and has no return type of its own.  Then whether a
+    // loop of that function holds it, and for a braceless body, where the
+    // head of the construct it is the body of ends.
+    let mut pending = vec![(Node::Program(program), None, false, None)];
     let mut children = Vec::new();
-    while let Some((node, owner)) = pending.pop() {
+    while let Some((node, owner, in_loop, braceless_after)) = pending.pop() {
+        let mut in_loop = in_loop;
         let owner = if let Some(function) = FunctionLike::of(node) {
+            in_loop = false;
             let reported_here = match anchor {
                 Anchor::Declaration => {
                     crosses_line(function.span().start.offset, body_start(function))
@@ -222,19 +246,72 @@ fn find_target<'ast, 'arena>(
                 && let Some(function) = owner
                 && wanted(function)
             {
-                return Some((function, Some(statement)));
+                let found = FoundReturn {
+                    statement,
+                    braceless_after,
+                    in_loop,
+                };
+                return Some((function, Some(found)));
             }
             owner
         };
+        in_loop |= matches!(
+            node,
+            Node::While(_) | Node::DoWhile(_) | Node::For(_) | Node::Foreach(_)
+        );
+        let braceless_after = braceless_body_after(node, braceless_after);
         node.visit_children(|child| {
             let span = child.span();
             if crosses_line(span.start.offset, span.end.offset) {
                 children.push(child);
             }
         });
-        pending.extend(children.drain(..).rev().map(|child| (child, owner)));
+        pending.extend(
+            children
+                .drain(..)
+                .rev()
+                .map(|child| (child, owner, in_loop, braceless_after)),
+        );
     }
     None
+}
+
+/// For the children of `node`, where the head of the construct ends that
+/// a child is the braceless body of, given `braceless_after` for `node`
+/// itself.  Only a statement child, and the `return` it wraps, can be such
+/// a body; a block or colon-delimited body passes nothing on.
+fn braceless_body_after(node: Node<'_, '_>, braceless_after: Option<u32>) -> Option<u32> {
+    match node {
+        Node::If(If {
+            right_parenthesis, ..
+        })
+        | Node::IfStatementBodyElseIfClause(IfStatementBodyElseIfClause {
+            right_parenthesis,
+            ..
+        })
+        | Node::While(While {
+            right_parenthesis, ..
+        })
+        | Node::For(For {
+            right_parenthesis, ..
+        })
+        | Node::Foreach(Foreach {
+            right_parenthesis, ..
+        })
+        | Node::Declare(Declare {
+            right_parenthesis, ..
+        }) => Some(right_parenthesis.end.offset),
+        Node::IfStatementBodyElseClause(clause) => Some(clause.r#else.span.end.offset),
+        Node::DoWhile(do_while) => Some(do_while.r#do.span.end.offset),
+        Node::IfBody(_)
+        | Node::IfStatementBody(_)
+        | Node::WhileBody(_)
+        | Node::ForBody(_)
+        | Node::ForeachBody(_)
+        | Node::DeclareBody(_)
+        | Node::Statement(_) => braceless_after,
+        _ => None,
+    }
 }
 
 /// Where the body of `function` starts, which ends its declaration: the

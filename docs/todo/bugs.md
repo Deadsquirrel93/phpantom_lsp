@@ -61,31 +61,6 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B635. "Remove return statement" moves the `return` out of a braceless `if`
-
-**Impact: Low · Complexity: Low**
-
-```php
-public function run(): void {
-    if ($this->ready())
-        return $this->save();   // PHPStan: ... returns bool but should not return anything.
-    $this->log();
-}
-```
-
-The quick fix keeps the value as a statement and adds a `return;` on the
-line after it, so the method still stops there. When the `return` is the
-only statement of an `if`, `else`, `elseif` or a loop written without
-braces, that `return;` lands after the construct instead of inside it: the
-method above now returns before `$this->log()` every time. On one line,
-`if ($x) return $v;` becomes `if ($x) $v;` and `if ($x) return;`, which
-evaluates the condition twice. `build_strip_return_expr_edit`
-(`code_actions/phpstan/fix_return_type/edits.rs`) writes the two
-statements without looking at what holds the `return`; when that is a
-braceless body, they need braces around them. `find_target`
-(`fix_return_type/target.rs`) already walks down to the statement and can
-report what holds it.
-
 ### B636. A docblock that mentions "function" loses its inferred `@return`
 
 **Impact: Low · Complexity: Low**
