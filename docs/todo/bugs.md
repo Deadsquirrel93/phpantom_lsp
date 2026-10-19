@@ -61,27 +61,6 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B638. A monorepo's subprojects miss path repositories and are never rescanned after `composer update`
-
-**Impact: Low-Medium · Complexity: Medium**
-
-A workspace with no root `composer.json` goes through `init_monorepo`
-(`indexing/init.rs`), which sets up each subproject with its own copy of the
-Composer steps. That copy leaves out the PSR-4 mappings of path-repository
-packages (`composer::extract_path_repo_psr4_mappings`), which
-`init_autoload_paths` adds for a single project, so a class in a local
-module that the classmap does not list yet never resolves. After startup a
-`composer.json` or `composer.lock` change runs `rescan_composer_indexes`
-(`indexing/scan.rs`) on the workspace root only. It reads the root's
-`composer.json`, finds none, and just clears the caches, so a subproject's
-vendor classes, autoload functions and constants stay as they were at
-startup until a restart. The copy also never classifies the classes the
-subproject's Composer classmap lists, which a single project does with
-`classify_class_origin`, so where an optimized autoloader lists every
-vendor class, completion ranks all of them as project code. Run the
-single-project Composer setup per subproject root, and rescan the
-subproject whose Composer files changed.
-
 ### B639. A `Pest.php` changed outside the editor is never re-read
 
 **Impact: Low · Complexity: Low**

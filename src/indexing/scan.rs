@@ -11,6 +11,7 @@ use super::path_aliases;
 use crate::Backend;
 use crate::classmap_scanner::{self, WorkspaceScanResult};
 use crate::composer;
+use crate::workspace_env::ComposerProjectPaths;
 
 impl Backend {
     /// Register a vendor directory path and its URI prefix for
@@ -44,55 +45,34 @@ impl Backend {
     /// Rebuild the vendor-derived indexes after a `composer.json` /
     /// `composer.lock` change (e.g. a `composer install` or `update`).
     ///
-    /// Re-reads PSR-4 mappings, rebuilds the vendor classmap and the
-    /// autoload function/constant indexes, rescans autoload files, and
-    /// clears the resolved-class caches so stale vendor versions do not
+    /// In a monorepo (no `composer.json` at `root`) only the subprojects
+    /// holding one of `changed_files` are rescanned.  Every pass ends by
+    /// clearing the resolved-class caches so stale vendor versions do not
     /// linger.  This is the synchronous body of
     /// [`did_change_watched_files`](Self::did_change_watched_files)'s
     /// composer branch, factored out so it can run on a blocking thread.
-    pub(crate) fn rescan_composer_indexes(&self, root: &Path) {
+    pub(crate) fn rescan_composer_indexes(&self, root: &Path, changed_files: &[PathBuf]) {
         if let Some(pkg) = composer::read_composer_package(root) {
-            let mut mappings = composer::extract_psr4_mappings_from_package(&pkg);
-            let vendor_dir = composer::get_vendor_dir(&pkg);
-            mappings.extend(composer::extract_path_repo_psr4_mappings(root, &vendor_dir));
-            // Keep the merged list longest-prefix-first so path-repo
-            // namespaces are matched before any shorter root prefix.
-            mappings.sort_by_key(|m| std::cmp::Reverse(m.prefix.len()));
-            *self.workspace.psr4_mappings.write() = mappings;
-
-            let vendor_path = root.join(&vendor_dir);
-            // `vendor/` may not have existed during initialization (a fresh
-            // clone before `composer install`). Register it again now so the
-            // shared vendor filters cache both raw and canonical spellings.
-            self.add_vendor_dir(&vendor_path);
-
-            // Rebuild vendor classmap, tracking dependency provenance so
-            // completion ranking stays accurate after a composer change.
-            let explicit_deps = composer::explicit_dependency_names(&pkg);
-            let mut vendor_scan = classmap_scanner::scan_vendor_packages_with_skip(
-                root,
-                &vendor_dir,
-                &HashSet::new(),
-                &explicit_deps,
-                &self.index_filters(),
-                None,
-                Some(self.followed_links()),
-            );
-            // Package roots came out of the same `installed.json` parse
-            // `scan_vendor_packages_with_skip` already did; no need to
-            // re-read and re-parse the file a second time here.
-            let vendor_package_roots = std::mem::take(&mut vendor_scan.package_roots);
-
-            // Everything the old vendor tree contributed goes, so symbols
-            // removed by a `composer update` no longer resolve.
-            self.symbols
-                .replace_tree(&path_aliases(&vendor_path), vendor_scan);
-
-            // Refresh the cached package roots for path-based lookups.
-            *self.workspace.vendor_package_origin_roots.write() = vendor_package_roots;
-
-            // Rescan autoload files (they may have changed).
-            self.scan_autoload_files(root, &vendor_dir, None);
+            self.rescan_composer_project(root, &pkg, false);
+        } else {
+            let changed_subprojects: Vec<PathBuf> = self
+                .workspace
+                .composer_projects
+                .read()
+                .iter()
+                .filter(|project| {
+                    let aliases = path_aliases(&project.root);
+                    changed_files
+                        .iter()
+                        .any(|file| aliases.iter().any(|alias| file.starts_with(alias)))
+                })
+                .map(|project| project.root.clone())
+                .collect();
+            for sub_root in changed_subprojects {
+                if let Some(pkg) = composer::read_composer_package(&sub_root) {
+                    self.rescan_composer_project(&sub_root, &pkg, true);
+                }
+            }
         }
 
         // Clear all cached class info since vendor classes may have
@@ -114,6 +94,120 @@ impl Backend {
         // shadow Laravel's runtime helper and facade aliases. Only maps with
         // such candidates are revisited.
         self.refresh_all_published_laravel_candidates();
+    }
+
+    /// Re-read one Composer project's PSR-4 mappings, rebuild its vendor
+    /// classmap and autoload function/constant indexes, and rescan its
+    /// autoload files.
+    fn rescan_composer_project(
+        &self,
+        project_root: &Path,
+        pkg: &composer::ComposerPackage,
+        subproject: bool,
+    ) {
+        // `vendor/` may not have existed during initialization (a fresh
+        // clone before `composer install`), so registering it again here
+        // is what lets the shared vendor filters cache both raw and
+        // canonical spellings.
+        let (vendor_dir, vendor_path) =
+            self.register_composer_project_paths(project_root, Some(pkg), subproject);
+
+        // Rebuild vendor classmap, tracking dependency provenance so
+        // completion ranking stays accurate after a composer change.
+        let explicit_deps = composer::explicit_dependency_names(pkg);
+        let mut vendor_scan = classmap_scanner::scan_vendor_packages_with_skip(
+            project_root,
+            &vendor_dir,
+            &HashSet::new(),
+            &explicit_deps,
+            &self.index_filters(),
+            None,
+            Some(self.followed_links()),
+        );
+        let vendor_package_roots = std::mem::take(&mut vendor_scan.package_roots);
+
+        // Everything the old vendor tree contributed goes, so symbols
+        // removed by a `composer update` no longer resolve.
+        self.symbols
+            .replace_tree(&path_aliases(&vendor_path), vendor_scan);
+
+        self.set_project_package_roots(project_root, vendor_package_roots);
+
+        // Rescan autoload files (they may have changed).
+        self.scan_autoload_files(project_root, &vendor_dir, None);
+    }
+
+    /// Register where a Composer project keeps its code: the PSR-4
+    /// mappings from its `composer.json` and from its path repositories,
+    /// and its vendor directory.
+    ///
+    /// A subproject's own mappings are made absolute; the workspace root's
+    /// stay relative to it.  Returns the vendor directory both as
+    /// `composer.json` spells it and as an absolute path.
+    pub(super) fn register_composer_project_paths(
+        &self,
+        project_root: &Path,
+        composer_json: Option<&composer::ComposerPackage>,
+        subproject: bool,
+    ) -> (String, PathBuf) {
+        let (mut mappings, vendor_dir) = match composer_json {
+            Some(pkg) => (
+                composer::extract_psr4_mappings_from_package(pkg),
+                composer::get_vendor_dir(pkg),
+            ),
+            None => (Vec::new(), "vendor".to_string()),
+        };
+        if subproject {
+            for mapping in &mut mappings {
+                let base = project_root.join(&mapping.base_path);
+                mapping.base_path = composer::normalise_path(&base.to_string_lossy());
+            }
+        }
+
+        // Cache the vendor dir path so cross-file scans can skip it
+        // without re-reading composer.json on every request.
+        let vendor_path = project_root.join(&vendor_dir);
+        self.add_vendor_dir(&vendor_path);
+
+        // Include PSR-4 mappings from path-repository packages (local
+        // packages symlinked into vendor/, e.g. internachi/modular modules).
+        mappings.extend(composer::extract_path_repo_psr4_mappings(
+            project_root,
+            &vendor_dir,
+        ));
+        self.set_project_psr4_mappings(project_root, mappings);
+
+        (vendor_dir, vendor_path)
+    }
+
+    /// Replace the PSR-4 mappings `project_root` contributed.
+    fn set_project_psr4_mappings(&self, project_root: &Path, mappings: Vec<composer::Psr4Mapping>) {
+        let mut projects = self.workspace.composer_projects.write();
+        composer_project_entry(&mut projects, project_root).psr4_mappings = mappings;
+        let mut all: Vec<composer::Psr4Mapping> = projects
+            .iter()
+            .flat_map(|project| project.psr4_mappings.iter().cloned())
+            .collect();
+        // Longest-prefix-first, so path-repo namespaces are matched before
+        // any shorter root prefix (e.g. an empty-prefix root fallback).
+        all.sort_by_key(|m| std::cmp::Reverse(m.prefix.len()));
+        *self.workspace.psr4_mappings.write() = all;
+    }
+
+    /// Replace the vendor package roots `project_root` contributed, which
+    /// path-based origin lookups (functions, constants) classify lazily
+    /// parsed symbols by.
+    pub(super) fn set_project_package_roots(
+        &self,
+        project_root: &Path,
+        package_roots: Vec<(PathBuf, crate::ClassCompletionOrigin, String)>,
+    ) {
+        let mut projects = self.workspace.composer_projects.write();
+        composer_project_entry(&mut projects, project_root).package_roots = package_roots;
+        *self.workspace.vendor_package_origin_roots.write() = projects
+            .iter()
+            .flat_map(|project| project.package_roots.iter().cloned())
+            .collect();
     }
 
     /// Scan autoload files for a single project root and populate the
@@ -337,6 +431,24 @@ impl Backend {
     }
 }
 
+/// The record of the Composer project at `root`, added if absent.
+fn composer_project_entry<'a>(
+    projects: &'a mut Vec<ComposerProjectPaths>,
+    root: &Path,
+) -> &'a mut ComposerProjectPaths {
+    let index = match projects.iter().position(|project| project.root == root) {
+        Some(index) => index,
+        None => {
+            projects.push(ComposerProjectPaths {
+                root: root.to_path_buf(),
+                ..Default::default()
+            });
+            projects.len() - 1
+        }
+    };
+    &mut projects[index]
+}
+
 /// Append each of `items` that `list` does not already hold.
 fn push_new<T: PartialEq>(list: &mut Vec<T>, items: Vec<T>) {
     for item in items {
@@ -383,7 +495,7 @@ mod tests {
 
         let backend = Backend::new_test();
         assert!(backend.workspace.vendor_dir_paths.lock().is_empty());
-        backend.rescan_composer_indexes(dir.path());
+        backend.rescan_composer_indexes(dir.path(), &[]);
 
         let paths = backend.workspace.vendor_dir_paths.lock();
         assert!(paths.contains(&aliased_vendor));

@@ -62,31 +62,7 @@ impl Backend {
         root: &Path,
         composer_json: Option<&composer::ComposerPackage>,
     ) -> (String, PathBuf) {
-        let (mappings, vendor_dir) = match composer_json {
-            Some(pkg) => (
-                composer::extract_psr4_mappings_from_package(pkg),
-                composer::get_vendor_dir(pkg),
-            ),
-            None => (Vec::new(), "vendor".to_string()),
-        };
-
-        // Cache the vendor dir path so cross-file scans can skip it
-        // without re-reading composer.json on every request.
-        let vendor_path = root.join(&vendor_dir);
-        self.add_vendor_dir(&vendor_path);
-
-        // Include PSR-4 mappings from path-repository packages (local
-        // packages symlinked into vendor/, e.g. internachi/modular modules).
-        let path_repo_mappings = composer::extract_path_repo_psr4_mappings(root, &vendor_dir);
-        let mut all_mappings = mappings;
-        all_mappings.extend(path_repo_mappings);
-        // Keep the merged list longest-prefix-first so path-repo namespaces
-        // are matched before any shorter root prefix (e.g. an empty-prefix
-        // root fallback).
-        all_mappings.sort_by_key(|m| std::cmp::Reverse(m.prefix.len()));
-        *self.workspace.psr4_mappings.write() = all_mappings;
-
-        (vendor_dir, vendor_path)
+        self.register_composer_project_paths(root, composer_json, false)
     }
 
     /// Initialize a single-project workspace (root `composer.json` exists).
@@ -135,21 +111,48 @@ impl Backend {
             .write()
             .set_runtime_permission_package(runtime_permissions);
 
-        let (vendor_dir, vendor_path) = self.init_autoload_paths(root, composer_json.as_ref());
+        let source_label =
+            self.index_composer_project(root, composer_json.as_ref(), false, (15, 85), progress);
+
+        self.finish_discovery(root, php_version, source_label, progress)
+            .await;
+    }
+
+    /// Index one Composer project: its autoload paths, its classmap (built
+    /// the way `[indexing] strategy` asks), its PSR-0 and Drupal
+    /// directories, and its autoload files.
+    ///
+    /// `root` is the workspace root, or with `subproject` set one
+    /// subproject of a monorepo.  The work reports progress within
+    /// `percent_range`.  Returns where the classmap came from, for the
+    /// discovery log.
+    fn index_composer_project(
+        &self,
+        root: &Path,
+        composer_json: Option<&composer::ComposerPackage>,
+        subproject: bool,
+        percent_range: (u32, u32),
+        progress: Option<&crate::progress::ScanProgress>,
+    ) -> &'static str {
+        // A phase's position in `percent_range`, in seventieths of it.
+        let (lo, hi) = percent_range;
+        let at = |share: u32| lo + (hi - lo) * share / 70;
+
+        let (vendor_dir, vendor_path) =
+            self.register_composer_project_paths(root, composer_json, subproject);
         let vendor_paths = path_aliases(&vendor_path);
 
         // ── Build the classmap ──────────────────────────────────────
         let strategy = self.config().indexing.strategy();
 
-        // The classmap build owns the 15..70 range of the bar; the
-        // scan helpers divide it into contiguous per-phase windows
-        // with per-file counts.
+        // The classmap build owns most of the range; the scan helpers
+        // divide it into contiguous per-phase windows with per-file
+        // counts.
         if let Some(p) = progress {
-            p.set_scope(15, 70, "Building class index");
+            p.set_scope(at(0), at(55), "Building class index");
         }
 
         let explicit_deps = composer_json
-            .as_ref()
             .map(crate::composer::explicit_dependency_names)
             .unwrap_or_default();
 
@@ -219,7 +222,7 @@ impl Backend {
                 let mut self_scan = self.build_self_scan_composer(
                     root,
                     &vendor_dir,
-                    composer_json.as_ref(),
+                    composer_json,
                     &skip_paths,
                     progress,
                 );
@@ -240,9 +243,7 @@ impl Backend {
             }
         }
         self.symbols.merge_scan(scan);
-        // Cache the package roots so path-based origin lookups
-        // (functions, constants) can classify lazily parsed symbols.
-        *self.workspace.vendor_package_origin_roots.write() = package_roots;
+        self.set_project_package_roots(root, package_roots);
 
         // ── Drupal: scan web-root directories (gitignore bypassed) ──
         // Drupal's .gitignore excludes web/core, web/modules/contrib,
@@ -250,11 +251,11 @@ impl Backend {
         // contain every base interface and hook definition that modules
         // depend on.  detect_drupal_web_root() returns None for
         // non-Drupal projects so this block is a no-op in that case.
-        if let Some(ref pkg) = composer_json
+        if let Some(pkg) = composer_json
             && let Some(drupal_web_root) = composer::detect_drupal_web_root(root, pkg)
         {
             if let Some(p) = progress {
-                p.set_scope(70, 74, "Scanning Drupal directories");
+                p.set_scope(at(55), at(59), "Scanning Drupal directories");
             }
             let drupal_result = classmap_scanner::scan_drupal_directories(
                 &drupal_web_root,
@@ -301,20 +302,19 @@ impl Backend {
 
         // ── Autoload files ──────────────────────────────────────────
         if let Some(p) = progress {
-            p.set_scope(74, 85, "Scanning autoload files");
+            p.set_scope(at(59), at(70), "Scanning autoload files");
         }
 
         self.scan_autoload_files(root, &vendor_dir, progress);
 
-        self.finish_discovery(root, php_version, source_label, progress)
-            .await;
+        source_label
     }
 
     /// Initialize a monorepo workspace (no root `composer.json`, but
     /// subprojects with their own `composer.json` were discovered).
     ///
-    /// Each subproject is processed through the Composer pipeline (PSR-4,
-    /// classmap, autoload files, vendor packages).  After all subprojects
+    /// Each subproject is indexed the way a single Composer project is
+    /// (see [`Self::index_composer_project`]).  After all subprojects
     /// are processed, a gitignore-aware full-scan picks up loose PHP files
     /// outside any subproject directory.
     pub(crate) async fn init_monorepo(
@@ -360,16 +360,12 @@ impl Backend {
         // keys that only the installing application declares.
         let mut any_application = false;
 
-        for (sub_idx, (sub_root, vendor_dir)) in subprojects.iter().enumerate() {
+        for (sub_idx, (sub_root, _)) in subprojects.iter().enumerate() {
             // Each subproject owns an equal slice of the 10..80 range;
             // the loose-file scan gets 80..85.  Every report inside the
-            // slice carries the subproject prefix, and the scan helpers
-            // divide the slice into per-phase windows with file counts.
+            // slice carries the subproject prefix.
             let sub_lo = 10 + (sub_idx as u32 * 70) / sub_count.max(1) as u32;
             let sub_hi = 10 + ((sub_idx as u32 + 1) * 70) / sub_count.max(1) as u32;
-            // The autoload byte-scan is a small fraction of a
-            // subproject's work; the classmap build dominates.
-            let sub_mid = sub_lo + (sub_hi - sub_lo) / 5;
             if let Some(p) = progress {
                 let label = sub_root
                     .strip_prefix(root)
@@ -382,70 +378,24 @@ impl Backend {
                     sub_count,
                     label
                 ));
-                p.set_scope(sub_lo, sub_mid, "Scanning autoload files");
             }
             skip_dirs.insert(sub_root.clone());
 
-            if (!any_laravel || !any_runtime_permissions || !any_application)
-                && let Some(pkg) = composer::read_composer_package(sub_root)
-            {
-                any_laravel |= composer::is_laravel_project(&pkg);
-                any_runtime_permissions |= composer::has_runtime_permission_package(&pkg);
+            let composer_json = composer::read_composer_package(sub_root);
+            if let Some(pkg) = &composer_json {
+                any_laravel |= composer::is_laravel_project(pkg);
+                any_runtime_permissions |= composer::has_runtime_permission_package(pkg);
                 any_application |=
-                    composer::is_application_project(&pkg) || sub_root.join("artisan").is_file();
+                    composer::is_application_project(pkg) || sub_root.join("artisan").is_file();
             }
 
-            // ── PSR-4 mappings ──────────────────────────────────────
-            let (mappings, _) = composer::parse_composer_json(sub_root);
-
-            // Resolve base_path values to absolute paths so that
-            // resolve_class_path works regardless of workspace_root.
-            let abs_mappings: Vec<composer::Psr4Mapping> = mappings
-                .into_iter()
-                .map(|m| {
-                    let abs_base = sub_root.join(&m.base_path).to_string_lossy().to_string();
-                    composer::Psr4Mapping {
-                        prefix: m.prefix,
-                        base_path: composer::normalise_path(&abs_base),
-                    }
-                })
-                .collect();
-            {
-                let mut psr4 = self.workspace.psr4_mappings.write();
-                psr4.extend(abs_mappings);
-            }
-
-            // ── Vendor dir tracking ─────────────────────────────────
-            let vendor_path = sub_root.join(vendor_dir);
-            self.add_vendor_dir(&vendor_path);
-
-            // ── Autoload files ──────────────────────────────────────
-            self.scan_autoload_files(sub_root, vendor_dir, progress);
-
-            // ── Merged classmap + self-scan ──────────────────────────
-            // Load the subproject's Composer classmap as a skip set,
-            // then self-scan its PSR-4 directories and vendor packages
-            // for anything the classmap missed.
-            let mut sub_cm = composer::parse_autoload_classmap(sub_root, vendor_dir);
-            // Merge PSR-0 classes for this subproject.
-            let psr0_cm = composer::parse_autoload_namespaces(sub_root, vendor_dir);
-            for (fqn, path) in psr0_cm {
-                sub_cm.entry(fqn).or_insert(path);
-            }
-            // …and the classes Composer's own bootstrap `require`s, which
-            // no autoload map lists.
-            for (fqn, path) in composer::scan_composer_bootstrap_classes(sub_root, vendor_dir) {
-                sub_cm.entry(fqn).or_insert(path);
-            }
-            let sub_skip: HashSet<PathBuf> = sub_cm.values().cloned().collect();
-            if let Some(p) = progress {
-                p.set_scope(sub_mid, sub_hi, "Building class index");
-            }
-            let scan =
-                self.build_self_scan_composer(sub_root, vendor_dir, None, &sub_skip, progress);
-            self.symbols
-                .merge_scan(WorkspaceScanResult::from_classmap(sub_cm));
-            self.symbols.merge_scan(scan);
+            self.index_composer_project(
+                sub_root,
+                composer_json.as_ref(),
+                true,
+                (sub_lo, sub_hi),
+                progress,
+            );
         }
 
         self.resolved_class_cache.write().set_laravel(any_laravel);
@@ -453,18 +403,6 @@ impl Backend {
         self.laravel_gates
             .write()
             .set_runtime_permission_package(any_runtime_permissions);
-
-        // Re-sort PSR-4 mappings by prefix length descending so
-        // longest-prefix-first matching works.  Each subproject appends
-        // to the shared list, and so does a rediscovery pass over a list
-        // an earlier one already filled, so drop the repeats instead of
-        // letting every pass grow what class-path resolution walks.
-        {
-            let mut psr4 = self.workspace.psr4_mappings.write();
-            let mut seen: HashSet<(String, String)> = HashSet::new();
-            psr4.retain(|m| seen.insert((m.prefix.clone(), m.base_path.clone())));
-            psr4.sort_by_key(|b| std::cmp::Reverse(b.prefix.len()));
-        }
 
         // ── Full-scan loose files ───────────────────────────────────
         // Walk the workspace for PHP files outside any subproject
@@ -560,3 +498,7 @@ impl Backend {
         .await;
     }
 }
+
+#[cfg(test)]
+#[path = "init_tests.rs"]
+mod tests;

@@ -37,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Monorepo subprojects are indexed like standalone projects.** In a workspace without a root `composer.json`, each subproject's local path-repository modules now resolve, its vendor classes rank below project code in completion, and a `composer update` in it is picked up without a restart.
 - **Warnings for files PHPantom could not read.** A `composer.json` with a syntax error, a `.phpantom.toml` edit that no longer parses, a broken phar, and a Laravel schema dump or migration that fails to load are now reported in the PHPantom output log instead of being silently skipped.
 - **`@phpstan-ignore` reasons with commas.** Adding an identifier to an ignore comment, or removing one from it, keeps each reason with its own identifier, even when the reason contains commas or parentheses.
 - **Edits and jumps after non-ASCII text.** "Remove assert" and go-to-definition on an object shape key no longer land too far right on a line with non-ASCII characters before them, and go-to-definition on a shape whose keys contain them no longer fails.

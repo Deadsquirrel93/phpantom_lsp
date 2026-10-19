@@ -30,7 +30,8 @@ const WATCHED_FILES_REGISTRATION_ID: &str = "workspace/didChangeWatchedFiles";
 /// A watched-file batch sorted by the work it calls for.
 #[derive(Default)]
 struct WatchedChangeBatch {
-    composer_changed: bool,
+    /// The `composer.json` / `composer.lock` files the batch touched.
+    composer_changes: Vec<PathBuf>,
     translations_changed: bool,
     config_changed: bool,
     schema_full_rebuild: bool,
@@ -44,7 +45,7 @@ impl WatchedChangeBatch {
     fn is_empty(&self) -> bool {
         self.php_changes.is_empty()
             && self.resource_changes.is_empty()
-            && !self.composer_changed
+            && self.composer_changes.is_empty()
             && !self.translations_changed
             && !self.config_changed
             && !self.schema_full_rebuild
@@ -106,9 +107,9 @@ impl Backend {
             self.reindex_watched_php_files(&batch.php_changes);
         }
 
-        if batch.composer_changed {
+        if !batch.composer_changes.is_empty() {
             tracing::info!("PHPantom: composer files changed, rescanning vendor");
-            self.rescan_composer_indexes(root);
+            self.rescan_composer_indexes(root, &batch.composer_changes);
         }
 
         if !batch.resource_changes.is_empty() {
@@ -151,7 +152,9 @@ impl Backend {
         for change in changes {
             let path_str = change.uri.path();
             if path_str.ends_with("/composer.json") || path_str.ends_with("/composer.lock") {
-                batch.composer_changed = true;
+                if let Some(path) = crate::util::url_to_path(&change.uri) {
+                    batch.composer_changes.push(path);
+                }
                 continue;
             }
             if crate::util::url_to_path(&change.uri).is_some_and(|p| p == config_path) {
