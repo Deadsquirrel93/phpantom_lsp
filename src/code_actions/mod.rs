@@ -292,12 +292,14 @@ impl Backend {
 
         // Every collector plans its edits against the PHP a template lowers
         // to; the editor applies them to the template itself.
+        let eol = crate::text_position::line_ending(content);
         for action in &mut actions {
             if let CodeActionOrCommand::CodeAction(CodeAction {
                 edit: Some(edit), ..
             }) = action
             {
                 self.translate_workspace_edit(edit);
+                self.match_workspace_edit_line_endings(edit, uri, eol);
             }
         }
 
@@ -497,6 +499,63 @@ impl Backend {
 
         let mut edit = result?;
         self.translate_workspace_edit(&mut edit);
+        self.match_workspace_edit_line_endings(
+            &mut edit,
+            &data.uri,
+            crate::text_position::line_ending(content),
+        );
         Some(edit)
+    }
+
+    /// Give the text of every edit in `edit` the line terminator of the
+    /// file it goes into.  `eol` is the terminator of `uri`, the file the
+    /// action was requested in, and also stands for a file with no content
+    /// yet (one the edit creates).
+    fn match_workspace_edit_line_endings(
+        &self,
+        edit: &mut WorkspaceEdit,
+        uri: &str,
+        eol: &'static str,
+    ) {
+        use crate::text_position::{line_ending, match_line_ending};
+
+        let eol_of = |target: &Url| {
+            if target.as_str() == uri {
+                return eol;
+            }
+            self.get_file_content_arc(target.as_str())
+                .map_or(eol, |content| line_ending(&content))
+        };
+        if let Some(changes) = edit.changes.as_mut() {
+            for (target, edits) in changes.iter_mut() {
+                let eol = eol_of(target);
+                for edit in edits {
+                    match_line_ending(&mut edit.new_text, eol);
+                }
+            }
+        }
+        let match_document = |document: &mut TextDocumentEdit| {
+            let eol = eol_of(&document.text_document.uri);
+            for edit in &mut document.edits {
+                let text = match edit {
+                    OneOf::Left(edit) => &mut edit.new_text,
+                    OneOf::Right(edit) => &mut edit.text_edit.new_text,
+                };
+                match_line_ending(text, eol);
+            }
+        };
+        match edit.document_changes.as_mut() {
+            Some(DocumentChanges::Edits(documents)) => {
+                documents.iter_mut().for_each(match_document)
+            }
+            Some(DocumentChanges::Operations(operations)) => {
+                for operation in operations {
+                    if let DocumentChangeOperation::Edit(document) = operation {
+                        match_document(document);
+                    }
+                }
+            }
+            None => {}
+        }
     }
 }

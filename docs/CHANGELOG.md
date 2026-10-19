@@ -37,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Line endings of generated code.** Imports, generated methods and docblocks, extracted code and other edits now end their lines with `\r\n` in a file saved that way, instead of leaving it with mixed line endings.
 - **Constants in `switch` cases.** Hover, go-to-definition, find references and rename now work on a constant or class constant written in a `case` label, and an import used only there is no longer reported as unused.
 - **Unused imports named only in text.** An import whose name appears only in a string, a comment or as a property name is now reported as unused.
 - **Variables imported with `global`.** A function that reads a top-level variable through `global` now sees the type the top-level code gave it in diagnostics too, as hover already did.

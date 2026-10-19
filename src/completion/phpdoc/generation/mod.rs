@@ -244,6 +244,10 @@ pub fn try_generate_docblock_on_enter(
         ));
     }
 
+    let eol = crate::text_position::line_ending(content);
+    for edit in &mut edits {
+        crate::text_position::match_line_ending(&mut edit.new_text, eol);
+    }
     Some(edits)
 }
 

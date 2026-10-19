@@ -198,6 +198,29 @@ pub(crate) fn line_ending(content: &str) -> &'static str {
     }
 }
 
+/// Rewrite the bare `\n` line breaks of edit text to `eol`, the terminator
+/// of the file the text goes into (see [`line_ending`]).  A `\r\n` the text
+/// already carries is kept as is.
+///
+/// Edit builders write `\n`; the request handlers run their edits through
+/// this before answering, so a `\r\n` file does not end up with mixed line
+/// endings.
+pub(crate) fn match_line_ending(text: &mut String, eol: &str) {
+    if eol == "\n" || !text.contains('\n') {
+        return;
+    }
+    let mut out = String::with_capacity(text.len() + 16);
+    let mut rest = text.as_str();
+    while let Some(i) = rest.find('\n') {
+        let line = &rest[..i];
+        out.push_str(line.strip_suffix('\r').unwrap_or(line));
+        out.push_str(eol);
+        rest = &rest[i + 1..];
+    }
+    out.push_str(rest);
+    *text = out;
+}
+
 /// [`LineIndex::position`] over a table built by [`line_starts`] for the
 /// same `content`.
 pub(crate) fn position_in(content: &str, line_starts: &[usize], offset: usize) -> Position {
@@ -545,6 +568,17 @@ mod tests {
         assert_eq!(line_ending("<?php\r\necho 1;\r\n"), "\r\n");
         assert_eq!(line_ending("<?php\necho 1;\n"), "\n");
         assert_eq!(line_ending("<?php echo 1;"), "\n");
+    }
+
+    #[test]
+    fn match_line_ending_rewrites_bare_line_feeds_only() {
+        let mut text = "use Foo;\nuse Bar;\r\n\n".to_string();
+        match_line_ending(&mut text, "\r\n");
+        assert_eq!(text, "use Foo;\r\nuse Bar;\r\n\r\n");
+
+        let mut text = "use Foo;\n".to_string();
+        match_line_ending(&mut text, "\n");
+        assert_eq!(text, "use Foo;\n");
     }
 
     #[test]

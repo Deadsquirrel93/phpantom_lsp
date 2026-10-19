@@ -96,6 +96,34 @@ fn paren_follows_cursor(content: &str, position: Position) -> bool {
     after_ident.starts_with('(')
 }
 
+/// Give the text every item inserts the file's line terminator `eol`.
+fn match_completion_line_endings(response: &mut CompletionResponse, eol: &str) {
+    use crate::text_position::match_line_ending;
+
+    if eol == "\n" {
+        return;
+    }
+    let items = match response {
+        CompletionResponse::Array(items) => items,
+        CompletionResponse::List(list) => &mut list.items,
+    };
+    for item in items {
+        if let Some(text) = &mut item.insert_text {
+            match_line_ending(text, eol);
+        }
+        match &mut item.text_edit {
+            Some(CompletionTextEdit::Edit(edit)) => match_line_ending(&mut edit.new_text, eol),
+            Some(CompletionTextEdit::InsertAndReplace(edit)) => {
+                match_line_ending(&mut edit.new_text, eol);
+            }
+            None => {}
+        }
+        for edit in item.additional_text_edits.iter_mut().flatten() {
+            match_line_ending(&mut edit.new_text, eol);
+        }
+    }
+}
+
 /// Downgrade callable snippet items to plain-name insertions.
 ///
 /// When `(` already follows the cursor, snippets that insert their own
@@ -163,20 +191,34 @@ impl Backend {
         params: CompletionParams,
     ) -> Result<Option<CompletionResponse>> {
         let uri = params.text_document_position.text_document.uri.to_string();
+        let mut response = self.completion_response(&uri, params);
+        if let Some(response) = &mut response
+            && let Some(content) = self.get_file_content_arc(&uri)
+        {
+            match_completion_line_endings(response, crate::text_position::line_ending(&content));
+        }
+        Ok(response)
+    }
+
+    /// The completion items at the request's position, before their edit
+    /// text is given the file's line terminator.
+    fn completion_response(
+        &self,
+        uri: &str,
+        params: CompletionParams,
+    ) -> Option<CompletionResponse> {
         let position = params.text_document_position.position;
 
-        if self.is_blade_file(&uri)
-            && let Some(response) = self.blade_source_completion(&uri, position)
+        if self.is_blade_file(uri)
+            && let Some(response) = self.blade_source_completion(uri, position)
         {
-            return Ok(Some(response));
+            return Some(response);
         }
 
         // A template is analysed as the virtual PHP it lowers to, with the
         // cursor moved into it, so variable resolution walks the
         // preprocessed AST.
-        let Some((content, position)) = self.analysable_content_at(&uri, position) else {
-            return Ok(None);
-        };
+        let (content, position) = self.analysable_content_at(uri, position)?;
 
         let response = {
             // Activate the chain resolution cache so that shared chain
@@ -194,11 +236,11 @@ impl Backend {
 
             let cursor_offset = crate::text_position::position_to_offset(&content, position);
             let site = CompletionSite {
-                uri: &uri,
+                uri,
                 content: &content,
                 position,
                 cursor_offset,
-                ctx: self.file_context_at(&uri, cursor_offset),
+                ctx: self.file_context_at(uri, cursor_offset),
             };
             match self.completion_stages(&site, params.context.as_ref()) {
                 ControlFlow::Break(response) => response,
@@ -212,12 +254,12 @@ impl Backend {
         // has — translate it back, dropping items whose range falls in
         // the injected prologue rather than clamping them to the
         // template's start.
-        Ok(match response {
-            Some(response) if self.is_blade_file(&uri) => {
-                Some(self.translate_completion_response(&uri, response))
+        match response {
+            Some(response) if self.is_blade_file(uri) => {
+                Some(self.translate_completion_response(uri, response))
             }
             other => other,
-        })
+        }
     }
 
     /// Completion that reads a Blade template's own source at the
