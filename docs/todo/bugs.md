@@ -150,6 +150,75 @@ literal at the call site and for a value whose extra key comes from a
 declaration. PHPStan, Psalm and Mago all seal by default; conformance row
 `arrays_shape_sealed_by_default.php`.
 
+### B665. Writing a literal key into `array<K, V>` widens `K` to `int` or `string`
+
+**Impact: Medium · Complexity: Low**
+
+```php
+enum Country: string { case DK = 'dk'; case EN = 'en'; }
+
+/** @param array<value-of<Country>, string> $texts */
+function save(array $texts): void {}
+
+/** @param array<value-of<Country>, string> $texts */
+function f(array $texts): void {
+    $texts[Country::EN->value] = 'x';
+    save($texts);   // reported: got non-empty-array<string, string>
+}
+```
+
+A write with a known key into a generic array keeps the value type but
+replaces the key type with its general scalar: `$a['a'] = …` on
+`array<'a'|'b', V>` gives `non-empty-array<string, V>`, and `$a[1] = …` on
+`array<1|2, V>` gives `non-empty-array<int, V>`. The literal key is
+resolved correctly (`Country::EN->value` is `'en'`), so the loss is in the
+write. The result should be `non-empty-array<K|'lit', V>`, which is what
+PHPStan gives. Found in the Laravel sample.
+
+### B666. An array filled by key inside a `foreach` loses every required key
+
+**Impact: Medium · Complexity: Medium**
+
+```php
+/** @param array{dk: string, en?: string} $texts
+ *  @return array{int, Translation} */
+function f(array $texts): array {
+    $out = [];
+    foreach ($texts as $market => $text) {
+        $out[$market] = new Translation($text);
+    }
+    return [1, $out['dk']];   // reported: got array{1, ?Translation}
+}
+```
+
+`$out` comes out of the loop as `array{dk?: Translation, en?: Translation}`.
+Every key is optional, so reading `dk`, which the source shape guarantees
+the loop wrote, picks up `null`. The same happens when the source is a
+`non-empty-array<'dk'|'en', string>`: the loop runs at least once, but the
+result is still an all-optional shape. A key the iterated shape requires
+should stay required in the result. Otherwise the result should be
+`non-empty-array<K, V>` when the source is non-empty, the way PHPStan
+generalizes it, so a read neither adds `null` nor claims a key that may be
+missing. Found in the Laravel sample.
+
+### B667. A key read on an intersection of array types resolves nothing
+
+**Impact: Medium · Complexity: Medium**
+
+```php
+/** @param array<string, mixed>&array{at: Carbon} $entry */
+function f(array $entry): string {
+    return $entry['at']->toIso8601String();   // Cannot verify method — type of
+}                                             // '$entry['at']' could not be resolved
+```
+
+`array<string, mixed>&array{at: Carbon}` is the usual way to say "an
+open-ended array that has at least `at`". The intersection itself resolves
+and survives spreads, `usort()` and closure-parameter inference from
+`array_map()`, but an offset read on it gives no type at all. A read should
+take the most specific answer among the members: `Carbon` here, from the
+shape. Found in the Laravel sample.
+
 ## Laravel
 
 ### B655. An unknown config key is not reported
@@ -171,6 +240,25 @@ itself is simply absent. Add it alongside the other three, with the same
 conservative stance they take when the index is incomplete. Conformance row
 `framework.config-diagnostic` in the language-server probes, the only
 non-green framework cell for our column.
+
+### B669. `response($content)` with a nullable argument is typed `ResponseFactory|Response`
+
+**Impact: Medium · Complexity: Low**
+
+```php
+public function download(): Response {
+    $file = Storage::disk('feeds')->get('feed.xml');   // string|null
+    return response($file, 200, $headers);             // reported: ResponseFactory|Response
+}
+```
+
+The helper's docblock says `($content is null ? ResponseFactory : Response)`,
+but its body branches on `func_num_args() === 0`, not on the value: any call
+with an argument returns `$factory->make($content ?? '', …)`, a `Response`,
+even when that argument is `null`. Following the docblock literally turns
+every `response($maybeNull)` into a return-type false positive. The return
+type should depend on whether an argument was passed. Found in the Laravel
+sample.
 
 ## Blade
 
@@ -249,7 +337,10 @@ Two resolution paths answer "what does `new $var` produce", and they
 disagree. The assignment handler gets it right for every class-string
 flavour — `$obj::class`, a literal string, `get_class()`, a
 `class-string<T>` docblock. The member-access subject resolver only handles
-`class-string<T>`; for anything else it either gives up or, worse, hands
+`class-string<T>`, and only when it is the variable's declared type: a
+`class-string<Model>` obtained by `$class = $map[$type] ?? null` and a
+`null` guard still fails, with or without the parentheses PHP 8.4 makes
+optional. For anything else it either gives up or, worse, hands
 back the *operand's* type, so a literal class name is reported as a method
 call on a string. That is the parallel-resolution-path anti-pattern:
 whichever of the two paths is right, there should be one. Conformance row
@@ -354,3 +445,21 @@ way the member-access checks resolve theirs rather than pattern-matched.
 Conformance row `regressions_variable_class_static_property.php` (the
 private-read half of that test already passes, so only the write check is
 missing).
+
+### B668. A member access on a parenthesised closure literal has no subject
+
+**Impact: Low-Medium · Complexity: Low**
+
+```php
+function f(View\Factory $factory): void {
+    $state = (fn(): array => [])->call($factory);             // Cannot verify method
+    (function (): int { return 1; })->bindTo($factory);       // 'call'/'bindTo' — type
+}                                                             // of '' could not be resolved
+```
+
+`$state` itself resolves to `array`, so the call is understood. Only the
+member-access diagnostic fails: the subject it extracts from
+`(fn() => …)` or `(function () {…})` is the empty string, which resolves
+to nothing. A closure literal is a `Closure`; the diagnostic should resolve
+its subject through the same path that typed the call. Found in the Laravel
+sample.

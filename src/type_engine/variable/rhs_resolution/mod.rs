@@ -361,6 +361,14 @@ fn resolve_rhs_expression_inner<'b>(
         // directly.  The signs are separate AST nodes rather than part of
         // numeric literals, so `-1` keeps its exact value through here.
         Expression::UnaryPrefix(unary) => {
+            // A scalar cast checked earlier (`isset($map[(string) $k])`)
+            // reads the entry the check left under the cast's key, the
+            // way a function call does.
+            if unary.operator.is_cast()
+                && let Some(narrowed) = narrowed_call(expr, ctx)
+            {
+                return narrowed;
+            }
             match unary_prefix_result_type(&unary.operator, unary.operand, || {
                 resolve_rhs_expression(unary.operand, ctx)
             }) {

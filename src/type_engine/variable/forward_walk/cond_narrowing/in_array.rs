@@ -27,7 +27,10 @@ pub(crate) fn apply_array_key_exists_narrowing<'b>(
     inverted: bool,
 ) {
     for operand in collect_and_chain_operands(condition) {
-        let Some((base_key, key_expr, negated)) = array_key_exists_target(operand) else {
+        let Some((array_expr, key_expr, negated)) = array_key_exists_target(operand) else {
+            continue;
+        };
+        let Some(base_key) = condition_facts::expr_to_subject_key(array_expr) else {
             continue;
         };
         narrow_key_existence(&base_key, key_expr, negated == inverted, scope, ctx);

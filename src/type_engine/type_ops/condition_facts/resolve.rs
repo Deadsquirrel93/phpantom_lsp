@@ -197,6 +197,29 @@ fn non_chain_subject_key(expr: &Expression<'_>) -> Option<String> {
             // `strpos(...)` are the same call.
             Some(format!("{}({})", name.to_ascii_lowercase(), args))
         }
+        // A scalar cast is the conversion function it stands for, so
+        // `(string) $x` and `strval($x)` share a key and a check on one
+        // narrows a later read of either.
+        Expression::UnaryPrefix(prefix) => {
+            let function = match prefix.operator {
+                UnaryPrefixOperator::StringCast(..) | UnaryPrefixOperator::BinaryCast(..) => {
+                    "strval"
+                }
+                UnaryPrefixOperator::IntCast(..) | UnaryPrefixOperator::IntegerCast(..) => "intval",
+                UnaryPrefixOperator::FloatCast(..)
+                | UnaryPrefixOperator::DoubleCast(..)
+                | UnaryPrefixOperator::RealCast(..) => "floatval",
+                UnaryPrefixOperator::BoolCast(..) | UnaryPrefixOperator::BooleanCast(..) => {
+                    "boolval"
+                }
+                _ => return None,
+            };
+            Some(format!(
+                "{}({})",
+                function,
+                argument_value_key(prefix.operand)?
+            ))
+        }
         // See through parentheses so `($x instanceof Foo)` and grouped
         // subjects resolve to the same key as the bare form.
         Expression::Parenthesized(inner) => expr_to_subject_key(inner.expression),

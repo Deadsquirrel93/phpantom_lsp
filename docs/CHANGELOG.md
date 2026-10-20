@@ -38,6 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`array_key_exists()` narrows the key.** A key that passes `array_key_exists($k, $array)` is now one of the array's keys, as it already was after `isset($array[$k])`, so it can be returned as a `key-of<...>`. Both checks also narrow a key written as a cast, such as `(string) $this->sort`.
 - **Same-named variables in different functions.** A call through a variable no longer takes its type from a variable of the same name in another function of the file. `$box->get(0)` on a `Box<Post>` was read as the `Box<User>` of an earlier function, and `$f()` lost its return type when another function's `$f` held a plain `Closure`.
 - **Generated property hooks follow the file's indentation.** "Generate get hook" and "Generate set hook" indent the new hooks by two spaces in a file indented with two spaces, instead of always using four.
 - **Dead branches in Blade templates.** A mistake inside a branch the template can never take, such as `@if (false)`, is no longer reported, and diagnostics in live code are no longer dropped by mistake.

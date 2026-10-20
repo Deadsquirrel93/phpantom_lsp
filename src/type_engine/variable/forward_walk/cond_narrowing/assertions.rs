@@ -2,17 +2,17 @@ use super::*;
 
 use crate::php_type::ShapeEntry;
 
-/// Extract the `(base subject key, key expression, negated)` of an
+/// Extract the `(array, key, negated)` expressions of an
 /// `array_key_exists($k, $arr)` check, unwrapping parentheses and a
 /// leading `!`.
 pub(super) fn array_key_exists_target<'b>(
     expr: &'b Expression<'b>,
-) -> Option<(String, &'b Expression<'b>, bool)> {
+) -> Option<(&'b Expression<'b>, &'b Expression<'b>, bool)> {
     match expr {
         Expression::Parenthesized(inner) => array_key_exists_target(inner.expression),
         Expression::UnaryPrefix(prefix) if prefix.operator.is_not() => {
             array_key_exists_target(prefix.operand)
-                .map(|(base, key, negated)| (base, key, !negated))
+                .map(|(array, key, negated)| (array, key, !negated))
         }
         Expression::Call(Call::Function(call)) => {
             let Expression::Identifier(ident) = call.function else {
@@ -24,13 +24,10 @@ pub(super) fn array_key_exists_target<'b>(
             {
                 return None;
             }
-            let args: Vec<_> = call.argument_list.arguments.iter().collect();
-            if args.len() < 2 {
-                return None;
-            }
-            let base_key =
-                condition_facts::expr_to_subject_key(condition_facts::argument_value(args[1]))?;
-            Some((base_key, condition_facts::argument_value(args[0]), false))
+            let mut args = call.argument_list.arguments.iter();
+            let key = condition_facts::argument_value(args.next()?);
+            let array = condition_facts::argument_value(args.next()?);
+            Some((array, key, false))
         }
         _ => None,
     }
