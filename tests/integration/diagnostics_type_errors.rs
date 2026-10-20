@@ -15060,3 +15060,73 @@ namespace App {
         "`self` is `App\\Clash`, not the class itself as a value, got: {diags:?}",
     );
 }
+
+// ─── Literal key writes into a literal key domain ──────────────────────────
+
+#[test]
+fn a_write_under_a_literal_key_keeps_a_literal_key_domain() {
+    let php = r#"<?php
+enum Country: string { case DK = 'dk'; case EN = 'en'; }
+
+/** @param array<value-of<Country>, string> $texts */
+function save(array $texts): void {}
+
+/** @param array<value-of<Country>, string> $texts */
+function f(array $texts): void {
+    $texts[Country::EN->value] = 'x';
+    save($texts);
+}
+
+/** @param array<'a'|'b', string> $texts */
+function strings(array $texts): void {}
+
+/** @param array<'a'|'b', string> $t */
+function g(array $t): void {
+    $t['a'] = 'x';
+    strings($t);
+}
+
+/** @param array<1|2, string> $texts */
+function ints(array $texts): void {}
+
+/** @param array<1|2, string> $t */
+function h(array $t): void {
+    $t[2] = 'x';
+    ints($t);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "A write under a key the domain already has should keep the domain, got: {diags:?}"
+    );
+}
+
+#[test]
+fn a_write_under_a_new_literal_key_adds_just_that_key() {
+    let php = r#"<?php
+/** @param array<'a'|'b', string> $texts */
+function strings(array $texts): void {}
+
+/** @param array<'a'|'b'|'c', string> $texts */
+function wider(array $texts): void {}
+
+/** @param array<'a'|'b', string> $t */
+function g(array $t): void {
+    $t['c'] = 'x';
+    wider($t);
+    strings($t);
+}
+"#;
+    let diags = collect(php);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
+    assert_eq!(
+        msgs.len(),
+        1,
+        "Only the call that does not allow 'c' should be flagged, got: {msgs:?}"
+    );
+    assert!(
+        msgs[0].contains("non-empty-array<'a'|'b'|'c', string>"),
+        "The written key should join the literal domain, got: {msgs:?}"
+    );
+}

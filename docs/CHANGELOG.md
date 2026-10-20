@@ -38,6 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Writing a literal key keeps a literal key type.** Writing under a known key into an array typed `array<'a'|'b', V>` or `array<value-of<Country>, V>` keeps those keys, adding the written one if it is new, instead of widening them to `string` or `int` and reporting the array where the original type is expected.
 - **`array_key_exists()` narrows the key.** A key that passes `array_key_exists($k, $array)` is now one of the array's keys, as it already was after `isset($array[$k])`, so it can be returned as a `key-of<...>`. Both checks also narrow a key written as a cast, such as `(string) $this->sort`.
 - **Same-named variables in different functions.** A call through a variable no longer takes its type from a variable of the same name in another function of the file. `$box->get(0)` on a `Box<Post>` was read as the `Box<User>` of an earlier function, and `$f()` lost its return type when another function's `$f` held a plain `Closure`.
 - **Generated property hooks follow the file's indentation.** "Generate get hook" and "Generate set hook" indent the new hooks by two spaces in a file indented with two spaces, instead of always using four.

@@ -150,31 +150,6 @@ literal at the call site and for a value whose extra key comes from a
 declaration. PHPStan, Psalm and Mago all seal by default; conformance row
 `arrays_shape_sealed_by_default.php`.
 
-### B665. Writing a literal key into `array<K, V>` widens `K` to `int` or `string`
-
-**Impact: Medium · Complexity: Low**
-
-```php
-enum Country: string { case DK = 'dk'; case EN = 'en'; }
-
-/** @param array<value-of<Country>, string> $texts */
-function save(array $texts): void {}
-
-/** @param array<value-of<Country>, string> $texts */
-function f(array $texts): void {
-    $texts[Country::EN->value] = 'x';
-    save($texts);   // reported: got non-empty-array<string, string>
-}
-```
-
-A write with a known key into a generic array keeps the value type but
-replaces the key type with its general scalar: `$a['a'] = …` on
-`array<'a'|'b', V>` gives `non-empty-array<string, V>`, and `$a[1] = …` on
-`array<1|2, V>` gives `non-empty-array<int, V>`. The literal key is
-resolved correctly (`Country::EN->value` is `'en'`), so the loss is in the
-write. The result should be `non-empty-array<K|'lit', V>`, which is what
-PHPStan gives. Found in the Laravel sample.
-
 ### B666. An array filled by key inside a `foreach` loses every required key
 
 **Impact: Medium · Complexity: Medium**
