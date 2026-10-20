@@ -357,10 +357,15 @@ fn scope_type_discriminator(vars: &[String], ctx: &ResolutionCtx<'_>) -> Option<
             forward_walk::lookup_diagnostic_scope(name, ctx.cursor_offset).unwrap_or_default()
         };
 
+        // The class alone does not say what a chain through the variable
+        // resolves to: `Box<User>` and `Box<Post>` are both `Box`, and a
+        // bare `Closure` is the same class as `Closure(): User`.  The type
+        // carries the generic arguments and the callable signature, and the
+        // FQN tells apart two classes the type may spell alike.
         let mut parts: Vec<String> = resolved
             .iter()
             .map(|rt| match &rt.class_info {
-                Some(ci) => ci.fqn().to_string(),
+                Some(ci) => format!("{}:{}", ci.fqn(), rt.type_string),
                 None => rt.type_string.to_string(),
             })
             .collect();

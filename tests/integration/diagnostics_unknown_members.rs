@@ -1,7 +1,7 @@
 use crate::common::{
     create_psr4_workspace, create_psr4_workspace_with_stubs, create_test_backend,
-    create_test_backend_with_exception_stubs, create_test_backend_with_full_stubs,
-    create_test_backend_with_stubs, slow_diagnostic_messages,
+    create_test_backend_with_closure_stub, create_test_backend_with_exception_stubs,
+    create_test_backend_with_full_stubs, create_test_backend_with_stubs, slow_diagnostic_messages,
     unknown_member_diagnostics_with_scope_cache,
 };
 use tower_lsp::LanguageServer;
@@ -2487,6 +2487,73 @@ class MyTest extends BaseAssert
     assert!(
         !diags.iter().any(|d| d.message.contains("getImage")),
         "getImage is a valid method on ASTNode, got: {diags:?}",
+    );
+}
+
+/// A same-named callable invoked in two function bodies resolves through
+/// each body's own binding: a bare `Closure` in one does not make `$f()`
+/// unresolvable in the other, where `$f` carries the callee's signature.
+#[test]
+fn bare_closure_in_one_body_does_not_leak_into_another() {
+    let backend = create_test_backend_with_closure_stub();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///test.php";
+    let text = r#"<?php
+final class User { public function name(): string { return ''; } }
+final class Repo { public function find(): User { return new User(); } }
+
+function poison(Repo $r): void {
+    $f = \Closure::fromCallable([$r, 'find']);
+    $f()->name();
+}
+
+function clean(Repo $r): void {
+    $f = $r->find(...);
+    $f()->name();
+}
+"#;
+    backend.update_ast(uri, text);
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut diags);
+    assert!(
+        !diags.iter().any(|d| d.range.start.line == 11),
+        "$f()->name() in clean() should resolve to User, got: {diags:?}",
+    );
+}
+
+/// The same call on a same-named variable in two bodies resolves through
+/// each variable's generic arguments, not the first body's.
+#[test]
+fn same_call_on_differently_parameterised_variables_resolves_per_body() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+final class User { public function name(): string { return ''; } }
+final class Post { public function title(): string { return ''; } }
+/** @template T */
+final class Box {
+    /** @return T */
+    public function get(int $i): mixed { return null; }
+}
+
+/** @param Box<User> $b */
+function a(Box $b): void {
+    $b->get(0)->name();
+}
+
+/** @param Box<Post> $b */
+function b(Box $b): void {
+    $b->get(0)->title();
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "each $b->get(0) should resolve through its own Box<T>, got: {diags:?}",
     );
 }
 

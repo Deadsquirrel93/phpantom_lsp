@@ -111,9 +111,7 @@ method's return type through, so the information is available — the stub's
 return type just discards it. Give `fromCallable()` a return type derived
 from its argument, the same way the first-class callable syntax is handled.
 See also [B661](#b661-invoking-an-array-callable-has-no-return-type), which
-is the other half of the same hole, and
-[B663](#b663-a-bare-closure-in-one-function-body-makes-f-unresolvable-in-the-others),
-which is what makes this one spread.
+is the other half of the same hole.
 
 ## Reachability
 
@@ -356,34 +354,3 @@ way the member-access checks resolve theirs rather than pattern-matched.
 Conformance row `regressions_variable_class_static_property.php` (the
 private-read half of that test already passes, so only the write check is
 missing).
-
-### B663. A bare `Closure` in one function body makes `$f()` unresolvable in the others
-
-**Impact: High · Complexity: Medium**
-
-```php
-function poison(Repo $r): void {
-    $f = \Closure::fromCallable([$r, 'find']);
-    $f()->name();   // unresolved — expected, see B653
-}
-
-function clean(Repo $r): void {
-    $f = $r->find(...);
-    $f()->name();   // ALSO unresolved; resolves to User if `poison` is deleted,
-                    // or if either function renames its variable
-}
-```
-
-A variable that holds a signature-less `Closure` in one function body
-leaks that reading into every other body in the file that invokes a
-variable of the same name. Renaming either `$f` fixes it, deleting the
-first function fixes it, and no other unresolvable binding does it — an
-array callable or a `mixed` in the first body leaves the second alone, so
-it is specific to the bare `Closure`. A per-file map keyed by variable name
-is reaching across scopes it should not see; find it and key it by the
-function/closure body as well. This is the mechanism that turns one real
-gap ([B653](#b653-closurefromcallable-loses-the-callees-signature)) into a
-false positive on every other call of a same-named callable in the file,
-and it will do the same to any file with a `$callback` or `$fn` in more
-than one function. Found while reducing the php-typing-conformance
-callable rows, not by a row of its own.
