@@ -420,21 +420,3 @@ way the member-access checks resolve theirs rather than pattern-matched.
 Conformance row `regressions_variable_class_static_property.php` (the
 private-read half of that test already passes, so only the write check is
 missing).
-
-### B668. A member access on a parenthesised closure literal has no subject
-
-**Impact: Low-Medium · Complexity: Low**
-
-```php
-function f(View\Factory $factory): void {
-    $state = (fn(): array => [])->call($factory);             // Cannot verify method
-    (function (): int { return 1; })->bindTo($factory);       // 'call'/'bindTo' — type
-}                                                             // of '' could not be resolved
-```
-
-`$state` itself resolves to `array`, so the call is understood. Only the
-member-access diagnostic fails: the subject it extracts from
-`(fn() => …)` or `(function () {…})` is the empty string, which resolves
-to nothing. A closure literal is a `Closure`; the diagnostic should resolve
-its subject through the same path that typed the call. Found in the Laravel
-sample.

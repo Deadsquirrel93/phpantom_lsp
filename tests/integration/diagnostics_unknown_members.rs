@@ -2434,6 +2434,44 @@ function test(Application $app): void {
     );
 }
 
+/// A closure or arrow-function literal used as a member-access subject is a
+/// `Closure`, so its members are checked against the `Closure` class even
+/// inside a namespace.
+#[test]
+fn member_access_on_parenthesised_closure_literal_resolves_to_closure() {
+    let backend = create_test_backend_with_closure_stub();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///test.php";
+    let text = r#"<?php
+namespace App;
+
+class Factory {}
+
+function f(Factory $factory): void {
+    $state = (fn(): array => [])->call($factory);
+    (function (): int { return 1; })->bindTo($factory);
+    (static fn() => 1)->missing();
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        !diags
+            .iter()
+            .any(|d| d.message.contains("could not be resolved")),
+        "closure literal subjects should resolve, got: {diags:?}",
+    );
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("missing") && d.message.contains("Closure")),
+        "expected unknown-method diagnostic for 'missing' on Closure, got: {diags:?}",
+    );
+}
+
 /// An `assertInstanceOf`-style `@phpstan-assert` on an array-index subject
 /// (`assertInstanceOf(X::class, $arr['k'])`) must narrow that index so a
 /// following member access on it resolves.  Without keying narrowing by the
