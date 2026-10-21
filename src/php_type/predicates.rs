@@ -369,6 +369,9 @@ impl PhpType {
             TypeKind::Union(members) => {
                 !members.is_empty() && members.iter().all(|m| m.is_string_subtype())
             }
+            // `non-empty-lowercase-string&non-falsy-string`: each member
+            // narrows the same string.
+            TypeKind::Intersection(members) => members.iter().any(|m| m.is_string_subtype()),
             _ => false,
         }
     }

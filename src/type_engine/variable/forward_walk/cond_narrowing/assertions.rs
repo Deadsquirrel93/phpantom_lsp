@@ -387,6 +387,37 @@ pub(super) fn apply_assertion_to_key(
                 });
             }
         }
+    } else if !should_exclude && is_scalar_refinement(asserted_type) {
+        // `@phpstan-assert class-string $name` on a `string` names no class
+        // to narrow to: it refines the scalar the subject already holds.
+        exhaustible = true;
+        results.retain_mut(|rt| {
+            let kept: Vec<PhpType> = rt
+                .type_string
+                .union_members()
+                .into_iter()
+                .filter_map(|member| {
+                    if member.is_subtype_of(asserted_type) {
+                        Some(member.clone())
+                    } else if member.is_mixed() || asserted_type.is_subtype_of(member) {
+                        Some(asserted_type.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            match kept.len() {
+                0 => false,
+                1 => {
+                    rt.replace_type(kept.into_iter().next().unwrap_or_else(PhpType::mixed));
+                    true
+                }
+                _ => {
+                    rt.replace_type(PhpType::union(kept));
+                    true
+                }
+            }
+        });
     } else {
         let var_ctx = build_var_ctx(target, ctx, scope_resolver);
         if should_exclude {
@@ -406,6 +437,20 @@ pub(super) fn apply_assertion_to_key(
     } else if exhaustible {
         mark_exhausted(target, scope);
     }
+}
+
+/// Whether `ty` is a narrower form of `string` or `int` (`class-string`,
+/// `non-empty-string`, `positive-int`, a literal), which an assertion
+/// applies by refining the subject's scalar rather than naming a class.
+fn is_scalar_refinement(ty: &PhpType) -> bool {
+    let string = PhpType::string();
+    let int = PhpType::int();
+    ty != &string
+        && ty != &int
+        && ty
+            .union_members()
+            .iter()
+            .all(|member| member.is_subtype_of(&string) || member.is_subtype_of(&int))
 }
 
 /// Give entries of the asserted class the type arguments the assertion

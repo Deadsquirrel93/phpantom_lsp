@@ -87,7 +87,7 @@ mod scope_reads;
 mod static_calls;
 mod unary_prefix;
 
-pub(crate) use scalar_fold::fold_concat_types;
+pub(crate) use scalar_fold::{fold_concat_types, is_literal_string_type};
 
 use arithmetic::resolve_binary_result_type;
 use array_access::resolve_rhs_array_access;
@@ -369,9 +369,13 @@ fn resolve_rhs_expression_inner<'b>(
             {
                 return narrowed;
             }
-            match unary_prefix_result_type(&unary.operator, unary.operand, || {
-                resolve_rhs_expression(unary.operand, ctx)
-            }) {
+            match unary_prefix_result_type(
+                &unary.operator,
+                unary.operand,
+                || resolve_rhs_expression(unary.operand, ctx),
+                ctx.file.class_loader,
+                ctx.resolved_class_cache,
+            ) {
                 Some(ty) => vec![ResolvedType::from_type_string(ty)],
                 None => vec![],
             }
@@ -450,18 +454,24 @@ fn resolve_rhs_expression_inner<'b>(
         }
         // ── Concatenation: `"prefix" . $var` → string ───────────────
         // Two operands that each hold one known scalar concatenate to the
-        // literal PHP would build (`'1' . 'a'` is `'1a'`).
+        // literal PHP would build (`'1' . 'a'` is `'1a'`). Otherwise a
+        // non-empty operand makes the result non-empty (`'x' . $u`).
         Expression::Binary(binary) if binary.operator.is_concatenation() => {
-            let folded = (scalar_fold::is_cheap_scalar_operand(binary.lhs)
-                && scalar_fold::is_cheap_scalar_operand(binary.rhs))
-            .then(|| {
-                let lhs = scalar_fold::single_scalar(&resolve_rhs_expression(binary.lhs, ctx))?;
-                let rhs = scalar_fold::single_scalar(&resolve_rhs_expression(binary.rhs, ctx))?;
-                scalar_fold::fold_concat(&lhs, &rhs)
-            })
-            .flatten();
+            let foldable = scalar_fold::is_cheap_scalar_operand(binary.lhs)
+                && scalar_fold::is_cheap_scalar_operand(binary.rhs);
+            let lhs = resolve_rhs_expression(binary.lhs, ctx);
+            if !foldable {
+                return vec![ResolvedType::from_type_string(scalar_fold::concat_result(
+                    &lhs,
+                    || resolve_rhs_expression(binary.rhs, ctx),
+                ))];
+            }
+            let rhs = resolve_rhs_expression(binary.rhs, ctx);
+            let folded = scalar_fold::single_scalar(&lhs)
+                .zip(scalar_fold::single_scalar(&rhs))
+                .and_then(|(l, r)| scalar_fold::fold_concat(&l, &r));
             vec![ResolvedType::from_type_string(
-                folded.unwrap_or_else(PhpType::string),
+                folded.unwrap_or_else(|| scalar_fold::concat_result(&lhs, || rhs)),
             )]
         }
         // ── Interpolated strings: `"$a-$b"`, heredocs ───────────────

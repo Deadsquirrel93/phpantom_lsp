@@ -18,8 +18,7 @@ use super::is_subtype_of_typed;
 use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::php_type::{
     CallableType, LiteralValue, PhpType, ShapeEntry, ShapeParts, TypeKind,
-    int_literal_is_within_range, int_refinement, is_array_like_name, shape_key_type,
-    string_refinement,
+    int_literal_is_within_range, is_array_like_name, shape_key_type,
 };
 use crate::types::{ClassInfo, Visibility};
 
@@ -547,7 +546,7 @@ impl Compat<'_> {
         self.rewritten(arg, param)
             .or_else(|| self.unverifiable(arg, param))
             .or_else(|| self.callables(arg, param))
-            .or_else(|| self.unprovable_refinements(arg, param))
+            .or_else(|| self.class_keywords(arg, param))
             .or_else(|| self.composites(arg, param))
             .or_else(|| self.arrays(arg, param))
             .or_else(|| self.nullable_param(arg, param))
@@ -779,34 +778,14 @@ impl Compat<'_> {
         None
     }
 
-    /// Pairs the type alone cannot prove apart: class keywords that need a
-    /// class context, and a base scalar against a refinement of it.
-    fn unprovable_refinements(self, arg_type: &PhpType, param_type: &PhpType) -> Option<bool> {
+    /// Class keywords, which need a class context the type alone does not
+    /// carry.
+    fn class_keywords(self, arg_type: &PhpType, param_type: &PhpType) -> Option<bool> {
         // Skip when param or arg type contains `self`, `static`, `$this`, or
         // `parent` anywhere in the type tree (including inside unions like
         // `int|self|string`).  These keywords need class context to resolve
         // and would cause false positives without it.
         if contains_self_or_parent(param_type) || contains_self_or_parent(arg_type) {
-            return Some(true);
-        }
-
-        // ── Refined scalar subtypes: stay silent when uncertain ──────
-        // `string` passed to `non-empty-string`, `int` to `positive-int`,
-        // etc.  The base type *might* satisfy the refinement at runtime
-        // and we can't prove otherwise from the type alone.  Only the
-        // reverse (e.g. `non-empty-string` passed to `string`) is safe
-        // to accept unconditionally — and `is_subtype_of` already does.
-        if is_refined_scalar_pair(arg_type, param_type) {
-            return Some(true);
-        }
-
-        // ── int → int<min..max>: MAYBE ──────────────────────────────
-        // A bare `int` *might* satisfy any int range constraint at
-        // runtime.  We cannot prove otherwise from the type alone.
-        if matches!(param_type.kind(), TypeKind::IntRange(..))
-            && let TypeKind::Named(sub) = arg_type.kind()
-            && matches!(sub.to_ascii_lowercase().as_str(), "int" | "integer")
-        {
             return Some(true);
         }
         None
@@ -1443,41 +1422,6 @@ impl Compat<'_> {
         });
         all_param_keys_satisfied.then_some(true)
     }
-}
-
-/// Returns `true` when the argument is a base scalar and the parameter
-/// is a refinement of that scalar.  In these cases we cannot prove the
-/// value violates the refinement, so we stay silent.
-///
-/// Also handles the case where the parameter is a union type: if any
-/// member of the union forms a refined scalar pair with the argument,
-/// we stay silent (the value might satisfy that branch at runtime).
-fn is_refined_scalar_pair(arg: &PhpType, param: &PhpType) -> bool {
-    // When the param is a union, check each member individually.
-    if let TypeKind::Union(members) = param.kind() {
-        return members.iter().any(|m| is_refined_scalar_pair(arg, m));
-    }
-
-    let (arg_name, param_name) = match (arg.kind(), param.kind()) {
-        (TypeKind::Named(a), TypeKind::Named(p)) => {
-            (a.to_ascii_lowercase(), p.to_ascii_lowercase())
-        }
-        _ => return false,
-    };
-
-    matches!(
-        (arg_name.as_str(), param_name.as_str()),
-        ("string", string_refinement!())
-            | ("int" | "integer", int_refinement!())
-            | (
-                // bool *might* be true or false at runtime — we can't
-                // prove otherwise from the type alone.  This arises when
-                // template inference narrows a parameter to `true` or
-                // `false` (e.g. Conditionable::when(true, …)).
-                "bool" | "boolean",
-                "true" | "false"
-            )
-    )
 }
 
 /// Returns `true` when the type is any form of array (bare, generic,

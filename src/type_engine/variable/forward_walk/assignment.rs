@@ -870,6 +870,8 @@ pub(crate) fn resolve_rhs_with_types<'b>(
             &prefix.operator,
             prefix.operand,
             || resolve_rhs_with_types(prefix.operand, scope, ctx, expr_types),
+            ctx.file.class_loader,
+            ctx.resolved_class_cache,
         )
     {
         return vec![ResolvedType::from_type_string(ty)];

@@ -455,14 +455,14 @@ impl Backend {
             let owner_name = owner_fqn.as_deref().unwrap_or("");
             let fn_args = TextArrayFuncArgs::new(text_args, ctx);
 
-            // String builtins over literal arguments: the stub
-            // declares the widest string the function can return,
-            // but a call whose arguments are all literals has one
-            // answer.  It names no class, so it travels purely as
-            // the hint.
-            if crate::type_engine::variable::string_func_rules::is_foldable_string_func(func_name)
+            // String builtins: the stub declares the widest string
+            // the function can return, but a call whose arguments
+            // are all literals has one answer, and other arguments
+            // can still decide a refinement of `string`.  It names
+            // no class, so it travels purely as the hint.
+            if crate::type_engine::variable::string_func_rules::has_string_func_rule(func_name)
                 && let Some(folded) =
-                    crate::type_engine::variable::string_func_rules::string_func_literal_type(
+                    crate::type_engine::variable::string_func_rules::string_func_return_type(
                         func_name, &fn_args,
                     )
             {

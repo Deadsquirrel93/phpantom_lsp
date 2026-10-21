@@ -174,10 +174,10 @@ pub(crate) fn process_assert_narrowing<'b>(
         }
     }
 
-    // PHPUnit's `assertSame()`, `assertCount()` and `assertArrayHasKey()`
-    // (and their negations) prove the `===`, `count()` and
-    // `array_key_exists()` checks they stand for, so those are narrowed as
-    // if they were written out in an `assert()`.
+    // PHPUnit's `assertSame()`, `assertCount()`, `assertArrayHasKey()` and
+    // `assertNotEmpty()` (and their negations) prove the `===`, `count()`,
+    // `array_key_exists()` and `!empty()` checks they stand for, so those
+    // are narrowed as if they were written out in an `assert()`.
     if let Expression::Call(call) = unwrapped {
         let phpunit_assertion = {
             let snapshot = scope.locals.clone();
@@ -215,6 +215,13 @@ pub(crate) fn process_assert_narrowing<'b>(
                 array,
                 present,
             }) => apply_array_key_assertion(key, array, present, scope, ctx),
+            Some(condition_facts::PhpunitAssertion::Truthy { actual, empty }) => {
+                if empty {
+                    apply_condition_narrowing_inverse(actual, scope, ctx);
+                } else {
+                    apply_condition_narrowing(actual, scope, ctx);
+                }
+            }
             None => {}
         }
     }

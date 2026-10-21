@@ -441,8 +441,8 @@ pub(crate) fn process_foreach<'b>(
         ForeachBody::Statement(inner) => vec![*inner],
         ForeachBody::ColonDelimited(body) => body.statements.iter().collect(),
     };
-    let assignment_depth =
-        clamp_iterations_for_depth(assignment_map_depth(&body_stmts), loop_depth);
+    let assignments = loop_assignments(&body_stmts, std::iter::empty());
+    let assignment_depth = clamp_iterations_for_depth(assignments.depth, loop_depth);
 
     // A loop that walks an array's own keys and unconditionally writes the
     // entry at each key it visits (`foreach ($pairs as $cn => $_)` /
@@ -489,7 +489,11 @@ pub(crate) fn process_foreach<'b>(
     walk_loop_body_to_fixed_point(
         &body_stmts,
         scope,
-        loop_ctxs.walk(&pre_loop_scope, assignment_depth),
+        loop_ctxs.walk(
+            &pre_loop_scope,
+            assignment_depth,
+            &assignments.self_dependent,
+        ),
         |next_scope, point| {
             if point != LoopSeedPoint::Entry {
                 return;

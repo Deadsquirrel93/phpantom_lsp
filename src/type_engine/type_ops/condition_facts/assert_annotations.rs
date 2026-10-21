@@ -579,6 +579,12 @@ pub(in crate::type_engine) enum PhpunitAssertion<'a> {
         array: &'a Expression<'a>,
         present: bool,
     },
+    /// `assertNotEmpty()` / `assertEmpty()`: `!empty($actual)`, which is
+    /// `$actual` being truthy, or falsy when `empty`.
+    Truthy {
+        actual: &'a Expression<'a>,
+        empty: bool,
+    },
 }
 
 /// Recognise a call to one of the PHPUnit assertions in
@@ -618,6 +624,8 @@ pub(in crate::type_engine) fn phpunit_assertion<'a>(
             | "assertnotcount"
             | "assertarrayhaskey"
             | "assertarraynothaskey"
+            | "assertempty"
+            | "assertnotempty"
     ) {
         return None;
     }
@@ -643,6 +651,10 @@ pub(in crate::type_engine) fn phpunit_assertion<'a>(
             expected: arg("$expectedCount")?,
             haystack: arg("$haystack")?,
             equal: lower == "assertcount",
+        },
+        "assertempty" | "assertnotempty" => PhpunitAssertion::Truthy {
+            actual: arg("$actual")?,
+            empty: lower == "assertempty",
         },
         _ => PhpunitAssertion::HasKey {
             key: arg("$key")?,

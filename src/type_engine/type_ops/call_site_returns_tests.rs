@@ -208,7 +208,7 @@ fn int_range_options_bound_the_result() {
     );
     assert_eq!(
         filter_var("$v, FILTER_VALIDATE_INT, $boundedOptions").as_deref(),
-        Some("int<1, 10>|5")
+        Some("int<1, 10>")
     );
 }
 

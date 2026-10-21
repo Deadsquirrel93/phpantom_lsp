@@ -25,39 +25,7 @@ No outstanding items.
 
 ## Type comparison
 
-### B650. A refinement type accepts the base type it refines
-
-**Impact: High · Complexity: Medium**
-
-```php
-/** @param non-empty-string $s */
-function takesNonEmpty(string $s): void {}
-function f(string $s): void { takesNonEmpty($s); }   // not reported
-
-function takesFalse(false $v): void {}
-function g(bool $b): void { takesFalse($b); }        // not reported
-
-/** @param positive-int $n */
-function takesPos(int $n): void {}
-function h(int $n): void { takesPos($n); }           // not reported
-```
-
-A refinement of a scalar — `non-empty-string`, `positive-int`,
-`int<1, 100>`, the `true`/`false` literals — is enforced against a
-*literal* argument (`takesNonEmpty('')` and `takesFalse(true)` are both
-reported) but not against the base type it refines. `string` reaching a
-`non-empty-string`, `bool` reaching a `false`, `int` reaching a
-`positive-int`: every one is accepted. The compatibility check treats the
-pair as related and stops there instead of asking which of the two is the
-subtype, so the widening direction passes.
-
-PHPStan reports this as `argument.type`, Psalm as `ArgumentTypeCoercion`.
-It is the only thing standing between us and two conformance rows, and
-both of them are about the *unguarded* control rather than the narrowing
-they probe: `regressions_string_narrowing_assert_if_true.php` (a plain
-`string` handed to a `non-empty-string` parameter outside the guard) and
-`regressions_ternary_exact_narrowing.php` (a `bool` handed to a `false`
-parameter after the `if`).
+No outstanding items.
 
 ## Standard-library return types
 

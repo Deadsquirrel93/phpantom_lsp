@@ -1197,6 +1197,23 @@ fn normalize_key_type(ty: &PhpType, keep_literals: bool) -> Option<PhpType> {
         }
     }
 
+    fn is_kept_key_refinement(ty: &PhpType) -> bool {
+        match ty.kind() {
+            TypeKind::Named(name) => matches!(
+                name.to_ascii_lowercase().as_str(),
+                "non-empty-string"
+                    | "non-falsy-string"
+                    | "truthy-string"
+                    | "lowercase-string"
+                    | "non-empty-lowercase-string"
+                    | "uppercase-string"
+                    | "non-empty-uppercase-string"
+            ),
+            TypeKind::Intersection(members) => members.iter().all(is_kept_key_refinement),
+            _ => false,
+        }
+    }
+
     fn collect(ty: &PhpType, keep_literals: bool, normalized: &mut Vec<PhpType>) -> bool {
         match ty.kind() {
             TypeKind::Union(members) => members
@@ -1247,6 +1264,14 @@ fn normalize_key_type(ty: &PhpType, keep_literals: bool) -> Option<PhpType> {
             // integer, so PHP stores it as the string it is and the refined
             // type is already a valid key.
             _ if is_non_numeric_string_domain(ty) => {
+                push_unique(normalized, ty.clone());
+                true
+            }
+            // A string's case and emptiness survive its use as a key, so
+            // `$map[strtolower($name)]` keys a `lowercase-string` map.
+            // Like PHPStan, this sets aside the decimal-integer string
+            // (`"123"` is lower-case too) that PHP would store as an int.
+            _ if is_kept_key_refinement(ty) => {
                 push_unique(normalized, ty.clone());
                 true
             }

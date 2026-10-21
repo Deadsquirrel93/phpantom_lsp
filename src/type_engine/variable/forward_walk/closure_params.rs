@@ -125,7 +125,8 @@ pub(crate) fn seed_closure_params(
 /// callable signature it is passed to gives it, where that says more: when
 /// the declaration names no type, when it names a class bare and the
 /// signature that class with generic arguments, or when the signature's
-/// classes refine the declared ones.
+/// classes refine the declared ones, or, for a declaration naming no class,
+/// when the signature's type is a subtype of it.
 fn refine_by_inferred(
     declared: DeclaredParam,
     inferred: &PhpType,
@@ -148,6 +149,14 @@ fn refine_by_inferred(
         .filter_map(|rt| rt.class_info.as_ref())
         .collect();
     if declared_classes.is_empty() {
+        // The callable is only ever called with what the signature passes,
+        // so a declared `string` holding `list<non-empty-string>`'s
+        // elements is a `non-empty-string`.
+        if !inferred.equivalent(effective)
+            && crate::class_lookup::is_subtype_of_typed(inferred, effective, ctx.file.class_loader)
+        {
+            return inferred_param_results(inferred, ctx);
+        }
         return declared.results;
     }
     let inferred_classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(

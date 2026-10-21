@@ -131,19 +131,22 @@ pub(super) fn first_class_function_return_type(
 }
 
 /// What a builtin returns when its arguments decide more than its stub
-/// declares: a string function folded over literal arguments, or an array
-/// function's element or iterable type read from the array it is handed.
+/// declares: a string function folded over literal arguments or refined by
+/// them, or an array function's element or iterable type read from the
+/// array it is handed.
 fn builtin_function_call(
     name: &str,
     argument_list: &ArgumentList<'_>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Option<Vec<ResolvedType>> {
-    // ── String builtins over literal arguments ───────
+    // ── String builtins ──────────────────────────────
     // The stub declares the widest string the function can return; with
     // literal arguments the call has one answer, and a caller checking
     // it against a literal union needs that answer rather than `string`.
+    // Short of that, the arguments can still decide a refinement
+    // (`lowercase-string`, `non-empty-string`).
     if let Some(folded) =
-        crate::type_engine::variable::raw_type_inference::resolve_string_func_literal_type(
+        crate::type_engine::variable::raw_type_inference::resolve_string_func_return_type(
             name,
             argument_list,
             ctx,

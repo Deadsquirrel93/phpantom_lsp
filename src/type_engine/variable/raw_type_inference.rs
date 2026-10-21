@@ -647,6 +647,13 @@ impl ArrayFuncArgs for AstArrayFuncArgs<'_, '_, '_> {
         )
     }
 
+    fn is_named(&self, index: usize) -> bool {
+        matches!(
+            self.args.arguments.iter().nth(index),
+            Some(Argument::Named(_))
+        )
+    }
+
     fn callback_declared_return_type(&self, index: usize) -> Option<PhpType> {
         // A written `: ReturnType` carries the file's own spelling of the
         // class (`Support\Pen` behind a `use App\Support;`), and it is
@@ -754,19 +761,20 @@ pub(in crate::type_engine) fn resolve_array_func_element_type(
     array_func_element_type(func_name, &AstArrayFuncArgs { args, ctx })
 }
 
-/// Constant-fold a string builtin whose arguments are all literals.
+/// The literal or refined `string` a string builtin returns for these
+/// arguments.
 ///
-/// See [`super::string_func_rules`] for which functions fold and why the
-/// literal answer matters.
-pub(in crate::type_engine) fn resolve_string_func_literal_type(
+/// See [`super::string_func_rules`] for which functions it covers and why
+/// the narrower answer matters.
+pub(in crate::type_engine) fn resolve_string_func_return_type(
     func_name: &str,
     args: &ArgumentList<'_>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Option<PhpType> {
-    if !super::string_func_rules::is_foldable_string_func(func_name) {
+    if !super::string_func_rules::has_string_func_rule(func_name) {
         return None;
     }
-    super::string_func_rules::string_func_literal_type(func_name, &AstArrayFuncArgs { args, ctx })
+    super::string_func_rules::string_func_return_type(func_name, &AstArrayFuncArgs { args, ctx })
 }
 
 /// Extract per-argument source text from a parsed `ArgumentList`.

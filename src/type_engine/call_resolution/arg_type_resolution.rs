@@ -110,6 +110,12 @@ impl ArrayFuncArgs for TextArrayFuncArgs<'_, '_> {
             .is_some_and(|arg| arg.trim_start().starts_with("..."))
     }
 
+    fn is_named(&self, index: usize) -> bool {
+        self.args
+            .get(index)
+            .is_some_and(|arg| crate::call_args::text_arg_is_named(arg))
+    }
+
     fn callback_declared_return_type(&self, index: usize) -> Option<PhpType> {
         let text = self.arg_text(index)?;
         crate::completion::source::helpers::extract_closure_return_type_from_text(text)

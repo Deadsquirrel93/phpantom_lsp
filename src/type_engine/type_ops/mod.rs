@@ -14,6 +14,8 @@
 //!   conditional return type cannot express
 //! - **const_fold**: folding a constant expression to the value PHP would
 //!   compute for it, so a constant defined from other constants is readable
+//! - **int_interval**: the bounds of an integer type, which arithmetic on
+//!   `int<a, b>` operands and a loop's widening of a growing counter use
 
 pub mod aliases;
 pub mod call_site_returns;
@@ -21,4 +23,5 @@ pub mod condition_facts;
 pub mod conditional;
 pub mod const_fold;
 pub mod docblock_narrowing;
+pub(crate) mod int_interval;
 pub mod resolution;
