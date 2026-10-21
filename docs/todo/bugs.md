@@ -393,30 +393,3 @@ closures both resolve, so the gap is the array spelling alone —
 `call_user_func([$r, 'find'])` is `mixed` for the same reason. Conformance
 row `callables_array_callable_invocation.php`; the sibling stub gap is
 [B653](#b653-closurefromcallable-loses-the-callees-signature).
-
-### B662. Property assignment type checks only cover `$this->prop` and `self::$prop`
-
-**Impact: Medium-High · Complexity: Medium**
-
-```php
-final class Holder { public static int $count = 1; public int $n = 1; }
-
-function f(Holder $h): void { $h->n = 'no'; }        // not reported
-function g(): void { Holder::$count = 'no'; }        // not reported
-function h(Holder $h): void { $h->n = 1; }           // correct, and silent
-
-/** @param class-string<Holder> $c */
-function i(string $c): void { $c::$count = 'no'; }   // not reported
-```
-
-`check_expression_for_property_assignment` in
-`diagnostics/property_type_errors.rs` returns early unless the instance
-assignment's object is literally `$this`, or the static assignment's class
-is `self`/`static`. Every write through another object, through a named
-class, or through a class-string goes unchecked — which is most writes in
-real code. The property's declared type and the RHS type are both already
-resolved for the `$this` case; the subject just has to be resolved the same
-way the member-access checks resolve theirs rather than pattern-matched.
-Conformance row `regressions_variable_class_static_property.php` (the
-private-read half of that test already passes, so only the write check is
-missing).

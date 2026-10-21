@@ -38,6 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Property type checks on every write.** Assigning a value of the wrong type to a typed property is now reported wherever the write happens, such as `$user->age = 'ten'` from outside the class, `Config::$timeout = '30'`, or a static write through a class-string, not only through `$this` inside the class.
 - **Member access on a closure literal.** Calling a method such as `call()` or `bindTo()` directly on a parenthesised closure or arrow function, like `(fn() => [])->call($obj)`, is now checked against `Closure` instead of being reported as an unresolved member access.
 - **Writing a literal key keeps a literal key type.** Writing under a known key into an array typed `array<'a'|'b', V>` or `array<value-of<Country>, V>` keeps those keys, adding the written one if it is new, instead of widening them to `string` or `int` and reporting the array where the original type is expected.
 - **`array_key_exists()` narrows the key.** A key that passes `array_key_exists($k, $array)` is now one of the array's keys, as it already was after `isset($array[$k])`, so it can be returned as a `key-of<...>`. Both checks also narrow a key written as a cast, such as `(string) $this->sort`.
