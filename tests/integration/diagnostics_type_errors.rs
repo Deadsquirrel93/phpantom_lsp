@@ -15471,3 +15471,91 @@ function f(string $u): void {
     assert_eq!(messages.len(), 1, "got {messages:?}");
     assert!(messages[0].ends_with("got int<-1, max>"), "{messages:?}");
 }
+
+// ─── Operators overloaded by GMP and BcMath\Number ──────────────────────────
+
+/// `GMP` and `BcMath\Number` overload the arithmetic operators, so an
+/// operation on one of them produces another, whichever side it is on and
+/// whatever the other operand is.
+#[test]
+fn overloaded_number_arithmetic_produces_the_class() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+use BcMath\Number;
+
+function takesNumber(Number $v): void {}
+function takesGmp(\GMP $v): void {}
+
+function f(Number $price, int $qty, string $rate): void {
+    takesNumber($price * $qty);
+    takesNumber($qty - $price);
+    takesNumber($price / $rate);
+    takesNumber($price % 3);
+    takesNumber($price ** 2);
+    takesNumber(-$price);
+    $price += 1;
+    takesNumber($price);
+}
+
+function g(\GMP $l, \GMP $r, ?\GMP $maybe): void {
+    takesGmp($l + $r);
+    takesGmp(2 * $l);
+    takesGmp($l % $r);
+    takesGmp($l | $r);
+    takesGmp($l << 2);
+    takesGmp(~$l);
+    takesGmp(-$l);
+    takesGmp($maybe + 1);
+    $l &= $r;
+    takesGmp($l);
+}
+"#;
+    let diags = collect_with_full_stubs(php);
+    assert!(
+        !has_type_error(&diags),
+        "Operators on GMP and BcMath\\Number should produce the class, got: {diags:?}"
+    );
+}
+
+/// The overloaded result is the class itself, not something that also
+/// satisfies a number parameter.
+#[test]
+fn overloaded_number_arithmetic_is_not_an_int() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+function takes_int(int $x): void {}
+
+function g(\GMP $l): void {
+    takes_int($l + 1);
+}
+"#;
+    let diags = collect_with_full_stubs(php);
+    assert!(
+        has_type_error(&diags),
+        "GMP + int passed to an int parameter should be flagged, got: {diags:?}"
+    );
+}
+
+/// `BcMath\Number` does not overload the bitwise operators: `&` on one
+/// keeps the ordinary `int` result rather than becoming a `Number`.
+#[test]
+fn bcmath_number_bitwise_is_not_overloaded() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+use BcMath\Number;
+
+function takesNumber(Number $v): void {}
+
+function f(Number $n): void {
+    takesNumber($n & 1);
+}
+"#;
+    let diags = collect_with_full_stubs(php);
+    assert!(
+        has_type_error(&diags),
+        "Number & int should not be typed as a Number, got: {diags:?}"
+    );
+}

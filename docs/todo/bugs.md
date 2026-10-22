@@ -29,36 +29,6 @@ No outstanding items.
 
 ## Standard-library return types
 
-### B652. Arithmetic on `BcMath\Number` and `GMP` is typed `int|float`
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-use BcMath\Number;
-
-function takesNumber(Number $v): void {}
-function takesGmp(\GMP $v): void {}
-
-function f(Number $price, int $qty): void {
-    takesNumber($price * $qty);   // reported: expects BcMath\Number, got int|float
-}
-function g(\GMP $l, \GMP $r): void {
-    takesGmp($l + $r);            // reported: expects GMP, got int|float
-}
-```
-
-PHP 8.4 overloads `+`, `-`, `*`, `/`, `%` and `**` on `BcMath\Number`, and
-`GMP` has overloaded the same set for much longer. In both cases an
-operation on two operands of the class, or the class and an `int`, produces
-an instance of the class. The binary-arithmetic result type is computed
-from the numeric promotion rules alone and answers `int|float` whatever the
-operands were, so every such expression is a false positive at the next
-parameter that wants the class. Special-case the two classes in the
-arithmetic result rule: `GMP` with `GMP|int` gives `GMP`, `BcMath\Number`
-with `BcMath\Number|int|string` gives `BcMath\Number`, and division by the
-same operand types follows. Conformance row
-`native_types_overloaded_number_operators.php`.
-
 ### B653. `Closure::fromCallable()` loses the callee's signature
 
 **Impact: Medium · Complexity: Medium**
