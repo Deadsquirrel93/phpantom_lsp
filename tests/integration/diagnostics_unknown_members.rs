@@ -16575,3 +16575,133 @@ class Wallet
         "`missing()` must be flagged on `Money`, got: {diags:?}",
     );
 }
+
+/// Invoking an array callable calls the method it names, so the result has
+/// that method's return type.
+#[test]
+fn invoking_an_array_callable_returns_the_method_return_type() {
+    let backend = create_test_backend();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///test.php";
+    let text = r#"<?php
+final class User { public function name(): string { return ''; } }
+final class Repo {
+    public function find(): User { return new User(); }
+    public static function make(): User { return new User(); }
+}
+
+function f(Repo $r): void {
+    $find = [$r, 'find'];
+    $find()->name();
+    $lookup = [$r, 'find'];
+    $lookup()->missing();
+    $make = [Repo::class, 'make'];
+    $make()->missing();
+    $named = ['Repo', 'make'];
+    $named()->name();
+}
+"#;
+    backend.update_ast(uri, text);
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut diags);
+    assert!(
+        !diags
+            .iter()
+            .any(|d| d.range.start.line == 9 || d.range.start.line == 15),
+        "`$find()` and `$named()` should resolve to User, got: {diags:?}",
+    );
+    for line in [11, 13] {
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.range.start.line == line && d.message.contains("'missing'")),
+            "`missing()` on line {line} must be flagged on User, got: {diags:?}",
+        );
+    }
+}
+
+/// `call_user_func()` returns what calling its callback does.
+#[test]
+fn call_user_func_returns_what_the_callback_returns() {
+    let backend = create_test_backend();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///test.php";
+    let text = r#"<?php
+final class User { public function name(): string { return ''; } }
+final class Repo { public function find(): User { return new User(); } }
+
+function f(Repo $r): void {
+    $user = call_user_func([$r, 'find']);
+    $user->missing();
+    call_user_func([$r, 'find'])->missing();
+    call_user_func_array(fn(): User => new User(), [])->missing();
+    call_user_func([$r, 'find'])->name();
+}
+"#;
+    backend.update_ast(uri, text);
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut diags);
+    assert!(
+        !diags
+            .iter()
+            .any(|d| d.range.start.line == 9 && d.message.contains("'name'")),
+        "`call_user_func([$r, 'find'])` should resolve to User, got: {diags:?}",
+    );
+    for line in [6, 7, 8] {
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.range.start.line == line && d.message.contains("'missing'")),
+            "`missing()` on line {line} must be flagged on User, got: {diags:?}",
+        );
+    }
+}
+
+/// A class named by a string in an array callable is resolved at runtime,
+/// so it is fully qualified: the file's namespace does not apply to it,
+/// while `Repo::class` follows the namespace as written code does.
+#[test]
+fn array_callable_class_string_is_fully_qualified() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+namespace {
+    final class Global_ { public function g(): void {} }
+    final class Repo { public static function make(): Global_ { return new Global_(); } }
+}
+namespace App {
+    final class Local { public function l(): void {} }
+    final class Repo { public static function make(): Local { return new Local(); } }
+
+    function f(): void {
+        $global = ['Repo', 'make'];
+        $global()->l();
+        $local = [Repo::class, 'make'];
+        $local()->g();
+    }
+}
+"#;
+    backend.update_ast(uri, text);
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut diags);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.range.start.line == 11 && d.message.contains("Global_")),
+        "`['Repo', 'make']()` calls the global Repo, got: {diags:?}",
+    );
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.range.start.line == 13 && d.message.contains("Local")),
+        "`[Repo::class, 'make']()` calls App\\Repo, got: {diags:?}",
+    );
+}

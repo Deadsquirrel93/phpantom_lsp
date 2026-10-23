@@ -47,6 +47,7 @@ pub(super) fn resolve_rhs_function_call<'b>(
         // block of the same file (the file-level namespace guess would miss).
         let name_offset = func_call.function.span().start.offset;
         if let Some(resolved) = laravel_helper_call(name, argument_list, ctx)
+            .or_else(|| call_user_func_return(name, argument_list, ctx))
             .or_else(|| builtin_function_call(name, argument_list, ctx))
             .or_else(|| named_function_call(name, name_offset, argument_list, ctx))
         {
@@ -348,6 +349,27 @@ pub(super) fn value_invocation(
     invoke_method_return(types, ctx)
 }
 
+/// What `call_user_func($callback, …)` and `call_user_func_array($callback,
+/// …)` return: whatever calling `$callback` does.
+fn call_user_func_return(
+    name: &str,
+    argument_list: &ArgumentList<'_>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<Vec<ResolvedType>> {
+    let name = name.strip_prefix('\\').unwrap_or(name);
+    if !name.eq_ignore_ascii_case("call_user_func")
+        && !name.eq_ignore_ascii_case("call_user_func_array")
+    {
+        return None;
+    }
+    let callback = argument_list.arguments.first()?;
+    if callback.is_unpacked() {
+        return None;
+    }
+    let resolved = value_invocation(&resolve_rhs_expression(callback.value(), ctx), ctx);
+    (!resolved.is_empty()).then_some(resolved)
+}
+
 /// What `($expr)()` returns when the callee is an arbitrary expression
 /// (`($this->foo)()`, `(getFactory())()`, a closure literal invoked on the
 /// spot): the literal's own return type, the callable type the expression
@@ -489,37 +511,14 @@ pub(super) fn closure_call_return(
 /// What calling the array callable `callable` (`[$obj, 'method']`,
 /// `[Foo::class, 'method']`) returns.
 fn array_callable_return(callable: &PhpType, ctx: &VarResolutionCtx<'_>) -> Vec<ResolvedType> {
-    let Some([receiver, method]) = callable.shape_entries() else {
-        return vec![];
-    };
-    let positional = |entry: &crate::php_type::ShapeEntry, index: &str| {
-        !entry.optional && entry.key.as_deref().is_none_or(|k| k == index)
-    };
-    if !positional(receiver, "0") || !positional(method, "1") {
-        return vec![];
-    }
-    let TypeKind::Literal(literal) = method.value_type.kind() else {
-        return vec![];
-    };
-    let Some(method_name) = literal.string_content() else {
-        return vec![];
-    };
-    if receiver.value_type.is_object_like() {
-        let owners = crate::type_engine::type_resolution::type_hint_to_classes_typed(
-            &receiver.value_type,
-            &ctx.current_class.fqn(),
-            ctx.file.all_classes,
-            ctx.file.class_loader,
-        );
-        return class_method_return(&owners, &method_name, false, ctx);
-    }
-    let owners = crate::type_engine::variable::class_string_resolution::classes_named_by_type(
-        &receiver.value_type,
+    crate::type_engine::call_resolution::array_callable_return_type(
+        callable,
+        &ctx.file,
         &ctx.current_class.fqn(),
-        ctx.file.all_classes,
-        ctx.file.class_loader,
-    );
-    class_method_return(&owners, &method_name, true, ctx)
+        ctx.resolved_class_cache,
+    )
+    .map(|ret| callable_return_resolution(&ret, ctx))
+    .unwrap_or_default()
 }
 
 /// What calling the callable string `callable` returns: the function

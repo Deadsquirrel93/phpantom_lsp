@@ -58,6 +58,8 @@
 //!   `@psalm-if-this-is` pattern and the receiver's type.
 //! - [`arg_type_resolution`]: resolving inline argument expressions to
 //!   their raw `PhpType`.
+//! - [`array_callable`]: what invoking an `[$object, 'method']` array
+//!   callable returns.
 //! - [`facade_owner`]: picking the concrete container class that types a
 //!   static call made through a Laravel facade.
 //! - [`out_param`]: what a callee leaves in a by-reference parameter,
@@ -67,6 +69,7 @@
 //!   whose result depends on the property name passed at the call site.
 mod arg_text_types;
 mod arg_type_resolution;
+mod array_callable;
 mod callable_target;
 mod closure_returns;
 mod constant_operands;
@@ -82,6 +85,7 @@ mod template_subs;
 pub(crate) use out_param::{OutParamCallee, effective_out_type, resolve_out_type_for_call};
 
 pub(crate) use arg_text_types::array_literal_shape_type_with;
+pub(crate) use array_callable::array_callable_return_type;
 pub(crate) use callable_target::invoked_value_types;
 pub(crate) use constant_operands::evaluate_constant_operands;
 pub(crate) use facade_owner::facade_concrete_owner;

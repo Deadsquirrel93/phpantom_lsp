@@ -288,29 +288,6 @@ the most. Route free functions through the same body inference the method
 path uses. Conformance row `native_types_untyped_return_inferred.php`, and
 the `inferred-return` hover probe, which shows no type for the same reason.
 
-### B661. Invoking an array callable has no return type
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-function f(Repo $r): void {
-    $find = [$r, 'find'];
-    $find()->name();               // type of '$find()' could not be resolved
-}
-function g(Repo $r): void {
-    $f = $r->find(...);
-    $f()->name();                  // resolves to User
-}
-```
-
-`[$object, 'method']` and `[Repo::class, 'method']` name their target
-exactly, so invoking one is the same call as `$object->method()`. We type
-the array as an array and the invocation as nothing, which makes the member
-access on the result a false positive. First-class callable syntax and
-closures both resolve, so the gap is the array spelling alone —
-`call_user_func([$r, 'find'])` is `mixed` for the same reason. Conformance
-row `callables_array_callable_invocation.php`.
-
 ### B670. A member access on a closure invoked in place resolves nothing
 
 **Impact: Low · Complexity: Medium**

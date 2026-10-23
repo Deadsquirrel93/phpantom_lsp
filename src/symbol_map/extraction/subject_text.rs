@@ -223,47 +223,37 @@ fn lower_spine_base<'a>(expr: &'a Expression<'a>) -> Option<SubjectExpr> {
         Expression::Clone(clone) => expr_to_subject_expr(clone.object),
 
         // Array literals: `[Foo::class, 'bar']` → `[Foo::class, 'bar']`.
-        // We format elements we can represent and elide the rest so that
+        // Elements are formatted the way call arguments are, so literals
+        // survive (an array callable names its method by one), and an
+        // element that cannot be represented is elided as `...` so that
         // callers (especially conditional return-type resolution) can see
         // that an argument was provided and is not null.
         Expression::Array(array) => {
-            let mut parts = Vec::new();
-            for element in array.elements.iter() {
-                match element {
+            let parts = array
+                .elements
+                .iter()
+                .map(|element| match element {
                     ArrayElement::KeyValue(kv) => {
-                        let val = expr_to_subject_text(kv.value);
-                        if !val.is_empty() {
-                            let key = expr_to_subject_text(kv.key);
-                            if key.is_empty() {
-                                parts.push(val);
-                            } else {
-                                parts.push(format!("{} => {}", key, val));
-                            }
+                        let val = format_arg_expr(kv.value);
+                        let key = format_arg_expr(kv.key);
+                        if val == "..." || key == "..." {
+                            val
                         } else {
-                            parts.push("...".to_string());
+                            format!("{} => {}", key, val)
                         }
                     }
-                    ArrayElement::Value(v) => {
-                        let val = expr_to_subject_text(v.value);
-                        if val.is_empty() {
-                            parts.push("...".to_string());
-                        } else {
-                            parts.push(val);
-                        }
-                    }
+                    ArrayElement::Value(v) => format_arg_expr(v.value),
                     ArrayElement::Variadic(v) => {
-                        let val = expr_to_subject_text(v.value);
-                        if val.is_empty() {
-                            parts.push("...".to_string());
+                        let val = format_arg_expr(v.value);
+                        if val == "..." {
+                            val
                         } else {
-                            parts.push(format!("...{}", val));
+                            format!("...{}", val)
                         }
                     }
-                    ArrayElement::Missing(_) => {
-                        parts.push("...".to_string());
-                    }
-                }
-            }
+                    ArrayElement::Missing(_) => "...".to_string(),
+                })
+                .collect();
             Some(SubjectExpr::InlineArray {
                 elements: parts,
                 index_segments: Vec::new(),
