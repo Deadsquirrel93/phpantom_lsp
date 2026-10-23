@@ -58,6 +58,13 @@ impl Backend {
         range: Range,
     ) -> Option<Vec<InlayHint>> {
         let symbol_map = self.symbol_map_for(uri)?;
+        // The editor asks for hints right after an edit, usually before the
+        // background parse has replaced the map.  The old map's offsets
+        // would land hints on whatever text now sits there; the parse's
+        // inlay hint refresh asks again once the map is current.
+        if !symbol_map.matches_source(content) {
+            return Some(Vec::new());
+        }
         let ctx = self.file_context(uri);
 
         // A template's request range arrives in Blade coordinates; the

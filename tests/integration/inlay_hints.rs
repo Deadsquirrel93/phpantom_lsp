@@ -1504,3 +1504,46 @@ makeClosure('1', '2')('test');
         a_count, line6_labels
     );
 }
+
+/// The editor asks for hints as soon as it sends an edit, usually before
+/// the background parse has replaced the symbol map.  The old map's
+/// argument offsets must not be laid over the new text: here they would
+/// put a second `var1:` in front of the named argument the user just
+/// typed.
+#[tokio::test]
+async fn stale_symbol_map_produces_no_hints() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test/inlay.php").unwrap();
+    let before = r#"<?php
+function myFunc(string $var1): void {}
+myFunc($something);
+"#;
+    let after = before.replace("myFunc($something)", "myFunc(var1: $something)");
+
+    let hints = inlay_hints_for(&backend, &uri, before).await;
+    assert_eq!(labels(&hints_at_line(&hints, 2)), ["var1:"]);
+
+    let range = Range {
+        start: Position::new(0, 0),
+        end: Position::new(3, 0),
+    };
+    let stale = backend
+        .handle_inlay_hints(uri.as_ref(), &after, range)
+        .unwrap_or_default();
+    assert!(
+        stale.is_empty(),
+        "stale map must not produce hints, got {:?}",
+        stale.iter().map(hint_label).collect::<Vec<_>>()
+    );
+
+    // Once the background parse lands, the named argument needs no hint.
+    backend.update_ast(uri.as_str(), &after);
+    let fresh = backend
+        .handle_inlay_hints(uri.as_ref(), &after, range)
+        .unwrap_or_default();
+    assert!(
+        fresh.is_empty(),
+        "{:?}",
+        fresh.iter().map(hint_label).collect::<Vec<_>>()
+    );
+}

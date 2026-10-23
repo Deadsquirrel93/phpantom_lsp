@@ -41,6 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Parameter-name hints no longer double up while typing.** Editing a call could leave a hint in the wrong place, such as `myFunc(var1: var1: $something)`, until the file was reopened.
 - **`response()` with content is a response.** `response($content)` now resolves to a `Response` even when `$content` may be `null`, so returning it from a method declared to return `Response` is no longer reported. Only `response()` with no arguments is the response factory.
 - **Reading a key from an intersection of array types.** For a value typed `array<string, mixed>&array{at: Carbon}`, `$entry['at']` now resolves to `Carbon` instead of an unknown type.
 - **`Closure::fromCallable()` keeps the callee's return type.** Calling the closure it makes, such as `Closure::fromCallable([$repo, 'find'])`, now returns what the callable does, whether it is an array callable, a callable string, an invokable object, or a closure.
