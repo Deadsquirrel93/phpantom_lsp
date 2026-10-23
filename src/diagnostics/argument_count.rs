@@ -28,8 +28,8 @@ use crate::Backend;
 use crate::parser::with_parse_cache;
 
 use super::helpers::{
-    CallTargetCache, FileDiagnosticContext, is_position_independent_call_expression,
-    make_diagnostic,
+    CallTargetCache, FileDiagnosticContext, classes_instantiated_by_variable,
+    is_position_independent_call_expression, make_diagnostic,
 };
 
 /// Diagnostic code used for argument-count diagnostics.
@@ -260,6 +260,7 @@ impl Backend {
         // per `namespace` block, since the same text can name a different
         // target under another block's imports.
         let call_targets = CallTargetCache::new(file_ctx);
+        let mut loaders = None;
 
         // ── Walk every call site ────────────────────────────────────
         for call_site in &symbol_map.call_sites {
@@ -270,6 +271,21 @@ impl Backend {
             }
 
             let expr = call_site.call_expression;
+
+            // `new $class(…)` is checked against the constructor of the
+            // one class the variable spells, never against the bound of a
+            // `class-string<T>`, whose subclasses may take other arguments.
+            if let Some(var_name) = expr.strip_prefix("new ")
+                && var_name.starts_with('$')
+            {
+                let loaders = loaders.get_or_insert_with(|| self.file_loaders(file_ctx));
+                let rctx = loaders.resolution_ctx_at(content, call_site.args_start);
+                if !classes_instantiated_by_variable(var_name, &rctx)
+                    .is_some_and(|classes| classes.len() == 1)
+                {
+                    continue;
+                }
+            }
 
             // Look up or populate the call expression cache.
             let resolved = if is_position_independent_call_expression(expr) {

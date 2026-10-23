@@ -17,15 +17,20 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use mago_syntax::cst::*;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::class_lookup::{Fqn, ResolvedClassLoader};
+use crate::parser::{with_parse_cache, with_parsed_program};
 use crate::symbol_map::{ClassRefContext, SymbolKind};
 use crate::types::{ClassInfo, ClassLikeKind};
 use crate::util::short_name;
 
-use super::helpers::{FileDiagnosticContext, is_offset_in_ranges, make_diagnostic, resolve_to_fqn};
+use super::helpers::{
+    FileDiagnosticContext, classes_instantiated_by_variable, is_offset_in_ranges, make_diagnostic,
+    resolve_to_fqn,
+};
 use super::use_statements::compute_use_line_ranges;
 
 /// Diagnostic code used for invalid-class-kind diagnostics.
@@ -156,6 +161,103 @@ impl Backend {
                     message,
                 ));
             }
+        }
+
+        self.collect_variable_instantiation_diagnostics(ctx, uri, content, out);
+    }
+
+    /// Check `new $class` against the classes the variable spells.
+    ///
+    /// Only a variable holding nothing but strings that spell classes is
+    /// judged, and only when every class it may spell is invalid: one
+    /// instantiable class among them makes the `new` legal.
+    fn collect_variable_instantiation_diagnostics(
+        &self,
+        ctx: &FileDiagnosticContext,
+        uri: &str,
+        content: &str,
+        out: &mut Vec<Diagnostic>,
+    ) {
+        let _parse_guard = with_parse_cache(content);
+        let sites = with_parsed_program(content, "invalid_class_kind", |program, _content| {
+            let mut sites = Vec::new();
+            for statement in program.statements.iter() {
+                mago_syntax::walker::Walker::walk_statement(
+                    &VariableInstantiationWalker,
+                    statement,
+                    &mut sites,
+                );
+            }
+            sites
+        });
+        if sites.is_empty() {
+            return;
+        }
+
+        let loaders = self.file_loaders(&ctx.file);
+        for site in sites {
+            if !super::incremental::reports_site(site.start) {
+                continue;
+            }
+            let rctx = loaders.resolution_ctx_at(content, site.start);
+            let Some(classes) = classes_instantiated_by_variable(&site.var_name, &rctx) else {
+                continue;
+            };
+            let verdicts: Option<Vec<_>> = classes
+                .iter()
+                .map(|class| {
+                    check_kind_in_context(
+                        class,
+                        ClassRefContext::New,
+                        &class.fqn(),
+                        rctx.file.class_loader,
+                    )
+                })
+                .collect();
+            let Some((severity, message)) = verdicts.and_then(|v| v.into_iter().next()) else {
+                continue;
+            };
+            let Some(range) = self.offset_range_to_lsp_range(
+                uri,
+                content,
+                site.start as usize,
+                site.end as usize,
+            ) else {
+                continue;
+            };
+            out.push(make_diagnostic(
+                range,
+                severity,
+                INVALID_CLASS_KIND_CODE,
+                message,
+            ));
+        }
+    }
+}
+
+/// A `new $class` in the source: the variable and its byte span.
+struct VariableInstantiation {
+    var_name: String,
+    start: u32,
+    end: u32,
+}
+
+struct VariableInstantiationWalker;
+
+impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, Vec<VariableInstantiation>>
+    for VariableInstantiationWalker
+{
+    fn walk_in_instantiation(
+        &self,
+        node: &'ast Instantiation<'arena>,
+        sites: &mut Vec<VariableInstantiation>,
+    ) {
+        if let Expression::Variable(Variable::Direct(var)) = node.class {
+            sites.push(VariableInstantiation {
+                var_name: crate::atom::bytes_to_str(var.name).to_string(),
+                start: var.span.start.offset,
+                end: var.span.end.offset,
+            });
         }
     }
 }

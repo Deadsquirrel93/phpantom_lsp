@@ -78,6 +78,94 @@ $x = new Color();
         assert!(diags[0].message.contains("enum"));
     }
 
+    #[test]
+    fn new_from_string_naming_interface_error() {
+        let diags = collect(
+            r#"<?php
+namespace App;
+interface Shape {}
+function plain(): void {
+    $c = 'App\Shape';
+    new $c();
+}
+function slashed(): void {
+    $c = '\\App\\Shape';
+    new $c;
+}
+"#,
+        );
+        assert_eq!(diags.len(), 2, "got: {diags:?}");
+        for d in &diags {
+            assert_eq!(d.severity, Some(DiagnosticSeverity::ERROR));
+            assert!(
+                d.message
+                    .contains("Cannot instantiate interface 'App\\Shape'")
+            );
+        }
+        assert_eq!(diags[0].range.start, Position::new(5, 8));
+        assert_eq!(diags[0].range.end, Position::new(5, 10));
+    }
+
+    #[test]
+    fn new_from_string_naming_abstract_class_error() {
+        let diags = collect(
+            r#"<?php
+abstract class Base {}
+function f(): void {
+    $c = 'Base';
+    new $c();
+}
+"#,
+        );
+        assert_eq!(diags.len(), 1, "got: {diags:?}");
+        assert!(diags[0].message.contains("abstract"));
+    }
+
+    #[test]
+    fn new_from_string_naming_concrete_class_no_diagnostic() {
+        let diags = collect(
+            r#"<?php
+class Foo {}
+function f(): void {
+    $c = 'Foo';
+    new $c();
+}
+"#,
+        );
+        assert!(diags.is_empty(), "got: {diags:?}");
+    }
+
+    #[test]
+    fn new_from_string_that_may_name_a_concrete_class_no_diagnostic() {
+        let diags = collect(
+            r#"<?php
+interface Shape {}
+class Circle implements Shape {}
+function f(bool $b): void {
+    $c = $b ? 'Shape' : 'Circle';
+    new $c();
+}
+"#,
+        );
+        assert!(diags.is_empty(), "got: {diags:?}");
+    }
+
+    #[test]
+    fn new_from_class_string_of_interface_no_diagnostic() {
+        // `class-string<Shape>` holds some implementation of `Shape`, not
+        // `Shape` itself.
+        let diags = collect(
+            r#"<?php
+interface Shape {}
+/** @param class-string<Shape> $c */
+function f(string $c): void {
+    new $c();
+}
+"#,
+        );
+        assert!(diags.is_empty(), "got: {diags:?}");
+    }
+
     // ── extends (class) ─────────────────────────────────────────────
 
     #[test]

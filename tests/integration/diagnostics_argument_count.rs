@@ -559,6 +559,50 @@ function test(): void {
         assert!(diags.is_empty(), "No diagnostics expected, got: {diags:?}",);
     }
 
+    #[test]
+    fn flags_too_few_args_to_constructor_named_by_string() {
+        let php = r#"<?php
+namespace App;
+class User {
+    public function __construct(string $name, string $email) {}
+}
+function plain(): void {
+    $c = 'App\User';
+    new $c("Alice");
+}
+function slashed(): void {
+    $c = '\\App\\User';
+    new $c("Alice");
+}
+"#;
+        let diags = collect(php);
+        assert_eq!(
+            diags
+                .iter()
+                .filter(|d| d.message.contains("Expected 2") && d.message.contains("got 1"))
+                .count(),
+            2,
+            "Expected a too-few-args diagnostic at both sites, got: {diags:?}",
+        );
+    }
+
+    #[test]
+    fn no_diagnostic_for_constructor_through_class_string_bound() {
+        // A `class-string<Base>` names some subclass of `Base`, whose
+        // constructor may take other arguments.
+        let php = r#"<?php
+abstract class Base {
+    public function __construct(string $name) {}
+}
+/** @param class-string<Base> $c */
+function test(string $c): void {
+    new $c();
+}
+"#;
+        let diags = collect(php);
+        assert!(diags.is_empty(), "No diagnostics expected, got: {diags:?}",);
+    }
+
     // ── "at least / at most" message wording ────────────────────────
 
     #[test]

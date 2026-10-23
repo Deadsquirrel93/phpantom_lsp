@@ -665,6 +665,27 @@ impl Backend {
 
         let result = match effective {
             // ── Constructor: `new ClassName` or `new ClassName()` ────
+            // `new $class` builds the class the variable names, the same
+            // one `$class::` reaches.
+            SubjectExpr::NewExpr { class_name } if class_name.starts_with('$') => {
+                let named = crate::type_engine::resolver::resolve_target_classes_expr(
+                    effective,
+                    crate::AccessKind::Arrow,
+                    &rctx,
+                );
+                match named.as_slice() {
+                    [only] => only.class_info.as_ref().and_then(|class| {
+                        Self::resolve_constructor_callable(
+                            &class.fqn(),
+                            &resolved_class_loader,
+                            &self.resolved_class_cache,
+                            effective_args_text,
+                            &rctx,
+                        )
+                    }),
+                    _ => None,
+                }
+            }
             SubjectExpr::NewExpr { class_name } => {
                 let resolved_class_name =
                     Self::resolve_class_name_keyword(class_name, rctx.current_class);

@@ -41,6 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`new` on a class name held in a string is checked.** `$class = 'Countable'; new $class()` now reports the interface, abstract class, trait or enum it would fail to instantiate, and a constructor given the wrong number of arguments, the same as when the class is written out. A leading backslash in the string names the same class.
 - **Parameter-name hints no longer double up while typing.** Editing a call could leave a hint in the wrong place, such as `myFunc(var1: var1: $something)`, until the file was reopened.
 - **`response()` with content is a response.** `response($content)` now resolves to a `Response` even when `$content` may be `null`, so returning it from a method declared to return `Response` is no longer reported. Only `response()` with no arguments is the response factory.
 - **Reading a key from an intersection of array types.** For a value typed `array<string, mixed>&array{at: Carbon}`, `$entry['at']` now resolves to `Carbon` instead of an unknown type.

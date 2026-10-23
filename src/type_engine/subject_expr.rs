@@ -851,7 +851,11 @@ pub(crate) fn parse_new_expression_class(s: &str) -> Option<String> {
     // A leading `\` stays: it marks an explicit global reference, which
     // resolving the bare name inside a namespace would lose.
     let class_name = &rest[..end];
-    let bare = class_name.strip_prefix('\\').unwrap_or(class_name);
+    // `new $class` names its class through a variable.
+    let bare = class_name
+        .strip_prefix('\\')
+        .or_else(|| class_name.strip_prefix('$'))
+        .unwrap_or(class_name);
     if bare.is_empty()
         || bare == "class"
         || !bare

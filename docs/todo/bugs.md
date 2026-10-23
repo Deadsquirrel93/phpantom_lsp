@@ -151,24 +151,6 @@ call on a string. That is the parallel-resolution-path anti-pattern:
 whichever of the two paths is right, there should be one. Conformance row
 `objects_class_constant_on_instance.php`.
 
-### B659. `new $classString` skips the class-kind and constructor checks
-
-**Impact: Low-Medium · Complexity: Low**
-
-```php
-new \Countable();                           // reported: Cannot instantiate interface
-function f(): void { $c = 'Countable';  new $c(); }   // not reported
-function g(): void { $c = '\\Countable'; new $c(); }  // not reported
-```
-
-`invalid_class_kind` (and the argument-count check on the constructor) only
-runs when `new` names a class syntactically. Once the class comes from a
-class-string the checks are skipped entirely, even though the resolver
-knows which class it is — including the leading-backslash spelling, which
-names the same class as the slash-free one. Run the same checks on the
-resolved class whatever syntax named it. Conformance row
-`regressions_new_class_string_leading_backslash.php`.
-
 ## Code actions
 
 No outstanding items.

@@ -261,6 +261,14 @@ fn resolve_target_classes_expr_inner(
             resolve_static_access_subject(class, member, ctx)
         }
 
+        // ── `new $class` builds the class the variable names ────
+        SubjectExpr::NewExpr { class_name } if class_name.starts_with('$') => {
+            resolve_variable_fallback(class_name, AccessKind::DoubleColon, ctx)
+                .into_iter()
+                .filter(|rt| rt.class_info.is_some())
+                .collect()
+        }
+
         // ── A bare class name, and `new ClassName` without trailing
         //    call parens, are the same reference written two ways ──
         SubjectExpr::ClassName(name) | SubjectExpr::NewExpr { class_name: name } => {

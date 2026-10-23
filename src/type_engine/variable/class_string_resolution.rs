@@ -99,20 +99,49 @@ fn collect_named_classes(
                 collect_named_classes(member, owning_class, all_classes, class_loader, results);
             }
         }
-        TypeKind::Literal(literal) => {
-            let Some(content) = literal.string_content() else {
-                return;
-            };
-            // PHP reads a class name held in a string as fully qualified.
-            let name = content.strip_prefix('\\').unwrap_or(&content);
-            let is_class_name = !name.is_empty()
-                && name
-                    .bytes()
-                    .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'\\' || b >= 0x80);
-            if is_class_name && let Some(cls) = class_loader(Fqn::new(name)) {
+        TypeKind::Literal(_) => {
+            if let Some(cls) = class_spelled_by(ty, class_loader) {
                 ClassInfo::extend_unique_arc(results, vec![cls]);
             }
         }
         _ => {}
     }
+}
+
+/// The classes a value of type `ty` names exactly, when every value it can
+/// hold is a string literal spelling a loaded class (`'Foo'`, `'\\Foo'`).
+///
+/// `None` for anything else, `class-string<T>` included: that holds some
+/// class extending `T`, so a fact about `T` itself (that it is abstract, or
+/// what its constructor takes) says nothing about the class `new` builds.
+pub(crate) fn classes_spelled_exactly_by(
+    ty: &PhpType,
+    class_loader: &ResolvedClassLoader<'_>,
+) -> Option<Vec<Arc<ClassInfo>>> {
+    let mut results = Vec::new();
+    for member in ty.union_members() {
+        ClassInfo::extend_unique_arc(&mut results, vec![class_spelled_by(member, class_loader)?]);
+    }
+    Some(results)
+}
+
+/// The class a string literal type spells, if it spells a loaded one.
+fn class_spelled_by(
+    ty: &PhpType,
+    class_loader: &ResolvedClassLoader<'_>,
+) -> Option<Arc<ClassInfo>> {
+    let TypeKind::Literal(literal) = ty.kind() else {
+        return None;
+    };
+    let content = literal.string_content()?;
+    // PHP reads a class name held in a string as fully qualified.
+    let name = content.strip_prefix('\\').unwrap_or(&content);
+    let is_class_name = !name.is_empty()
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'\\' || b >= 0x80);
+    if !is_class_name {
+        return None;
+    }
+    class_loader(Fqn::new(name))
 }
