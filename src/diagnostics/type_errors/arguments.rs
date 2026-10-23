@@ -17,7 +17,7 @@ use crate::Backend;
 use crate::atom::bytes_to_str;
 use crate::class_lookup::{
     Fqn, ResolvedClassLoader, first_rejected_callable_param, missing_required_shape_keys,
-    shape_breaks_list_order,
+    shape_breaks_list_order, undeclared_shape_keys,
 };
 use crate::parser::{with_parse_cache, with_parsed_program};
 use crate::php_type::{PhpType, TypeKind, is_array_like_name};
@@ -924,6 +924,18 @@ impl ArgumentCheck<'_> {
                 " (missing required key{} {})",
                 if missing_keys.len() == 1 { "" } else { "s" },
                 missing_keys
+                    .iter()
+                    .map(|key| format!("'{key}'"))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            ));
+        }
+        let undeclared_keys = undeclared_shape_keys(arg_type, param_type, self.class_loader);
+        if !undeclared_keys.is_empty() {
+            message.push_str(&format!(
+                " (undeclared key{} {})",
+                if undeclared_keys.len() == 1 { "" } else { "s" },
+                undeclared_keys
                     .iter()
                     .map(|key| format!("'{key}'"))
                     .collect::<Vec<_>>()

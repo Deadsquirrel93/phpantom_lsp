@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Morph aliases resolve in column comparisons.** Comparing a model's polymorphic type column with a registered alias now offers completion, hover, go-to-definition, and find-references, and reports unknown aliases when the morph map is enforced. Query filters and property comparisons recognize the columns declared by the model's relationships, including custom names and inherited relations. Contributed by @shuvroroy.
 - **Index files the workspace scan skips.** List files and directories under `[indexing] include` in `.phpantom.toml` to index them even though they are hidden or gitignored, such as Castor's `.castor/` tasks and its generated `.castor.stub.php`. Their symbols then complete, resolve, and stop being reported as unknown. A path inside the workspace is treated as project code, and one outside it as a library, like `vendor/`. See [configuration.md](configuration.md#extra-include-paths). Contributed by @joelwurtz.
 - **Refinement types are enforced against their base type.** A plain `string` passed where a `non-empty-string` is declared, an `int` where a `positive-int` or `int<1, 100>` is, or a `bool` where `false` is, is now reported, the way PHPStan reports it.
+- **Array shapes are sealed.** An array with a key that a shape like `array{foo: int}` does not declare no longer satisfies it, whether the key is written at the call site or comes from the value's own declared shape. Write `array{foo: int, ...}` to accept other keys.
 
 ### Changed
 

@@ -312,8 +312,11 @@ class TypeErrorDemo
         $this->requiresConfig(['host' => 'localhost']);
 
         // No diagnostic — every required key is there. Order does not
-        // matter, an extra key is harmless, and `timeout` is optional:
+        // matter, and `timeout` is optional:
         $this->requiresConfig(['port' => 3306, 'host' => 'localhost']);
+
+        // Type error — a shape without a trailing `...` declares every key
+        // it handles, so `debug` is one it does not accept:
         $this->requiresConfig(['host' => 'localhost', 'port' => 3306, 'debug' => true]);
 
         // No diagnostic — a shape built up over several statements records

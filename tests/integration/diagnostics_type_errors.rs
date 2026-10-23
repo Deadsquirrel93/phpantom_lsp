@@ -11079,7 +11079,6 @@ function takesOptional(array $config): void {}
 
 takesConfig(['host' => 'localhost', 'port' => 3306]);
 takesConfig(['port' => 3306, 'host' => 'localhost']);
-takesConfig(['host' => 'localhost', 'port' => 3306, 'debug' => true]);
 takesOptional(['host' => 'localhost']);
 "#;
     let messages = messages_with_code(&collect(php), "type_mismatch_argument");
@@ -14091,12 +14090,53 @@ h(['k' => 'x']);
 }
 
 #[test]
-fn a_shape_with_extra_keys_still_satisfies_a_narrower_shape() {
+fn a_shape_with_an_undeclared_key_does_not_satisfy_a_sealed_shape() {
     let php = r#"<?php
 declare(strict_types=1);
 /** @param array{foo: int} $a */
 function f(array $a): void {}
 f(['foo' => 1, 'buz' => 'x']);
+/** @param array{foo: int, buz: float} $wider */
+function g(array $wider): void {
+    f($wider);
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 2, "got {messages:?}");
+    assert!(
+        messages
+            .iter()
+            .all(|m| m.contains("(undeclared key 'buz')")),
+        "got {messages:?}"
+    );
+}
+
+#[test]
+fn a_shape_with_extra_keys_satisfies_an_unsealed_shape() {
+    let php = r#"<?php
+declare(strict_types=1);
+/** @param array{foo: int, ...} $a */
+function f(array $a): void {}
+f(['foo' => 1, 'buz' => 'x']);
+/** @param array{foo: int, buz: float} $wider */
+function g(array $wider): void {
+    f($wider);
+}
+"#;
+    assert!(!has_type_error(&collect(php)));
+}
+
+#[test]
+fn a_class_constant_key_matches_the_key_it_evaluates_to_in_a_sealed_shape() {
+    let php = r#"<?php
+declare(strict_types=1);
+final class Slots { public const NAME = 'name'; }
+/** @param array{name: string} $a */
+function f(array $a): void {}
+/** @param array{Slots::NAME: string} $b */
+function g(array $b): void {
+    f($b);
+}
 "#;
     assert!(!has_type_error(&collect(php)));
 }

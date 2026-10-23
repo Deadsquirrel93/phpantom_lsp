@@ -41,33 +41,6 @@ No outstanding items.
 
 ## Array types
 
-### B654. Array shapes are unsealed: an undeclared key is admitted
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-/** @param array{foo: int} $shape */
-function takesShape(array $shape): void {}
-
-takesShape([]);                            // reported: missing required key 'foo'
-takesShape(['foo' => 'one']);              // reported: foo is int, not string
-takesShape(['foo' => 2, 'buz' => 42.0]);   // not reported: buz is undeclared
-
-/** @param array{foo: int, buz: float} $wider */
-function passAlong(array $wider): void {
-    takesShape($wider);                    // not reported: wider shape is not a subtype
-}
-```
-
-A shape written without a trailing `...` declares exactly the keys it
-handles; `array{foo: int, ...}` is the opt-in for anything else. The
-required-key and value-type halves of the check are already there, so what
-is missing is the third question: a candidate shape whose key set is not a
-subset of the declared one does not satisfy it. That holds both for a
-literal at the call site and for a value whose extra key comes from a
-declaration. PHPStan, Psalm and Mago all seal by default; conformance row
-`arrays_shape_sealed_by_default.php`.
-
 ### B666. An array filled by key inside a `foreach` loses every required key
 
 **Impact: Medium · Complexity: Medium**
