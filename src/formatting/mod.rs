@@ -56,7 +56,8 @@
 //! ## Blade templates
 //!
 //! A `.blade.php` file is resolved separately, see [`blade`]: Pint when
-//! the project has its Blade rule on, the built-in reindenter otherwise.
+//! the project has its Blade rule on, blade-formatter when the project
+//! uses it, the built-in reindenter otherwise.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
@@ -84,7 +85,7 @@ const DEFAULT_TIMEOUT_MS: u64 = 10_000;
 /// An external formatter PHPantom knows how to detect and drive.
 ///
 /// Everything tool-specific hangs off this enum: the `.phpantom.toml`
-/// key, the Composer package that certifies it, the binary name, and how
+/// key, the project metadata that certifies it, the binary name, and how
 /// it is invoked.  Adding a formatter means adding a variant and filling
 /// in each method; the resolution and execution code never lists tools
 /// by name.
@@ -93,10 +94,13 @@ pub enum Tool {
     Pint,
     PhpCsFixer,
     Phpcbf,
+    /// shufo/blade-formatter, which formats Blade templates only and so
+    /// is never part of the PHP pipeline ([`Tool::ALL`]); see [`blade`].
+    BladeFormatter,
 }
 
 impl Tool {
-    /// Every tool, in the order a pipeline runs them.
+    /// Every PHP formatter, in the order a pipeline runs them.
     pub const ALL: [Tool; 3] = [Tool::Pint, Tool::PhpCsFixer, Tool::Phpcbf];
 
     /// The binary's name, which is also the name used in logs.
@@ -105,16 +109,7 @@ impl Tool {
             Tool::Pint => "pint",
             Tool::PhpCsFixer => "php-cs-fixer",
             Tool::Phpcbf => "phpcbf",
-        }
-    }
-
-    /// The Composer package whose presence in `require-dev` selects the
-    /// tool.
-    fn composer_package(self) -> &'static str {
-        match self {
-            Tool::Pint => "laravel/pint",
-            Tool::PhpCsFixer => "friendsofphp/php-cs-fixer",
-            Tool::Phpcbf => "squizlabs/php_codesniffer",
+            Tool::BladeFormatter => "blade-formatter",
         }
     }
 
@@ -125,6 +120,7 @@ impl Tool {
             Tool::Pint => config.pint.as_deref(),
             Tool::PhpCsFixer => config.php_cs_fixer.as_deref(),
             Tool::Phpcbf => config.phpcbf.as_deref(),
+            Tool::BladeFormatter => config.blade_formatter.as_deref(),
         }
     }
 
@@ -151,8 +147,12 @@ impl Tool {
                     || crate::phpcs::project_uses_phpcs(workspace_root, composer_json))
                     && !workspace_root.is_some_and(crate::mago::formats_with_mago)
             }
-            Tool::Pint | Tool::PhpCsFixer => composer_json
-                .is_some_and(|package| composer::has_require_dev(package, self.composer_package())),
+            Tool::Pint => composer_json
+                .is_some_and(|package| composer::has_require_dev(package, "laravel/pint")),
+            Tool::PhpCsFixer => composer_json.is_some_and(|package| {
+                composer::has_require_dev(package, "friendsofphp/php-cs-fixer")
+            }),
+            Tool::BladeFormatter => workspace_root.is_some_and(blade::uses_blade_formatter),
         }
     }
 }

@@ -194,8 +194,8 @@ impl Backend {
         };
 
         // Blade markup isn't PHP, so a template resolves its own strategy:
-        // Pint when the project formats Blade with it, the built-in
-        // reindenter otherwise.
+        // Pint or blade-formatter when the project formats Blade with one,
+        // the built-in reindenter otherwise.
         let is_blade = self.is_blade_file(&uri);
         let blade_options = formatting::blade::options_from_lsp(options);
 

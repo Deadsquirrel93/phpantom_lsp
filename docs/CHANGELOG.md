@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Format selection.** Formatting a selection reformats only the lines it covers, with whichever formatter the project uses, in PHP files and Blade templates alike.
+- **Blade templates use the project's blade-formatter.** A project that installs [blade-formatter](https://github.com/shufo/blade-formatter) and configures it with a `.bladeformatterrc.json` now gets its Blade templates formatted by it, with the project's settings and `.bladeignore`, instead of by the built-in reindenter. Set `blade-formatter` under `[formatting]` to choose the command or turn it off.
 - **Conflicting trait properties.** A class that gets the same property from two traits, or from a trait and its own body, with a different type, visibility, modifier or default is reported, the same fatal error PHP raises when it loads the class.
 - **Destructuring offsets an array cannot have.** `[$a, $b] = $map` on a string-keyed array, or `['email' => $email] = $row` on a shape without that key, is now reported, since the target ends up `null` with a warning at runtime.
 - **Morph aliases resolve in column comparisons.** Comparing a model's polymorphic type column with a registered alias now offers completion, hover, go-to-definition, and find-references, and reports unknown aliases when the morph map is enforced. Query filters and property comparisons recognize the columns declared by the model's relationships, including custom names and inherited relations. Contributed by @shuvroroy.

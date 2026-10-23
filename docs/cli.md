@@ -369,8 +369,8 @@ phpantom_lsp format --project-root /path/to/app   # explicit project root
 Each file goes through the strategy PHPantom resolves for the project, so
 a run honours a Laravel Pint, php-cs-fixer, or PHP_CodeSniffer the project
 depends on, and uses the built-in formatter otherwise. Blade templates
-resolve separately: Pint when the project formats Blade with it, the
-built-in reindenter otherwise. See
+resolve separately: Pint or blade-formatter when the project formats
+Blade with one, the built-in reindenter otherwise. See
 [`[formatting]`](configuration.md#formatting) for how that is decided and how
 to override it. The run opens with a line on stderr naming what it
 resolved, so a CI log records which formatter enforced the result.

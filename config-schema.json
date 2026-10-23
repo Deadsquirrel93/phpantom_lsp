@@ -184,6 +184,18 @@
           "type": "string",
           "description": "Command or path to run Laravel Pint. Unset: auto-detect from composer.json require-dev. Empty string: disable Pint. Any other value: use as the command."
         },
+        "pint-blade": {
+          "type": "boolean",
+          "description": "Whether .blade.php files are formatted by Pint's Pint/laravel_blade rule. Unset: follow the workspace pint.json. true: send them to Pint with --blade. false: never."
+        },
+        "blade-formatter": {
+          "type": "string",
+          "description": "Command or path to run blade-formatter on .blade.php files. Unset: use node_modules/.bin/blade-formatter when package.json lists blade-formatter, the workspace root has a .bladeformatterrc.json or .bladeformatterrc, and Pint does not format Blade. Empty string: never. Any other value: always, even over Pint."
+        },
+        "blade-php": {
+          "type": "boolean",
+          "description": "Whether the built-in Blade formatter also formats the PHP a template carries. Unset: leave every fragment as written. true: format it. No effect when Blade files go to Pint or blade-formatter."
+        },
         "php-cs-fixer": {
           "type": "string",
           "description": "Command or path to run php-cs-fixer. Unset: auto-detect from composer.json require-dev. Empty string: disable php-cs-fixer. Any other value: use as the command."

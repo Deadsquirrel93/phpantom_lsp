@@ -117,7 +117,8 @@ enum Command {
     /// Runs the same formatter the editor runs on save: a Laravel Pint,
     /// php-cs-fixer, or PHP_CodeSniffer the project depends on, and the
     /// built-in formatter otherwise. Blade templates are reindented by
-    /// the built-in reindenter unless the project formats them with Pint.
+    /// the built-in reindenter unless the project formats them with Pint
+    /// or blade-formatter.
     ///
     /// With --check nothing is written: the files that are not formatted
     /// are listed and the command exits non-zero, so a CI job can require
