@@ -83,27 +83,4 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B660. A return type is inferred from an untyped body only for methods
-
-**Impact: High · Complexity: Medium**
-
-```php
-function makeUser() { return new User(); }
-final class Repo { public function find() { return new User(); } }
-
-function f(Repo $r): void {
-    makeUser()->name();        // Cannot verify method 'name' — type of
-                               // 'makeUser()' could not be resolved
-    $r->find()->name();        // resolves to User
-}
-```
-
-A method with neither a native return type nor `@return` gets its return
-type read off its body; a free function with the same shape gets nothing.
-Closures and arrow functions do infer, so the method path is the rule and
-the free function is the exception. The result is an
-`unresolved_member_access` false positive on every call to an unannotated
-function — common in legacy code, which is where a language server is worth
-the most. Route free functions through the same body inference the method
-path uses. Conformance row `native_types_untyped_return_inferred.php`, and
-the `inferred-return` hover probe, which shows no type for the same reason.
+No outstanding items.

@@ -685,6 +685,28 @@ impl Backend {
                 }
             }
 
+            // No return type to go on: read it off the body, as for a
+            // method without one.
+            if func_info.return_type.is_none()
+                && let Some(backend) = ctx.file.backend
+                && let Some(inferred) =
+                    crate::type_engine::call_resolution::try_infer_function_body_return_type(
+                        backend, &func_info,
+                    )
+            {
+                let classes =
+                    crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
+                        &inferred,
+                        "",
+                        ctx.file.all_classes,
+                        ctx.file.class_loader,
+                    );
+                if let Some(ref mut hint_out) = return_type_hint_out {
+                    **hint_out = Some(inferred);
+                }
+                return classes;
+            }
+
             if let Some(ref ret) = func_info.return_type {
                 if let Some(ref mut hint_out) = return_type_hint_out {
                     **hint_out = Some(ret.clone());

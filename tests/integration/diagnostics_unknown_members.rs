@@ -1,8 +1,8 @@
 use crate::common::{
     create_psr4_workspace, create_psr4_workspace_with_stubs, create_test_backend,
     create_test_backend_with_closure_stub, create_test_backend_with_exception_stubs,
-    create_test_backend_with_full_stubs, create_test_backend_with_stubs, slow_diagnostic_messages,
-    unknown_member_diagnostics_with_scope_cache,
+    create_test_backend_with_full_stubs, create_test_backend_with_stubs, open_php_str,
+    slow_diagnostic_messages, unknown_member_diagnostics_with_scope_cache,
 };
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
@@ -17071,4 +17071,39 @@ function f(Repo $r): void {
             && d.message.contains("User")),
         "a first-class callable binds the template from the call, got: {diags:?}",
     );
+}
+
+/// A free function with no return type has it read off its body, as a
+/// method does, so a member it does not have is still flagged.
+#[tokio::test]
+async fn untyped_function_return_type_is_inferred_from_body() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+namespace App;
+
+class User { public function name(): string { return ''; } }
+
+function makeUser() { return new User(); }
+function wrapped() { return makeUser(); }
+
+function f(): void {
+    makeUser()->name();
+    wrapped()->name();
+    \App\makeUser()->name();
+    makeUser()->missing();
+}
+"#;
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    // Opened as the editor would, so the function's body can be read back.
+    open_php_str(&backend, uri, text).await;
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut diags);
+    let messages: Vec<&str> = diags.iter().map(|d| d.message.as_str()).collect();
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    assert!(messages[0].contains("'missing'"), "{messages:?}");
 }

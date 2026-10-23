@@ -355,6 +355,22 @@ fn named_function_call<'b>(
         }
     }
 
+    // No return type to go on: read it off the body, as for a method
+    // without one.
+    if func_info.return_type.is_none()
+        && let Some(backend) = ctx.file.backend
+        && let Some(inferred) =
+            crate::type_engine::call_resolution::try_infer_function_body_return_type(
+                backend, &func_info,
+            )
+    {
+        return Some(vec![resolved_type_with_lookup(
+            inferred,
+            ctx.file.all_classes,
+            ctx.file.class_loader,
+        )]);
+    }
+
     Some(resolve_return_type(func_info.return_type?, ctx))
 }
 

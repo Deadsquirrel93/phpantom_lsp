@@ -16926,3 +16926,25 @@ echo $_SERVER;
         );
     }
 }
+
+/// An untyped function's return type is read off its body, both for a
+/// variable holding its result and for the function's own hover.
+#[tokio::test]
+async fn hover_untyped_function_shows_inferred_return_type() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let content = r#"<?php
+class Pen {}
+function makePen() { return new Pen(); }
+function run(): void {
+    $pen = makePen();
+}
+"#;
+    open_php(&backend, &uri, content).await;
+
+    let text = markup_hover_at(&backend, &uri, 4, 6).await;
+    assert!(text.contains("Pen"), "should resolve to Pen: {text}");
+
+    let text = markup_hover_at(&backend, &uri, 4, 13).await;
+    assert!(text.contains("`Pen` *(inferred)*"), "{text}");
+}
