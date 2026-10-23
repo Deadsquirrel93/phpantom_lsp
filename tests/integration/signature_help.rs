@@ -1328,6 +1328,30 @@ async fn first_class_callable_invocation() {
 }
 
 #[tokio::test]
+async fn partial_application_invocation_shows_the_open_parameters() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///sig_pfa.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "function makePen(int $size, string $ink, bool $cap = true): Pen { return new Pen(); }\n",
+        "class Pen {}\n",
+        "class Demo {\n",
+        "    public function test() {\n",
+        "        $fn = makePen(1, ?, cap: false);\n",
+        "        $fn();\n",
+        "    }\n",
+        "}\n",
+    );
+    let sh = sig_help_at(&backend, &uri, text, 6, 12).await.unwrap();
+    let label = sig_label(&sh);
+    assert!(label.contains("string $ink"), "got: {label}");
+    assert!(
+        !label.contains("$size") && !label.contains("$cap"),
+        "got: {label}"
+    );
+}
+
+#[tokio::test]
 async fn first_class_callable_invocation_in_enum_method() {
     let backend = create_test_backend();
     let uri = Url::parse("file:///sig_fcc_enum.php").unwrap();

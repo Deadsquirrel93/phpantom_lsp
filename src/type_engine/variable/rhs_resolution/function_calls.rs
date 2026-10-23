@@ -335,7 +335,7 @@ fn named_function_call<'b>(
 /// type it holds, an array callable, or its class's `__invoke()`.
 fn variable_invocation(
     var_name: &str,
-    _expr: &Expression<'_>,
+    expr: &Expression<'_>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Vec<ResolvedType> {
     // Closures, arrow functions, and first-class callables are all
@@ -343,7 +343,40 @@ fn variable_invocation(
     // `infer_closure_literal_type`), so `$fn`'s embedded return type
     // covers `$fn = function(): T {}`, `$fn = fn(): T => …`, and
     // `$fn = strlen(...)` / `$fn = $obj->method(...)` alike.
-    value_invocation(&resolve_var_types(var_name, ctx, ctx.cursor_offset), ctx)
+    let types = resolve_var_types(var_name, ctx, ctx.cursor_offset);
+
+    // That type was read with no arguments, so a template the call's
+    // arguments bind is only bound by making the call the partial
+    // application wraps.
+    if let Expression::Call(Call::Function(call)) = expr
+        && types.iter().any(|rt| rt.type_string.is_closure())
+    {
+        let list = &call.argument_list;
+        let args = ctx
+            .file
+            .content
+            .get(
+                list.left_parenthesis.end.offset as usize
+                    ..list.right_parenthesis.start.offset as usize,
+            )
+            .unwrap_or("");
+        if let Some(wrapped) = Backend::invoked_partial_application_call(
+            var_name,
+            ctx.file.content,
+            expr.span().start.offset,
+            args,
+        ) {
+            let resolved = crate::type_engine::resolver::resolve_target_classes(
+                &wrapped,
+                crate::types::AccessKind::Arrow,
+                &ctx.as_resolution_ctx(),
+            );
+            if !resolved.is_empty() {
+                return resolved;
+            }
+        }
+    }
+    value_invocation(&types, ctx)
 }
 
 /// What calling a value of one of `types` returns: the callable signature

@@ -254,29 +254,23 @@ positional spelling and the assigned `fromCallable()` form both resolve. The
 `fromCallable()` shape then falls back to the stub's `Closure` and reports a
 false `unknown_member`.
 
-### B673. A partial application held in a variable is checked against the wrapped signature
+### B674. A partial application's closure type carries no parameters
 
-**Impact: Medium · Complexity: Medium**
+**Impact: Low · Complexity: Medium**
 
 ```php
-/**
- * @template T of object
- * @param class-string<T> $class
- * @return T
- */
-public function make(int $id, string $class): object { … }
+/** @param Closure(string): object $factory */
+function useFactory(Closure $factory): void {}
 
-$c = $r->make(1, ?);
-$c(User::class)->name(); // Expected 2 arguments, got 1
-                         // Argument 1 ($id) expects int, got class-string<User>
-                         // type of '$c(User::class)' could not be resolved
+$make = $r->make(1, ?); // typed as a Closure with no parameters
+useFactory($make);
+useFactory($r->find(...)); // likewise, though find() takes (int, int)
 ```
 
-Calling a variable that holds a partial application with bound arguments is
-checked against every parameter of the wrapped method, so the bound ones count
-as missing and the call's arguments are matched to the wrong parameters. The
-closure type inferred for `$c` carries no parameters at all, and its return
-type is the wrapped call's with no arguments, so a template the placeholder
-fills is never bound. The closure's signature should be the wrapped
-signature's remaining (placeholder) parameters, and invoking it should combine
-the call's arguments with the bound values, the way invoking it in place does.
+The type inferred for a first-class callable or a partial application is a
+`Closure` with the wrapped call's return type and an empty parameter list, so
+hover shows no parameters and a check against a declared `Closure(…)`
+signature compares nothing. Calling the variable is already checked against
+the parameters the placeholders leave open; the type should carry the same
+parameters, and a partial application's return type should be resolved with
+its bound arguments.

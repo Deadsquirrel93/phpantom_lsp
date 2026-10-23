@@ -324,6 +324,43 @@ pub(crate) fn bind_partial_text_arguments(bound: &str, call: &str) -> String {
         .join(", ")
 }
 
+/// The parameters a partial application written with the `bound` argument
+/// text leaves open, in the order a call to it fills them: each `?` and
+/// `name: ?` placeholder's parameter as written, then for `...` every
+/// parameter no argument names.  `$r->make(1, ?)` over `make(int $id,
+/// string $class)` takes only `$class`.
+pub(crate) fn partial_application_params(
+    params: &[ParameterInfo],
+    bound: &str,
+) -> Vec<ParameterInfo> {
+    let mut taken = vec![false; params.len()];
+    let mut open = Vec::new();
+    let mut position = 0;
+    for arg in crate::text_scan::split_top_level_commas(bound) {
+        let at = match split_named_text_arg(arg) {
+            (None, "...") => {
+                open.extend((0..params.len()).filter(|&i| !taken[i]));
+                break;
+            }
+            (Some(name), _) => params.iter().position(|p| param_name_bare(p) == name),
+            (None, _) => {
+                let at = position.min(params.len().saturating_sub(1));
+                position += 1;
+                params
+                    .get(at)
+                    .filter(|p| at + 1 == position || p.is_variadic)
+                    .map(|_| at)
+            }
+        };
+        let Some(at) = at else { continue };
+        if text_arg_value(arg) == "?" && !taken[at] {
+            open.push(at);
+        }
+        taken[at] = true;
+    }
+    open.into_iter().map(|i| params[i].clone()).collect()
+}
+
 /// Names (with the `$` prefix) of required parameters that no argument
 /// supplies, given `positional_count` positional arguments and the named
 /// arguments in `named_arg_names` (parameter names without the `$` prefix).
@@ -424,5 +461,35 @@ mod tests {
         let params = [param("$a", true), param("$b", true)];
         let missing = missing_required_params(&params, 2, std::iter::empty());
         assert!(missing.is_empty());
+    }
+
+    #[test]
+    fn partial_application_params_keep_what_placeholders_leave_open() {
+        let params = [param("$a", true), param("$b", true), param("$c", false)];
+        let open = |bound: &str| -> Vec<String> {
+            partial_application_params(&params, bound)
+                .into_iter()
+                .map(|p| p.name.to_string())
+                .collect()
+        };
+        assert_eq!(open("1, ?"), ["$b"]);
+        assert_eq!(open("?, 1"), ["$a"]);
+        assert_eq!(open("c: ?, a: 1"), ["$c"]);
+        assert_eq!(open("c: ?, ?"), ["$c", "$a"]);
+        assert_eq!(open("?, ..."), ["$a", "$b", "$c"]);
+        assert_eq!(open("b: 2, ..."), ["$a", "$c"]);
+        assert_eq!(open("1, 2, 3, ?"), Vec::<String>::new());
+    }
+
+    #[test]
+    fn partial_application_params_fill_a_variadic_once() {
+        let mut ids = param("$ids", false);
+        ids.is_variadic = true;
+        let params = [param("$class", true), ids];
+        let open: Vec<String> = partial_application_params(&params, "?, ?, ?")
+            .into_iter()
+            .map(|p| p.name.to_string())
+            .collect();
+        assert_eq!(open, ["$class", "$ids"]);
     }
 }

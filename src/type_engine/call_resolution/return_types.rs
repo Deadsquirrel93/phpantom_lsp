@@ -394,9 +394,12 @@ impl Backend {
             SubjectExpr::FunctionCall(func_name) => {
                 Self::return_types_of_function_call(func_name, text_args, ctx, return_type_hint_out)
             }
-            SubjectExpr::Variable(var_name) => {
-                Self::return_types_of_variable_invocation(var_name, ctx, return_type_hint_out)
-            }
+            SubjectExpr::Variable(var_name) => Self::return_types_of_variable_invocation(
+                var_name,
+                text_args,
+                ctx,
+                return_type_hint_out,
+            ),
             SubjectExpr::NewExpr { class_name } => Self::return_types_of_constructor_call(
                 class_name,
                 text_args,

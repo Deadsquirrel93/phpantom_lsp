@@ -707,21 +707,39 @@ impl Backend {
             }
 
             // ── Variable used as a callable target: `$fn(…)` ────────
-            // Check for a first-class callable assignment and recurse.
+            // Check for a partial application assignment and recurse.  One
+            // with bound arguments (`$fn = $r->make(1, ?)`) passes them on
+            // with the call's own and takes only the parameters its
+            // placeholders leave open.
             SubjectExpr::Variable(var_name) if !visited_vars.iter().any(|v| v == var_name) => {
-                let callable_target =
+                let assigned =
                     Self::extract_callable_target_from_variable(var_name, content, cursor_offset)?;
+                let wrapped_args = assigned.bound.as_deref().map(|bound| {
+                    crate::call_args::bind_partial_text_arguments(
+                        bound,
+                        effective_args_text.unwrap_or(""),
+                    )
+                });
                 visited_vars.push(var_name.clone());
                 let resolved = self.resolve_callable_target_inner(
-                    &callable_target,
+                    &assigned.target,
                     content,
                     cursor_offset,
                     file_ctx,
-                    call_args_text,
+                    wrapped_args.as_deref().or(call_args_text),
                     visited_vars,
                 );
                 visited_vars.pop();
-                resolved
+                match (resolved, assigned.bound.as_deref()) {
+                    (Some(mut target), Some(bound)) => {
+                        target.parameters =
+                            crate::call_args::partial_application_params(&target.parameters, bound)
+                                .into();
+                        target.overloads.clear();
+                        Some(target)
+                    }
+                    (resolved, _) => resolved,
+                }
             }
 
             // ── Bare class name used as a function name ─────────────

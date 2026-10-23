@@ -16847,3 +16847,93 @@ function f(Repo $r): void {
         );
     }
 }
+
+/// A partial application held in a variable takes only the parameters its
+/// placeholders leave open, and calling it passes the bound values on.
+#[test]
+fn partial_application_held_in_a_variable() {
+    let backend = create_test_backend_with_closure_stub();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        cfg.diagnostics.extra_arguments = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///test.php";
+    let text = r#"<?php
+final class User { public function name(): string { return ''; } }
+final class Repo {
+    public function find(int $id, int $tenant): User { return new User(); }
+    /**
+     * @template T of object
+     * @param class-string<T> $class
+     * @return T
+     */
+    public function make(int $id, string $class): object { return new $class(); }
+}
+
+function f(Repo $r): void {
+    $c = $r->make(1, ?);
+    $c(User::class)->name();
+    $d = $r->find(?, 1);
+    $d(5)->name();
+    $e = $r->make(class: ?, id: 1);
+    $e(User::class)->name();
+    $g = $r->find(...);
+    $g(5, 1)->name();
+    $c(User::class)->missing();
+    $d(5)->missing();
+    $d();
+    $d(5, 1);
+    $d('x');
+    $u = $c(User::class);
+    $u->name();
+    $u->missing();
+    $c = fn (int $id) => $r;
+    $c(1)->find(1, 2);
+    $h = $r->make(...);
+    $h(1, User::class)->missing();
+}
+"#;
+    backend.update_ast(uri, text);
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut diags);
+    assert!(
+        !diags
+            .iter()
+            .any(|d| (14..=20).contains(&d.range.start.line)),
+        "each call through a held partial application should check and resolve, got: {diags:?}",
+    );
+    for line in 21..=22 {
+        assert!(
+            diags.iter().any(|d| d.range.start.line == line
+                && d.message.contains("'missing'")
+                && d.message.contains("User")),
+            "`missing()` on line {line} must be flagged on User, got: {diags:?}",
+        );
+    }
+    for line in 23..=25 {
+        assert!(
+            diags.iter().any(|d| d.range.start.line == line),
+            "the call on line {line} does not fit the remaining parameter, got: {diags:?}",
+        );
+    }
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.range.start.line == 28 && d.message.contains("not found on class 'User'")),
+        "`$u` holds the User the call returns, got: {diags:?}",
+    );
+    assert!(
+        !diags
+            .iter()
+            .any(|d| matches!(d.range.start.line, 26 | 27 | 30)),
+        "a reassigned `$c` is checked against its new value, got: {diags:?}",
+    );
+    assert!(
+        diags.iter().any(|d| d.range.start.line == 32
+            && d.message.contains("'missing'")
+            && d.message.contains("User")),
+        "a first-class callable binds the template from the call, got: {diags:?}",
+    );
+}

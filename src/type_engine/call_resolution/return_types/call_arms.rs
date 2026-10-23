@@ -704,6 +704,7 @@ impl Backend {
     /// `$fn(…)`: the variable invocation arm.
     pub(super) fn return_types_of_variable_invocation(
         var_name: &str,
+        text_args: &str,
         ctx: &ResolutionCtx<'_>,
         return_type_hint_out: Option<&mut Option<PhpType>>,
     ) -> Vec<Arc<ClassInfo>> {
@@ -714,6 +715,29 @@ impl Backend {
         // and `$fn = strlen(...)` / `$fn = $obj->method(...)` alike.
         let resolved_var_types =
             crate::type_engine::resolver::resolve_target_classes(var_name, AccessKind::Arrow, ctx);
+
+        // That type was read with no arguments, so a template the call's
+        // arguments bind is only bound by making the call the partial
+        // application wraps.
+        if resolved_var_types
+            .iter()
+            .any(|rt| rt.type_string.is_closure())
+            && let Some(call) = Self::invoked_partial_application_call(
+                var_name,
+                ctx.file.content,
+                ctx.cursor_offset,
+                text_args,
+            )
+            && let SubjectExpr::CallExpr { callee, args_text } = &SubjectExpr::parse(&call)
+        {
+            return Self::resolve_call_return_types_on_receiver(
+                callee,
+                args_text,
+                None,
+                ctx,
+                return_type_hint_out,
+            );
+        }
         Self::return_types_of_invoked_value(resolved_var_types, ctx, return_type_hint_out)
     }
 
