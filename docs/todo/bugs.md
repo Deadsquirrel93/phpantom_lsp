@@ -200,24 +200,3 @@ the whole `callback: …` text as the callable and finds no type. The
 positional spelling and the assigned `fromCallable()` form both resolve. The
 `fromCallable()` shape then falls back to the stub's `Closure` and reports a
 false `unknown_member`.
-
-### B674. A partial application's closure type carries no parameters
-
-**Impact: Low · Complexity: Medium**
-
-```php
-/** @param Closure(string): object $factory */
-function useFactory(Closure $factory): void {}
-
-$make = $r->make(1, ?); // typed as a Closure with no parameters
-useFactory($make);
-useFactory($r->find(...)); // likewise, though find() takes (int, int)
-```
-
-The type inferred for a first-class callable or a partial application is a
-`Closure` with the wrapped call's return type and an empty parameter list, so
-hover shows no parameters and a check against a declared `Closure(…)`
-signature compares nothing. Calling the variable is already checked against
-the parameters the placeholders leave open; the type should carry the same
-parameters, and a partial application's return type should be resolved with
-its bound arguments.

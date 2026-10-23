@@ -107,6 +107,33 @@ fn partial_application_invocation<'b>(
     wrapped_call(pa, &bound_list, ctx)
 }
 
+/// What the closure a partial application with bound arguments makes
+/// returns, decided by those arguments alone: `$r->make(Foo::class, ?)`
+/// returns what `$r->make(Foo::class)` does.  The placeholders stay open,
+/// so a bound positional argument after one is dropped (see
+/// [`crate::call_args::bind_partial_arguments`]).
+///
+/// `None` for a first-class callable, which binds nothing, or when the
+/// wrapped function cannot be found.
+pub(super) fn partial_application_return<'b>(
+    pa: &'b PartialApplication<'b>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<Vec<ResolvedType>> {
+    if pa.is_first_class_callable() {
+        return None;
+    }
+    let written = pa.get_argument_list();
+    let no_call = ArgumentList {
+        left_parenthesis: written.left_parenthesis,
+        arguments: TokenSeparatedSequence {
+            nodes: &[],
+            tokens: &[],
+        },
+        right_parenthesis: written.right_parenthesis,
+    };
+    partial_application_invocation(pa, &no_call, ctx)
+}
+
 /// What the call `pa` wraps returns when it receives `argument_list`.
 fn wrapped_call<'b>(
     pa: &'b PartialApplication<'b>,

@@ -6257,6 +6257,30 @@ function test(Printer $p) {
     );
 }
 
+#[test]
+fn hover_partial_application_shows_the_parameters_left_open() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Repo {
+    public function make(int $id, string $class): object { return new $class(); }
+}
+function test(Repo $r) {
+    $make = $r->make(1, ?);
+    $all = $r->make(...);
+    $make;
+    $all;
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 7, 6).expect("expected hover");
+    let text = hover_text(&hover);
+    assert!(text.contains("Closure(string): object"), "got: {text}");
+    let hover = hover_at(&backend, uri, content, 8, 6).expect("expected hover");
+    let text = hover_text(&hover);
+    assert!(text.contains("Closure(int, string): object"), "got: {text}");
+}
+
 // ─── Origin indicator tests ─────────────────────────────────────────────────
 
 #[test]

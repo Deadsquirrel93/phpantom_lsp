@@ -14023,6 +14023,85 @@ function g() {
     assert_eq!(messages.len(), 1, "got {messages:?}");
 }
 
+/// A first-class callable or partial application takes the parameters of
+/// the call it wraps that its placeholders leave open, so it is checked
+/// against a declared closure signature like a closure literal is.
+#[test]
+fn a_partial_application_is_checked_against_a_closure_signature() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+final class User {}
+final class Repo {
+    public function find(int $id, int $tenant): User { return new User(); }
+    public function make(int $id, string $class): object { return new User(); }
+    public static function named(string $name): User { return new User(); }
+    /**
+     * @template T
+     * @param T $value
+     * @return T
+     */
+    public function echo(mixed $value): mixed { return $value; }
+}
+function build(string $class): User { return new User(); }
+
+/** @param Closure(string): object $factory */
+function useFactory(Closure $factory): void {}
+
+function f(Repo $r): void {
+    $make = $r->make(1, ?);
+    useFactory($make);
+    useFactory($r->make(class: ?, id: 1));
+    useFactory(Repo::named(...));
+    useFactory(build(...));
+    useFactory($r->echo(...));
+    useFactory($r->find(...));
+    useFactory($r->find(1, ?));
+    useFactory($r->make(?, 'x'));
+}
+"#;
+    let diags = collect(php);
+    let flagged: Vec<u32> = diags
+        .iter()
+        .filter(|d| {
+            d.code.as_ref().is_some_and(
+                |c| matches!(c, NumberOrString::String(s) if s == "type_mismatch_argument"),
+            )
+        })
+        .map(|d| d.range.start.line)
+        .collect();
+    assert_eq!(flagged, [27, 28, 29], "got {diags:?}");
+}
+
+/// The arguments a partial application binds decide what its closure
+/// returns, the way they would for the call it wraps.
+#[test]
+fn a_partial_application_returns_what_its_bound_arguments_decide() {
+    let php = r#"<?php
+class User {}
+final class Admin extends User {}
+final class Repo {
+    /**
+     * @template T of object
+     * @param class-string<T> $class
+     * @return T
+     */
+    public function make(string $class, int $id): object { return new $class(); }
+}
+
+/** @param Closure(int): Admin $factory */
+function useAdminFactory(Closure $factory): void {}
+
+function f(Repo $r): void {
+    useAdminFactory($r->make(Admin::class, ?));
+    useAdminFactory($r->make(User::class, ?));
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(messages[0].contains("User"), "got {messages:?}");
+}
+
 // ── Array shapes against typed arrays and other shapes ──────────────
 
 #[test]
