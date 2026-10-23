@@ -136,7 +136,7 @@ fn static_call_on_class(
         // signature of the callable it is handed, as `$callable(...)` does.
         if method_name.eq_ignore_ascii_case("fromCallable")
             && owner.fqn() == "Closure"
-            && let Some(callable) = argument_list.arguments.first()
+            && let Some(callable) = crate::call_args::first_param_arg(argument_list, "callback")
         {
             return super::closure_value(
                 super::calls::closure_from_callable(callable.value(), ctx),

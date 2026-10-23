@@ -16710,6 +16710,44 @@ function f(Repo $r): void {
     }
 }
 
+/// A callback passed as a named argument, in any position, is the one
+/// `call_user_func()` and `Closure::fromCallable()` invoke.
+#[test]
+fn callback_passed_by_name_is_invoked() {
+    let backend = create_test_backend_with_closure_stub();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///test.php";
+    let text = r#"<?php
+final class User { public function name(): string { return ''; } }
+final class Repo { public function find(): User { return new User(); } }
+
+function f(Repo $r): void {
+    call_user_func(callback: [$r, 'find'])->missing();
+    call_user_func_array(args: [], callback: [$r, 'find'])->missing();
+    \Closure::fromCallable(callback: [$r, 'find'])()->missing();
+    $user = call_user_func(callback: [$r, 'find']);
+    $user->missing();
+    $c = \Closure::fromCallable(callback: [$r, 'find']);
+    $c()->missing();
+}
+"#;
+    backend.update_ast(uri, text);
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut diags);
+    for line in [5, 6, 7, 9, 11] {
+        assert!(
+            diags.iter().any(|d| d.range.start.line == line
+                && d.message.contains("'missing'")
+                && d.message.contains("User")),
+            "`missing()` on line {line} must be flagged on User, got: {diags:?}",
+        );
+    }
+}
+
 /// A class named by a string in an array callable is resolved at runtime,
 /// so it is fully qualified: the file's namespace does not apply to it,
 /// while `Repo::class` follows the namespace as written code does.

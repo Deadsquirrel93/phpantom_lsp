@@ -443,7 +443,7 @@ fn call_user_func_return(
     {
         return None;
     }
-    let callback = argument_list.arguments.first()?;
+    let callback = crate::call_args::first_param_arg(argument_list, "callback")?;
     if callback.is_unpacked() {
         return None;
     }

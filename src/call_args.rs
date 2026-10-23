@@ -148,6 +148,33 @@ pub(crate) fn text_arg_value(arg: &str) -> &str {
     split_named_text_arg(arg).1
 }
 
+/// The argument that binds a callee's first parameter, named `name`: the
+/// first argument when it is positional, else the one labelled `name:`.
+pub(crate) fn first_param_arg<'a, 'b>(
+    argument_list: &'a ArgumentList<'b>,
+    name: &str,
+) -> Option<&'a Argument<'b>> {
+    match argument_list.arguments.first()? {
+        first @ Argument::Positional(_) => Some(first),
+        Argument::Named(_) => argument_list.arguments.iter().find(
+            |arg| matches!(arg, Argument::Named(named) if bytes_to_str(named.name.value) == name),
+        ),
+    }
+}
+
+/// The text-source counterpart of [`first_param_arg`]: the value text of the
+/// argument binding a callee's first parameter, named `name`.
+pub(crate) fn first_param_text_arg<'a>(args: &[&'a str], name: &str) -> Option<&'a str> {
+    let (label, value) = split_named_text_arg(args.first()?);
+    if label.is_none() {
+        return Some(value);
+    }
+    args.iter().find_map(|arg| match split_named_text_arg(arg) {
+        (Some(label), value) if label == name => Some(value),
+        _ => None,
+    })
+}
+
 /// Whether a textual argument is written with a `name:` label.
 pub(crate) fn text_arg_is_named(arg: &str) -> bool {
     split_named_text_arg(arg).0.is_some()

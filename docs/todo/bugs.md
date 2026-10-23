@@ -139,22 +139,3 @@ function — common in legacy code, which is where a language server is worth
 the most. Route free functions through the same body inference the method
 path uses. Conformance row `native_types_untyped_return_inferred.php`, and
 the `inferred-return` hover probe, which shows no type for the same reason.
-
-### B671. A callback passed by name is not invoked by `call_user_func()` or an in-place `fromCallable()`
-
-**Impact: Low · Complexity: Low**
-
-```php
-function f(Repo $r): void {
-    call_user_func(callback: [$r, 'find'])->name();          // type is 'mixed'
-    \Closure::fromCallable(callback: [$r, 'find'])()->name(); // Method 'name' not found on class 'Closure'
-    $c = \Closure::fromCallable(callback: [$r, 'find']);
-    $c()->name();                                            // resolves to User
-}
-```
-
-When the callback is a named argument, the member-access subject path reads
-the whole `callback: …` text as the callable and finds no type. The
-positional spelling and the assigned `fromCallable()` form both resolve. The
-`fromCallable()` shape then falls back to the stub's `Closure` and reports a
-false `unknown_member`.

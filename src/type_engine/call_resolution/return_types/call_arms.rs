@@ -759,15 +759,16 @@ impl Backend {
         Self::return_types_of_invoked_first_arg(text_args, ctx, return_type_hint_out)
     }
 
-    /// What calling the callable passed as the first of `text_args`
-    /// returns.  `None` when its type is unknown.
+    /// What calling the callable `text_args` bind to the callee's first
+    /// parameter, `$callback`, returns.  `None` when its type is unknown.
     fn return_types_of_invoked_first_arg(
         text_args: &str,
         ctx: &ResolutionCtx<'_>,
         return_type_hint_out: Option<&mut Option<PhpType>>,
     ) -> Option<Vec<Arc<ClassInfo>>> {
-        let callback = split_top_level_commas(text_args).into_iter().next()?;
-        if callback.trim_start().starts_with("...") {
+        let callback =
+            crate::call_args::first_param_text_arg(&split_top_level_commas(text_args), "callback")?;
+        if callback.starts_with("...") {
             return None;
         }
         let ty = Self::resolve_arg_text_to_type(callback, ctx)?;
