@@ -16786,3 +16786,64 @@ function f(Repo $r): void {
         "`\\Closure::fromCallable()` calls `$r->find()`, got: {diags:?}",
     );
 }
+
+/// Invoking a partial application where it is made calls the wrapped
+/// method with the placeholders filled by the call's arguments.
+#[test]
+fn member_access_on_a_partial_application_invoked_in_place() {
+    let backend = create_test_backend_with_closure_stub();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///test.php";
+    let text = r#"<?php
+final class User { public function name(): string { return ''; } }
+final class Repo {
+    public function find(int $id, int $tenant): User { return new User(); }
+    /**
+     * @template T of object
+     * @param class-string<T> $class
+     * @return T
+     */
+    public function make(int $id, string $class): object { return new $class(); }
+    /**
+     * @template T of object
+     * @param class-string<T> $class
+     * @return T
+     */
+    public static function build(string $class, int ...$ids): object { return new $class(); }
+}
+
+function f(Repo $r): void {
+    $r->find(?, 1)(5)->name();
+    $r->make(?, User::class)(5)->name();
+    $r->make(1, ?)(User::class)->name();
+    $r->make(class: ?, id: 1)(User::class)->name();
+    Repo::build(?, ...)(User::class, 1, 2)->name();
+    $u = $r->make(1, ?)(User::class);
+    $u->name();
+    $r->find(?, 1)(5)->missing();
+    $r->make(1, ?)(User::class)->missing();
+    $u->missing();
+}
+"#;
+    backend.update_ast(uri, text);
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut diags);
+    assert!(
+        !diags
+            .iter()
+            .any(|d| (19..=25).contains(&d.range.start.line)),
+        "each invoked partial application should resolve to User, got: {diags:?}",
+    );
+    for line in 26..=28 {
+        assert!(
+            diags.iter().any(|d| d.range.start.line == line
+                && d.message.contains("'missing'")
+                && d.message.contains("User")),
+            "`missing()` on line {line} must be flagged on User, got: {diags:?}",
+        );
+    }
+}

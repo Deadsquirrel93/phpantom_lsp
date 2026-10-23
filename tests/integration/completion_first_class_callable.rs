@@ -1284,3 +1284,42 @@ async fn test_member_access_on_a_closure_invoked_in_place() {
         );
     }
 }
+
+#[tokio::test]
+async fn test_member_access_on_a_partial_application_invoked_in_place() {
+    for call in [
+        "$repo->find(?, 1)(5)",
+        "$repo->make(?, User::class)(5)",
+        "$repo->make(1, ?)(User::class)",
+    ] {
+        let backend = create_test_backend_with_closure_stub();
+        let uri = Url::parse("file:///test/partial_invoked_in_place.php").unwrap();
+        let src = format!(
+            concat!(
+                "<?php\n",
+                "class User {{\n",
+                "    public function getName(): string {{ return ''; }}\n",
+                "}}\n",
+                "class Repo {{\n",
+                "    public function find(int $id, int $tenant): User {{ return new User(); }}\n",
+                "    /**\n",
+                "     * @template T of object\n",
+                "     * @param class-string<T> $class\n",
+                "     * @return T\n",
+                "     */\n",
+                "    public function make(int $id, string $class): object {{ return new $class(); }}\n",
+                "}}\n",
+                "function run(Repo $repo): void {{\n",
+                "    {}->\n",
+                "}}\n",
+            ),
+            call
+        );
+        let items = complete_at(&backend, &uri, &src, 14, 4 + call.len() as u32 + 2).await;
+        assert!(
+            method_names(&items).contains(&"getName"),
+            "Expected getName after {call}->, got {:?}",
+            method_names(&items),
+        );
+    }
+}

@@ -10,7 +10,9 @@
 //! This module is the single place that encodes PHP's binding rules so the
 //! various consumers stay consistent.
 
-use mago_syntax::cst::{Argument, ArgumentList, Expression};
+use mago_syntax::cst::{
+    Argument, ArgumentList, Expression, NamedArgument, PartialArgument, PartialArgumentList,
+};
 
 use crate::atom::bytes_to_str;
 use crate::types::ParameterInfo;
@@ -193,6 +195,133 @@ pub(crate) fn bind_text_args_to_params(
     }
 
     bound
+}
+
+/// One argument written in a partial application: a bound value (named or
+/// positional), a `?` or `name: ?` placeholder, or the `...` placeholder.
+enum PartialArg<N, V> {
+    Bound(Option<N>, V),
+    Placeholder(Option<N>),
+    Variadic,
+}
+
+/// The arguments the wrapped call receives when a partial application with
+/// `bound` arguments is invoked with the `call` arguments, as
+/// `(name, value)` pairs: `$r->find(?, 1)(5)` calls `$r->find(5, 1)`.
+///
+/// Each `?` takes the next positional call argument and `name: ?` the call
+/// argument of that name (else the next positional one); `...` takes every
+/// call argument left over.  Once a `?` goes unfilled the positions after it
+/// are unknown, so the bound positional arguments that follow are dropped
+/// rather than shifted into its place.
+fn bind_partial<N: Copy, V>(
+    bound: impl Iterator<Item = PartialArg<N, V>>,
+    call: impl Iterator<Item = (Option<N>, V)>,
+    same_name: impl Fn(N, N) -> bool,
+) -> Vec<(Option<N>, V)> {
+    let mut positional = Vec::new();
+    let mut named = Vec::new();
+    for (name, value) in call {
+        match name {
+            Some(name) => named.push((name, value)),
+            None => positional.push(value),
+        }
+    }
+    let mut positional = positional.into_iter();
+    let mut args = Vec::new();
+    let mut positions_known = true;
+    for arg in bound {
+        match arg {
+            PartialArg::Bound(None, value) => {
+                if positions_known {
+                    args.push((None, value));
+                }
+            }
+            PartialArg::Bound(name @ Some(_), value) => args.push((name, value)),
+            PartialArg::Placeholder(None) => match positional.next() {
+                Some(value) if positions_known => args.push((None, value)),
+                _ => positions_known = false,
+            },
+            PartialArg::Placeholder(Some(name)) => {
+                let value = match named.iter().position(|&(n, _)| same_name(n, name)) {
+                    Some(at) => Some(named.remove(at).1),
+                    None => positional.next(),
+                };
+                if let Some(value) = value {
+                    args.push((Some(name), value));
+                }
+            }
+            PartialArg::Variadic => {
+                if positions_known {
+                    args.extend(positional.by_ref().map(|value| (None, value)));
+                }
+                args.extend(named.drain(..).map(|(name, value)| (Some(name), value)));
+            }
+        }
+    }
+    args
+}
+
+/// The arguments the call a partial application wraps receives when the
+/// application (written with the `bound` arguments) is invoked with `call`.
+/// See [`bind_partial`] for how placeholders are filled.
+pub(crate) fn bind_partial_arguments<'a>(
+    bound: &PartialArgumentList<'a>,
+    call: &ArgumentList<'a>,
+) -> Vec<Argument<'a>> {
+    let bound_args = bound.arguments.iter().map(|arg| match arg {
+        PartialArgument::Positional(arg) => {
+            PartialArg::Bound(None, Argument::Positional(arg.clone()))
+        }
+        PartialArgument::Named(arg) => {
+            PartialArg::Bound(Some(arg.name), Argument::Named(arg.clone()))
+        }
+        PartialArgument::Placeholder(_) => PartialArg::Placeholder(None),
+        PartialArgument::NamedPlaceholder(arg) => PartialArg::Placeholder(Some(arg.name)),
+        PartialArgument::VariadicPlaceholder(_) => PartialArg::Variadic,
+    });
+    let call_args = call.arguments.iter().map(|arg| match arg {
+        Argument::Positional(_) => (None, arg.clone()),
+        Argument::Named(named) => (Some(named.name), arg.clone()),
+    });
+    bind_partial(bound_args, call_args, |a, b| a.value == b.value)
+        .into_iter()
+        .map(|(name, arg)| match (name, arg) {
+            // A positional call argument filling a `name: ?` placeholder.
+            (Some(name), Argument::Positional(positional)) => Argument::Named(NamedArgument {
+                name,
+                colon: name.span,
+                value: positional.value,
+            }),
+            (_, arg) => arg,
+        })
+        .collect()
+}
+
+/// [`bind_partial_arguments`] over argument text, for the subject extractor
+/// that only has the source of the two argument lists: `bound` as written
+/// between the partial application's parentheses and `call` as written
+/// between the invoking call's.  Returns the combined argument text.
+pub(crate) fn bind_partial_text_arguments(bound: &str, call: &str) -> String {
+    let bound_args = crate::text_scan::split_top_level_commas(bound)
+        .into_iter()
+        .map(|arg| match split_named_text_arg(arg) {
+            (None, "?") => PartialArg::Placeholder(None),
+            (Some(name), "?") => PartialArg::Placeholder(Some(name)),
+            (None, "...") => PartialArg::Variadic,
+            (name, value) => PartialArg::Bound(name, value),
+        });
+    let call_args = crate::text_scan::split_top_level_commas(call)
+        .into_iter()
+        .map(split_named_text_arg);
+    bind_partial(bound_args, call_args, |a, b| a == b)
+        .into_iter()
+        .map(|(name, value)| match name {
+            Some(name) => format!("{name}: {value}"),
+            None => value.to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// Names (with the `$` prefix) of required parameters that no argument

@@ -34,7 +34,7 @@ pub(super) fn resolve_rhs_function_call<'b>(
     let argument_list = &func_call.argument_list;
 
     if let Expression::PartialApplication(pa) = func_call.function
-        && let Some(resolved) = first_class_callable_invocation(pa, argument_list, ctx)
+        && let Some(resolved) = partial_application_invocation(pa, argument_list, ctx)
     {
         return resolved;
     }
@@ -81,13 +81,34 @@ pub(super) fn callable_invocation<'b>(
     expression_invocation(callee, ctx)
 }
 
-/// What invoking a first-class callable on the spot returns:
-/// `Foo::method(...)()`, `$obj->method(...)()` and `strlen(...)()` each
-/// return what the call they wrap does.
+/// What invoking a partial application on the spot returns:
+/// `Foo::method(...)()`, `$obj->method(?, 1)($id)` and `strlen(...)()` each
+/// return what the call they wrap does, given the arguments it receives.
 ///
 /// `None` when the wrapped function cannot be found, leaving the caller to
 /// read the callable's own type.
-fn first_class_callable_invocation<'b>(
+fn partial_application_invocation<'b>(
+    pa: &'b PartialApplication<'b>,
+    argument_list: &'b ArgumentList<'b>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<Vec<ResolvedType>> {
+    if pa.is_first_class_callable() {
+        return wrapped_call(pa, argument_list, ctx);
+    }
+    let bound = crate::call_args::bind_partial_arguments(pa.get_argument_list(), argument_list);
+    let bound_list = ArgumentList {
+        left_parenthesis: argument_list.left_parenthesis,
+        arguments: TokenSeparatedSequence {
+            nodes: &bound,
+            tokens: &[],
+        },
+        right_parenthesis: argument_list.right_parenthesis,
+    };
+    wrapped_call(pa, &bound_list, ctx)
+}
+
+/// What the call `pa` wraps returns when it receives `argument_list`.
+fn wrapped_call<'b>(
     pa: &'b PartialApplication<'b>,
     argument_list: &'b ArgumentList<'b>,
     ctx: &VarResolutionCtx<'_>,

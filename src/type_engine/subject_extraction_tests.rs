@@ -638,3 +638,28 @@ fn test_invoked_call_result() {
         );
     }
 }
+
+#[test]
+fn test_invoked_partial_application() {
+    for (input, expected) in [
+        ("$r->find(?, 1)(5)->", "$r->find(5, 1)"),
+        ("$r->make(1, ?)(User::class)->", "$r->make(1, User::class)"),
+        (
+            "$r->make(class: ?, id: 1)(User::class)->",
+            "$r->make(class: User::class, id: 1)",
+        ),
+        (
+            "Repo::build(?, ...)(User::class, 1, 2)->",
+            "Repo::build(User::class, 1, 2)",
+        ),
+        ("$r->find(?, ?, 1)(5)->", "$r->find(5)"),
+    ] {
+        let chars: Vec<char> = input.chars().collect();
+        let arrow_pos = input.rfind("->").unwrap();
+        assert_eq!(
+            extract_arrow_subject(&chars, arrow_pos),
+            expected,
+            "{input}"
+        );
+    }
+}

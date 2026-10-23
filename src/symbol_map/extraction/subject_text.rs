@@ -179,14 +179,25 @@ fn lower_spine_base<'a>(expr: &'a Expression<'a>) -> Option<SubjectExpr> {
             })
         }
         Expression::Call(Call::Function(fc)) => {
-            let args_text = format_all_call_args(&fc.argument_list.arguments);
-            // Invoking a first-class callable on the spot is the call it
-            // wraps: `$r->find(...)($id)` is `$r->find($id)`.
-            if let Expression::PartialApplication(pa) = crate::parser::unwrap_parens(fc.function)
-                && pa.is_first_class_callable()
-            {
+            // Invoking a partial application on the spot is the call it
+            // wraps: `$r->find(...)($id)` is `$r->find($id)`, and
+            // `$r->find(?, 1)($id)` is `$r->find($id, 1)`.
+            if let Expression::PartialApplication(pa) = crate::parser::unwrap_parens(fc.function) {
+                let args_text = if pa.is_first_class_callable() {
+                    format_all_call_args(&fc.argument_list.arguments)
+                } else {
+                    let bound = crate::call_args::bind_partial_arguments(
+                        pa.get_argument_list(),
+                        &fc.argument_list,
+                    );
+                    format_all_call_args(&TokenSeparatedSequence {
+                        nodes: &bound,
+                        tokens: &[],
+                    })
+                };
                 return lower_invoked_callable(pa, args_text);
             }
+            let args_text = format_all_call_args(&fc.argument_list.arguments);
             // A closure literal is kept as written, so invoking it reads
             // the signature and body it was written with.
             if is_closure_literal(fc.function) {
@@ -335,8 +346,8 @@ fn lower_spine_base<'a>(expr: &'a Expression<'a>) -> Option<SubjectExpr> {
     }
 }
 
-/// The call a first-class callable `pa` makes when it is invoked with
-/// `args_text`.
+/// The call a partial application `pa` makes when it is invoked, given the
+/// arguments the wrapped call receives as `args_text`.
 fn lower_invoked_callable(pa: &PartialApplication<'_>, args_text: String) -> Option<SubjectExpr> {
     let callee = match pa {
         PartialApplication::Function(fpa) => expr_to_subject_expr(fpa.function)?,

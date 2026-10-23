@@ -280,20 +280,29 @@ positional spelling and the assigned `fromCallable()` form both resolve. The
 `fromCallable()` shape then falls back to the stub's `Closure` and reports a
 false `unknown_member`.
 
-### B672. Invoking a partial application in place resolves nothing
+### B673. A partial application held in a variable is checked against the wrapped signature
 
-**Impact: Low · Complexity: Low**
+**Impact: Medium · Complexity: Medium**
 
 ```php
-function f(Repo $r): void {
-    $r->find(?, 1)(5)->name(); // type of '' could not be resolved
-    $c = $r->find(?, 1);
-    $c(5)->name();             // resolves to User
-}
+/**
+ * @template T of object
+ * @param class-string<T> $class
+ * @return T
+ */
+public function make(int $id, string $class): object { … }
+
+$c = $r->make(1, ?);
+$c(User::class)->name(); // Expected 2 arguments, got 1
+                         // Argument 1 ($id) expects int, got class-string<User>
+                         // type of '$c(User::class)' could not be resolved
 ```
 
-A partial application with bound arguments that is invoked where it is made
-lowers to an empty member-access subject. The first-class callable form
-`$r->find(...)()` resolves, and so does the assigned form. The in-place form
-needs the same treatment, with the call's arguments combined with the
-placeholders' bound values.
+Calling a variable that holds a partial application with bound arguments is
+checked against every parameter of the wrapped method, so the bound ones count
+as missing and the call's arguments are matched to the wrong parameters. The
+closure type inferred for `$c` carries no parameters at all, and its return
+type is the wrapped call's with no arguments, so a template the placeholder
+fills is never bound. The closure's signature should be the wrapped
+signature's remaining (placeholder) parameters, and invoking it should combine
+the call's arguments with the bound values, the way invoking it in place does.
