@@ -743,6 +743,58 @@ function test(Factory $factory): void {
     }
 }
 
+/// A member access written directly on `new $var` builds the class the
+/// variable names, whatever kind of class name it holds.
+#[test]
+fn member_access_on_new_variable_resolves_the_instance() {
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+namespace App;
+
+class Customer {
+    public function name(): string { return ''; }
+}
+
+/** @param array<string, class-string<Customer>> $map */
+function f(Customer $c, array $map, string $type): void {
+    $class = $c::class;
+    echo (new $class())->name();
+    (new $class())->missingA();
+    (new $class)->missingB();
+    (new $class('extra'))->missingE();
+    new $class()->missingF();
+
+    $runtime = get_class($c);
+    echo (new $runtime())->name();
+    (new $runtime())->missingG();
+
+    $literal = 'App\\Customer';
+    echo (new $literal())->name();
+    (new $literal())->missingC();
+
+    $mapped = $map[$type] ?? null;
+    if ($mapped === null) {
+        return;
+    }
+    echo (new $mapped())->name();
+    (new $mapped())->missingD();
+}
+"#;
+    backend.update_ast(uri, text);
+    let mut out = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut out);
+    let mut messages: Vec<&str> = out.iter().map(|d| d.message.as_str()).collect();
+    messages.sort_unstable();
+    let expected = [
+        "missingA", "missingB", "missingC", "missingD", "missingE", "missingF", "missingG",
+    ];
+    assert_eq!(messages.len(), expected.len(), "got: {messages:?}");
+    for (message, name) in messages.iter().zip(expected) {
+        assert!(message.contains(name), "got: {messages:?}");
+    }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Magic method suppression
 // ═══════════════════════════════════════════════════════════════════════════

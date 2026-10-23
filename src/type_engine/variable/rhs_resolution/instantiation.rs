@@ -146,32 +146,12 @@ pub(super) fn resolve_rhs_instantiation(
         operand => super::resolve_rhs_expression(operand, ctx),
     };
 
-    // `new $class` on a `class-string<T>` of a bounded template builds
-    // a `T`, whatever classes its bound resolves to.
-    if let [only] = operand_types.as_slice()
-        && let TypeKind::ClassString(Some(inner)) = only.type_string.kind()
-        && inner.as_template_param().is_some()
-    {
-        let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
-            inner,
-            &ctx.current_class.fqn(),
-            ctx.file.all_classes,
-            ctx.file.class_loader,
-        );
-        if !classes.is_empty() {
-            return ResolvedType::from_classes_with_hint(classes, inner.clone());
-        }
-    }
-
-    let classes = crate::type_engine::variable::class_string_resolution::classes_named_by(
+    crate::type_engine::variable::class_string_resolution::instances_built_by_new(
         &operand_types,
-        ctx,
-    );
-    if !classes.is_empty() {
-        return ResolvedType::from_classes(classes);
-    }
-
-    vec![]
+        &ctx.current_class.fqn(),
+        ctx.file.all_classes,
+        ctx.file.class_loader,
+    )
 }
 
 /// Bind a template a `class-string<Wrapper<T>>` hint names, from the class

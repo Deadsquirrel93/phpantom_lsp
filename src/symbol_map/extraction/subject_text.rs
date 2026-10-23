@@ -221,8 +221,15 @@ fn lower_spine_base<'a>(expr: &'a Expression<'a>) -> Option<SubjectExpr> {
 
         // `new Foo(...)` as a subject lowers to just the class name: the
         // constructed instance resolves through its own class regardless
-        // of the constructor arguments.
-        Expression::Instantiation(inst) => expr_to_subject_expr(inst.class),
+        // of the constructor arguments.  `new $class(...)` keeps the `new`,
+        // since the instance is of the class the variable names, not the
+        // variable's own type.
+        Expression::Instantiation(inst) => match inst.class {
+            Expression::Variable(Variable::Direct(dv)) => Some(SubjectExpr::NewExpr {
+                class_name: bytes_to_str(dv.name).to_string(),
+            }),
+            class => expr_to_subject_expr(class),
+        },
 
         Expression::Parenthesized(paren) => expr_to_subject_expr(paren.expression),
 

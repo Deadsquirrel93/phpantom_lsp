@@ -50,6 +50,42 @@ pub(in crate::type_engine) fn classes_named_by(
     classes
 }
 
+/// What `new $x` builds when `$x` resolved to `operand`: an instance of each
+/// class the value names.
+///
+/// A `class-string<T>` of a bounded template builds a `T`, whatever classes
+/// its bound resolves to, so the result keeps `T` as its hint.
+pub(crate) fn instances_built_by_new(
+    operand: &[ResolvedType],
+    owning_class: &str,
+    all_classes: &[Arc<ClassInfo>],
+    class_loader: &ResolvedClassLoader<'_>,
+) -> Vec<ResolvedType> {
+    if let [only] = operand
+        && let TypeKind::ClassString(Some(inner)) = only.type_string.kind()
+        && inner.as_template_param().is_some()
+    {
+        let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
+            inner,
+            owning_class,
+            all_classes,
+            class_loader,
+        );
+        if !classes.is_empty() {
+            return ResolvedType::from_classes_with_hint(classes, inner.clone());
+        }
+    }
+
+    let mut classes: Vec<Arc<ClassInfo>> = Vec::new();
+    for rt in operand {
+        ClassInfo::extend_unique_arc(
+            &mut classes,
+            classes_named_by_type(&rt.type_string, owning_class, all_classes, class_loader),
+        );
+    }
+    ResolvedType::from_classes(classes)
+}
+
 /// The classes a value of type `ty` names where PHP reads a value as a
 /// class name (`new $x`, `$x::method()`, `$x::CONST`): the `T` of a
 /// `class-string<T>`, also when it is nullable or one member of a union,

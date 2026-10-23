@@ -879,6 +879,18 @@ impl Backend {
         ctx: &ResolutionCtx<'_>,
         mut return_type_hint_out: Option<&mut Option<PhpType>>,
     ) -> Vec<Arc<ClassInfo>> {
+        // `new $class(…)` builds whatever class the variable names.
+        if class_name.starts_with('$') {
+            let built = crate::type_engine::resolver::resolve_target_classes_expr(
+                &SubjectExpr::NewExpr {
+                    class_name: class_name.to_string(),
+                },
+                crate::AccessKind::Arrow,
+                ctx,
+            );
+            return ResolvedType::into_arced_classes(built);
+        }
+
         // `new X` is a source-level reference: an unqualified name
         // resolves against the current namespace before the global
         // scope, so a same-namespace class wins over a global stub

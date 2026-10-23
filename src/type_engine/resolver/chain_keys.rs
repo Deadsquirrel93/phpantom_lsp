@@ -400,6 +400,7 @@ fn base_roots_in_variable(expr: &SubjectExpr) -> bool {
             | SubjectExpr::StaticKw
             | SubjectExpr::Parent
             | SubjectExpr::Variable(_) => return true,
+            SubjectExpr::NewExpr { class_name } => return class_name.starts_with('$'),
             SubjectExpr::PropertyChain { base, .. } | SubjectExpr::ArrayAccess { base, .. } => base,
             _ => return false,
         };

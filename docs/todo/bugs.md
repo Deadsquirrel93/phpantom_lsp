@@ -75,39 +75,7 @@ No outstanding items.
 
 ## Name resolution
 
-### B658. A member access written directly on `new $var` resolves the variable, not the instance
-
-**Impact: High · Complexity: Medium**
-
-```php
-function f(Customer $c): void {
-    $class = $c::class;
-    $copy = new $class();
-    $copy->name();                 // resolves to Customer
-
-    echo (new $class())->name();   // Cannot verify method 'name' — type of
-                                   // '$class' could not be resolved
-}
-
-function g(): void {
-    $class = 'App\\Customer';
-    echo (new $class())->name();   // Cannot access method 'name' on type
-                                   // ''App\Customer''        [scalar_member_access]
-}
-```
-
-Two resolution paths answer "what does `new $var` produce", and they
-disagree. The assignment handler gets it right for every class-string
-flavour — `$obj::class`, a literal string, `get_class()`, a
-`class-string<T>` docblock. The member-access subject resolver only handles
-`class-string<T>`, and only when it is the variable's declared type: a
-`class-string<Model>` obtained by `$class = $map[$type] ?? null` and a
-`null` guard still fails, with or without the parentheses PHP 8.4 makes
-optional. For anything else it either gives up or, worse, hands
-back the *operand's* type, so a literal class name is reported as a method
-call on a string. That is the parallel-resolution-path anti-pattern:
-whichever of the two paths is right, there should be one. Conformance row
-`objects_class_constant_on_instance.php`.
+No outstanding items.
 
 ## Code actions
 

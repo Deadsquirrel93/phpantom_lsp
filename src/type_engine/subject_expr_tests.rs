@@ -400,6 +400,28 @@ fn parse_new_expression_fqn() {
     );
 }
 
+#[test]
+fn parse_new_on_variable_named_class() {
+    // `$class` is a variable, not the `class` keyword of an anonymous class.
+    assert_eq!(
+        SubjectExpr::parse("(new $class())"),
+        SubjectExpr::NewExpr {
+            class_name: "$class".to_string(),
+        }
+    );
+}
+
+#[test]
+fn new_expression_round_trips_through_text() {
+    for text in [
+        "(new $class)",
+        "(new $class)->name()",
+        "(new $class('a'))->name",
+    ] {
+        assert_eq!(SubjectExpr::parse(text).to_subject_text(), text);
+    }
+}
+
 // ── Variable callable: `$fn()` ──────────────────────────────────────
 
 #[test]

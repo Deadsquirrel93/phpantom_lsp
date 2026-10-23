@@ -263,10 +263,14 @@ fn resolve_target_classes_expr_inner(
 
         // ── `new $class` builds the class the variable names ────
         SubjectExpr::NewExpr { class_name } if class_name.starts_with('$') => {
-            resolve_variable_fallback(class_name, AccessKind::DoubleColon, ctx)
-                .into_iter()
-                .filter(|rt| rt.class_info.is_some())
-                .collect()
+            let operand = resolve_variable_fallback(class_name, AccessKind::Arrow, ctx);
+            let owning_class = current_class.map(|cc| cc.fqn());
+            crate::type_engine::variable::class_string_resolution::instances_built_by_new(
+                &operand,
+                owning_class.as_ref().map_or("", |fqn| fqn.as_str()),
+                all_classes,
+                class_loader,
+            )
         }
 
         // ── A bare class name, and `new ClassName` without trailing

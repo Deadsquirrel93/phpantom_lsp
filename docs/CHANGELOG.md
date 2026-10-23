@@ -41,6 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Members of `new $class` resolve.** `(new $class())->name()` and `new $class()->name()` now resolve against the class `$class` names, whether it holds `$obj::class`, `get_class()`, a class name string or a `class-string<T>`. Previously the method could be reported as unverifiable, or as a call on a string.
 - **`new` on a parenthesised expression resolves.** `new (User::class)()`, `new ('App\\User')()` and `new ($factory->class)()` now produce the class the expression names, so members accessed on the new instance complete and are no longer reported as unknown.
 - **Nested conditional return types follow the argument through each branch.** In `($key is Model ? TModel|null : ($key is Arrayable ? static : TModel|null))`, an argument typed `?User` now reaches the inner condition as just `null`, so the call returns `User|null` instead of also picking up `static`.
 - **Callbacks passed by name.** `call_user_func(callback: [$repo, 'find'])` and `\Closure::fromCallable(callback: …)()` now return what the callback returns, instead of an unknown type or a false "method not found on `Closure`" error.

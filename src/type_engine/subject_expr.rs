@@ -415,9 +415,23 @@ impl SubjectExpr {
                             | SubjectExpr::CallExpr { .. }
                             | SubjectExpr::Closure(_)
                     );
+                    // A constructor's arguments go inside the parentheses
+                    // a bare `new` is written with: `(new Foo(args))`.
+                    let new_class = match callee.as_ref() {
+                        SubjectExpr::NewExpr { class_name } => Some(class_name),
+                        _ => None,
+                    };
+                    if new_class.is_some() {
+                        stack.push(Step::Text(")"));
+                    }
                     stack.push(Step::Text(")"));
                     stack.push(Step::Text(args_text));
                     stack.push(Step::Text("("));
+                    if let Some(class_name) = new_class {
+                        stack.push(Step::Text(class_name));
+                        out.push_str("(new ");
+                        continue;
+                    }
                     if needs_parens {
                         // The opening paren precedes the callee, so it is
                         // written now rather than queued.
@@ -441,9 +455,12 @@ impl SubjectExpr {
                     out.push_str("::");
                     out.push_str(member);
                 }
+                // Parenthesised, so a member access on the instance does not
+                // read as `new ($class->member)`.
                 SubjectExpr::NewExpr { class_name } => {
-                    out.push_str("new ");
+                    out.push_str("(new ");
                     out.push_str(class_name);
+                    out.push(')');
                 }
                 SubjectExpr::ClassName(name) => out.push_str(name),
                 SubjectExpr::FunctionCall(name) => out.push_str(name),
@@ -551,6 +568,10 @@ impl SubjectExpr {
             node = match node {
                 SubjectExpr::Variable(name) => {
                     out.push(name.clone());
+                    break;
+                }
+                SubjectExpr::NewExpr { class_name } if class_name.starts_with('$') => {
+                    out.push(class_name.clone());
                     break;
                 }
                 SubjectExpr::PropertyChain { base, .. }
@@ -851,13 +872,15 @@ pub(crate) fn parse_new_expression_class(s: &str) -> Option<String> {
     // A leading `\` stays: it marks an explicit global reference, which
     // resolving the bare name inside a namespace would lose.
     let class_name = &rest[..end];
-    // `new $class` names its class through a variable.
+    // `new $class` names its class through a variable, and `new class`
+    // (unprefixed) opens an anonymous class.
+    let is_variable = class_name.starts_with('$');
     let bare = class_name
         .strip_prefix('\\')
         .or_else(|| class_name.strip_prefix('$'))
         .unwrap_or(class_name);
     if bare.is_empty()
-        || bare == "class"
+        || (!is_variable && bare == "class")
         || !bare
             .chars()
             .all(|c| c.is_alphanumeric() || c == '_' || c == '\\')
