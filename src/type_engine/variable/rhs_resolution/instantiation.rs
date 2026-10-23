@@ -135,34 +135,40 @@ pub(super) fn resolve_rhs_instantiation(
         return ResolvedType::from_classes_with_hint(classes, parsed_name);
     }
 
-    // ── `new $var` where `$var` holds a class name ──────────────
-    // `$f = Foo::class; new $f`, a `class-string<Foo>` parameter, or a
-    // string naming a class builds the class it names.
-    if let Expression::Variable(Variable::Direct(dv)) = inst.class {
-        // `new $class` on a `class-string<T>` of a bounded template builds
-        // a `T`, whatever classes its bound resolves to.
-        let var_types = resolve_var_types(bytes_to_str(dv.name), ctx, ctx.cursor_offset);
-        if let [only] = var_types.as_slice()
-            && let TypeKind::ClassString(Some(inner)) = only.type_string.kind()
-            && inner.as_template_param().is_some()
-        {
-            let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
-                inner,
-                &ctx.current_class.fqn(),
-                ctx.file.all_classes,
-                ctx.file.class_loader,
-            );
-            if !classes.is_empty() {
-                return ResolvedType::from_classes_with_hint(classes, inner.clone());
-            }
+    // ── `new $var` / `new (<expr>)` where the operand holds a class name ──
+    // `$f = Foo::class; new $f`, a `class-string<Foo>` parameter,
+    // `new (Foo::class)`, or a string naming a class builds the class it
+    // names.
+    let operand_types = match inst.class {
+        Expression::Variable(Variable::Direct(dv)) => {
+            resolve_var_types(bytes_to_str(dv.name), ctx, ctx.cursor_offset)
         }
+        operand => super::resolve_rhs_expression(operand, ctx),
+    };
 
-        let classes = crate::type_engine::variable::class_string_resolution::classes_named_by(
-            &var_types, ctx,
+    // `new $class` on a `class-string<T>` of a bounded template builds
+    // a `T`, whatever classes its bound resolves to.
+    if let [only] = operand_types.as_slice()
+        && let TypeKind::ClassString(Some(inner)) = only.type_string.kind()
+        && inner.as_template_param().is_some()
+    {
+        let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
+            inner,
+            &ctx.current_class.fqn(),
+            ctx.file.all_classes,
+            ctx.file.class_loader,
         );
         if !classes.is_empty() {
-            return ResolvedType::from_classes(classes);
+            return ResolvedType::from_classes_with_hint(classes, inner.clone());
         }
+    }
+
+    let classes = crate::type_engine::variable::class_string_resolution::classes_named_by(
+        &operand_types,
+        ctx,
+    );
+    if !classes.is_empty() {
+        return ResolvedType::from_classes(classes);
     }
 
     vec![]

@@ -698,6 +698,51 @@ $foo->missing();
     assert!(messages[0].contains("missing"), "got: {messages:?}");
 }
 
+/// PHP 8.0 accepts any parenthesised expression as the operand of `new`.
+#[test]
+fn new_on_parenthesised_class_name_expression_resolves() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+namespace App;
+
+class User {
+    public function bar(): void {}
+}
+
+class Factory {
+    /** @var class-string<User> */
+    public string $class = User::class;
+}
+
+function test(Factory $factory): void {
+    $a = new (User::class)();
+    $a->bar();
+    $a->missingA();
+
+    $b = new ('App\\User')();
+    $b->bar();
+    $b->missingB();
+
+    $c = new ($factory->class)();
+    $c->bar();
+    $c->missingC();
+
+    (new (User::class)())->missingD();
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    let mut messages: Vec<&str> = diags.iter().map(|d| d.message.as_str()).collect();
+    messages.sort_unstable();
+    assert_eq!(messages.len(), 4, "got: {messages:?}");
+    for (message, name) in messages
+        .iter()
+        .zip(["missingA", "missingB", "missingC", "missingD"])
+    {
+        assert!(message.contains(name), "got: {messages:?}");
+    }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Magic method suppression
 // ═══════════════════════════════════════════════════════════════════════════

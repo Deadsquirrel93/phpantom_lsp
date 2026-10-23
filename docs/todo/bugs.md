@@ -75,25 +75,6 @@ No outstanding items.
 
 ## Name resolution
 
-### B657. `new (<expression>)` is not resolved
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-$a = new (User::class)();        // unresolved
-$b = new ('App\\User')();        // unresolved
-$c = new ($factory->class)();    // unresolved, even with @var class-string<User>
-$d = new $someClassString();     // resolves
-```
-
-PHP 8.0 allows an arbitrary parenthesised expression as the operand of
-`new`. The resolver handles the bare-variable spelling (`new $c()`) and
-nothing else: with parentheses around the operand the whole `new` resolves
-to nothing, so every member access on the instance is an
-`unresolved_member_access` false positive. The parenthesised operand should
-go through the same class-string resolution the bare variable already uses.
-Conformance row `generics_class_string_property_new.php`.
-
 ### B658. A member access written directly on `new $var` resolves the variable, not the instance
 
 **Impact: High · Complexity: Medium**
