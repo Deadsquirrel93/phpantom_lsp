@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
 use crate::common::{
-    complete_at, create_psr4_workspace, create_test_backend, method_names, property_names,
+    complete_at, create_psr4_workspace, create_test_backend, create_test_backend_with_closure_stub,
+    method_names, property_names,
 };
 use tower_lsp::lsp_types::*;
 
@@ -1174,4 +1175,76 @@ async fn test_first_class_callable_invokable_object() {
         "Expected getValue in {:?}",
         names,
     );
+}
+
+// ─── Closure::fromCallable() ────────────────────────────────────────────────
+
+/// The methods offered on `$c()->` after `$c = \Closure::fromCallable(<arg>)`,
+/// written inside `namespace App` so callable strings have to be read as
+/// fully qualified names.
+async fn from_callable_invocation_methods(arg: &str) -> Vec<String> {
+    let backend = create_test_backend_with_closure_stub();
+    let uri = Url::parse("file:///test/from_callable.php").unwrap();
+
+    let src = format!(
+        concat!(
+            "<?php\n",
+            "namespace App;\n",
+            "class User {{\n",
+            "    public function getName(): string {{ return ''; }}\n",
+            "}}\n",
+            "class Repo {{\n",
+            "    public function find(): User {{ return new User(); }}\n",
+            "    public static function make(): User {{ return new User(); }}\n",
+            "}}\n",
+            "class Finder {{\n",
+            "    public function __invoke(): User {{ return new User(); }}\n",
+            "}}\n",
+            "function makeUser(): User {{ return new User(); }}\n",
+            "function run(Repo $repo): void {{\n",
+            "    $c = \\Closure::fromCallable({});\n",
+            "    $c()->\n",
+            "}}\n",
+        ),
+        arg
+    );
+
+    // Line 15: `    $c()->`  cursor after `->`
+    let items = complete_at(&backend, &uri, &src, 15, 10).await;
+    method_names(&items)
+        .into_iter()
+        .map(str::to_string)
+        .collect()
+}
+
+#[tokio::test]
+async fn test_closure_from_callable_keeps_the_callee_return_type() {
+    for arg in [
+        "[$repo, 'find']",
+        "[Repo::class, 'make']",
+        "'App\\\\makeUser'",
+        "'App\\\\Repo::make'",
+        "new Finder()",
+        "$repo->find(...)",
+        "fn(): User => new User()",
+        "callback: [$repo, 'find']",
+    ] {
+        let names = from_callable_invocation_methods(arg).await;
+        assert!(
+            names.iter().any(|n| n == "getName"),
+            "Expected getName after fromCallable({arg}) in {names:?}",
+        );
+    }
+}
+
+#[tokio::test]
+async fn test_closure_from_callable_does_not_call_an_instance_method_statically() {
+    // PHP throws rather than call an instance method through the class name.
+    for arg in ["[Repo::class, 'find']", "'App\\\\Repo::find'"] {
+        let names = from_callable_invocation_methods(arg).await;
+        assert!(
+            !names.iter().any(|n| n == "getName"),
+            "Expected no getName after fromCallable({arg}) in {names:?}",
+        );
+    }
 }

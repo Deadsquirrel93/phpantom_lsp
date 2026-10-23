@@ -533,18 +533,11 @@ pub(crate) fn infer_closure_literal_type(
     expr: &Expression<'_>,
     ctx: &VarResolutionCtx<'_>,
 ) -> PhpType {
-    // `$fn(...)` wraps a callable value rather than naming a function, so
-    // the closure it makes has that value's own signature.
+    // `$fn(...)` wraps a callable value rather than naming a function.
     if let Expression::PartialApplication(PartialApplication::Function(fpa)) = expr
         && !matches!(fpa.function, Expression::Identifier(_))
     {
-        let resolved = resolve_rhs_expression(fpa.function, ctx);
-        if let TypeKind::Callable(callable) = ResolvedType::types_joined(&resolved).kind() {
-            return PhpType::callable_type(crate::php_type::CallableType {
-                kind: atom("Closure"),
-                ..(**callable).clone()
-            });
-        }
+        return closure_from_callable(fpa.function, ctx);
     }
 
     // The declared `: ReturnType`, else the `Generator` the body's yields
@@ -679,6 +672,43 @@ pub(crate) fn first_class_callable_return_type<'b>(
         PartialApplication::Function(fa) => callable_invocation(fa.function, at, ctx),
     };
     (!resolved.is_empty()).then(|| ResolvedType::types_joined(&resolved))
+}
+
+/// The closure `Closure::fromCallable($value)` and `$value(...)` make from
+/// the callable `value`: a closure literal unchanged, a value whose type
+/// carries a callable signature with that signature, and otherwise a
+/// closure returning what invoking the value does (an array callable, a
+/// callable string, an object with `__invoke()`).
+pub(crate) fn closure_from_callable(value: &Expression<'_>, ctx: &VarResolutionCtx<'_>) -> PhpType {
+    let value = crate::parser::unwrap_parens(value);
+    if matches!(
+        value,
+        Expression::Closure(_) | Expression::ArrowFunction(_) | Expression::PartialApplication(_)
+    ) {
+        return infer_closure_literal_type(value, ctx);
+    }
+    let resolved = match value {
+        Expression::Variable(Variable::Direct(dv)) => {
+            resolve_var_types(bytes_to_str(dv.name), ctx, ctx.cursor_offset)
+        }
+        _ => resolve_rhs_expression(value, ctx),
+    };
+    if let TypeKind::Callable(callable) = ResolvedType::types_joined(&resolved).kind() {
+        return PhpType::callable_type(crate::php_type::CallableType {
+            kind: atom("Closure"),
+            ..(**callable).clone()
+        });
+    }
+    let returned = super::function_calls::value_invocation(&resolved, ctx);
+    if returned.is_empty() {
+        PhpType::closure()
+    } else {
+        PhpType::callable_spec(
+            "Closure",
+            Vec::new(),
+            Some(ResolvedType::types_joined(&returned)),
+        )
+    }
 }
 
 /// The parameter list a closure or arrow function literal declares, as

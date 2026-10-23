@@ -29,27 +29,7 @@ No outstanding items.
 
 ## Standard-library return types
 
-### B653. `Closure::fromCallable()` loses the callee's signature
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-final class Repo { public function find(): User { return new User(); } }
-
-function f(Repo $r): void {
-    $c = \Closure::fromCallable([$r, 'find']);
-    $c()->name();   // Cannot verify method 'name' — type of '$c()' could not be resolved
-}
-```
-
-`Closure::fromCallable()` is typed as a bare `Closure` with no parameter or
-return types, so invoking the result resolves to nothing. The first-class
-callable form of the same thing (`$r->find(...)`) already carries the
-method's return type through, so the information is available — the stub's
-return type just discards it. Give `fromCallable()` a return type derived
-from its argument, the same way the first-class callable syntax is handled.
-See also [B661](#b661-invoking-an-array-callable-has-no-return-type), which
-is the other half of the same hole.
+No outstanding items.
 
 ## Reachability
 
@@ -329,5 +309,26 @@ the array as an array and the invocation as nothing, which makes the member
 access on the result a false positive. First-class callable syntax and
 closures both resolve, so the gap is the array spelling alone —
 `call_user_func([$r, 'find'])` is `mixed` for the same reason. Conformance
-row `callables_array_callable_invocation.php`; the sibling stub gap is
-[B653](#b653-closurefromcallable-loses-the-callees-signature).
+row `callables_array_callable_invocation.php`.
+
+### B670. A member access on a closure invoked in place resolves nothing
+
+**Impact: Low · Complexity: Medium**
+
+```php
+function f(Repo $r): void {
+    $r->find(...)()->name();                     // type of '' could not be resolved
+    (fn(): User => new User())()->name();        // type of '' could not be resolved
+    \Closure::fromCallable([$r, 'find'])()->name(); // Method 'name' not found on class 'Closure'
+    $c = \Closure::fromCallable([$r, 'find']);
+    $c()->name();                                // resolves to User
+}
+```
+
+Invoking an expression that makes a closure, without assigning it first,
+loses the closure's return type when a member is accessed on the result. The
+assignment form resolves, so the value carries the signature; the gap is in
+how the member-access subject `<closure expression>()` is resolved. The
+`fromCallable()` shape reads the call's stub type `Closure` and reports a
+false `unknown_member`, and the other shapes name an empty subject in the
+message.

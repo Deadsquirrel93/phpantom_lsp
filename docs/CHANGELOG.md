@@ -39,6 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`Closure::fromCallable()` keeps the callee's return type.** Calling the closure it makes, such as `Closure::fromCallable([$repo, 'find'])`, now returns what the callable does, whether it is an array callable, a callable string, an invokable object, or a closure.
 - **Arithmetic on `GMP` and `BcMath\Number`.** An operation on a `GMP` or a `BcMath\Number`, such as `$price * $qty`, now produces the same class instead of `int|float`, so passing the result on is no longer reported.
 - **Property type checks on every write.** Assigning a value of the wrong type to a typed property is now reported wherever the write happens, such as `$user->age = 'ten'` from outside the class, `Config::$timeout = '30'`, or a static write through a class-string, not only through `$this` inside the class.
 - **Member access on a closure literal.** Calling a method such as `call()` or `bindTo()` directly on a parenthesised closure or arrow function, like `(fn() => [])->call($obj)`, is now checked against `Closure` instead of being reported as an unresolved member access.

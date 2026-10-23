@@ -316,27 +316,36 @@ fn variable_invocation(
     _expr: &Expression<'_>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Vec<ResolvedType> {
-    // 1. Resolve the variable's own type.  Closures, arrow functions,
-    //    and first-class callables are all inferred by
-    //    `resolve_rhs_expression` as a `TypeKind::Callable` (see
-    //    `infer_closure_literal_type`), so `$fn`'s embedded return
-    //    type covers `$fn = function(): T {}`, `$fn = fn(): T => …`,
-    //    and `$fn = strlen(...)` / `$fn = $obj->method(...)` alike.
-    let var_types = resolve_var_types(var_name, ctx, ctx.cursor_offset);
-    if let Some(resolved) = callable_typed_return(&var_types, ctx) {
+    // Closures, arrow functions, and first-class callables are all
+    // inferred by `resolve_rhs_expression` as a `TypeKind::Callable` (see
+    // `infer_closure_literal_type`), so `$fn`'s embedded return type
+    // covers `$fn = function(): T {}`, `$fn = fn(): T => …`, and
+    // `$fn = strlen(...)` / `$fn = $obj->method(...)` alike.
+    value_invocation(&resolve_var_types(var_name, ctx, ctx.cursor_offset), ctx)
+}
+
+/// What calling a value of one of `types` returns: the callable signature
+/// its type carries, the method an array or `'Class::method'` callable
+/// names, the function a callable string names, or its class's
+/// `__invoke()`.
+pub(super) fn value_invocation(
+    types: &[ResolvedType],
+    ctx: &VarResolutionCtx<'_>,
+) -> Vec<ResolvedType> {
+    if let Some(resolved) = callable_typed_return(types, ctx) {
         return resolved;
     }
-
-    // 2. An array callable, `[$obj, 'method']`, calls the method.
-    for rt in &var_types {
+    for rt in types {
         let resolved = array_callable_return(&rt.type_string, ctx);
         if !resolved.is_empty() {
             return resolved;
         }
+        let resolved = string_callable_return(&rt.type_string, ctx);
+        if !resolved.is_empty() {
+            return resolved;
+        }
     }
-
-    // 3. An object with an `__invoke()` method returns what that does.
-    invoke_method_return(&var_types, ctx)
+    invoke_method_return(types, ctx)
 }
 
 /// What `($expr)()` returns when the callee is an arbitrary expression
@@ -363,16 +372,10 @@ fn expression_invocation<'b>(
         }
     }
 
-    let callee_results = resolve_rhs_expression(callee_expr, ctx);
-    // A callable-typed value carries its return type in the type
-    // string itself (`callable(): Scope`, `Closure(): Item`), which is
-    // how a property or a method result annotated that way arrives
-    // here.  Read it the same way the `$fn()` path does before falling
-    // back to `__invoke()`.
-    if let Some(resolved) = callable_typed_return(&callee_results, ctx) {
-        return resolved;
-    }
-    invoke_method_return(&callee_results, ctx)
+    // A callable-typed value carries its return type in the type string
+    // itself (`callable(): Scope`, `Closure(): Item`), which is how a
+    // property or a method result annotated that way arrives here.
+    value_invocation(&resolve_rhs_expression(callee_expr, ctx), ctx)
 }
 
 /// What calling a value of one of `types` returns, read from the callable
@@ -483,10 +486,8 @@ pub(super) fn closure_call_return(
     (!resolved.is_empty()).then_some(resolved)
 }
 
-/// What calling the array callable `callable` (`[$obj, 'method']`) returns.
-///
-/// Only an object in the first slot is read: `['Foo', 'bar']` calls `bar`
-/// statically, which is a different call with rules of its own.
+/// What calling the array callable `callable` (`[$obj, 'method']`,
+/// `[Foo::class, 'method']`) returns.
 fn array_callable_return(callable: &PhpType, ctx: &VarResolutionCtx<'_>) -> Vec<ResolvedType> {
     let Some([receiver, method]) = callable.shape_entries() else {
         return vec![];
@@ -503,23 +504,85 @@ fn array_callable_return(callable: &PhpType, ctx: &VarResolutionCtx<'_>) -> Vec<
     let Some(method_name) = literal.string_content() else {
         return vec![];
     };
-    if !receiver.value_type.is_object_like() {
-        return vec![];
+    if receiver.value_type.is_object_like() {
+        let owners = crate::type_engine::type_resolution::type_hint_to_classes_typed(
+            &receiver.value_type,
+            &ctx.current_class.fqn(),
+            ctx.file.all_classes,
+            ctx.file.class_loader,
+        );
+        return class_method_return(&owners, &method_name, false, ctx);
     }
-    let owners = crate::type_engine::type_resolution::type_hint_to_classes_typed(
+    let owners = crate::type_engine::variable::class_string_resolution::classes_named_by_type(
         &receiver.value_type,
         &ctx.current_class.fqn(),
         ctx.file.all_classes,
         ctx.file.class_loader,
     );
-    for owner in &owners {
+    class_method_return(&owners, &method_name, true, ctx)
+}
+
+/// What calling the callable string `callable` returns: the function
+/// `'strlen'` names, or the static method `'Foo::bar'` names.
+///
+/// PHP reads a callable string as a fully qualified name, whatever
+/// namespace the string is written in.
+fn string_callable_return(callable: &PhpType, ctx: &VarResolutionCtx<'_>) -> Vec<ResolvedType> {
+    let TypeKind::Literal(literal) = callable.kind() else {
+        return vec![];
+    };
+    let Some(text) = literal.string_content() else {
+        return vec![];
+    };
+    let is_name = |name: &str| {
+        !name.is_empty()
+            && !name.starts_with(|c: char| c.is_ascii_digit())
+            && name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '\\' || !c.is_ascii())
+    };
+    let text = text.trim_start_matches('\\');
+    if let Some((class, method)) = text.split_once("::") {
+        if !is_name(class) || !is_name(method) {
+            return vec![];
+        }
+        let owners: Vec<_> = (ctx.file.class_loader)(crate::class_lookup::Fqn::new(class))
+            .into_iter()
+            .collect();
+        return class_method_return(&owners, method, true, ctx);
+    }
+    if !is_name(text) {
+        return vec![];
+    }
+    let Some(function_loader) = ctx.function_loader() else {
+        return vec![];
+    };
+    function_loader(&format!("\\{text}"), 0)
+        .and_then(|f| f.return_type)
+        .map(|ret| callable_return_resolution(&ret, ctx))
+        .unwrap_or_default()
+}
+
+/// What calling `method_name` on the first of `owners` that has it returns.
+///
+/// A callable that names the class rather than an object (`[Foo::class,
+/// 'bar']`, `'Foo::bar'`) calls the method statically, which PHP refuses
+/// for an instance method, so `statically` admits only a `static` one.
+fn class_method_return(
+    owners: &[std::sync::Arc<crate::types::ClassInfo>],
+    method_name: &str,
+    statically: bool,
+    ctx: &VarResolutionCtx<'_>,
+) -> Vec<ResolvedType> {
+    for owner in owners {
         let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
             owner,
             ctx.file.class_loader,
             ctx.resolved_class_cache,
         );
         if let Some(ret) = merged
-            .get_method(&method_name)
+            .get_method(method_name)
+            .filter(|m| m.is_static || !statically)
             .and_then(|m| m.return_type.as_ref())
         {
             let ret = ret.replace_self_bound(&owner.fqn(), None);
