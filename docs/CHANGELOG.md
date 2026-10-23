@@ -41,6 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Reading a key from an intersection of array types.** For a value typed `array<string, mixed>&array{at: Carbon}`, `$entry['at']` now resolves to `Carbon` instead of an unknown type.
 - **`Closure::fromCallable()` keeps the callee's return type.** Calling the closure it makes, such as `Closure::fromCallable([$repo, 'find'])`, now returns what the callable does, whether it is an array callable, a callable string, an invokable object, or a closure.
 - **Invoking an array callable.** Calling `[$object, 'method']` or `[Foo::class, 'method']` through a variable, or passing one to `call_user_func()`, now returns what the method returns instead of an unknown type.
 - **Calling a closure on the spot.** Accessing a member on the result of a closure invoked where it is made, such as `$repo->find(...)()`, `$repo->find(?, 1)(5)`, `(fn(): User => new User())()` or `Closure::fromCallable([$repo, 'find'])()`, now resolves to what the closure returns.

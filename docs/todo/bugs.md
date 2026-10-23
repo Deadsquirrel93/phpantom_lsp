@@ -41,23 +41,7 @@ No outstanding items.
 
 ## Array types
 
-### B667. A key read on an intersection of array types resolves nothing
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-/** @param array<string, mixed>&array{at: Carbon} $entry */
-function f(array $entry): string {
-    return $entry['at']->toIso8601String();   // Cannot verify method — type of
-}                                             // '$entry['at']' could not be resolved
-```
-
-`array<string, mixed>&array{at: Carbon}` is the usual way to say "an
-open-ended array that has at least `at`". The intersection itself resolves
-and survives spreads, `usort()` and closure-parameter inference from
-`array_map()`, but an offset read on it gives no type at all. A read should
-take the most specific answer among the members: `Carbon` here, from the
-shape. Found in the Laravel sample.
+No outstanding items.
 
 ## Laravel
 

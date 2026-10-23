@@ -792,3 +792,60 @@ function f(array $inside, array $entries, int $i): void {
         ],
     );
 }
+
+/// `array<string, mixed>&array{at: Carbon}` is an open-ended array that has
+/// at least `at`. Reading `at` yields the shape's answer, which every member
+/// agrees with, rather than nothing. A shape is sealed, so a key read
+/// dynamically can only address the entries it lists.
+#[test]
+fn an_offset_read_on_an_intersection_of_arrays_takes_the_shape_entry() {
+    let content = r#"<?php
+class Carbon {
+    public function toIso8601String(): string { return ''; }
+}
+
+/**
+ * @param array<string, mixed>&array{at: Carbon} $entry
+ * @param array<string, int>&array{n: positive-int} $counts
+ */
+function f(array $entry, array $counts, string $k): string {
+    $at = $entry['at'];
+    $n = $counts['n'];
+    $any = $counts[$k];
+    echo /*AT*/$at, /*N*/$n, /*ANY*/$any;
+    return $entry['at']->toIso8601String();
+}
+"#;
+    assert_marked_types(
+        content,
+        &[
+            ("AT", "Carbon"),
+            ("N", "positive-int"),
+            ("ANY", "positive-int"),
+        ],
+    );
+
+    let backend = create_test_backend_with_full_stubs();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///intersection_offset.php";
+    backend.update_ast(uri, content);
+    let mut diagnostics = Vec::new();
+    backend.collect_slow_diagnostics(uri, content, &mut diagnostics);
+    let unresolved: Vec<String> = diagnostics
+        .into_iter()
+        .filter(|d| {
+            d.code.as_ref().is_some_and(
+                |c| matches!(c, NumberOrString::String(s) if s == "unresolved_member_access"),
+            )
+        })
+        .map(|d| d.message)
+        .collect();
+    assert!(
+        unresolved.is_empty(),
+        "the offset read resolves to Carbon: {unresolved:?}"
+    );
+}
