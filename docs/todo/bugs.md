@@ -65,25 +65,6 @@ conservative stance they take when the index is incomplete. Conformance row
 `framework.config-diagnostic` in the language-server probes, the only
 non-green framework cell for our column.
 
-### B669. `response($content)` with a nullable argument is typed `ResponseFactory|Response`
-
-**Impact: Medium · Complexity: Low**
-
-```php
-public function download(): Response {
-    $file = Storage::disk('feeds')->get('feed.xml');   // string|null
-    return response($file, 200, $headers);             // reported: ResponseFactory|Response
-}
-```
-
-The helper's docblock says `($content is null ? ResponseFactory : Response)`,
-but its body branches on `func_num_args() === 0`, not on the value: any call
-with an argument returns `$factory->make($content ?? '', …)`, a `Response`,
-even when that argument is `null`. Following the docblock literally turns
-every `response($maybeNull)` into a return-type false positive. The return
-type should depend on whether an argument was passed. Found in the Laravel
-sample.
-
 ## Blade
 
 No outstanding items.
