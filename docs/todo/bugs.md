@@ -41,32 +41,6 @@ No outstanding items.
 
 ## Array types
 
-### B666. An array filled by key inside a `foreach` loses every required key
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-/** @param array{dk: string, en?: string} $texts
- *  @return array{int, Translation} */
-function f(array $texts): array {
-    $out = [];
-    foreach ($texts as $market => $text) {
-        $out[$market] = new Translation($text);
-    }
-    return [1, $out['dk']];   // reported: got array{1, ?Translation}
-}
-```
-
-`$out` comes out of the loop as `array{dk?: Translation, en?: Translation}`.
-Every key is optional, so reading `dk`, which the source shape guarantees
-the loop wrote, picks up `null`. The same happens when the source is a
-`non-empty-array<'dk'|'en', string>`: the loop runs at least once, but the
-result is still an all-optional shape. A key the iterated shape requires
-should stay required in the result. Otherwise the result should be
-`non-empty-array<K, V>` when the source is non-empty, the way PHPStan
-generalizes it, so a read neither adds `null` nor claims a key that may be
-missing. Found in the Laravel sample.
-
 ### B667. A key read on an intersection of array types resolves nothing
 
 **Impact: Medium · Complexity: Medium**
