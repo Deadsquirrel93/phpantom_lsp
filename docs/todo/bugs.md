@@ -71,30 +71,7 @@ No outstanding items.
 
 ## Templates
 
-### B656. A nested conditional return type tests its inner condition against the unnarrowed parameter
-
-**Impact: Medium · Complexity: Medium-High**
-
-```php
-/**
- * @return ($key is Model ? TModel|null : ($key is Arrayable ? static : TModel|null))
- */
-public function find(mixed $key): mixed { /* … */ }
-
-function f(Collection $collection, ?User $user): void {
-    takesUserOrNull($collection->find($user));
-    // reported: got User|Collection<User>|null
-}
-```
-
-`?User` takes the outer `$key is Model` branch for its `User` part, so the
-inner condition only ever sees what the outer one rejected — `null`, which
-is not `Arrayable`. We evaluate the inner `$key is Arrayable` against the
-whole `?User` instead, `User` matches, and `static` joins a return type it
-cannot be part of. Each nested arm has to be resolved against the subject
-the enclosing condition left for it, not against the argument as written.
-This was PHPStan's own bug until 2.2.16 (phpstan-src#6586); conformance row
-`regressions_nested_param_conditional.php`.
+No outstanding items.
 
 ## Name resolution
 
