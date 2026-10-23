@@ -534,6 +534,25 @@ fn extract_call_subject(chars: &[char], paren_end: usize) -> Option<String> {
             return Some(clone_inner);
         }
 
+        // ── Call result invocation: `make()()`, `$r->find(...)()` ──
+        // A group that is a call's argument list makes the callee the
+        // value that call returns, spelled the way the AST side spells
+        // it: the call in parentheses, or for a first-class callable the
+        // call it wraps (`$r->find(...)($id)` is `$r->find($id)`).
+        if open > 0
+            && chars[open - 1] == ')'
+            && let Some(inner_open) = skip_balanced_parens_back(chars, open)
+            && inner_open > 0
+            && (chars[inner_open - 1].is_alphanumeric()
+                || matches!(chars[inner_open - 1], '_' | ')'))
+            && let Some(inner_call) = extract_call_subject(chars, open)
+        {
+            return Some(match inner_call.strip_suffix("(...)") {
+                Some(wrapped) => format!("{}({})", wrapped, args_text),
+                None => format!("({})({})", inner_call, args_text),
+            });
+        }
+
         // ── Parenthesized expression invocation: `(expr)()` ─────
         // When a balanced `(…)` group immediately precedes the call
         // parens, the inner expression is the callee (e.g.

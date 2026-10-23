@@ -288,24 +288,39 @@ the most. Route free functions through the same body inference the method
 path uses. Conformance row `native_types_untyped_return_inferred.php`, and
 the `inferred-return` hover probe, which shows no type for the same reason.
 
-### B670. A member access on a closure invoked in place resolves nothing
+### B671. A callback passed by name is not invoked by `call_user_func()` or an in-place `fromCallable()`
 
-**Impact: Low · Complexity: Medium**
+**Impact: Low · Complexity: Low**
 
 ```php
 function f(Repo $r): void {
-    $r->find(...)()->name();                     // type of '' could not be resolved
-    (fn(): User => new User())()->name();        // type of '' could not be resolved
-    \Closure::fromCallable([$r, 'find'])()->name(); // Method 'name' not found on class 'Closure'
-    $c = \Closure::fromCallable([$r, 'find']);
-    $c()->name();                                // resolves to User
+    call_user_func(callback: [$r, 'find'])->name();          // type is 'mixed'
+    \Closure::fromCallable(callback: [$r, 'find'])()->name(); // Method 'name' not found on class 'Closure'
+    $c = \Closure::fromCallable(callback: [$r, 'find']);
+    $c()->name();                                            // resolves to User
 }
 ```
 
-Invoking an expression that makes a closure, without assigning it first,
-loses the closure's return type when a member is accessed on the result. The
-assignment form resolves, so the value carries the signature; the gap is in
-how the member-access subject `<closure expression>()` is resolved. The
-`fromCallable()` shape reads the call's stub type `Closure` and reports a
-false `unknown_member`, and the other shapes name an empty subject in the
-message.
+When the callback is a named argument, the member-access subject path reads
+the whole `callback: …` text as the callable and finds no type. The
+positional spelling and the assigned `fromCallable()` form both resolve. The
+`fromCallable()` shape then falls back to the stub's `Closure` and reports a
+false `unknown_member`.
+
+### B672. Invoking a partial application in place resolves nothing
+
+**Impact: Low · Complexity: Low**
+
+```php
+function f(Repo $r): void {
+    $r->find(?, 1)(5)->name(); // type of '' could not be resolved
+    $c = $r->find(?, 1);
+    $c(5)->name();             // resolves to User
+}
+```
+
+A partial application with bound arguments that is invoked where it is made
+lowers to an empty member-access subject. The first-class callable form
+`$r->find(...)()` resolves, and so does the assigned form. The in-place form
+needs the same treatment, with the call's arguments combined with the
+placeholders' bound values.

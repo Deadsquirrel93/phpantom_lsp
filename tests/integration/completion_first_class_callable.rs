@@ -1248,3 +1248,39 @@ async fn test_closure_from_callable_does_not_call_an_instance_method_statically(
         );
     }
 }
+
+#[tokio::test]
+async fn test_member_access_on_a_closure_invoked_in_place() {
+    for call in [
+        "$repo->find(...)()",
+        "makeFinder()()",
+        "(fn(): User => new User())()",
+        "\\Closure::fromCallable([$repo, 'find'])()",
+    ] {
+        let backend = create_test_backend_with_closure_stub();
+        let uri = Url::parse("file:///test/invoked_in_place.php").unwrap();
+        let src = format!(
+            concat!(
+                "<?php\n",
+                "class User {{\n",
+                "    public function getName(): string {{ return ''; }}\n",
+                "}}\n",
+                "class Repo {{\n",
+                "    public function find(): User {{ return new User(); }}\n",
+                "}}\n",
+                "/** @return \\Closure(): User */\n",
+                "function makeFinder(): \\Closure {{ return fn() => new User(); }}\n",
+                "function run(Repo $repo): void {{\n",
+                "    {}->\n",
+                "}}\n",
+            ),
+            call
+        );
+        let items = complete_at(&backend, &uri, &src, 10, 4 + call.len() as u32 + 2).await;
+        assert!(
+            method_names(&items).contains(&"getName"),
+            "Expected getName after {call}->, got {:?}",
+            method_names(&items),
+        );
+    }
+}

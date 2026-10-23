@@ -1197,3 +1197,22 @@ fn parse_call_array_access_with_brackets_in_a_string_argument() {
         }
     );
 }
+
+#[test]
+fn parse_invoked_closure_literal_round_trips() {
+    for text in [
+        "(fn(int $x): User => new User())(1)",
+        "(function(): User { return $r->find(); })()",
+    ] {
+        let parsed = SubjectExpr::parse(text);
+        assert!(
+            matches!(
+                &parsed,
+                SubjectExpr::CallExpr { callee, .. }
+                    if matches!(callee.as_ref(), SubjectExpr::Closure(_))
+            ),
+            "{text} should parse as an invoked closure, got {parsed:?}",
+        );
+        assert_eq!(parsed.to_subject_text(), text);
+    }
+}

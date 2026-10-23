@@ -107,6 +107,9 @@ pub enum SubjectExpr {
     ClassName(String),
     /// A bare function name used as a call target.
     FunctionCall(String),
+    /// A closure or arrow-function literal used as a call target, written
+    /// the way call arguments carry one (`fn(int $x): User => new User()`).
+    Closure(String),
     /// Array index access: `base['key']` or `base[]`.
     ArrayAccess {
         /// The base expression being indexed.
@@ -410,6 +413,7 @@ impl SubjectExpr {
                             | SubjectExpr::ArrayAccess { .. }
                             | SubjectExpr::InlineArray { .. }
                             | SubjectExpr::CallExpr { .. }
+                            | SubjectExpr::Closure(_)
                     );
                     stack.push(Step::Text(")"));
                     stack.push(Step::Text(args_text));
@@ -443,6 +447,7 @@ impl SubjectExpr {
                 }
                 SubjectExpr::ClassName(name) => out.push_str(name),
                 SubjectExpr::FunctionCall(name) => out.push_str(name),
+                SubjectExpr::Closure(text) => out.push_str(text),
                 SubjectExpr::ArrayAccess { base, segments } => {
                     stack.push(Step::Brackets(segments));
                     stack.push(Step::Node(base));
@@ -561,6 +566,10 @@ impl SubjectExpr {
                     }
                     break;
                 }
+                SubjectExpr::Closure(text) => {
+                    collect_text_local_variables(text, out);
+                    break;
+                }
                 SubjectExpr::This
                 | SubjectExpr::SelfKw
                 | SubjectExpr::StaticKw
@@ -631,6 +640,7 @@ fn detach_child(node: &mut SubjectExpr, pending: &mut Vec<SubjectExpr>) {
         | SubjectExpr::NewExpr { .. }
         | SubjectExpr::ClassName(_)
         | SubjectExpr::FunctionCall(_)
+        | SubjectExpr::Closure(_)
         | SubjectExpr::InlineArray { .. } => return,
     };
     pending.push(std::mem::replace(child.as_mut(), SubjectExpr::This));
@@ -688,6 +698,9 @@ fn parse_callee(call_body: &str) -> SubjectExpr {
         && find_matching_forward(call_body, 0, b'(', b')') == Some(call_body.len() - 1)
     {
         let inner = &call_body[1..call_body.len() - 1];
+        if crate::completion::source::helpers::closure_literal_parts(inner).is_some() {
+            return SubjectExpr::Closure(inner.trim().to_string());
+        }
         return SubjectExpr::parse(inner);
     }
 

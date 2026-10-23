@@ -179,11 +179,25 @@ fn lower_spine_base<'a>(expr: &'a Expression<'a>) -> Option<SubjectExpr> {
             })
         }
         Expression::Call(Call::Function(fc)) => {
+            let args_text = format_all_call_args(&fc.argument_list.arguments);
+            // Invoking a first-class callable on the spot is the call it
+            // wraps: `$r->find(...)($id)` is `$r->find($id)`.
+            if let Expression::PartialApplication(pa) = crate::parser::unwrap_parens(fc.function)
+                && pa.is_first_class_callable()
+            {
+                return lower_invoked_callable(pa, args_text);
+            }
+            // A closure literal is kept as written, so invoking it reads
+            // the signature and body it was written with.
             if is_closure_literal(fc.function) {
-                return None;
+                return Some(SubjectExpr::CallExpr {
+                    callee: Box::new(SubjectExpr::Closure(format_arg_expr(
+                        crate::parser::unwrap_parens(fc.function),
+                    ))),
+                    args_text,
+                });
             }
             let callee = expr_to_subject_expr(fc.function)?;
-            let args_text = format_all_call_args(&fc.argument_list.arguments);
             // `SubjectExpr::to_subject_text` wraps callees that are not
             // callable-by-name (property chains, array access, nested calls)
             // in parentheses, so `($this->formatter)()` round-trips through
@@ -317,6 +331,34 @@ fn lower_spine_base<'a>(expr: &'a Expression<'a>) -> Option<SubjectExpr> {
             })
         }
 
+        _ => None,
+    }
+}
+
+/// The call a first-class callable `pa` makes when it is invoked with
+/// `args_text`.
+fn lower_invoked_callable(pa: &PartialApplication<'_>, args_text: String) -> Option<SubjectExpr> {
+    let callee = match pa {
+        PartialApplication::Function(fpa) => expr_to_subject_expr(fpa.function)?,
+        PartialApplication::Method(mpa) => SubjectExpr::MethodCall {
+            base: Box::new(expr_to_subject_expr(mpa.object)?),
+            method: member_selector_name(&mpa.method)?,
+        },
+        PartialApplication::StaticMethod(spa) => SubjectExpr::StaticMethodCall {
+            class: expr_to_subject_expr(spa.class)?.to_subject_text(),
+            method: member_selector_name(&spa.method)?,
+        },
+    };
+    Some(SubjectExpr::CallExpr {
+        callee: Box::new(callee),
+        args_text,
+    })
+}
+
+/// The name a member selector spells, when it is a plain identifier.
+fn member_selector_name(selector: &ClassLikeMemberSelector<'_>) -> Option<String> {
+    match selector {
+        ClassLikeMemberSelector::Identifier(ident) => Some(bytes_to_str(ident.value).to_string()),
         _ => None,
     }
 }

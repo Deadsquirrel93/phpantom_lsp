@@ -273,6 +273,17 @@ fn resolve_target_classes_expr_inner(
                 .collect()
         }
 
+        // ── Closure literal: a `Closure` with its own signature ─
+        SubjectExpr::Closure(text) => {
+            let Some(ty) = Backend::resolve_arg_text_to_type(text, ctx) else {
+                return vec![];
+            };
+            match class_loader(Fqn::new("Closure")) {
+                Some(closure) => vec![ResolvedType::from_both_arc(ty, closure)],
+                None => vec![ResolvedType::from_type_string(ty)],
+            }
+        }
+
         // ── Call expression ─────────────────────────────────────
         SubjectExpr::CallExpr { callee, args_text } => {
             resolve_call_subject(callee, args_text, receiver, ctx)

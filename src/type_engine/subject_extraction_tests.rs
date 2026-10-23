@@ -616,3 +616,25 @@ fn test_nullsafe_property_chain_array_access() {
         "Subject should include the property chain with bracket segment (? is stripped)"
     );
 }
+
+#[test]
+fn test_invoked_call_result() {
+    for (input, expected) in [
+        ("$r->find(...)()->", "$r->find()"),
+        ("Repo::make(...)($id)->", "Repo::make($id)"),
+        ("make()()->", "(make())()"),
+        (
+            "\\Closure::fromCallable([$r, 'find'])()->",
+            "(\\Closure::fromCallable([$r, 'find']))()",
+        ),
+        ("($this->formatter)()->", "($this->formatter)()"),
+    ] {
+        let chars: Vec<char> = input.chars().collect();
+        let arrow_pos = input.rfind("->").unwrap();
+        assert_eq!(
+            extract_arrow_subject(&chars, arrow_pos),
+            expected,
+            "{input}"
+        );
+    }
+}

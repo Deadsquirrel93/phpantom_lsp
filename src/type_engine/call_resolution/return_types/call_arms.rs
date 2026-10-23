@@ -732,6 +732,16 @@ impl Backend {
         {
             return None;
         }
+        Self::return_types_of_invoked_first_arg(text_args, ctx, return_type_hint_out)
+    }
+
+    /// What calling the callable passed as the first of `text_args`
+    /// returns.  `None` when its type is unknown.
+    fn return_types_of_invoked_first_arg(
+        text_args: &str,
+        ctx: &ResolutionCtx<'_>,
+        return_type_hint_out: Option<&mut Option<PhpType>>,
+    ) -> Option<Vec<Arc<ClassInfo>>> {
         let callback = split_top_level_commas(text_args).into_iter().next()?;
         if callback.trim_start().starts_with("...") {
             return None;
@@ -893,6 +903,25 @@ impl Backend {
         ctx: &ResolutionCtx<'_>,
         mut return_type_hint_out: Option<&mut Option<PhpType>>,
     ) -> Vec<Arc<ClassInfo>> {
+        // The stub can only say `fromCallable()` makes a `Closure`; calling
+        // that closure calls the callable it was handed.
+        if let SubjectExpr::CallExpr {
+            callee: from_callable,
+            args_text,
+        } = callee
+            && let SubjectExpr::StaticMethodCall { class, method } = from_callable.as_ref()
+            && method.eq_ignore_ascii_case("fromCallable")
+            && crate::type_engine::resolver::resolve_static_owner_class(class, ctx)
+                .is_some_and(|owner| owner.fqn() == "Closure")
+            && let Some(classes) = Self::return_types_of_invoked_first_arg(
+                args_text,
+                ctx,
+                return_type_hint_out.as_deref_mut(),
+            )
+        {
+            return classes;
+        }
+
         let callee_resolved = crate::type_engine::resolver::resolve_target_classes_expr(
             callee,
             AccessKind::Arrow,

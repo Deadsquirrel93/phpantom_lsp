@@ -16705,3 +16705,84 @@ namespace App {
         "`[Repo::class, 'make']()` calls App\\Repo, got: {diags:?}",
     );
 }
+
+/// Invoking an expression that makes a closure, without assigning it first,
+/// yields what the closure returns.
+#[test]
+fn member_access_on_a_closure_invoked_in_place() {
+    let backend = create_test_backend_with_closure_stub();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///test.php";
+    let text = r#"<?php
+final class User { public function name(): string { return ''; } }
+final class Repo { public function find(): User { return new User(); } }
+
+function f(Repo $r): void {
+    $r->find(...)()->name();
+    (fn(): User => new User())()->name();
+    \Closure::fromCallable([$r, 'find'])()->name();
+    (function (): User { return new User(); })()->name();
+    (static fn() => $r->find())()->name();
+    $r->find(...)()->missing();
+    (fn(): User => new User())()->missing();
+    \Closure::fromCallable([$r, 'find'])()->missing();
+    (function (): User { return new User(); })()->missing();
+    (static fn() => $r->find())()->missing();
+}
+"#;
+    backend.update_ast(uri, text);
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut diags);
+    assert!(
+        !diags.iter().any(|d| (5..=9).contains(&d.range.start.line)),
+        "each invoked closure should resolve to User, got: {diags:?}",
+    );
+    for line in 10..=14 {
+        assert!(
+            diags.iter().any(|d| d.range.start.line == line
+                && d.message.contains("'missing'")
+                && d.message.contains("User")),
+            "`missing()` on line {line} must be flagged on User, got: {diags:?}",
+        );
+    }
+}
+
+/// `Closure::fromCallable()` only makes a closure from the builtin
+/// `Closure`; a namespaced class of the same short name is its own class.
+#[test]
+fn from_callable_on_a_namespaced_closure_class_is_not_the_builtin() {
+    let backend = create_test_backend_with_closure_stub();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+namespace App;
+final class User { public function name(): string { return ''; } }
+final class Repo { public function find(): User { return new User(); } }
+final class Other { public function other(): void {} }
+final class Closure {
+    public static function fromCallable(mixed $c): Invoker { return new Invoker(); }
+}
+final class Invoker { public function __invoke(): Other { return new Other(); } }
+
+function f(Repo $r): void {
+    Closure::fromCallable([$r, 'find'])()->name();
+    \Closure::fromCallable([$r, 'find'])()->name();
+}
+"#;
+    backend.update_ast(uri, text);
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut diags);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.range.start.line == 11 && d.message.contains("App\\Other")),
+        "`App\\Closure::fromCallable()` returns an Invoker, got: {diags:?}",
+    );
+    assert!(
+        !diags.iter().any(|d| d.range.start.line == 12),
+        "`\\Closure::fromCallable()` calls `$r->find()`, got: {diags:?}",
+    );
+}
