@@ -663,3 +663,184 @@ created or deleted should also refresh the open files that name it.
 **Where to look:** `src/backend/documents.rs` (`did_open`, `did_change`
 for resource documents), `src/diagnostics/laravel_string_keys.rs`,
 `src/code_actions/create_missing_view.rs`.
+
+---
+
+## F33. Twig templates outside Symfony
+
+**Impact: Medium-High · Complexity: Medium-High**
+
+Twig is used well beyond Symfony (Drupal, Craft, OpenCart, Slim, and
+plenty of hand-rolled applications that build a `Twig\Environment`
+themselves), but template names only navigate, complete, and get checked
+in a Symfony project, and only for `.twig` files under `templates/`. A
+project like this one gets nothing:
+
+```php
+$loader = new FilesystemLoader('default/', $app->basePath('/theme'));
+$loader->prependPath($theme . '/');
+```
+
+```twig
+{% extends "index.html" %}
+{% include 'menu.html' with {'menu': item.children} %}
+```
+
+What is needed:
+
+- **Detect Twig on its own.** Template names switch on when the project
+  requires `twig/twig` or `symfony/twig-bundle`, or is a Symfony project.
+  Route names and translation keys in a template stay Symfony-only:
+  `path()` and the `trans` filter come from Symfony's Twig extensions,
+  not from Twig.
+- **Know where the templates are.** `templates/` when it exists, as
+  now, plus a `[twig]` section in `.phpantom.toml` for the loader roots
+  a project builds at runtime or from constants, which cannot be read
+  statically: `paths` (highest precedence first), `namespaces`
+  (`@admin/…`), and `extensions` (default `["twig"]`). A name several
+  roots hold (a theme overriding a default one) resolves to all of
+  them, since which root wins is decided at runtime.
+- **Recognise template files by more than their extension.** Whether a
+  file is a resource document is decided from its URI alone today
+  (`is_resource_document`, `is_resource_path`). A `.html` file under a
+  configured root has to be a Twig template while every other `.html`
+  file is left alone, so the check needs the backend, at every call
+  site: opening and editing, the workspace walk, the watcher,
+  definition, references, and rename.
+- **Validate names by the configured extensions** instead of the
+  hard-coded `.twig` suffix (`is_template_name`). Unknown names are only
+  reported when the roots are known: `templates/` exists or `[twig]` is
+  configured.
+
+PHP wrappers that build the name (an application's
+`RenderService::render('product')` appending `.html`, OpenCart's
+`$this->load->view('common/header')`) are F34.
+
+**Where to look:** `src/symfony/templates.rs`, `src/resource_navigation.rs`
+(`is_resource_document`, `resource_symbol_map`), `src/composer/project.rs`
+(`is_symfony_project`), `src/config.rs`, `src/indexing/watch.rs`.
+TwigStan (a PHPStan-based Twig analyser) is the reference for Twig outside
+Symfony: it takes the template directories as configuration
+(`twigPaths`) rather than discovering them, which supports the `[twig]`
+section here. It also asks for a script that builds the project's
+`Twig\Environment`, which PHPantom does not do: roots are read
+statically or configured.
+
+---
+
+## F34. Template names a PHP wrapper builds
+
+**Impact: Medium · Complexity: Medium-High**
+
+```php
+public function render(string $template = 'index', array $data = []): string
+{
+    return $this->twig->render($template . '.html', $data);
+}
+
+app(RenderService::class)->render('product', $data);
+```
+
+Applications and frameworks rarely call Twig with a literal: they pass a
+short name to a wrapper that adds the extension (or a theme directory)
+and renders it. The literal at the call site names a template, but
+nothing says so. The wrapper's parameter needs marking as a template
+name, together with how the wrapper completes it (the suffix it appends,
+the directory it prepends). That could be a docblock type in the spirit
+of Laravel's `view-string`, or a `.phpantom.toml` entry for wrappers a
+project does not own (OpenCart's `Loader::view()`). Depends on F33.
+
+**Where to look:** `src/symbol_map/extraction/symfony.rs`
+(`symfony_receiver_method`), how `view-string` parameters are read for
+Laravel views. TwigStan's context collectors (the ones that find
+`render()` calls and `#[Template]` returns) show which call shapes it
+recognises as rendering a template.
+
+---
+
+## F35. Suggest a close name for an unknown template or view
+
+**Impact: Low-Medium · Complexity: Low**
+
+```php
+return $this->render('blog/shw.html.twig');   // blog/show.html.twig exists
+return view('emails.welcom');                  // emails.welcome exists
+```
+
+An unknown Twig template or Laravel view offers only "Create missing
+template/view", which is the wrong fix for a typo. Offer the closest
+declared names first ("Change to 'blog/show.html.twig'"), ranked by edit
+distance and limited to a few, the way Symfony's language tools do. Both
+kinds already go through one collector, so one change serves both.
+
+**Where to look:** `src/code_actions/create_missing_view.rs`.
+
+---
+
+## F36. Twig block navigation
+
+**Impact: Medium · Complexity: Medium**
+
+```twig
+{% extends 'base.html.twig' %}
+{% block body %}…{% endblock %}
+```
+
+A `{% block %}` in a child template overrides the block of the same name
+in the template it extends, possibly several levels up, and `{{ block('x') }}`
+and `{{ parent() }}` refer to them. None of that navigates. It is the Twig
+counterpart of Blade's section and stack navigation (`blade/blocks.rs`),
+and the `extends` links are already `TwigTemplate` spans, so it needs
+the blocks each template declares and a resolver that walks up the
+chain: go to the overridden block, find the overrides of a parent's
+block, and complete the block names a child can override.
+
+**Where to look:** `src/symfony/templates.rs`, `src/blade/blocks.rs`,
+`src/blade/block_index.rs`.
+
+---
+
+## F37. Twig template variables
+
+**Impact: Medium · Complexity: Medium-High**
+
+```php
+return $this->render('post/show.html.twig', ['post' => $post]);
+```
+
+```twig
+{{ post.title }}
+```
+
+The variables a template receives come from the keys every `render()`
+of it passes, the names a `#[Template]` action returns, Twig's globals,
+and the `{% types %}` tag. Completing and hovering those names is feasible
+from the call sites alone, the way Blade's call-site inference collects a
+template's variables (`blade/call_site_inference.rs`). Typing what follows
+(`post.title` as the `Post` class's `getTitle()`) is a much larger
+project: TwigStan does it by compiling templates to PHP and analysing
+that. Start with the names; decide on types separately.
+
+**Where to look:** `src/blade/call_site_inference.rs`,
+`src/symbol_map/extraction/symfony.rs` (the render sites).
+
+---
+
+## F38. Twig components
+
+**Impact: Low-Medium · Complexity: Medium-High**
+
+```twig
+<twig:Alert type="success" message="Saved" />
+{{ component('Alert', {type: 'success'}) }}
+```
+
+With `symfony/ux-twig-component`, a `<twig:Name>` tag or `component()`
+call names a component class (`#[AsTwigComponent]`) and its template,
+and its attributes name the class's public properties. None of it
+completes or navigates. It is the counterpart of Blade's `<x-…>`
+components, so check what `blade/component_tags/` and `blade/discovery.rs`
+can share before writing a second implementation.
+
+**Where to look:** `src/blade/component_tags/`, `src/blade/discovery.rs`,
+`src/symfony/templates.rs`.
