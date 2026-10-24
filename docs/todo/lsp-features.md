@@ -615,3 +615,51 @@ Catalogues are read when they are YAML or XLIFF files under a
 
 **Where to look:** `src/symfony/translations.rs`,
 `src/symbol_map/extraction/symfony.rs` (`push_translatable_spans`).
+
+---
+
+## F31. Symfony Twig templates outside `templates/`
+
+**Impact: Low-Medium · Complexity: Medium**
+
+A template is known by its path under the project's `templates/`
+directory, and a bundle override under `templates/bundles/AcmeBundle/` by
+its `@Acme/` name as well. These are missed:
+
+- the directories `config/packages/twig.yaml` adds or moves the default
+  one to (`default_path:`, and `paths:` with or without a namespace);
+- a project's own bundle's templates (`src/Resources/views/`, or a
+  bundle's `templates/`);
+- the templates installed bundles ship, both under their `@Twig`-style
+  namespace and the ones registered without one, such as the form themes
+  `twig-bridge` provides (`bootstrap_5_layout.html.twig`), so their names
+  neither complete nor navigate.
+
+A name under a namespace is never reported as unknown, but one in an
+extra directory `paths:` adds without a namespace is, so reading
+`twig.yaml` matters most.
+
+**Where to look:** `src/symfony/templates.rs` (`template_names`),
+`src/symfony/mod.rs` (`symfony_template_names`).
+
+---
+
+## F32. Report unknown Symfony names in Twig templates
+
+**Impact: Medium · Complexity: Medium**
+
+```twig
+{% include 'partials/crad.html.twig' %}
+<a href="{{ path('app_hme') }}">Home</a>
+```
+
+An unknown template or `app_` route is reported where PHP names it, but not
+in a Twig template: diagnostics are not run on resource documents at all.
+They need scheduling for a Twig file the way a PHP file's are, the
+string-key check reading the template's resource symbol map, and the
+"Create missing template" quick fix offered there too. A template being
+created or deleted should also refresh the open files that name it.
+
+**Where to look:** `src/backend/documents.rs` (`did_open`, `did_change`
+for resource documents), `src/diagnostics/laravel_string_keys.rs`,
+`src/code_actions/create_missing_view.rs`.

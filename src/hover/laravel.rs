@@ -114,6 +114,17 @@ impl Backend {
                 };
                 ("View", detail)
             }
+            StringKeyKind::TwigTemplate => {
+                let detail = self
+                    .symfony_declaration_locations(*kind, key)
+                    .first()
+                    .and_then(|location| self.workspace_relative_path(location.uri.as_str()))
+                    .map_or_else(
+                        || "Not one of the project's templates".to_string(),
+                        |path| format!("`{}`", path),
+                    );
+                ("Template", detail)
+            }
             StringKeyKind::Trans => ("Trans", self.translation_hover_detail(key)),
             StringKeyKind::Command => {
                 let index = self.laravel.commands.read();

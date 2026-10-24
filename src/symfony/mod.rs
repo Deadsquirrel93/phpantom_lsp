@@ -1,13 +1,13 @@
-//! Symfony's service container, router, and translator: the service IDs,
-//! parameters, route names, and translation keys a project declares, and
-//! where.
+//! Symfony's service container, router, translator, and Twig: the service
+//! IDs, parameters, route names, translation keys, and templates a project
+//! declares, and where.
 //!
 //! Every declaration and every use is a
 //! [`StringKey`](crate::symbol_map::SymbolKind::StringKey) span in some
 //! file's symbol map: YAML and XML configuration, translation catalogues,
 //! and Twig templates through the resource symbol maps (see [`resources`],
-//! [`routes`], and [`translations`]), and PHP through symbol-map
-//! extraction.
+//! [`routes`], [`translations`], and [`templates`]), and PHP through
+//! symbol-map extraction.
 //! A declaration is a span with `is_write` set, or a configurator call
 //! whose receiver only the type engine can confirm (a
 //! [`TypedReceiverSite`](crate::symbol_map::TypedReceiverSite) with
@@ -16,6 +16,7 @@
 
 pub(crate) mod resources;
 pub(crate) mod routes;
+pub(crate) mod templates;
 pub(crate) mod translations;
 
 use std::collections::HashSet;
@@ -29,15 +30,15 @@ use crate::symbol_map::{StringKeyKind, SymbolKind, SymbolMap};
 use crate::text_position::LineIndex;
 
 /// The files whose symbol maps declare a Symfony service ID, container
-/// parameter, route, or translation key.
+/// parameter, route, translation key, or Twig template.
 #[derive(Default)]
 pub(crate) struct SymfonyState {
     declaring_uris: RwLock<HashSet<String>>,
 }
 
-/// Whether `map` declares a service ID, a container parameter, a route, or
-/// a translation key, outright or through a configurator call still to be
-/// confirmed.
+/// Whether `map` declares a service ID, a container parameter, a route, a
+/// translation key, or a template, outright or through a configurator call
+/// still to be confirmed.
 fn declares_symfony_keys(map: &SymbolMap) -> bool {
     map.spans.iter().any(|span| {
         matches!(
@@ -104,6 +105,24 @@ impl Backend {
         }
     }
 
+    /// The names the Twig template at `uri` is loaded by, when it is one of
+    /// the project's templates.
+    pub(crate) fn symfony_template_names(&self, uri: &str) -> Vec<String> {
+        let Some(root) = self.workspace.workspace_root.read().clone() else {
+            return Vec::new();
+        };
+        crate::util::uri_to_path(uri)
+            .map(|path| templates::template_names(&root, &path))
+            .unwrap_or_default()
+    }
+
+    /// Where the Twig template named `name` is created, when it is a name
+    /// of the project's own templates.
+    pub(crate) fn symfony_template_file(&self, name: &str) -> Option<std::path::PathBuf> {
+        let root = self.workspace.workspace_root.read().clone()?;
+        templates::template_file(&root, name)
+    }
+
     /// Forget a file that no longer exists.
     pub(crate) fn forget_symfony_declarations(&self, uri: &str) {
         if self.symfony.declaring_uris.read().contains(uri) {
@@ -149,8 +168,8 @@ impl Backend {
     }
 
     /// Every service ID, container parameter, route name, translation key
-    /// (with its domain, see [`translations::translation_key`]), or
-    /// translation domain the project declares, sorted.
+    /// (with its domain, see [`translations::translation_key`]),
+    /// translation domain, or template the project declares, sorted.
     pub(crate) fn symfony_declared_names(&self, kind: StringKeyKind) -> Vec<String> {
         let mut names = Vec::new();
         if kind == StringKeyKind::TranslationDomain {
@@ -205,7 +224,7 @@ impl Backend {
     }
 
     /// Where the project declares the service ID, container parameter,
-    /// route name, translation key, or translation domain `key`.
+    /// route name, translation key, translation domain, or template `key`.
     ///
     /// A service declared under its own class name is that class, and its
     /// ID is spelled as one: one with no declaration of its own (the usual

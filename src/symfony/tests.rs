@@ -113,3 +113,30 @@ fn catalogues_nobody_opened_are_found_by_the_workspace_walk() {
         vec!["messages".to_string(), "validators".to_string()]
     );
 }
+
+#[test]
+fn templates_nobody_opened_are_found_by_the_workspace_walk() {
+    let dir = tempfile::tempdir().unwrap();
+    for path in [
+        "templates/base.html.twig",
+        "templates/demo/index.html.twig",
+        "templates/bundles/AcmeBundle/widget.html.twig",
+        "src/Resources/views/old.html.twig",
+    ] {
+        let full = dir.path().join(path);
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        std::fs::write(&full, "<p></p>\n").unwrap();
+    }
+    let backend = crate::Backend::new_test_with_workspace(dir.path().to_path_buf(), vec![]);
+    backend.ensure_workspace_indexed();
+
+    assert_eq!(
+        backend.symfony_declared_names(StringKeyKind::TwigTemplate),
+        vec![
+            "@Acme/widget.html.twig".to_string(),
+            "base.html.twig".to_string(),
+            "bundles/AcmeBundle/widget.html.twig".to_string(),
+            "demo/index.html.twig".to_string(),
+        ]
+    );
+}

@@ -327,6 +327,12 @@ pub(super) fn extract_from_attribute_lists<'a>(
                     emit_autowire_attribute_spans(arg_list, ctx);
                 }
 
+                // `#[Template('demo/index.html.twig')]` renders an action's
+                // result with a template.
+                if is_template_attribute(semantic_class_name) {
+                    emit_template_attribute_span(arg_list, ctx);
+                }
+
                 // `#[RedirectToRoute('login')]` on a form request names the
                 // route a failed validation bounces back to.
                 if is_laravel_redirect_route_attr(

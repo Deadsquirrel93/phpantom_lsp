@@ -6,8 +6,8 @@
 //! declaration lookup to the normal PHP class loader.
 //!
 //! Twig templates and XLIFF catalogues are resource documents too, read
-//! only for the Symfony names they hold (see [`crate::symfony::routes`] and
-//! [`crate::symfony::translations`]).
+//! only for the Symfony names they hold (see [`crate::symfony::routes`],
+//! [`crate::symfony::translations`], and [`crate::symfony::templates`]).
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -152,10 +152,14 @@ impl Backend {
             let spans = if !is_symfony {
                 Vec::new()
             } else if crate::symfony::routes::is_twig_uri(uri) {
-                let mut spans = crate::symfony::routes::twig_route_spans(content);
+                let mut spans = crate::symfony::templates::template_declaration_spans(
+                    self.symfony_template_names(uri),
+                );
+                spans.extend(crate::symfony::routes::twig_route_spans(content));
                 spans.extend(crate::symfony::translations::twig_translation_spans(
                     content,
                 ));
+                spans.extend(crate::symfony::templates::twig_template_spans(content));
                 spans.sort_by_key(|span| span.start);
                 spans
             } else {

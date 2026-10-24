@@ -1,12 +1,13 @@
 //! The names Symfony takes as strings in PHP: service IDs, container
-//! parameters, route names, and translation keys and domains.
+//! parameters, route names, translation keys and domains, and Twig
+//! templates.
 //!
 //! The configurator functions (`service('app.mailer')`, `param('app.name')`),
-//! the `#[Autowire]` and `#[Route]` attributes, `TranslatableMessage`, and
-//! `t()` are recognised by their resolved name.  A method call names one
-//! only on the right receiver: `get()` on a container, `set()` on a
-//! configurator, `generate()` on a URL generator, `trans()` on a
-//! translator.  Those names are far too common to claim on sight, and the
+//! the `#[Autowire]`, `#[Route]`, and `#[Template]` attributes,
+//! `TranslatableMessage`, and `t()` are recognised by their resolved name.
+//! A method call names one only on the right receiver: `get()` on a
+//! container, `set()` on a configurator, `generate()` on a URL generator,
+//! `trans()` on a translator, `render()` on a controller or Twig.  Those names are far too common to claim on sight, and the
 //! receiver's spelling does not settle what it is (`$container` may be
 //! anything), so each call is recorded as a [`TypedReceiverSite`] for the
 //! type engine to confirm (see [`symfony_receiver_method`]).
@@ -18,6 +19,7 @@ use crate::virtual_members::laravel::helpers::{resolved_string_literal, string_l
 
 const CONFIGURATOR_NS: &str = SYMFONY_CONTAINER_CONFIGURATOR_NS;
 const AUTOWIRE_ATTRIBUTE: &str = "Symfony\\Component\\DependencyInjection\\Attribute\\Autowire";
+const TEMPLATE_ATTRIBUTE: &str = "Symfony\\Bridge\\Twig\\Attribute\\Template";
 const TRANSLATABLE_MESSAGE: &str = "Symfony\\Component\\Translation\\TranslatableMessage";
 const TRANSLATE_FUNCTION: &str = "Symfony\\Component\\Translation\\t";
 const ROUTE_ATTRIBUTES: [&str; 2] = [
@@ -64,6 +66,18 @@ pub(crate) fn symfony_receiver_method(
         0 if is("decorate") => Some((ReceiverClass::ServiceConfigurator, false)),
         0 if is("trans") => Some((ReceiverClass::Translator, false)),
         2 if is("trans") => Some((ReceiverClass::TranslatorDomain, false)),
+        0 if is("render")
+            || is("renderView")
+            || is("renderBlock")
+            || is("renderBlockView")
+            || is("stream")
+            || is("display") =>
+        {
+            Some((ReceiverClass::TemplateRenderer, false))
+        }
+        0 if is("htmlTemplate") || is("textTemplate") => {
+            Some((ReceiverClass::TemplatedEmail, false))
+        }
         _ => None,
     }
 }
@@ -97,7 +111,12 @@ pub(in crate::symbol_map::extraction) fn record_symfony_receiver_sites(
         let Some((key, start, end)) = resolved_string_literal(argument.value, ctx.content) else {
             continue;
         };
-        if key.is_empty() {
+        // `render('…')` is common enough elsewhere that only a string that
+        // looks like a template is worth asking the type engine about.
+        if key.is_empty()
+            || (receiver.names_twig_templates()
+                && !crate::symfony::templates::is_template_name(key))
+        {
             continue;
         }
         ctx.typed_receiver_sites.push(TypedReceiverSite {
@@ -392,6 +411,31 @@ pub(in crate::symbol_map::extraction) fn emit_autowire_attribute_spans(
             _ => {}
         }
     }
+}
+
+/// Whether `class_name`, as resolved, is Symfony's `#[Template]`.
+pub(crate) fn is_template_attribute(class_name: &str) -> bool {
+    class_name
+        .trim_start_matches('\\')
+        .eq_ignore_ascii_case(TEMPLATE_ATTRIBUTE)
+}
+
+/// Emit the template a `#[Template]` attribute renders the action's result
+/// with.
+pub(in crate::symbol_map::extraction) fn emit_template_attribute_span(
+    argument_list: &PartialArgumentList<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.symfony {
+        return;
+    }
+    try_emit_laravel_string_span_partial_for_parameter(
+        StringKeyKind::TwigTemplate,
+        argument_list,
+        "template",
+        ctx.content,
+        &mut ctx.spans,
+    );
 }
 
 /// Whether `class_name`, as resolved, is Symfony's `#[Route]`, under its
@@ -719,6 +763,32 @@ mod tests {
                 ("messages/c".to_string(), ReceiverClass::Translator),
             ]
         );
+    }
+
+    #[test]
+    fn renders_are_recorded_only_for_template_names() {
+        let php = "<?php\nuse Symfony\\Bridge\\Twig\\Attribute\\Template;\nclass C {\n    #[Template(template: 'attr.html.twig')]\n    function f($twig, $email) {\n        $twig->render('page.html.twig');\n        $twig->render('not-a-template');\n        $email->textTemplate('mail.txt.twig');\n    }\n}\n";
+        let map = map_of(php);
+        assert_eq!(
+            receivers(&map),
+            vec![
+                ("page.html.twig", ReceiverClass::TemplateRenderer, false),
+                ("mail.txt.twig", ReceiverClass::TemplatedEmail, false),
+            ]
+        );
+        let attribute: Vec<&str> = map
+            .spans
+            .iter()
+            .filter_map(|span| match &span.kind {
+                crate::symbol_map::SymbolKind::StringKey {
+                    kind: crate::symbol_map::StringKeyKind::TwigTemplate,
+                    key,
+                    ..
+                } => Some(key.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(attribute, vec!["attr.html.twig"]);
     }
 
     fn declared_routes(map: &SymbolMap, php: &str) -> Vec<(String, String)> {

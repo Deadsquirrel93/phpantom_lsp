@@ -1,13 +1,16 @@
-//! "Create missing view" quick-fix for an unresolved view name.
+//! "Create missing view" quick-fix for a template name nothing resolves.
 //!
 //! `view('name')` / `View::make('name')` resolve against Blade templates on
-//! disk; `invalid_laravel_view` (`diagnostics/laravel_string_keys.rs`) fires when a name
-//! matches none of them. This offers to create the missing `.blade.php`
-//! file at the location Laravel would actually look for it, under the
-//! project's configured view roots (or the matching package namespace's
-//! own view directory), then opens it.
+//! disk, and `render('name.html.twig')` against a Symfony project's Twig
+//! templates; `invalid_laravel_view` and `invalid_symfony_template`
+//! (`diagnostics/laravel_string_keys.rs`) fire when a name matches none of
+//! them. This offers to create the missing file at the location the
+//! framework would actually look for it, then opens it: for a view, under
+//! the project's configured view roots (or the matching package namespace's
+//! own view directory), and for a Twig template under `templates/`.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use tower_lsp::lsp_types::*;
 
@@ -17,10 +20,19 @@ use crate::diagnostics::helpers::make_diagnostic;
 use crate::symbol_map::{StringKeyKind, SymbolKind};
 use crate::text_position::ranges_overlap;
 
+/// The template names the project holds, read for the first span that
+/// needs them.
+#[derive(Default)]
+struct KnownTemplates {
+    views: Option<Arc<[String]>>,
+    twig: Option<Vec<String>>,
+}
+
 impl Backend {
     /// Offer to create the Blade template a `view('name')` (or
-    /// `View::make`, `@include`, …) call names when nothing on disk
-    /// resolves it.
+    /// `View::make`, `@include`, …) call names, or the Twig template a
+    /// `render('name.html.twig')` (or `#[Template]`, …) names, when nothing
+    /// on disk resolves it.
     pub(crate) fn collect_create_missing_view_actions(
         &self,
         uri: &str,
@@ -40,11 +52,11 @@ impl Backend {
         };
         let extra = self.typed_receiver_spans_for(uri, &symbol_map);
 
-        let mut view_names: Option<std::sync::Arc<[String]>> = None;
+        let mut known = KnownTemplates::default();
 
         for span in symbol_map.spans.iter().chain(extra.iter()) {
             let SymbolKind::StringKey {
-                kind: StringKeyKind::View,
+                kind: kind @ (StringKeyKind::View | StringKeyKind::TwigTemplate),
                 key,
                 is_write: false,
                 is_optional: false,
@@ -62,20 +74,20 @@ impl Backend {
                 continue;
             }
 
-            let known = view_names.get_or_insert_with(|| self.cached_view_names());
-            if known.binary_search(key).is_ok() {
-                continue;
-            }
-
-            let Some(target_dir) = self.laravel_view_create_target(key) else {
-                continue;
+            let (file_path, code, label) = match kind {
+                StringKeyKind::View => {
+                    let Some(path) = self.missing_view_file(key, &mut known) else {
+                        continue;
+                    };
+                    (path, "invalid_laravel_view", "view")
+                }
+                _ => {
+                    let Some(path) = self.missing_twig_template_file(key, &mut known) else {
+                        continue;
+                    };
+                    (path, "invalid_symfony_template", "template")
+                }
             };
-            let rel = match key.split_once("::") {
-                Some((_, name)) => name,
-                None => key.as_str(),
-            }
-            .replace('.', "/");
-            let file_path = target_dir.join(format!("{rel}.blade.php"));
             if file_path.exists() {
                 continue;
             }
@@ -86,12 +98,12 @@ impl Backend {
             let diagnostic = make_diagnostic(
                 range,
                 DiagnosticSeverity::WARNING,
-                "invalid_laravel_view",
-                format!("Unknown view: '{}'", key),
+                code,
+                format!("Unknown {}: '{}'", label, key),
             );
 
             out.push(CodeActionOrCommand::CodeAction(CodeAction {
-                title: format!("Create missing view '{}'", key),
+                title: format!("Create missing {} '{}'", label, key),
                 kind: Some(CodeActionKind::QUICKFIX),
                 diagnostics: Some(vec![diagnostic]),
                 edit: Some(super::create_file_edit(
@@ -100,7 +112,7 @@ impl Backend {
                     Vec::new(),
                 )),
                 command: Some(self.build_code_lens_command(
-                    "Open new view".to_string(),
+                    format!("Open new {}", label),
                     new_file_uri,
                     Position::new(0, 0),
                 )),
@@ -109,6 +121,47 @@ impl Backend {
                 data: None,
             }));
         }
+    }
+
+    /// The Blade file a view named `view_key` would be, when no view of
+    /// that name exists.
+    fn missing_view_file(&self, view_key: &str, known: &mut KnownTemplates) -> Option<PathBuf> {
+        let views = known.views.get_or_insert_with(|| self.cached_view_names());
+        if views
+            .binary_search_by(|name| name.as_str().cmp(view_key))
+            .is_ok()
+        {
+            return None;
+        }
+        let target_dir = self.laravel_view_create_target(view_key)?;
+        let rel = match view_key.split_once("::") {
+            Some((_, name)) => name,
+            None => view_key,
+        }
+        .replace('.', "/");
+        Some(target_dir.join(format!("{rel}.blade.php")))
+    }
+
+    /// The file a Twig template named `name` would be, when the project
+    /// holds no template of that name and it is a name of the project's own.
+    fn missing_twig_template_file(
+        &self,
+        name: &str,
+        known: &mut KnownTemplates,
+    ) -> Option<PathBuf> {
+        if !self.is_symfony_project() {
+            return None;
+        }
+        let templates = known
+            .twig
+            .get_or_insert_with(|| self.symfony_declared_names(StringKeyKind::TwigTemplate));
+        if templates
+            .binary_search_by(|declared| declared.as_str().cmp(name))
+            .is_ok()
+        {
+            return None;
+        }
+        self.symfony_template_file(name)
     }
 
     /// Where a missing view named `view_key` should be created.

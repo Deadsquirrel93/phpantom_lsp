@@ -84,6 +84,12 @@ pub(crate) enum StringKeyKind {
     /// `trans` filter names, or a template's `trans_default_domain`.  The
     /// catalogues named after it declare it.
     TranslationDomain,
+    /// A Twig template name: declared by the template file itself (see
+    /// `symfony::templates`), and read by a controller's `render()` family,
+    /// Twig's `render()`, a templated email's `htmlTemplate()` and
+    /// `textTemplate()`, `#[Template]`, and a template's `extends`,
+    /// `include`, and the other tags and functions that load one.
+    TwigTemplate,
 }
 
 impl StringKeyKind {
@@ -106,6 +112,7 @@ impl StringKeyKind {
                 | Self::SymfonyRoute
                 | Self::SymfonyTranslation
                 | Self::TranslationDomain
+                | Self::TwigTemplate
         )
     }
 }
@@ -304,6 +311,10 @@ const SYMFONY_URL_GENERATOR: &str = "Symfony\\Component\\Routing\\Generator\\Url
 const SYMFONY_ROUTING_CONFIGURATOR: &str =
     "Symfony\\Component\\Routing\\Loader\\Configurator\\RoutingConfigurator";
 const SYMFONY_TRANSLATOR: &str = "Symfony\\Contracts\\Translation\\TranslatorInterface";
+const SYMFONY_CONTROLLER_HELPER: &str =
+    "Symfony\\Bundle\\FrameworkBundle\\Controller\\ControllerHelper";
+const TWIG_ENVIRONMENT: &str = "Twig\\Environment";
+const SYMFONY_TEMPLATED_EMAIL: &str = "Symfony\\Bridge\\Twig\\Mime\\TemplatedEmail";
 
 /// The namespace of the PHP configurators that build Symfony's service
 /// container.
@@ -357,6 +368,12 @@ pub(crate) enum ReceiverClass {
     Translator,
     /// A translator again, for the domain its `trans()` takes.
     TranslatorDomain,
+    /// What renders a Twig template by name: a Symfony controller's
+    /// `render()` family, and Twig's own environment.
+    TemplateRenderer,
+    /// A templated email, whose `htmlTemplate()` and `textTemplate()` name
+    /// the templates its bodies are rendered from.
+    TemplatedEmail,
 }
 
 impl ReceiverClass {
@@ -365,7 +382,7 @@ impl ReceiverClass {
     pub(crate) fn targets(self) -> &'static [(&'static str, StringKeyKind)] {
         use StringKeyKind::{
             ContainerParameter, ServiceId, SymfonyRoute, SymfonyTranslation, TranslationDomain,
-            View,
+            TwigTemplate, View,
         };
         match self {
             // The concrete `Illuminate\View\Factory` implements the
@@ -404,6 +421,12 @@ impl ReceiverClass {
             Self::RoutingConfigurator => &[(SYMFONY_ROUTING_CONFIGURATOR, SymfonyRoute)],
             Self::Translator => &[(SYMFONY_TRANSLATOR, SymfonyTranslation)],
             Self::TranslatorDomain => &[(SYMFONY_TRANSLATOR, TranslationDomain)],
+            Self::TemplateRenderer => &[
+                (SYMFONY_ABSTRACT_CONTROLLER, TwigTemplate),
+                (SYMFONY_CONTROLLER_HELPER, TwigTemplate),
+                (TWIG_ENVIRONMENT, TwigTemplate),
+            ],
+            Self::TemplatedEmail => &[(SYMFONY_TEMPLATED_EMAIL, TwigTemplate)],
         }
     }
 
@@ -426,6 +449,11 @@ impl ReceiverClass {
             self,
             Self::ViewFactory | Self::Mailable | Self::MailTemplate
         )
+    }
+
+    /// Whether the call names a Twig template.
+    pub(crate) fn names_twig_templates(self) -> bool {
+        matches!(self, Self::TemplateRenderer | Self::TemplatedEmail)
     }
 
     /// Whether this receiver names one of Symfony's string keys rather than

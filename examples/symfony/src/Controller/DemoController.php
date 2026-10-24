@@ -44,6 +44,8 @@ final class DemoController extends AbstractController
         $this->events->dispatch(new OrderPlaced($userId), 'app.order.placed');
         $this->commandBus->dispatch(new SendWelcomeEmail($userId));
 
+        // Try: go-to-definition on the template name, or complete one inside
+        // render('').
         return $this->render('demo/index.html.twig', [
             'sender' => $this->senderName,
             'support' => $supportEmail,

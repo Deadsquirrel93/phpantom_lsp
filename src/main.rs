@@ -239,8 +239,11 @@ impl ProjectArgs {
     /// Settle the root (exiting when the current directory is unknown),
     /// the colour choice, and the output format.
     fn resolve(self) -> ProjectOptions {
+        // Every file the run reaches is named by an absolute URI, so a
+        // relative root would never be a prefix of one.
         let workspace_root = self
             .project_root
+            .map(|root| std::path::absolute(&root).unwrap_or(root))
             .or_else(|| std::env::current_dir().ok())
             .unwrap_or_else(|| {
                 eprintln!("Error: cannot determine project root directory");

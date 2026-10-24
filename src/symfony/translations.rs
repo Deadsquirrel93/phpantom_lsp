@@ -300,7 +300,7 @@ struct TwigString {
 /// Visit every `{{ … }}` and `{% … %}` block of a template, in order, with
 /// its byte range.  Comments are skipped, and so is everything outside a
 /// block, where a quote is only HTML.
-fn for_each_twig_block(content: &str, mut visit: impl FnMut(usize, usize)) {
+pub(super) fn for_each_twig_block(content: &str, mut visit: impl FnMut(usize, usize)) {
     let bytes = content.as_bytes();
     let mut cursor = 0usize;
     while let Some(relative) = memchr::memchr(b'{', &bytes[cursor..]) {
@@ -342,7 +342,7 @@ fn twig_block_end(content: &str, body: usize, close: &str) -> Option<usize> {
 
 /// The offset of the quote closing a string whose contents start at
 /// `start`.
-fn string_end(bytes: &[u8], start: usize, quote: u8) -> Option<usize> {
+pub(super) fn string_end(bytes: &[u8], start: usize, quote: u8) -> Option<usize> {
     let mut cursor = start;
     while cursor < bytes.len() {
         match bytes[cursor] {
@@ -354,7 +354,7 @@ fn string_end(bytes: &[u8], start: usize, quote: u8) -> Option<usize> {
     None
 }
 
-fn skip_whitespace(bytes: &[u8], mut cursor: usize, end: usize) -> usize {
+pub(super) fn skip_whitespace(bytes: &[u8], mut cursor: usize, end: usize) -> usize {
     while cursor < end && bytes[cursor].is_ascii_whitespace() {
         cursor += 1;
     }

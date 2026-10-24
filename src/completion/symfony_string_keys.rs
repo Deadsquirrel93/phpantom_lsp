@@ -1,18 +1,20 @@
-//! Symfony service ID, container parameter, route name, and translation
-//! completion.
+//! Symfony service ID, container parameter, route name, translation, and
+//! Twig template completion.
 //!
 //! In PHP the cursor's call is read from the raw buffer, which is mid-edit
 //! and usually does not parse, and is judged by the same predicates the
 //! symbol map uses (`symfony_receiver_method`, the configurator functions,
-//! `#[Autowire]`), so completion and navigation agree on which strings name
+//! `#[Autowire]`, `#[Template]`), so completion and navigation agree on which strings name
 //! what.  A method call's receiver is resolved by the type engine, as the
 //! symbol map's is.
 //!
 //! In YAML and XML configuration the line before the cursor says it: an `@`
 //! starts a service reference, an unclosed `%` a parameter placeholder, and
 //! a handful of XML attributes take a service ID.  In a Twig template, the
-//! first argument of `path()` and `url()` is a route name, and a string the
-//! `trans` filter is applied to a translation key.
+//! first argument of `path()` and `url()` is a route name, a string the
+//! `trans` filter is applied to a translation key, and the name an
+//! `extends`, an `include`, or another tag that loads a template takes a
+//! template name.
 //!
 //! A translation key is completed from the domain it is looked up in.  In
 //! PHP that is read from the symbol map, whose site for the string being
@@ -29,8 +31,8 @@ use crate::completion::laravel_string_keys::{
 };
 use crate::completion::source::code_context::CodeContext;
 use crate::symbol_map::extraction::{
-    configurator_function_kind, is_autowire_attribute, is_translatable_message,
-    is_translate_function, symfony_receiver_method,
+    configurator_function_kind, is_autowire_attribute, is_template_attribute,
+    is_translatable_message, is_translate_function, symfony_receiver_method,
 };
 use crate::symbol_map::{StringKeyKind, SymbolKind};
 use crate::symfony::translations::{DEFAULT_DOMAIN, split_translation_key};
@@ -38,8 +40,8 @@ use crate::text_position::position_to_offset;
 use crate::types::{AccessKind, FileContext};
 
 impl Backend {
-    /// Complete the service ID, parameter, route name, or translation key or
-    /// domain a PHP string literal is being typed as.
+    /// Complete the service ID, parameter, route name, translation key or
+    /// domain, or template a PHP string literal is being typed as.
     pub(crate) fn try_symfony_string_key_completion(
         &self,
         uri: &str,
@@ -56,7 +58,7 @@ impl Backend {
         let (kind, prefix_start) = self
             .symfony_call_key(content, cursor, code, ctx)
             .map(|kind| (kind, literal_start))
-            .or_else(|| autowire_key(content, quote, literal, literal_start, ctx))?;
+            .or_else(|| attribute_key(content, quote, literal, literal_start, ctx))?;
         if kind == StringKeyKind::SymfonyTranslation {
             let domain = self.translation_domain_at(uri, content, literal_start);
             let messages = self.symfony_translation_messages(&domain);
@@ -202,8 +204,8 @@ impl Backend {
     }
 
     /// Complete a service reference or parameter placeholder in a YAML or
-    /// XML configuration file, or a route name or translation key in a Twig
-    /// template.
+    /// XML configuration file, or a route name, translation key, or template
+    /// name in a Twig template.
     pub(crate) fn try_symfony_resource_completion(
         &self,
         uri: &str,
@@ -228,8 +230,14 @@ impl Backend {
                     position,
                 );
             }
-            let start = crate::symfony::routes::twig_route_name_start(content, cursor)?;
-            (StringKeyKind::SymfonyRoute, start)
+            if let Some(start) =
+                crate::symfony::templates::twig_template_name_start(content, cursor)
+            {
+                (StringKeyKind::TwigTemplate, start)
+            } else {
+                let start = crate::symfony::routes::twig_route_name_start(content, cursor)?;
+                (StringKeyKind::SymfonyRoute, start)
+            }
         } else if crate::symfony::resources::is_container_config_uri(uri) {
             resource_key_at(content, cursor)?
         } else {
@@ -239,10 +247,11 @@ impl Backend {
     }
 }
 
-/// What an `#[Autowire]` string names, and where the name in it starts:
-/// `service:` a service, `param:` a parameter, and its value an `@id`
-/// service reference or a `%name%` placeholder.
-fn autowire_key(
+/// What an `#[Autowire]` or `#[Template]` string names, and where the name
+/// in it starts: `service:` a service, `param:` a parameter, and its value
+/// an `@id` service reference or a `%name%` placeholder; a `#[Template]`'s
+/// `template:` a template.
+fn attribute_key(
     content: &str,
     quote: usize,
     literal: &str,
@@ -254,7 +263,15 @@ fn autowire_key(
     let name_start = callable.len() - trailing_name(callable).len();
     let class_start = attribute_class_start(callable, name_start)?;
     let written = &callable[class_start..];
-    if !is_autowire_attribute(&ctx.resolve_name_at(written, class_start as u32)) {
+    let attribute = ctx.resolve_name_at(written, class_start as u32);
+    if is_template_attribute(&attribute) {
+        return matches!(
+            slot,
+            ArgumentSlot::Named("template") | ArgumentSlot::Positional(0)
+        )
+        .then_some((StringKeyKind::TwigTemplate, literal_start));
+    }
+    if !is_autowire_attribute(&attribute) {
         return None;
     }
     match slot {

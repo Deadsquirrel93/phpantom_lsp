@@ -32,6 +32,11 @@ catalogues together, the way a real Symfony project does.
   domain each call names. In `DemoController`, go to the definition of
   `demo.title` or `user.invalid_email`, or complete a key inside
   `trans('')`.
+- Template names navigate between the controllers and templates that render,
+  extend, or include them and the files in `templates/`. In
+  `DemoController`, go to the definition of `demo/index.html.twig`, or
+  complete a name inside `render('')` or `{% include '' %}`. A template that
+  does not exist is reported, with a quick fix that creates it.
 - Open `src/Entity/User.php` and `src/Repository/UserRepository.php`. The
   CodeLens above each class links the entity and its repository.
 

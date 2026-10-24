@@ -71,7 +71,8 @@ pub(crate) fn resolve_laravel_string_key(
         | StringKeyKind::ContainerParameter
         | StringKeyKind::SymfonyRoute
         | StringKeyKind::SymfonyTranslation
-        | StringKeyKind::TranslationDomain => backend.symfony_declaration_locations(*kind, key),
+        | StringKeyKind::TranslationDomain
+        | StringKeyKind::TwigTemplate => backend.symfony_declaration_locations(*kind, key),
     }
 }
 
@@ -254,12 +255,13 @@ pub(crate) fn find_laravel_string_key_references(
         | StringKeyKind::GateAbility
         | StringKeyKind::ContainerBinding
         | StringKeyKind::Env => find_string_key_usages(kind, key, backend, snapshot, true),
-        // A Symfony declaration is a span in a configuration file's map like
-        // any use, so the usages already hold it.
+        // A Symfony declaration is a span in a configuration file's (or a
+        // template's) map like any use, so the usages already hold it.
         StringKeyKind::ServiceId
         | StringKeyKind::ContainerParameter
         | StringKeyKind::SymfonyRoute
-        | StringKeyKind::SymfonyTranslation => {
+        | StringKeyKind::SymfonyTranslation
+        | StringKeyKind::TwigTemplate => {
             return find_string_key_usages(kind, key, backend, snapshot, include_declaration);
         }
         // The catalogues named after a domain declare it, and are added

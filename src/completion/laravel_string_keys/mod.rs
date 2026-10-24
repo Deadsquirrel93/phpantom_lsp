@@ -30,7 +30,7 @@ pub(crate) use context::{ArgumentSlot, attribute_class_start, callable_before_sc
 pub(crate) fn string_key_item_kind(kind: &StringKeyKind) -> CompletionItemKind {
     match kind {
         StringKeyKind::Config | StringKeyKind::ConfigResource(_) => CompletionItemKind::PROPERTY,
-        StringKeyKind::View => CompletionItemKind::FILE,
+        StringKeyKind::View | StringKeyKind::TwigTemplate => CompletionItemKind::FILE,
         StringKeyKind::Trans | StringKeyKind::SymfonyTranslation => CompletionItemKind::TEXT,
         StringKeyKind::TranslationDomain => CompletionItemKind::MODULE,
         StringKeyKind::MorphAlias => CompletionItemKind::ENUM_MEMBER,
@@ -163,7 +163,8 @@ impl Backend {
             StringKeyKind::ServiceId
             | StringKeyKind::ContainerParameter
             | StringKeyKind::SymfonyRoute
-            | StringKeyKind::TranslationDomain => self.symfony_declared_names(*kind).into(),
+            | StringKeyKind::TranslationDomain
+            | StringKeyKind::TwigTemplate => self.symfony_declared_names(*kind).into(),
             // A translation key is completed in the domain it is looked up
             // in, which only the Symfony completion knows.
             StringKeyKind::SymfonyTranslation

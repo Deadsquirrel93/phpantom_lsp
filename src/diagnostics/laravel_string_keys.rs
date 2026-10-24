@@ -4,9 +4,8 @@
 //! Both read the spans the symbol map recorded for a file, resolve each name
 //! against what the project actually registers (routes, config keys,
 //! views, translation keys, console commands, morph aliases, gate
-//! abilities, Symfony service IDs, container parameters and routes), and
-//! report the
-//! ones nothing declares.
+//! abilities, Symfony service IDs, container parameters, routes and Twig
+//! templates), and report the ones nothing declares.
 
 use std::sync::Arc;
 
@@ -38,6 +37,7 @@ enum CheckedStringKind {
     ServiceId,
     ContainerParameter,
     SymfonyRoute,
+    TwigTemplate,
 }
 
 impl CheckedStringKind {
@@ -58,6 +58,7 @@ impl CheckedStringKind {
             StringKeyKind::ServiceId => Self::ServiceId,
             StringKeyKind::ContainerParameter => Self::ContainerParameter,
             StringKeyKind::SymfonyRoute => Self::SymfonyRoute,
+            StringKeyKind::TwigTemplate => Self::TwigTemplate,
             // A section or stack name is judged against the templates that
             // render the one it is written in, which the Blade pass has and
             // this one does not.  And anything at all can be bound at
@@ -115,6 +116,8 @@ struct DeclaredKeys<'a> {
     parameters: Vec<String>,
     /// The Symfony route names the project declares, sorted.
     symfony_routes: Vec<String>,
+    /// The Twig templates the project holds, sorted.
+    twig_templates: Vec<String>,
 }
 
 impl<'a> DeclaredKeys<'a> {
@@ -138,6 +141,7 @@ impl<'a> DeclaredKeys<'a> {
         let has_service = names(|kind| kind == CheckedStringKind::ServiceId);
         let has_parameter = names(|kind| kind == CheckedStringKind::ContainerParameter);
         let has_symfony_route = names(|kind| kind == CheckedStringKind::SymfonyRoute);
+        let has_twig_template = names(|kind| kind == CheckedStringKind::TwigTemplate);
 
         // A package with no routes of its own, whose names are registered
         // by the host application, cannot be judged: the valid set is
@@ -257,6 +261,11 @@ impl<'a> DeclaredKeys<'a> {
         } else {
             Vec::new()
         };
+        let twig_templates = if has_twig_template {
+            backend.symfony_declared_names(crate::symbol_map::StringKeyKind::TwigTemplate)
+        } else {
+            Vec::new()
+        };
 
         Self {
             backend,
@@ -273,6 +282,7 @@ impl<'a> DeclaredKeys<'a> {
             services,
             parameters,
             symfony_routes,
+            twig_templates,
         }
     }
 
@@ -330,7 +340,22 @@ impl<'a> DeclaredKeys<'a> {
                 Self::judge_application_key(&self.symfony_routes, "app_", key)
                     .map(|valid| (valid, "route", "invalid_symfony_route"))
             }
+            CheckedStringKind::TwigTemplate => self.judge_twig_template(key),
         }
+    }
+
+    /// A template under a Twig namespace (`@Acme/…`) is a bundle's, whose
+    /// own templates are not read, so only the project's own templates are
+    /// judged.  A project with none was not read at all.
+    fn judge_twig_template(&self, key: &str) -> Verdict {
+        if key.starts_with('@') || self.twig_templates.is_empty() {
+            return None;
+        }
+        let valid = self
+            .twig_templates
+            .binary_search_by(|name| name.as_str().cmp(key))
+            .is_ok();
+        Some((valid, "template", "invalid_symfony_template"))
     }
 
     /// A service ID spelled as a class name is that class, which an
