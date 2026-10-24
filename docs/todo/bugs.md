@@ -45,25 +45,7 @@ No outstanding items.
 
 ## Laravel
 
-### B655. An unknown config key is not reported
-
-**Impact: Low-Medium · Complexity: Low**
-
-```php
-config('app.name');       // fine
-config('gate.missing');   // not reported
-view('missing.page');     // reported: Unknown view
-route('gate.missing');    // reported: Unknown route
-__('boards.missing');     // reported: Unknown translation key
-```
-
-Views, routes and translation keys all have a string-key diagnostic, and
-`config()` already resolves far enough to hover a key and name the file it
-came from, so the index that would answer this is built. The diagnostic
-itself is simply absent. Add it alongside the other three, with the same
-conservative stance they take when the index is incomplete. Conformance row
-`framework.config-diagnostic` in the language-server probes, the only
-non-green framework cell for our column.
+No outstanding items.
 
 ## Blade
 

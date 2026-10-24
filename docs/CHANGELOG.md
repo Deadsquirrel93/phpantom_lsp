@@ -41,6 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Config keys with no config file are reported.** In a Laravel application, `config('gate.missing')` is now reported as an unknown config key when no config file declares `gate`, not only when the key is a typo inside a file that exists. Keys under a config file a package registers in a way that can't be read are still left alone.
 - **Members of `new $class` resolve.** `(new $class())->name()` and `new $class()->name()` now resolve against the class `$class` names, whether it holds `$obj::class`, `get_class()`, a class name string or a `class-string<T>`. Previously the method could be reported as unverifiable, or as a call on a string.
 - **Untyped functions return what their body returns.** A function with no return type now has it read from its `return` statements, as a method already did, so members accessed on its result complete, show in hover, and are no longer reported as unresolved.
 - **`new` on a parenthesised expression resolves.** `new (User::class)()`, `new ('App\\User')()` and `new ($factory->class)()` now produce the class the expression names, so members accessed on the new instance complete and are no longer reported as unknown.

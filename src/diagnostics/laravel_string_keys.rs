@@ -82,6 +82,11 @@ struct DeclaredKeys<'a> {
     /// `None` unless the project registers routes of its own.
     routes: Option<Arc<crate::virtual_members::laravel::RouteDiscovery>>,
     config_keys: Arc<[String]>,
+    /// Config namespaces a provider registers but whose file we could not
+    /// read: their keys are real, and none of them can be judged.
+    unread_config_namespaces: Vec<String>,
+    /// A provider registered config under a namespace we could not name.
+    open_config_namespace: bool,
     /// The config resources (guards, disks, …) whose subtree the declared
     /// config keys cover.
     config_resource_mask: u8,
@@ -137,6 +142,19 @@ impl<'a> DeclaredKeys<'a> {
             backend.cached_config_keys()
         } else {
             Arc::default()
+        };
+        let (unread_config_namespaces, open_config_namespace) = if has_config {
+            let resources = backend.laravel.provider_resources.read();
+            let unread = resources
+                .config_files
+                .iter()
+                .filter(|file| !file.path.is_file())
+                .map(|file| file.namespace.clone())
+                .chain(resources.unread_config_namespaces.iter().cloned())
+                .collect();
+            (unread, resources.open_config_namespace)
+        } else {
+            (Vec::new(), false)
         };
         let config_resource_mask = if has_config_resource {
             config_keys.iter().fold(0, |mask, key| {
@@ -205,6 +223,8 @@ impl<'a> DeclaredKeys<'a> {
             backend,
             routes,
             config_keys,
+            unread_config_namespaces,
+            open_config_namespace,
             config_resource_mask,
             view_names,
             trans_keys,
@@ -299,15 +319,26 @@ impl<'a> DeclaredKeys<'a> {
     }
 
     fn judge_config_key(&self, key: &str) -> Verdict {
-        // Only judge a key whose config file we actually read.  An unknown
-        // root means the file never reached us, so the key cannot be wrong
-        // as far as we can tell, while a typo inside a file we did read is
-        // still caught.  A runtime write is deliberately not a root of its
-        // own: the keys one file writes say nothing about what the rest of
-        // that namespace holds, least of all when the writes that
-        // established it were spelled dynamically.
+        // An application owns its whole configuration: its own `config/`
+        // files, the framework's defaults, and the files its providers
+        // merge.  A key under a root none of them declares is as wrong as a
+        // typo inside one of them, unless a provider registers config the
+        // enumeration could not read.  A root that only runtime writes
+        // establish is not judged either: the keys one file writes say
+        // nothing about what the rest of that namespace holds, least of all
+        // when the writes that established it were spelled dynamically.
+        if self.config_keys.is_empty()
+            || self
+                .unread_config_namespaces
+                .iter()
+                .any(|namespace| is_key_or_under(key, namespace))
+        {
+            return None;
+        }
         let root = key.split('.').next().unwrap_or(key);
-        if !names_key_or_group(&self.config_keys, root) {
+        if !names_key_or_group(&self.config_keys, root)
+            && (self.open_config_namespace || self.backend.runtime_config_key_covers(root))
+        {
             return None;
         }
         // Config keys may be partial prefixes (e.g. `config('app')`) which
@@ -659,6 +690,12 @@ impl Backend {
         }
         known.binary_search_by(|k| k.as_str().cmp(&name)).is_err()
     }
+}
+
+/// Whether `key` is `group` itself or a key nested under it.
+fn is_key_or_under(key: &str, group: &str) -> bool {
+    key.strip_prefix(group)
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with('.'))
 }
 
 /// Whether the sorted `keys` hold `key` itself or a key nested under it

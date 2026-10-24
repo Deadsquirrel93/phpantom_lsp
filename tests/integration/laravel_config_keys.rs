@@ -1,11 +1,13 @@
 //! Tests for the config-key diagnostic.
 //!
-//! A library package ships no `config/` directory of its own: its keys come
-//! from the host application's config files, which we never see.  Keys under
-//! such a root are unjudgeable, while a typo inside a config file we did read
-//! must still be reported.  `Config::set()` is a write: it declares the key it
-//! names, so a later read of that key is as valid as a read of one declared
-//! on disk.
+//! An application owns its whole configuration, so a key under a root no
+//! config file declares is reported as readily as a typo inside one.  A
+//! library package ships no `config/` directory of its own: its keys come
+//! from the host application's config files, which we never see, so none of
+//! them are judged.  Neither are keys under a namespace a service provider
+//! registers from a file we cannot read.  `Config::set()` is a write: it
+//! declares the key it names, so a later read of that key is as valid as a
+//! read of one declared on disk.
 
 use crate::common::{LARAVEL_SRC_COMPOSER, create_psr4_workspace, open_php};
 use tower_lsp::LanguageServer;
@@ -83,14 +85,22 @@ async fn config_diagnostics_for(
     consumer_path: &str,
     consumer: &str,
 ) -> Vec<String> {
-    let (backend, dir) = create_psr4_workspace(
-        composer_json,
-        &[
-            ("config/app.php", APP_CONFIG),
-            ("config/filesystems.php", FILESYSTEMS_CONFIG),
-            (consumer_path, consumer),
-        ],
-    );
+    config_diagnostics_with(composer_json, consumer_path, consumer, &[]).await
+}
+
+async fn config_diagnostics_with(
+    composer_json: &str,
+    consumer_path: &str,
+    consumer: &str,
+    extra: &[(&str, &str)],
+) -> Vec<String> {
+    let mut files = vec![
+        ("config/app.php", APP_CONFIG),
+        ("config/filesystems.php", FILESYSTEMS_CONFIG),
+        (consumer_path, consumer),
+    ];
+    files.extend_from_slice(extra);
+    let (backend, dir) = create_psr4_workspace(composer_json, &files);
     backend.initialized(InitializedParams {}).await;
 
     let uri = Url::from_file_path(dir.path().join(consumer_path)).unwrap();
@@ -109,18 +119,73 @@ async fn config_diagnostics_for(
 }
 
 #[tokio::test]
-async fn only_a_typo_in_a_config_file_we_read_is_reported() {
+async fn an_unknown_key_in_an_application_is_reported() {
     let messages = config_diagnostics_for(LARAVEL_SRC_COMPOSER, "src/Settings.php", CONSUMER).await;
 
     assert_eq!(
-        messages.len(),
-        1,
-        "an unknown root file and a written key are unjudgeable, got: {messages:?}"
+        messages,
+        vec![
+            "Unknown config key: 'acme.gateway.key'".to_string(),
+            "Unknown config key: 'app.tzimezone'".to_string(),
+        ],
+        "a key under an undeclared root and a typo are both unknown, a written key is not"
     );
-    assert!(
-        messages[0].contains("app.tzimezone"),
-        "the flagged key should be the typo, got: {}",
-        messages[0]
+}
+
+const PROVIDER_LIST: &str =
+    "<?php\nreturn [\n    App\\Providers\\AcmeServiceProvider::class,\n];\n";
+
+fn acme_provider(register: &str) -> String {
+    format!(
+        "<?php\nnamespace App\\Providers;\n\nclass AcmeServiceProvider\n{{\n    public function register(): void\n    {{\n        {register}\n    }}\n}}\n"
+    )
+}
+
+/// A namespace a provider registers is real even when the file behind it is
+/// missing, so its keys cannot be judged; the rest of the configuration
+/// still can.
+#[tokio::test]
+async fn a_provider_namespace_whose_file_is_missing_is_unjudgeable() {
+    let provider =
+        acme_provider("$this->mergeConfigFrom(__DIR__.'/../../config-missing/acme.php', 'acme');");
+    let messages = config_diagnostics_with(
+        LARAVEL_SRC_COMPOSER,
+        "src/Settings.php",
+        CONSUMER,
+        &[
+            ("bootstrap/providers.php", PROVIDER_LIST),
+            ("src/Providers/AcmeServiceProvider.php", &provider),
+        ],
+    )
+    .await;
+
+    assert_eq!(
+        messages,
+        vec!["Unknown config key: 'app.tzimezone'".to_string()],
+    );
+}
+
+/// A provider that names its config namespace at runtime may have registered
+/// any root, so only keys under a root we read are judged.
+#[tokio::test]
+async fn a_provider_namespace_named_at_runtime_leaves_unknown_roots_alone() {
+    let provider = acme_provider(
+        "$this->mergeConfigFrom(__DIR__.'/../../config-missing/acme.php', $this->name);",
+    );
+    let messages = config_diagnostics_with(
+        LARAVEL_SRC_COMPOSER,
+        "src/Settings.php",
+        CONSUMER,
+        &[
+            ("bootstrap/providers.php", PROVIDER_LIST),
+            ("src/Providers/AcmeServiceProvider.php", &provider),
+        ],
+    )
+    .await;
+
+    assert_eq!(
+        messages,
+        vec!["Unknown config key: 'app.tzimezone'".to_string()],
     );
 }
 
