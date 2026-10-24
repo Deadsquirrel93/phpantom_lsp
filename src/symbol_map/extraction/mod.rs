@@ -125,9 +125,11 @@ struct ExtractionCtx<'a> {
     /// `get()` and `set()` would otherwise record all over any other
     /// project.
     symfony: bool,
-    /// Whether the file names anything from Symfony's configurator
-    /// namespace, checked once lazily.
+    /// Whether the file names anything from Symfony's container
+    /// configurator namespace, checked once lazily.
     uses_symfony_configurators: Option<bool>,
+    /// Likewise for Symfony's routing configurator namespace.
+    uses_symfony_routing_configurators: Option<bool>,
 }
 
 /// A variable token's name without its `$`.
@@ -341,6 +343,7 @@ fn extract_symbol_map_inner(
         covers_default_class: None,
         symfony,
         uses_symfony_configurators: None,
+        uses_symfony_routing_configurators: None,
     };
 
     for stmt in program.statements.iter() {

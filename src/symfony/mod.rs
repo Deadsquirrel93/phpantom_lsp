@@ -1,10 +1,11 @@
-//! Symfony's service container: the service IDs and parameters a project
-//! declares, and where.
+//! Symfony's service container and router: the service IDs, parameters,
+//! and route names a project declares, and where.
 //!
 //! Every declaration and every use is a
 //! [`StringKey`](crate::symbol_map::SymbolKind::StringKey) span in some
-//! file's symbol map: YAML and XML configuration through the resource
-//! symbol maps (see [`resources`]), and PHP through symbol-map extraction.
+//! file's symbol map: YAML and XML configuration and Twig templates through
+//! the resource symbol maps (see [`resources`] and [`routes`]), and PHP
+//! through symbol-map extraction.
 //! A declaration is a span with `is_write` set, or a configurator call
 //! whose receiver only the type engine can confirm (a
 //! [`TypedReceiverSite`](crate::symbol_map::TypedReceiverSite) with
@@ -12,6 +13,7 @@
 //! declared names are read from those maps rather than from a second index.
 
 pub(crate) mod resources;
+pub(crate) mod routes;
 
 use std::collections::HashSet;
 use std::sync::atomic::Ordering;
@@ -23,16 +25,16 @@ use crate::Backend;
 use crate::symbol_map::{StringKeyKind, SymbolKind, SymbolMap};
 use crate::text_position::LineIndex;
 
-/// The files whose symbol maps declare a Symfony service ID or container
-/// parameter.
+/// The files whose symbol maps declare a Symfony service ID, container
+/// parameter, or route.
 #[derive(Default)]
 pub(crate) struct SymfonyState {
     declaring_uris: RwLock<HashSet<String>>,
 }
 
-/// Whether `map` declares a service ID or a container parameter, outright
-/// or through a configurator call still to be confirmed.
-fn declares_container_keys(map: &SymbolMap) -> bool {
+/// Whether `map` declares a service ID, a container parameter, or a route,
+/// outright or through a configurator call still to be confirmed.
+fn declares_symfony_keys(map: &SymbolMap) -> bool {
     map.spans.iter().any(|span| {
         matches!(
             &span.kind,
@@ -79,7 +81,7 @@ impl Backend {
         if !self.is_symfony_project() {
             return;
         }
-        let declares = declares_container_keys(map)
+        let declares = declares_symfony_keys(map)
             && !self
                 .workspace
                 .vendor_uri_prefixes
@@ -142,8 +144,8 @@ impl Backend {
         }
     }
 
-    /// Every service ID or container parameter the project declares,
-    /// sorted.
+    /// Every service ID, container parameter, or route name the project
+    /// declares, sorted.
     pub(crate) fn symfony_declared_names(&self, kind: StringKeyKind) -> Vec<String> {
         let mut names = Vec::new();
         self.visit_symfony_declarations(kind, |_, _, _, key| names.push(key.to_string()));
@@ -152,8 +154,8 @@ impl Backend {
         names
     }
 
-    /// Where the project declares the service ID or container parameter
-    /// `key`.
+    /// Where the project declares the service ID, container parameter, or
+    /// route name `key`.
     ///
     /// A service declared under its own class name is that class, and its
     /// ID is spelled as one: one with no declaration of its own (the usual

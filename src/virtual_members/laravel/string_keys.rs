@@ -67,9 +67,9 @@ pub(crate) fn resolve_laravel_string_key(
         StringKeyKind::GateAbility => resolve_gate_ability_definitions(backend, key),
         StringKeyKind::ContainerBinding => resolve_container_binding_definitions(backend, key),
         StringKeyKind::Env => super::env_vars::resolve_env_definitions(backend, key),
-        StringKeyKind::ServiceId | StringKeyKind::ContainerParameter => {
-            backend.symfony_declaration_locations(*kind, key)
-        }
+        StringKeyKind::ServiceId
+        | StringKeyKind::ContainerParameter
+        | StringKeyKind::SymfonyRoute => backend.symfony_declaration_locations(*kind, key),
     }
 }
 
@@ -254,7 +254,9 @@ pub(crate) fn find_laravel_string_key_references(
         | StringKeyKind::Env => find_string_key_usages(kind, key, backend, snapshot, true),
         // A Symfony declaration is a span in a configuration file's map like
         // any use, so the usages already hold it.
-        StringKeyKind::ServiceId | StringKeyKind::ContainerParameter => {
+        StringKeyKind::ServiceId
+        | StringKeyKind::ContainerParameter
+        | StringKeyKind::SymfonyRoute => {
             return find_string_key_usages(kind, key, backend, snapshot, include_declaration);
         }
     };

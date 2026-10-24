@@ -25,6 +25,8 @@ final class DemoController extends AbstractController
         private readonly string $senderName,
     ) {}
 
+    // Try: find references on 'app_demo'. The URL generated below and the
+    // link in templates/demo/index.html.twig both name it.
     #[Route('/demo/{userId}', name: 'app_demo')]
     public function index(ContainerInterface $container, string $userId): Response
     {
@@ -32,6 +34,7 @@ final class DemoController extends AbstractController
         // getParameter(''). The receiver's type is what makes these names.
         $container->has('app.welcome_mailer');
         $supportEmail = $this->getParameter('app.support_email');
+        // Try: complete a route name inside generateUrl('').
         $this->generateUrl('app_demo', ['userId' => $userId]);
         $title = $this->translator->trans('demo.title');
         $this->events->dispatch(new OrderPlaced($userId), 'app.order.placed');

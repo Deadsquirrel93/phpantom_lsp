@@ -152,7 +152,7 @@ fn scan_yaml(content: &str, spans: &mut Vec<SymbolSpan>) {
 }
 
 /// The key of a `key: value` line and its absolute offset.
-fn yaml_mapping_key(line: &str, line_start: usize) -> Option<(&str, usize)> {
+pub(super) fn yaml_mapping_key(line: &str, line_start: usize) -> Option<(&str, usize)> {
     let indent = crate::framework::leading_spaces(line);
     let rest = &line[indent..];
     let colon = rest.find(':')?;
@@ -161,7 +161,7 @@ fn yaml_mapping_key(line: &str, line_start: usize) -> Option<(&str, usize)> {
 }
 
 /// `line` without a trailing `# comment`, leaving a `#` inside quotes.
-fn yaml_content_before_comment(line: &str) -> &str {
+pub(super) fn yaml_content_before_comment(line: &str) -> &str {
     let mut quote = None;
     for (index, byte) in line.bytes().enumerate() {
         match (quote, byte) {

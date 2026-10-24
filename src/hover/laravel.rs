@@ -196,11 +196,13 @@ impl Backend {
                 };
                 ("Env", detail)
             }
-            StringKeyKind::ServiceId | StringKeyKind::ContainerParameter => {
-                let label = if *kind == StringKeyKind::ServiceId {
-                    "Service"
-                } else {
-                    "Parameter"
+            StringKeyKind::ServiceId
+            | StringKeyKind::ContainerParameter
+            | StringKeyKind::SymfonyRoute => {
+                let label = match kind {
+                    StringKeyKind::ServiceId => "Service",
+                    StringKeyKind::ContainerParameter => "Parameter",
+                    _ => "Route",
                 };
                 let declared = self.symfony_declaration_locations(*kind, key);
                 let detail = match declared

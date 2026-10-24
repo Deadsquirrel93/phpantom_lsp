@@ -38,6 +38,7 @@ pub(crate) fn string_key_item_kind(kind: &StringKeyKind) -> CompletionItemKind {
         StringKeyKind::ServiceId => CompletionItemKind::REFERENCE,
         StringKeyKind::ContainerParameter => CompletionItemKind::PROPERTY,
         StringKeyKind::Route
+        | StringKeyKind::SymfonyRoute
         | StringKeyKind::Command
         | StringKeyKind::Section
         | StringKeyKind::Stack
@@ -158,9 +159,9 @@ impl Backend {
             }
             StringKeyKind::GateAbility => self.cached_gate_abilities(),
             StringKeyKind::Env => crate::virtual_members::laravel::enumerate_env_keys(self).into(),
-            StringKeyKind::ServiceId | StringKeyKind::ContainerParameter => {
-                self.symfony_declared_names(*kind).into()
-            }
+            StringKeyKind::ServiceId
+            | StringKeyKind::ContainerParameter
+            | StringKeyKind::SymfonyRoute => self.symfony_declared_names(*kind).into(),
             StringKeyKind::Section | StringKeyKind::Stack | StringKeyKind::ContainerBinding => {
                 Arc::new([])
             }

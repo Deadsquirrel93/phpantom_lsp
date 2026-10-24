@@ -1,21 +1,25 @@
-//! The names Symfony's service container takes as strings in PHP: service
-//! IDs and container parameters.
+//! The names Symfony takes as strings in PHP: service IDs, container
+//! parameters, and route names.
 //!
 //! The configurator functions (`service('app.mailer')`, `param('app.name')`)
-//! and the `#[Autowire]` attribute are recognised by their resolved name.
-//! A method call names one only on the right receiver: `get()` on a
-//! container, `set()` on a configurator.  Those names are far too common to
-//! claim on sight, and the receiver's spelling does not settle what it is
-//! (`$container` may be anything), so each call is recorded as a
-//! [`TypedReceiverSite`] for the type engine to confirm (see
-//! [`symfony_receiver_method`]).
+//! and the `#[Autowire]` and `#[Route]` attributes are recognised by their
+//! resolved name.  A method call names one only on the right receiver:
+//! `get()` on a container, `set()` on a configurator, `generate()` on a URL
+//! generator.  Those names are far too common to claim on sight, and the
+//! receiver's spelling does not settle what it is (`$container` may be
+//! anything), so each call is recorded as a [`TypedReceiverSite`] for the
+//! type engine to confirm (see [`symfony_receiver_method`]).
 
 use super::*;
-use crate::symbol_map::{ReceiverClass, StringKeyKind};
+use crate::symbol_map::{ReceiverClass, SYMFONY_CONTAINER_CONFIGURATOR_NS, StringKeyKind};
 use crate::virtual_members::laravel::helpers::{resolved_string_literal, string_literal_at_range};
 
-const CONFIGURATOR_NS: &str = "Symfony\\Component\\DependencyInjection\\Loader\\Configurator\\";
+const CONFIGURATOR_NS: &str = SYMFONY_CONTAINER_CONFIGURATOR_NS;
 const AUTOWIRE_ATTRIBUTE: &str = "Symfony\\Component\\DependencyInjection\\Attribute\\Autowire";
+const ROUTE_ATTRIBUTES: [&str; 2] = [
+    "Symfony\\Component\\Routing\\Attribute\\Route",
+    "Symfony\\Component\\Routing\\Annotation\\Route",
+];
 
 /// What a method call names in its positional argument `index`, when its
 /// receiver turns out to be the right class: the receiver it needs, and
@@ -32,13 +36,18 @@ pub(crate) fn symfony_receiver_method(
     // turned away on a single byte.
     if !matches!(
         member_name.as_bytes().first().map(u8::to_ascii_lowercase),
-        Some(b'g' | b'h' | b's' | b'a' | b'd')
+        Some(b'g' | b'h' | b's' | b'a' | b'd' | b'r')
     ) {
         return None;
     }
     let is = |name: &str| member_name.eq_ignore_ascii_case(name);
     match index {
         0 if is("get") || is("has") => Some((ReceiverClass::ContainerLookup, false)),
+        0 if is("generateUrl") || is("redirectToRoute") => {
+            Some((ReceiverClass::ControllerRouting, false))
+        }
+        0 if is("generate") => Some((ReceiverClass::UrlGenerator, false)),
+        0 if is("add") => Some((ReceiverClass::RoutingConfigurator, true)),
         0 if is("getParameter") || is("hasParameter") => {
             Some((ReceiverClass::ParameterHolder, false))
         }
@@ -70,7 +79,9 @@ pub(in crate::symbol_map::extraction) fn record_symfony_receiver_sites(
         let Some((receiver, is_write)) = symfony_receiver_method(member_name, index) else {
             continue;
         };
-        if receiver.is_configurator() && !uses_configurators(ctx) {
+        if let Some(namespace) = receiver.configurator_namespace()
+            && !uses_configurators(namespace, ctx)
+        {
             continue;
         }
         let Some((key, start, end)) = resolved_string_literal(argument.value, ctx.content) else {
@@ -90,19 +101,26 @@ pub(in crate::symbol_map::extraction) fn record_symfony_receiver_sites(
     }
 }
 
-/// Whether the file names anything from Symfony's configurator namespace,
-/// which a receiver has to be a class of for `set()`, `alias()`, or
-/// `decorate()` to declare or name a service.  Those method names are common
-/// enough elsewhere (`$session->set('cart', …)`) that recording every call
-/// for the type engine would make every such file one the declared names
-/// are looked for in.  A file without resolved names is not judged.
-fn uses_configurators(ctx: &mut ExtractionCtx<'_>) -> bool {
+/// Whether the file names anything from one of Symfony's configurator
+/// namespaces, which a receiver has to be a class of for `set()`,
+/// `alias()`, `decorate()`, or `add()` to declare or name a service or a
+/// route.  Those method names are common enough elsewhere
+/// (`$session->set('cart', …)`, `$collection->add('x')`) that recording
+/// every call for the type engine would make every such file one the
+/// declared names are looked for in.  A file without resolved names is not
+/// judged.
+fn uses_configurators(namespace: &str, ctx: &mut ExtractionCtx<'_>) -> bool {
     let resolved_names = ctx.resolved_names;
-    *ctx.uses_symfony_configurators.get_or_insert_with(|| {
+    let slot = if namespace == CONFIGURATOR_NS {
+        &mut ctx.uses_symfony_configurators
+    } else {
+        &mut ctx.uses_symfony_routing_configurators
+    };
+    *slot.get_or_insert_with(|| {
         resolved_names.is_none_or(|names| {
             names.iter().any(|(_, name, _)| {
-                name.get(..CONFIGURATOR_NS.len())
-                    .is_some_and(|prefix| prefix.eq_ignore_ascii_case(CONFIGURATOR_NS))
+                name.get(..namespace.len())
+                    .is_some_and(|prefix| prefix.eq_ignore_ascii_case(namespace))
             })
         })
     })
@@ -200,6 +218,227 @@ pub(in crate::symbol_map::extraction) fn emit_autowire_attribute_spans(
     }
 }
 
+/// Whether `class_name`, as resolved, is Symfony's `#[Route]`, under its
+/// current name or the `Annotation` one older applications import.
+fn is_route_attribute(class_name: &str) -> bool {
+    let class_name = class_name.trim_start_matches('\\');
+    ROUTE_ATTRIBUTES
+        .iter()
+        .any(|route| class_name.eq_ignore_ascii_case(route))
+}
+
+/// The arguments of one `#[Route]` attribute that bear on its name.
+#[derive(Default)]
+struct RouteArguments<'e, 'a> {
+    path: Option<&'e Expression<'a>>,
+    name: Option<&'e Expression<'a>>,
+    alias: Option<&'e Expression<'a>>,
+}
+
+/// The `#[Route]` attributes in `attribute_lists`, by their arguments.
+fn route_attributes<'e, 'a>(
+    attribute_lists: &'e Sequence<'a, AttributeList<'a>>,
+    ctx: &ExtractionCtx<'_>,
+) -> Vec<RouteArguments<'e, 'a>> {
+    let mut routes = Vec::new();
+    for attribute in attribute_lists
+        .iter()
+        .flat_map(|list| list.attributes.iter())
+    {
+        let written = bytes_to_str(attribute.name.value());
+        let resolved = ctx
+            .resolved_name_at(attribute.name.span().start.offset)
+            .unwrap_or(written);
+        if !is_route_attribute(resolved) {
+            continue;
+        }
+        let mut route = RouteArguments::default();
+        if let Some(arguments) = &attribute.argument_list {
+            for (index, argument) in arguments.arguments.iter().enumerate() {
+                let (parameter, value) = match argument {
+                    PartialArgument::Named(named) => (bytes_to_str(named.name.value), named.value),
+                    PartialArgument::Positional(positional) if index == 0 => {
+                        ("path", positional.value)
+                    }
+                    PartialArgument::Positional(positional) if index == 1 => {
+                        ("name", positional.value)
+                    }
+                    _ => continue,
+                };
+                match parameter {
+                    "path" => route.path = Some(value),
+                    "name" => route.name = Some(value),
+                    "alias" => route.alias = Some(value),
+                    _ => {}
+                }
+            }
+        }
+        routes.push(route);
+    }
+    routes
+}
+
+/// Emit the route names a class's `#[Route]` attributes declare.
+///
+/// A route on a method is named by its `name:`, after the name of the
+/// class's own first `#[Route]`, which prefixes every route in it.  A route
+/// with no name is given the one Symfony derives from the class and the
+/// method, spanning its path.  A class with no routes on its methods and an
+/// `__invoke()` is a single action, and its own `#[Route]`s are its routes.
+/// An alias is declared as it is written, without the prefix.
+pub(in crate::symbol_map::extraction) fn emit_symfony_route_spans(
+    class: &Class<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.symfony {
+        return;
+    }
+    let class_routes = route_attributes(&class.attribute_lists, ctx);
+    // Derived names are spelled from the class an action is loaded with,
+    // which an abstract one never is.
+    let derive = (!class.modifiers.contains_abstract())
+        .then(|| ctx.resolved_name_at(class.name.span.start.offset))
+        .flatten();
+    let mut spans = Vec::new();
+
+    let prefix = class_routes
+        .first()
+        .and_then(|route| route.name)
+        .and_then(|name| resolved_string_literal(name, ctx.content))
+        .map_or("", |(name, _, _)| name);
+    let mut any_method_route = false;
+    let mut invoke = None;
+    for member in class.members.iter() {
+        let ClassLikeMember::Method(method) = member else {
+            continue;
+        };
+        let method_name = bytes_to_str(method.name.value);
+        if method_name.eq_ignore_ascii_case("__invoke") {
+            invoke = Some(method_name);
+        }
+        let routes = route_attributes(&method.attribute_lists, ctx);
+        any_method_route |= !routes.is_empty();
+        push_action_route_spans(
+            &routes,
+            prefix,
+            derive,
+            method_name,
+            ctx.content,
+            &mut spans,
+        );
+    }
+    if !any_method_route && let Some(invoke) = invoke {
+        push_action_route_spans(&class_routes, "", derive, invoke, ctx.content, &mut spans);
+    }
+    ctx.spans.extend(spans);
+}
+
+/// The spans the `#[Route]`s of one action declare.  `derive_from` is the
+/// class to derive a name from for a route that has none; Symfony numbers
+/// the unnamed routes of one action from the second one on.
+fn push_action_route_spans(
+    routes: &[RouteArguments<'_, '_>],
+    prefix: &str,
+    derive_from: Option<&str>,
+    method: &str,
+    content: &str,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    let mut unnamed = 0;
+    for route in routes {
+        let derived = match (route.name, derive_from) {
+            (None, Some(class)) => {
+                unnamed += 1;
+                Some(default_route_name(class, method, unnamed - 1))
+            }
+            _ => None,
+        };
+        push_route_spans(route, prefix, derived, content, spans);
+    }
+}
+
+/// The spans one `#[Route]` declares: its name, or the `derived` one over
+/// its path, and its aliases.
+fn push_route_spans(
+    route: &RouteArguments<'_, '_>,
+    prefix: &str,
+    derived: Option<String>,
+    content: &str,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    let declare = |spans: &mut Vec<SymbolSpan>, key: String, start: usize, end: usize| {
+        spans.push(SymbolSpan {
+            start: start as u32,
+            end: end as u32,
+            kind: SymbolKind::StringKey {
+                kind: StringKeyKind::SymfonyRoute,
+                key,
+                is_write: true,
+                is_optional: false,
+            },
+        });
+    };
+    match route.name {
+        Some(name) => {
+            if let Some((name, start, end)) = resolved_string_literal(name, content) {
+                declare(spans, format!("{prefix}{name}"), start, end);
+            }
+        }
+        None => {
+            if let Some(derived) = derived
+                && let Some((_, start, end)) = route
+                    .path
+                    .and_then(|path| resolved_string_literal(path, content))
+            {
+                declare(spans, format!("{prefix}{derived}"), start, end);
+            }
+        }
+    }
+    let aliases: Vec<&Expression<'_>> = match route.alias {
+        Some(Expression::Array(array)) => array
+            .elements
+            .iter()
+            .filter_map(|element| match element {
+                ArrayElement::Value(value) => Some(value.value),
+                _ => None,
+            })
+            .collect(),
+        Some(alias) => vec![alias],
+        None => Vec::new(),
+    };
+    for alias in aliases {
+        if let Some((alias, start, end)) = resolved_string_literal(alias, content) {
+            declare(spans, alias.to_string(), start, end);
+        }
+    }
+}
+
+/// The name Symfony's framework gives a route declared without one: the
+/// class and the method, lowercased and joined with `_`, with `Controller`
+/// and `Bundle` dropped from the namespace segments and an `Action` suffix
+/// dropped from the method.  The `index`th unnamed route of one method
+/// takes `_index` after it.
+fn default_route_name(class: &str, method: &str, index: usize) -> String {
+    let mut name = format!("{}_{method}", class.trim_start_matches('\\')).replace('\\', "_");
+    name.make_ascii_lowercase();
+    if index > 0 {
+        name.push_str(&format!("_{index}"));
+    }
+    let mut name = name.replace("bundle_", "_").replace("controller_", "_");
+    if method.ends_with("Action") || method.ends_with("_action") {
+        let digits = name.len() - name.trim_end_matches(|c: char| c.is_ascii_digit()).len();
+        let suffix_start = if digits > 0 && name[..name.len() - digits].ends_with('_') {
+            name.len() - digits - 1
+        } else {
+            name.len()
+        };
+        if name[..suffix_start].ends_with("action") {
+            name.replace_range(suffix_start - "action".len()..suffix_start, "");
+        }
+    }
+    name.replace("__", "_")
+}
+
 /// The names an `#[Autowire]` value is written in terms of: `'@app.mailer'`
 /// injects a service (`'@@'` escapes a literal `@`), and any other string
 /// is resolved for `%name%` parameter placeholders.
@@ -284,6 +523,71 @@ mod tests {
                 ("app.alias", ReceiverClass::ServicesConfigurator, true),
                 ("app.mailer", ReceiverClass::ServicesConfigurator, false),
             ]
+        );
+    }
+
+    fn declared_routes(map: &SymbolMap, php: &str) -> Vec<(String, String)> {
+        map.spans
+            .iter()
+            .filter_map(|span| match &span.kind {
+                crate::symbol_map::SymbolKind::StringKey {
+                    kind: crate::symbol_map::StringKeyKind::SymfonyRoute,
+                    key,
+                    is_write: true,
+                    ..
+                } => Some((
+                    key.clone(),
+                    php[span.start as usize..span.end as usize].to_string(),
+                )),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn route_attributes_declare_prefixed_derived_and_aliased_names() {
+        let php = "<?php\nnamespace App\\Controller;\nuse Symfony\\Component\\Routing\\Attribute\\Route;\n#[Route('/blog', name: 'blog_')]\nclass BlogController {\n    #[Route('/', name: 'index', alias: ['blog_home', 'home'])]\n    public function index() {}\n    #[Route('/a')]\n    #[Route('/b')]\n    public function showAction() {}\n}\n";
+        assert_eq!(
+            declared_routes(&map_of(php), php),
+            vec![
+                ("blog_index".to_string(), "index".to_string()),
+                ("blog_home".to_string(), "blog_home".to_string()),
+                ("home".to_string(), "home".to_string()),
+                ("blog_app_blog_show".to_string(), "/a".to_string()),
+                ("blog_app_blog_show_1".to_string(), "/b".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn an_invokable_controller_is_routed_by_its_class_attribute() {
+        let php = "<?php\nnamespace App\\Controller;\nuse Symfony\\Component\\Routing\\Annotation\\Route;\n#[Route('/about', name: 'about')]\nclass AboutController {\n    public function __invoke() {}\n}\n#[Route('/admin', name: 'admin_')]\nclass AdminController {\n    public function __invoke() {}\n    #[Route('/x', name: 'x')]\n    public function x() {}\n}\n";
+        assert_eq!(
+            declared_routes(&map_of(php), php),
+            vec![
+                ("about".to_string(), "about".to_string()),
+                ("admin_x".to_string(), "x".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn derived_route_names_follow_the_framework() {
+        assert_eq!(
+            super::default_route_name("App\\Controller\\DemoController", "index", 0),
+            "app_demo_index"
+        );
+        assert_eq!(
+            super::default_route_name(
+                "Acme\\BlogBundle\\Controller\\PostController",
+                "listAction",
+                0
+            ),
+            "acme_blog_post_list"
+        );
+        assert_eq!(
+            super::default_route_name("App\\Controller\\DemoController", "listAction", 2),
+            "app_demo_list_2"
         );
     }
 

@@ -350,14 +350,14 @@ impl Backend {
         }
     }
 
-    /// Refresh the reference index for the YAML/XML files of a watched
-    /// batch.
+    /// Refresh the reference index for the YAML, XML, and Twig files of a
+    /// watched batch.
     fn reindex_watched_resource_files(
         &self,
         resource_changes: &[(String, PathBuf, FileChangeType)],
     ) {
         tracing::info!(
-            "PHPantom: {} watched YAML/XML file(s) changed on disk, refreshing references",
+            "PHPantom: {} watched resource file(s) changed on disk, refreshing references",
             resource_changes.len()
         );
         for (uri, path, change_type) in resource_changes {
@@ -475,6 +475,7 @@ impl Backend {
         let index_filters = self.index_filters();
         let extra_extensions = index_filters.extra_extensions().to_vec();
         let is_laravel = self.resolved_class_cache.read().laravel().is_enabled();
+        let is_symfony = self.is_symfony_project();
 
         // Create, change, and delete: what every watcher but the two
         // Composer ones asks for.
@@ -495,6 +496,9 @@ impl Backend {
             ("**/composer.lock".to_string(), WatchKind::Change),
             ("**/.phpantom.toml".to_string(), watch_all),
         ]);
+        if is_symfony {
+            patterns.push(("**/*.twig".to_string(), watch_all));
+        }
         if is_laravel {
             patterns.extend([
                 ("**/*.json".to_string(), watch_all),
@@ -544,6 +548,7 @@ impl Backend {
             crate::WatchedFileInputs {
                 extra_extensions,
                 is_laravel,
+                is_symfony,
                 followed_links,
             },
         )

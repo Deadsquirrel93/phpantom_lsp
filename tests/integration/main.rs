@@ -269,6 +269,7 @@ mod signature_from_call_site;
 mod signature_help;
 mod smoke;
 mod symfony_container;
+mod symfony_routes;
 mod type_definition;
 mod type_hierarchy;
 mod watched_files;

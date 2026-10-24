@@ -547,6 +547,7 @@ fn the_startup_watcher_registration_is_recorded_for_a_client_that_opted_in() {
         Some(crate::WatchedFileInputs {
             extra_extensions: Vec::new(),
             is_laravel: true,
+            is_symfony: true,
             followed_links: Vec::new(),
         })
     );
@@ -590,6 +591,7 @@ fn reload_config_updates_the_registered_watcher_state_for_a_new_extension() {
         Some(crate::WatchedFileInputs {
             extra_extensions: Vec::new(),
             is_laravel: true,
+            is_symfony: true,
             followed_links: Vec::new(),
         })
     );
@@ -606,6 +608,7 @@ fn reload_config_updates_the_registered_watcher_state_for_a_new_extension() {
         Some(crate::WatchedFileInputs {
             extra_extensions: vec!["module".to_string()],
             is_laravel: true,
+            is_symfony: true,
             followed_links: Vec::new(),
         }),
         "a reload that adds an extension must update the registered watcher state"
@@ -634,6 +637,7 @@ fn reload_config_leaves_the_registered_watcher_state_untouched_for_an_unrelated_
         Some(crate::WatchedFileInputs {
             extra_extensions: Vec::new(),
             is_laravel: true,
+            is_symfony: true,
             followed_links: Vec::new(),
         })
     );
@@ -789,6 +793,7 @@ fn a_client_extension_update_updates_the_registered_watcher_state() {
         Some(crate::WatchedFileInputs {
             extra_extensions: vec!["module".to_string()],
             is_laravel: true,
+            is_symfony: true,
             followed_links: Vec::new(),
         }),
         "a client-forwarded extension must be watched"

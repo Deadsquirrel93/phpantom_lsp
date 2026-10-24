@@ -3,5 +3,9 @@
 {% block body %}
   <h1>{{ 'demo.title'|trans }}</h1>
   {% include 'demo/_card.html.twig' %}
+  {# Try: go-to-definition on a route name below. app_demo is declared by the
+     #[Route] on DemoController::index(), app_demo_legacy in
+     config/routes.yaml. #}
   <a href="{{ path('app_demo', {'userId': 42}) }}">{{ sender }}</a>
+  <a href="{{ path('app_demo_legacy') }}">Legacy</a>
 {% endblock %}

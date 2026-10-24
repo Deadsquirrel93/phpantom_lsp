@@ -221,6 +221,10 @@ impl Backend {
         {
             return Some(response);
         }
+        // A template is not PHP, so nothing below applies to it.
+        if crate::symfony::routes::is_twig_uri(uri) {
+            return None;
+        }
 
         // A template is analysed as the virtual PHP it lowers to, with the
         // cursor moved into it, so variable resolution walks the

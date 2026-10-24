@@ -1,4 +1,4 @@
-//! Symfony service ID and container parameter completion.
+//! Symfony service ID, container parameter, and route name completion.
 //!
 //! In PHP the cursor's call is read from the raw buffer, which is mid-edit
 //! and usually does not parse, and is judged by the same predicates the
@@ -9,7 +9,8 @@
 //!
 //! In YAML and XML configuration the line before the cursor says it: an `@`
 //! starts a service reference, an unclosed `%` a parameter placeholder, and
-//! a handful of XML attributes take a service ID.
+//! a handful of XML attributes take a service ID.  In a Twig template, the
+//! first argument of `path()` and `url()` is a route name.
 
 use tower_lsp::lsp_types::{CompletionResponse, Position};
 
@@ -28,8 +29,8 @@ use crate::text_position::position_to_offset;
 use crate::types::{AccessKind, FileContext};
 
 impl Backend {
-    /// Complete the service ID or parameter name a PHP string literal is
-    /// being typed as.
+    /// Complete the service ID, parameter, or route name a PHP string
+    /// literal is being typed as.
     pub(crate) fn try_symfony_string_key_completion(
         &self,
         content: &str,
@@ -119,18 +120,25 @@ impl Backend {
     }
 
     /// Complete a service reference or parameter placeholder in a YAML or
-    /// XML configuration file.
+    /// XML configuration file, or a route name in a Twig template.
     pub(crate) fn try_symfony_resource_completion(
         &self,
         uri: &str,
         content: &str,
         position: Position,
     ) -> Option<CompletionResponse> {
-        if !self.is_symfony_project() || !crate::symfony::resources::is_container_config_uri(uri) {
+        if !self.is_symfony_project() {
             return None;
         }
         let cursor = position_to_offset(content, position) as usize;
-        let (kind, prefix_start) = resource_key_at(content, cursor)?;
+        let (kind, prefix_start) = if crate::symfony::routes::is_twig_uri(uri) {
+            let start = crate::symfony::routes::twig_route_name_start(content, cursor)?;
+            (StringKeyKind::SymfonyRoute, start)
+        } else if crate::symfony::resources::is_container_config_uri(uri) {
+            resource_key_at(content, cursor)?
+        } else {
+            return None;
+        };
         self.symfony_key_response(kind, content, prefix_start, cursor, position)
     }
 }

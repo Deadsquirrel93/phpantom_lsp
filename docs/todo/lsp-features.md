@@ -502,3 +502,61 @@ for a project with dozens of bundles.
 (`symfony_receiver_method`), `src/symbol_map/string_keys.rs`
 (`ReceiverClass`), `src/symfony/`.
 
+---
+
+## F27. Symfony route parameters
+
+**Impact: Medium · Complexity: Medium**
+
+```php
+#[Route('/post/{slug}', name: 'blog_post')]
+public function show(string $slug): Response { … }
+
+$this->generateUrl('blog_post', ['slug' => $post->getSlug()]);
+```
+
+```twig
+{{ path('blog_post', {slug: post.slug}) }}
+```
+
+Route names complete and navigate, but the parameters a route's path
+declares do not: the `slug` key above neither completes from `{slug}` nor
+navigates to it. Laravel completes the keys of `route('name', [...])` from
+the URI it keeps with each route name (`completion/laravel_route_params.rs`).
+A parameter only means something under its route, so it does not fit a
+`StringKey` span on its own: a key spelled as one global name would merge
+every route's `id`. It needs the path kept beside each route declaration
+(the attribute's path, the YAML `path:`, the XML `path` attribute, the
+configurator's second argument, and the class-level prefix in front of a
+method's path), and the parameter array of each `generateUrl()`,
+`redirectToRoute()`, `generate()`, `path()`, and `url()` call read against
+it.
+
+**Where to look:** `src/symbol_map/extraction/symfony.rs`
+(`emit_symfony_route_spans`), `src/symfony/routes.rs`,
+`src/completion/laravel_route_params.rs`.
+
+---
+
+## F28. Symfony route names a loader composes
+
+**Impact: Low-Medium · Complexity: Medium**
+
+A route's name is read where it is declared: a `#[Route]` attribute, with
+its class's name prefix, a routing YAML or XML entry, or a routing
+configurator's `add()`. A few names are put together elsewhere, and are
+missed:
+
+- an import's `name_prefix:` in the routing YAML (or `->namePrefix()` in a
+  configurator), which prefixes every route it loads, attribute routes
+  included;
+- the routes a collection's `add()` declares under its
+  `$routes->collection('blog_')` prefix;
+- the `@Route` docblock annotations older applications still use;
+- the routes bundles declare in their own routing files, which is also why
+  only names under the application's own `app_` prefix are reported as
+  undeclared.
+
+**Where to look:** `src/symfony/routes.rs`,
+`src/symbol_map/extraction/symfony.rs`, `src/symbol_map/string_keys.rs`
+(`ReceiverClass::RoutingConfigurator`).

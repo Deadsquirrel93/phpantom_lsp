@@ -69,6 +69,12 @@ pub(crate) enum StringKeyKind {
     /// PHP configurator's `$parameters->set()`, read by `getParameter()`,
     /// `param()`, `#[Autowire(param: …)]`, and `%name%` placeholders.
     ContainerParameter,
+    /// A Symfony route name: declared by a `#[Route]` attribute, a key in
+    /// the routing YAML, a `<route>` in the routing XML, or a routing
+    /// configurator's `add()`, and read by `generateUrl()`,
+    /// `redirectToRoute()`, a URL generator's `generate()`, and Twig's
+    /// `path()` and `url()`.
+    SymfonyRoute,
 }
 
 impl StringKeyKind {
@@ -77,10 +83,12 @@ impl StringKeyKind {
         matches!(self, Self::Config | Self::ConfigResource(_))
     }
 
-    /// Whether this key belongs to a Symfony service container rather than
-    /// to Laravel.
+    /// Whether this key belongs to Symfony rather than to Laravel.
     pub(crate) const fn is_symfony(self) -> bool {
-        matches!(self, Self::ServiceId | Self::ContainerParameter)
+        matches!(
+            self,
+            Self::ServiceId | Self::ContainerParameter | Self::SymfonyRoute
+        )
     }
 }
 
@@ -274,6 +282,17 @@ const SYMFONY_SERVICE_CONFIGURATOR: &str =
     "Symfony\\Component\\DependencyInjection\\Loader\\Configurator\\ServiceConfigurator";
 const SYMFONY_PARAMETERS_CONFIGURATOR: &str =
     "Symfony\\Component\\DependencyInjection\\Loader\\Configurator\\ParametersConfigurator";
+const SYMFONY_URL_GENERATOR: &str = "Symfony\\Component\\Routing\\Generator\\UrlGeneratorInterface";
+const SYMFONY_ROUTING_CONFIGURATOR: &str =
+    "Symfony\\Component\\Routing\\Loader\\Configurator\\RoutingConfigurator";
+
+/// The namespace of the PHP configurators that build Symfony's service
+/// container.
+pub(crate) const SYMFONY_CONTAINER_CONFIGURATOR_NS: &str =
+    "Symfony\\Component\\DependencyInjection\\Loader\\Configurator\\";
+/// The namespace of the PHP configurators that build Symfony's routes.
+pub(crate) const SYMFONY_ROUTING_CONFIGURATOR_NS: &str =
+    "Symfony\\Component\\Routing\\Loader\\Configurator\\";
 
 /// The classes a receiver has to be an instance of for the call it receives
 /// to name a string key, and which kind of key each one makes it.
@@ -307,13 +326,21 @@ pub(crate) enum ReceiverClass {
     /// One service's configurator, whose `decorate()` names the service it
     /// replaces.
     ServiceConfigurator,
+    /// What `generateUrl()` and `redirectToRoute()` take a route name in:
+    /// the shortcuts a Symfony controller inherits.
+    ControllerRouting,
+    /// A URL generator, the router included, whose `generate()` takes a
+    /// route name.
+    UrlGenerator,
+    /// A PHP routing configurator, whose `add()` declares a route.
+    RoutingConfigurator,
 }
 
 impl ReceiverClass {
     /// Each class the receiver's type can be a subtype of, most specific
     /// first, with the kind of key the call names when it is.
     pub(crate) fn targets(self) -> &'static [(&'static str, StringKeyKind)] {
-        use StringKeyKind::{ContainerParameter, ServiceId, View};
+        use StringKeyKind::{ContainerParameter, ServiceId, SymfonyRoute, View};
         match self {
             // The concrete `Illuminate\View\Factory` implements the
             // contract, so the contract covers both spellings.
@@ -344,16 +371,25 @@ impl ReceiverClass {
                 (SYMFONY_ABSTRACT_SERVICE_CONFIGURATOR, ServiceId),
             ],
             Self::ServiceConfigurator => &[(SYMFONY_SERVICE_CONFIGURATOR, ServiceId)],
+            Self::ControllerRouting => &[(SYMFONY_ABSTRACT_CONTROLLER, SymfonyRoute)],
+            Self::UrlGenerator => &[(SYMFONY_URL_GENERATOR, SymfonyRoute)],
+            // Only the top-level configurator: a route a collection's
+            // `add()` declares takes the collection's name prefix.
+            Self::RoutingConfigurator => &[(SYMFONY_ROUTING_CONFIGURATOR, SymfonyRoute)],
         }
     }
 
-    /// Whether the receiver is one of the configurators a PHP service
-    /// configuration file builds the container with.
-    pub(crate) fn is_configurator(self) -> bool {
-        matches!(
-            self,
-            Self::ConfiguratorSet | Self::ServicesConfigurator | Self::ServiceConfigurator
-        )
+    /// The namespace of the configurators the receiver has to be one of,
+    /// when it is one of the configurators a PHP configuration file builds
+    /// the container or the routes with.
+    pub(crate) fn configurator_namespace(self) -> Option<&'static str> {
+        match self {
+            Self::ConfiguratorSet | Self::ServicesConfigurator | Self::ServiceConfigurator => {
+                Some(SYMFONY_CONTAINER_CONFIGURATOR_NS)
+            }
+            Self::RoutingConfigurator => Some(SYMFONY_ROUTING_CONFIGURATOR_NS),
+            _ => None,
+        }
     }
 
     /// Whether the call names a template.

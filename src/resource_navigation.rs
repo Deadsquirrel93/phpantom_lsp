@@ -4,6 +4,9 @@
 //! keys, values, attributes, and text. This module recognises those names
 //! without knowing the schema of the file that contains them, then delegates
 //! declaration lookup to the normal PHP class loader.
+//!
+//! Twig templates are resource documents too, read only for the Symfony
+//! names they hold (see [`crate::symfony::routes`]).
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -31,7 +34,8 @@ struct ScannedResourceSymbol {
     member: Option<(String, usize, usize)>,
 }
 
-/// Whether `uri` names a YAML or XML document that can carry PHP symbols.
+/// Whether `uri` names a YAML or XML document that can carry PHP symbols,
+/// or a Twig template.
 pub(crate) fn is_resource_document(uri: &str) -> bool {
     let path = uri
         .split(['?', '#'])
@@ -46,6 +50,7 @@ pub(crate) fn is_resource_document(uri: &str) -> bool {
         ".yaml.dist",
         ".yml.dist",
         ".xml.dist",
+        ".twig",
     ]
     .iter()
     .any(|suffix| path.ends_with(suffix))
@@ -109,8 +114,12 @@ impl Backend {
 
     /// Index resource files discovered during the workspace walk.
     pub(crate) fn index_resource_paths_batch(&self, files: &[(String, PathBuf)]) {
+        // A template holds nothing but Symfony names, so it is not even read
+        // in another project.
+        let is_symfony = self.is_symfony_project();
         let maps: Vec<(String, Arc<SymbolMap>)> = files
             .iter()
+            .filter(|(uri, _)| is_symfony || !crate::symfony::routes::is_twig_uri(uri))
             .filter_map(|(uri, path)| {
                 let content = std::fs::read_to_string(path).ok()?;
                 self.index_framework_uri_content(uri, &content);
@@ -129,9 +138,26 @@ impl Backend {
     }
 
     fn resource_symbol_map(&self, uri: &str, content: &str) -> SymbolMap {
+        let is_symfony = self.is_symfony_project();
+        if crate::symfony::routes::is_twig_uri(uri) {
+            let spans = if is_symfony {
+                crate::symfony::routes::twig_route_spans(content)
+            } else {
+                Vec::new()
+            };
+            return SymbolMap {
+                spans,
+                source_len: u32::try_from(content.len()).unwrap_or(u32::MAX),
+                ..SymbolMap::default()
+            };
+        }
+
         let mut spans = Vec::new();
-        if self.is_symfony_project() && crate::symfony::resources::is_container_config_uri(uri) {
+        if is_symfony && crate::symfony::resources::is_container_config_uri(uri) {
             spans = crate::symfony::resources::container_key_spans(uri, content);
+            if crate::symfony::routes::is_routing_config_uri(uri) {
+                spans.extend(crate::symfony::routes::routing_key_spans(uri, content));
+            }
         }
         for symbol in scan_symbols(content) {
             spans.push(SymbolSpan {

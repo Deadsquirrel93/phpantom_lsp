@@ -21,6 +21,12 @@ catalogues together, the way a real Symfony project does.
   `app.welcome_mailer` or `app.sender_name`, find their references, or
   complete a name inside `$container->has('')` or
   `#[Autowire(param: '')]`.
+- Route names navigate between their `#[Route]` attribute or
+  `config/routes.yaml` entry and the controllers and Twig templates that
+  link to them. In `templates/demo/index.html.twig`, go to the definition of
+  `app_demo` or `app_demo_legacy`, find references on `app_demo` in
+  `DemoController`, or complete a name inside `generateUrl('')` or
+  `path('')`.
 - Open `src/Entity/User.php` and `src/Repository/UserRepository.php`. The
   CodeLens above each class links the entity and its repository.
 

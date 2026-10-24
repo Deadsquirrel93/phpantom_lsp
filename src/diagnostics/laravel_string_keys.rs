@@ -4,7 +4,8 @@
 //! Both read the spans the symbol map recorded for a file, resolve each name
 //! against what the project actually registers (routes, config keys,
 //! views, translation keys, console commands, morph aliases, gate
-//! abilities, Symfony service IDs and container parameters), and report the
+//! abilities, Symfony service IDs, container parameters and routes), and
+//! report the
 //! ones nothing declares.
 
 use std::sync::Arc;
@@ -36,6 +37,7 @@ enum CheckedStringKind {
     GateAbility,
     ServiceId,
     ContainerParameter,
+    SymfonyRoute,
 }
 
 impl CheckedStringKind {
@@ -55,6 +57,7 @@ impl CheckedStringKind {
             StringKeyKind::GateAbility => Self::GateAbility,
             StringKeyKind::ServiceId => Self::ServiceId,
             StringKeyKind::ContainerParameter => Self::ContainerParameter,
+            StringKeyKind::SymfonyRoute => Self::SymfonyRoute,
             // A section or stack name is judged against the templates that
             // render the one it is written in, which the Blade pass has and
             // this one does not.  And anything at all can be bound at
@@ -105,6 +108,8 @@ struct DeclaredKeys<'a> {
     /// The container parameters the project's configuration declares,
     /// sorted.
     parameters: Vec<String>,
+    /// The Symfony route names the project declares, sorted.
+    symfony_routes: Vec<String>,
 }
 
 impl<'a> DeclaredKeys<'a> {
@@ -127,6 +132,7 @@ impl<'a> DeclaredKeys<'a> {
         let has_gate_ability = names(|kind| kind == CheckedStringKind::GateAbility);
         let has_service = names(|kind| kind == CheckedStringKind::ServiceId);
         let has_parameter = names(|kind| kind == CheckedStringKind::ContainerParameter);
+        let has_symfony_route = names(|kind| kind == CheckedStringKind::SymfonyRoute);
 
         // A package with no routes of its own, whose names are registered
         // by the host application, cannot be judged: the valid set is
@@ -241,6 +247,11 @@ impl<'a> DeclaredKeys<'a> {
         } else {
             Vec::new()
         };
+        let symfony_routes = if has_symfony_route {
+            backend.symfony_declared_names(crate::symbol_map::StringKeyKind::SymfonyRoute)
+        } else {
+            Vec::new()
+        };
 
         Self {
             backend,
@@ -256,6 +267,7 @@ impl<'a> DeclaredKeys<'a> {
             gate_abilities,
             services,
             parameters,
+            symfony_routes,
         }
     }
 
@@ -306,8 +318,12 @@ impl<'a> DeclaredKeys<'a> {
             CheckedStringKind::GateAbility => None,
             CheckedStringKind::ServiceId => self.judge_service(key),
             CheckedStringKind::ContainerParameter => {
-                Self::judge_application_key(&self.parameters, key)
+                Self::judge_application_key(&self.parameters, "app.", key)
                     .map(|valid| (valid, "container parameter", "invalid_symfony_parameter"))
+            }
+            CheckedStringKind::SymfonyRoute => {
+                Self::judge_application_key(&self.symfony_routes, "app_", key)
+                    .map(|valid| (valid, "route", "invalid_symfony_route"))
             }
         }
     }
@@ -322,21 +338,22 @@ impl<'a> DeclaredKeys<'a> {
                 .is_ok()
                 || self.backend.find_or_load_class(key).is_some()
         } else {
-            Self::judge_application_key(&self.services, key)?
+            Self::judge_application_key(&self.services, "app.", key)?
         };
         Some((valid, "service", "invalid_symfony_service"))
     }
 
-    /// Whether `key`, a service ID or parameter name, is among the
+    /// Whether `key`, a service ID, parameter, or route name, is among the
     /// `declared` ones, when that can be told at all.
     ///
-    /// The configuration read is the project's own: the services and
-    /// parameters the bundles it installs register are not, and neither are
-    /// the ones a compiler pass adds.  Symfony names an application's own
-    /// under the `app.` prefix, which no bundle uses, so only those can be
-    /// judged.  A project that declares none was not read at all.
-    fn judge_application_key(declared: &[String], key: &str) -> Option<bool> {
-        if !key.starts_with("app.") || declared.is_empty() {
+    /// The configuration read is the project's own: the services,
+    /// parameters, and routes the bundles it installs register are not, and
+    /// neither are the ones a compiler pass or a route loader adds.  Symfony
+    /// names an application's own under the `app.` prefix (`app_` for a
+    /// route), which no bundle uses, so only those can be judged.  A project
+    /// that declares none was not read at all.
+    fn judge_application_key(declared: &[String], prefix: &str, key: &str) -> Option<bool> {
+        if !key.starts_with(prefix) || declared.is_empty() {
             return None;
         }
         Some(
