@@ -1,7 +1,7 @@
 //! Regression tests for gating Laravel string-key hover, go-to-definition,
 //! find-references, and rename on `is_laravel`.
 //!
-//! `SymbolKind::LaravelStringKey` spans are extracted by pure name match
+//! `SymbolKind::StringKey` spans are extracted by pure name match
 //! (`config()`, `route()`, `view()`, `__()`, `trans()`, …) with no project
 //! context, so a non-Laravel project that happens to declare its own
 //! `config()` function (common in home-grown micro-frameworks) must not get

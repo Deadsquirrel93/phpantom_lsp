@@ -313,7 +313,7 @@ fn extract_function_call<'a>(
             );
             match helper_function_first_arg_kind(name_clean) {
                 // The `config()` helper both reads and writes.
-                Some(crate::symbol_map::LaravelStringKind::Config) => {
+                Some(crate::symbol_map::StringKeyKind::Config) => {
                     try_emit_laravel_config_helper_spans(
                         &func_call.argument_list,
                         ctx.content,
@@ -322,7 +322,7 @@ fn extract_function_call<'a>(
                 }
                 // `@can`, `@cannot` and `@canany` check the ability
                 // against the arguments that follow it.
-                Some(crate::symbol_map::LaravelStringKind::GateAbility) => {
+                Some(crate::symbol_map::StringKeyKind::GateAbility) => {
                     try_emit_gate_ability_spans(
                         &func_call.argument_list,
                         0,
@@ -337,7 +337,7 @@ fn extract_function_call<'a>(
                 // `@extendsFirst` siblings put their candidates in an
                 // array literal, so the compiled directive names several
                 // templates at once.
-                Some(crate::symbol_map::LaravelStringKind::View)
+                Some(crate::symbol_map::StringKeyKind::View)
                     if helper_function_accepts_name_list(name_clean) =>
                 {
                     try_emit_laravel_view_span_at(
@@ -376,9 +376,9 @@ fn extract_function_call<'a>(
                 );
                 if let Some(dependency) = ctx
                     .resolved_name_at(ident.span().start.offset)
-                    .and_then(crate::symbol_map::LaravelStringDependency::namespaced_auth)
+                    .and_then(crate::symbol_map::StringKeyDependency::namespaced_auth)
                 {
-                    ctx.defer_laravel_spans_since(span_start, dependency);
+                    ctx.defer_string_key_spans_since(span_start, dependency);
                 }
             }
         }
@@ -602,7 +602,7 @@ pub(super) fn extract_partial_application_expr<'a>(
 #[cfg(test)]
 mod tests {
     use crate::names::OwnedResolvedNames;
-    use crate::symbol_map::LaravelStringDependency;
+    use crate::symbol_map::StringKeyDependency;
 
     #[test]
     fn route_can_span_waits_for_the_root_alias_shadow_check() {
@@ -615,10 +615,10 @@ mod tests {
 
         let map = crate::symbol_map::extraction::extract_symbol_map_for_index(program, php, &names);
 
-        assert_eq!(map.conditional_laravel_spans.len(), 1);
+        assert_eq!(map.conditional_string_key_spans.len(), 1);
         assert_eq!(
-            Some(map.conditional_laravel_spans[0].dependency),
-            LaravelStringDependency::root_facade("Route")
+            Some(map.conditional_string_key_spans[0].dependency),
+            StringKeyDependency::root_facade("Route")
         );
     }
 }

@@ -374,16 +374,16 @@ pub(crate) enum SymbolKind {
     /// split into one span per source line at extraction time.
     Comment,
 
-    /// A Laravel string-key literal (config key, route name, view name, etc.)
+    /// A framework string-key literal (config key, route name, view name, etc.)
     /// inside a framework helper call such as `config()`, `route()`, `view()`,
     /// `Config::get()`, or `Config::set()`.
     ///
     /// The span covers the string content *inside* the quotes so that
     /// go-to-definition and find-references can work without re-parsing
     /// the file at request time.
-    LaravelStringKey {
+    StringKey {
         /// The category of the key (e.g. `Config`, `Route`, `View`).
-        kind: LaravelStringKind,
+        kind: StringKeyKind,
         /// The key value, e.g. `"app.name"` or `"users.index"`.
         key: String,
         /// Whether the call *defines* the key rather than reading it, as
@@ -441,7 +441,7 @@ impl SymbolKind {
                 name.capacity()
             }
             Self::MemberAccess { subject_text, .. } => subject_text.heap_bytes(),
-            Self::LaravelStringKey { key, .. } => key.capacity(),
+            Self::StringKey { key, .. } => key.capacity(),
             Self::SelfStaticParent(_) | Self::Keyword | Self::CastType | Self::Comment => 0,
         }
     }

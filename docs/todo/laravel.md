@@ -408,7 +408,7 @@ Go-to-definition is implemented for **route names** (`route()`), **config
 keys**, **env vars**, **translation keys**, and **view names** via the
 declaration scanners in `virtual_members/laravel/{route_names, config_keys,
 env_vars, trans_keys, view_names}.rs`. These walk the relevant source files
-and resolve a string key to its declaration site. `LaravelStringKey` also
+and resolve a string key to its declaration site. `StringKey` also
 flows through find-references (rename, highlight, and semantic tokens
 are L31). **Eloquent
 relation and column name strings** have completion (`completion/eloquent_string.rs`).

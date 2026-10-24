@@ -1337,10 +1337,10 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
                 sym.add(sp.kind.audit_heap());
             }
             sym.add(
-                sm.conditional_laravel_spans.capacity()
-                    * size_of::<crate::symbol_map::ConditionalLaravelStringSpan>(),
+                sm.conditional_string_key_spans.capacity()
+                    * size_of::<crate::symbol_map::ConditionalStringKeySpan>(),
             );
-            for candidate in &sm.conditional_laravel_spans {
+            for candidate in &sm.conditional_string_key_spans {
                 sym.add(candidate.audit_heap());
             }
             sym += map_buckets::<Atom, Vec<usize>>(sm.member_access_indices.capacity());

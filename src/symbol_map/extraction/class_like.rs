@@ -309,7 +309,7 @@ pub(super) fn extract_from_attribute_lists<'a>(
                         }
                         LaravelContainerAttribute::Config => {
                             try_emit_laravel_string_span_partial_for_parameter(
-                                crate::symbol_map::LaravelStringKind::Config,
+                                crate::symbol_map::StringKeyKind::Config,
                                 arg_list,
                                 "key",
                                 ctx.content,
@@ -327,7 +327,7 @@ pub(super) fn extract_from_attribute_lists<'a>(
                     ctx.content,
                 ) {
                     try_emit_laravel_string_span_partial_for_parameter(
-                        crate::symbol_map::LaravelStringKind::Route,
+                        crate::symbol_map::StringKeyKind::Route,
                         arg_list,
                         "route",
                         ctx.content,

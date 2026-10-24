@@ -144,7 +144,7 @@ impl Backend {
             | SymbolKind::MemberDeclaration { .. }
             | SymbolKind::ConstantReference { .. }
             | SymbolKind::NamespaceDeclaration { .. }
-            | SymbolKind::LaravelStringKey { .. }
+            | SymbolKind::StringKey { .. }
             | SymbolKind::LaravelMacroString { .. }
             | SymbolKind::CommandOwnParam { .. }
             | SymbolKind::Keyword

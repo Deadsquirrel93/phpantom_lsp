@@ -14,7 +14,7 @@ use super::helpers;
 use crate::Backend;
 use crate::class_lookup::Fqn;
 
-/// The [`crate::symbol_map::LaravelStringKind`]s
+/// The [`crate::symbol_map::StringKeyKind`]s
 /// [`Backend::collect_invalid_laravel_string_key_diagnostics`] can judge.
 ///
 /// The kinds it cannot are dropped when the spans are gathered rather than
@@ -38,28 +38,28 @@ enum CheckedStringKind {
 impl CheckedStringKind {
     /// The kind to judge a key of `kind` as, or `None` for the kinds this
     /// pass leaves alone.
-    fn of(kind: &crate::symbol_map::LaravelStringKind) -> Option<Self> {
-        use crate::symbol_map::LaravelStringKind;
+    fn of(kind: &crate::symbol_map::StringKeyKind) -> Option<Self> {
+        use crate::symbol_map::StringKeyKind;
 
         Some(match kind {
-            LaravelStringKind::Route => Self::Route,
-            LaravelStringKind::Config => Self::Config,
-            LaravelStringKind::ConfigResource(resource) => Self::ConfigResource(*resource),
-            LaravelStringKind::View => Self::View,
-            LaravelStringKind::Trans => Self::Trans,
-            LaravelStringKind::Command => Self::Command,
-            LaravelStringKind::MorphAlias => Self::MorphAlias,
-            LaravelStringKind::GateAbility => Self::GateAbility,
+            StringKeyKind::Route => Self::Route,
+            StringKeyKind::Config => Self::Config,
+            StringKeyKind::ConfigResource(resource) => Self::ConfigResource(*resource),
+            StringKeyKind::View => Self::View,
+            StringKeyKind::Trans => Self::Trans,
+            StringKeyKind::Command => Self::Command,
+            StringKeyKind::MorphAlias => Self::MorphAlias,
+            StringKeyKind::GateAbility => Self::GateAbility,
             // A section or stack name is judged against the templates that
             // render the one it is written in, which the Blade pass has and
             // this one does not.  And anything at all can be bound at
             // runtime, so an unrecognised container key proves nothing —
             // nor does an environment variable absent from `.env`, since
             // the environment a process runs with is not on disk.
-            LaravelStringKind::Section
-            | LaravelStringKind::Stack
-            | LaravelStringKind::ContainerBinding
-            | LaravelStringKind::Env => return None,
+            StringKeyKind::Section
+            | StringKeyKind::Stack
+            | StringKeyKind::ContainerBinding
+            | StringKeyKind::Env => return None,
         })
     }
 }
@@ -443,7 +443,7 @@ impl Backend {
         }
     }
 
-    /// Emit a warning for each `LaravelStringKey` span whose key does
+    /// Emit a warning for each `StringKey` span whose key does
     /// not resolve to any declaration (typo in route name, config key,
     /// view name, or translation key).
     ///
@@ -471,7 +471,7 @@ impl Backend {
             .chain(morph_columns.iter())
             .filter(|span| super::incremental::reports_site(span.start))
             .filter_map(|span| {
-                let SymbolKind::LaravelStringKey {
+                let SymbolKind::StringKey {
                     kind,
                     key,
                     is_write,

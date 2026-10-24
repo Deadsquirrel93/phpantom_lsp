@@ -21,7 +21,7 @@ impl Backend {
     /// than being cut at a segment it does not have.
     fn resolved_key_location(
         &self,
-        kind: &crate::symbol_map::LaravelStringKind,
+        kind: &crate::symbol_map::StringKeyKind,
         key: &str,
         uri: &str,
         dir: &str,
@@ -42,16 +42,16 @@ impl Backend {
     /// key, view name, or translation key).
     pub(super) fn hover_laravel_string_key(
         &self,
-        kind: &crate::symbol_map::LaravelStringKind,
+        kind: &crate::symbol_map::StringKeyKind,
         key: &str,
         uri: &str,
     ) -> Option<Hover> {
-        use crate::symbol_map::LaravelStringKind;
+        use crate::symbol_map::StringKeyKind;
 
         let (label, detail) = match kind {
-            LaravelStringKind::Section => ("Section", self.blade_block_detail(uri, kind, key)),
-            LaravelStringKind::Stack => ("Stack", self.blade_block_detail(uri, kind, key)),
-            LaravelStringKind::Route => {
+            StringKeyKind::Section => ("Section", self.blade_block_detail(uri, kind, key)),
+            StringKeyKind::Stack => ("Stack", self.blade_block_detail(uri, kind, key)),
+            StringKeyKind::Route => {
                 let locations = crate::virtual_members::laravel::resolve_laravel_string_key(
                     self, kind, key, uri,
                 );
@@ -74,14 +74,14 @@ impl Backend {
                 };
                 ("Route", detail)
             }
-            LaravelStringKind::Config => {
+            StringKeyKind::Config => {
                 let detail = match self.resolved_key_location(kind, key, uri, "config") {
                     Some((_, short_path)) => format!("Defined in `{short_path}`"),
                     None => "Config key".to_string(),
                 };
                 ("Config", detail)
             }
-            LaravelStringKind::ConfigResource(resource) => {
+            StringKeyKind::ConfigResource(resource) => {
                 let descriptor = crate::symbol_map::laravel_resources::descriptor(*resource);
                 let locations = crate::virtual_members::laravel::resolve_laravel_string_key(
                     self, kind, key, uri,
@@ -95,7 +95,7 @@ impl Backend {
                     );
                 (descriptor.hover_label, detail)
             }
-            LaravelStringKind::View => {
+            StringKeyKind::View => {
                 let locations = crate::virtual_members::laravel::resolve_laravel_string_key(
                     self, kind, key, uri,
                 );
@@ -112,8 +112,8 @@ impl Backend {
                 };
                 ("View", detail)
             }
-            LaravelStringKind::Trans => ("Trans", self.translation_hover_detail(key)),
-            LaravelStringKind::Command => {
+            StringKeyKind::Trans => ("Trans", self.translation_hover_detail(key)),
+            StringKeyKind::Command => {
                 let index = self.laravel.commands.read();
                 let detail = if let Some(entry) = index.get(key) {
                     let mut parts = Vec::new();
@@ -144,7 +144,7 @@ impl Backend {
                 };
                 ("Command", detail)
             }
-            LaravelStringKind::MorphAlias => {
+            StringKeyKind::MorphAlias => {
                 let index = self.laravel.morph_map.read();
                 let detail = match index.get(key) {
                     Some(target) => {
@@ -159,8 +159,8 @@ impl Backend {
                 };
                 ("Morph type", detail)
             }
-            LaravelStringKind::GateAbility => ("Ability", self.gate_ability_detail(key)),
-            LaravelStringKind::ContainerBinding => {
+            StringKeyKind::GateAbility => ("Ability", self.gate_ability_detail(key)),
+            StringKeyKind::ContainerBinding => {
                 let detail = match self.container_binding_target(key) {
                     Some(target) => {
                         let mut detail = format!("Resolves to `{}`", target.fqn);
@@ -176,7 +176,7 @@ impl Backend {
                 };
                 ("Container", detail)
             }
-            LaravelStringKind::Env => {
+            StringKeyKind::Env => {
                 // The value is shown like every sibling hover shows what its
                 // key resolves to, except for names that read as naming a
                 // credential: those are the ones worth not putting on screen
@@ -207,14 +207,14 @@ impl Backend {
     fn blade_block_detail(
         &self,
         uri: &str,
-        kind: &crate::symbol_map::LaravelStringKind,
+        kind: &crate::symbol_map::StringKeyKind,
         name: &str,
     ) -> String {
         use crate::blade::blocks::{BlockKind, BlockRole};
-        use crate::symbol_map::LaravelStringKind;
+        use crate::symbol_map::StringKeyKind;
 
         let kind = match kind {
-            LaravelStringKind::Stack => BlockKind::Stack,
+            StringKeyKind::Stack => BlockKind::Stack,
             _ => BlockKind::Section,
         };
         let (role, locations) = self.blade_block_pairing(uri, kind, name);

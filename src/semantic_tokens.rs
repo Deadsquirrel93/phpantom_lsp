@@ -470,7 +470,7 @@ impl Backend {
                     (TT_COMMENT, 0)
                 }
 
-                SymbolKind::LaravelStringKey { .. }
+                SymbolKind::StringKey { .. }
                 | SymbolKind::LaravelMacroString { .. }
                 | SymbolKind::CommandOwnParam { .. } => {
                     continue;

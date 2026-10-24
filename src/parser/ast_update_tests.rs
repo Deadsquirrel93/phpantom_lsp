@@ -13,8 +13,8 @@ fn has_config_resource_span(
         map.spans.iter().any(|span| {
             matches!(
                 &span.kind,
-                crate::symbol_map::SymbolKind::LaravelStringKey {
-                    kind: crate::symbol_map::LaravelStringKind::ConfigResource(found),
+                crate::symbol_map::SymbolKind::StringKey {
+                    kind: crate::symbol_map::StringKeyKind::ConfigResource(found),
                     key: found_key,
                     ..
                 } if *found == resource && found_key == key
@@ -29,8 +29,8 @@ fn reference_index_has_config_resource(
     key: &str,
     resource: crate::symbol_map::LaravelConfigResource,
 ) -> bool {
-    let index_key = crate::reference_index::laravel_string_reference_key(
-        crate::symbol_map::LaravelStringKind::ConfigResource(resource),
+    let index_key = crate::reference_index::string_key_reference_key(
+        crate::symbol_map::StringKeyKind::ConfigResource(resource),
         key,
     );
     backend
@@ -356,8 +356,8 @@ fn controller_middleware_does_not_claim_auth_guards_without_a_typed_receiver() {
         map.spans.iter().any(|span| {
             matches!(
                 &span.kind,
-                crate::symbol_map::SymbolKind::LaravelStringKey {
-                    kind: crate::symbol_map::LaravelStringKind::GateAbility,
+                crate::symbol_map::SymbolKind::StringKey {
+                    kind: crate::symbol_map::StringKeyKind::GateAbility,
                     key,
                     ..
                 } if key == "update"

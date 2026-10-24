@@ -1,7 +1,7 @@
 //! Render sites whose receiver only a *type* settles.
 //!
 //! The symbol map decides what is a view name syntactically, so the
-//! render sites it records as [`crate::symbol_map::SymbolKind::LaravelStringKey`]
+//! render sites it records as [`crate::symbol_map::SymbolKind::StringKey`]
 //! spans are the ones a receiver's spelling settles: `$this->view(…)`
 //! inside a mailable, the `View` facade, and the factory reached through a
 //! bare `view()` helper call. A constructor-injected `Factory $views`

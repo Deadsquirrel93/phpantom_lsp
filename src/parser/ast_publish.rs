@@ -4,7 +4,7 @@
 //! module publishes a batch of them in one pass: class declarations,
 //! standalone functions and `define()` constants, the reverse-inheritance
 //! index, the resolved-class cache, each file's imports and namespaces,
-//! and its symbol map, with the Laravel string spans whose meaning depends
+//! and its symbol map, with the string-key spans whose meaning depends
 //! on what the workspace declares refreshed against the result.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -16,7 +16,7 @@ use crate::atom::Atom;
 use crate::ci_map::CiMap;
 use crate::class_lookup::Fqn;
 use crate::names::OwnedResolvedNames;
-use crate::symbol_map::{LaravelStringDependency, SymbolMap};
+use crate::symbol_map::{StringKeyDependency, SymbolMap};
 use crate::types::{ClassInfo, DefineInfo, FunctionInfo, NamespaceSpan};
 
 use super::ast_update::{AstIndexUpdate, BladeLowering};
@@ -152,10 +152,10 @@ fn withdraw_function(
 impl Backend {
     /// Whether the workspace declares the symbol that keeps a dormant Laravel
     /// span from meaning what Laravel would make of it.
-    fn laravel_string_dependency_exists(&self, dependency: LaravelStringDependency) -> bool {
+    fn string_key_dependency_exists(&self, dependency: StringKeyDependency) -> bool {
         match dependency {
-            LaravelStringDependency::Function(name) => self.has_indexed_function(name.as_str()),
-            LaravelStringDependency::Class(name) => self.has_indexed_class(name.as_str()),
+            StringKeyDependency::Function(name) => self.has_indexed_function(name.as_str()),
+            StringKeyDependency::Class(name) => self.has_indexed_class(name.as_str()),
         }
     }
 
@@ -164,7 +164,7 @@ impl Backend {
     /// workspace purges where several declaration indexes changed together.
     fn refreshed_laravel_candidate_maps(
         &self,
-        affected: Option<&HashSet<LaravelStringDependency>>,
+        affected: Option<&HashSet<StringKeyDependency>>,
         excluded_uris: &HashSet<&str>,
     ) -> Vec<(String, Arc<SymbolMap>)> {
         let candidates: Vec<(String, Arc<SymbolMap>)> = self
@@ -173,7 +173,7 @@ impl Backend {
             .iter()
             .filter(|(uri, _)| !excluded_uris.contains(uri.as_str()))
             .filter_map(|(uri, state)| Some((uri, state.symbol_map.as_ref()?)))
-            .filter(|(_, map)| map.has_conditional_laravel_dependency(affected))
+            .filter(|(_, map)| map.has_conditional_string_key_dependency(affected))
             .map(|(uri, map)| (uri.clone(), Arc::clone(map)))
             .collect();
         let mut dependency_presence = HashMap::new();
@@ -183,14 +183,15 @@ impl Backend {
                 let mut dependency_exists = |dependency| {
                     *dependency_presence
                         .entry(dependency)
-                        .or_insert_with(|| self.laravel_string_dependency_exists(dependency))
+                        .or_insert_with(|| self.string_key_dependency_exists(dependency))
                 };
-                if !map.conditional_laravel_spans_need_refresh(affected, &mut dependency_exists) {
+                if !map.conditional_string_key_spans_need_refresh(affected, &mut dependency_exists)
+                {
                     return None;
                 }
                 let mut refreshed = map.as_ref().clone();
                 let changed =
-                    refreshed.refresh_conditional_laravel_spans(affected, dependency_exists);
+                    refreshed.refresh_conditional_string_key_spans(affected, dependency_exists);
                 debug_assert!(changed);
                 Some((uri, Arc::new(refreshed)))
             })
@@ -246,7 +247,7 @@ impl Backend {
     /// Publish a batch of parsed files into every index.
     ///
     /// Returns whether anything other files depend on changed: a class or
-    /// function signature, or the meaning of another file's Laravel string
+    /// function signature, or the meaning of another file's string-key
     /// spans.
     pub(crate) fn apply_ast_index_updates_batch(&self, updates: Vec<AstIndexUpdate>) -> bool {
         if updates.is_empty() {
@@ -924,12 +925,12 @@ impl Backend {
         {
             let mut dependency_presence = HashMap::new();
             for update in prepared.iter_mut() {
-                Arc::make_mut(&mut update.symbol_map).refresh_conditional_laravel_spans(
+                Arc::make_mut(&mut update.symbol_map).refresh_conditional_string_key_spans(
                     None,
                     |dependency| {
                         *dependency_presence
                             .entry(dependency)
-                            .or_insert_with(|| self.laravel_string_dependency_exists(dependency))
+                            .or_insert_with(|| self.string_key_dependency_exists(dependency))
                     },
                 );
             }
@@ -940,7 +941,7 @@ impl Backend {
         // therefore retain the existing O(batch) publication cost.
         let mut affected_laravel_dependencies = HashSet::new();
         for fqn in all_old_fqns.iter().chain(all_new_fqns) {
-            if let Some(dependency) = LaravelStringDependency::root_facade(fqn) {
+            if let Some(dependency) = StringKeyDependency::root_facade(fqn) {
                 affected_laravel_dependencies.insert(dependency);
             }
         }
@@ -950,7 +951,7 @@ impl Backend {
                 .iter()
                 .chain(&update.new_function_fqns)
             {
-                if let Some(dependency) = LaravelStringDependency::namespaced_auth(fqn) {
+                if let Some(dependency) = StringKeyDependency::namespaced_auth(fqn) {
                     affected_laravel_dependencies.insert(dependency);
                 }
             }

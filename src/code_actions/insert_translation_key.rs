@@ -6,7 +6,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::code_actions::indent_of_line_at;
-use crate::symbol_map::{LaravelStringKind, SymbolKind};
+use crate::symbol_map::{StringKeyKind, SymbolKind};
 use crate::text_position::{byte_range_to_lsp_range, line_ending, ranges_overlap};
 
 impl Backend {
@@ -34,8 +34,8 @@ impl Backend {
         // a package's lines through `lang/vendor/<namespace>/` instead.
         let vendor_prefixes = self.workspace.vendor_uri_prefixes.lock().clone();
         for span in &symbol_map.spans {
-            let SymbolKind::LaravelStringKey {
-                kind: LaravelStringKind::Trans,
+            let SymbolKind::StringKey {
+                kind: StringKeyKind::Trans,
                 key,
                 is_write: false,
                 ..

@@ -27,8 +27,10 @@
 //!   `extract_from_*` helpers)
 //! - [`call_sites`] — the call sites signature help reads, stored in
 //!   shared arenas
-//! - [`laravel_spans`] — Laravel string keys and the spans that depend
-//!   on a workspace symbol being absent
+//! - [`string_keys`] — the framework string keys spans record, and the
+//!   spans that depend on a workspace symbol being absent
+//! - [`laravel_spans`] — Laravel config resources and the side tables for
+//!   gate subjects and typed render receivers
 //! - [`span`] — the symbol spans and their kinds
 //! - [`map`] — [`SymbolMap`] itself and its lookups
 
@@ -40,6 +42,7 @@ mod laravel_spans;
 mod map;
 mod morph_columns;
 mod span;
+mod string_keys;
 
 pub(crate) use call_sites::*;
 #[cfg(test)]
@@ -49,6 +52,7 @@ pub(crate) use laravel_spans::*;
 pub(crate) use map::*;
 pub(crate) use morph_columns::{MorphColumnReceiver, MorphColumnSite};
 pub(crate) use span::*;
+pub(crate) use string_keys::*;
 
 #[cfg(test)]
 mod tests;

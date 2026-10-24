@@ -403,7 +403,7 @@ impl Backend {
                     .map(|loc| vec![loc])
             }
 
-            SymbolKind::LaravelStringKey { kind, key, .. } => {
+            SymbolKind::StringKey { kind, key, .. } => {
                 if !self.resolved_class_cache.read().laravel().is_enabled() {
                     return None;
                 }

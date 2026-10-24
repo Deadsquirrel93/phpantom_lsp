@@ -32,7 +32,7 @@ use crate::Backend;
 use crate::atom::bytes_to_str;
 use crate::parser::with_parsed_program;
 use crate::php_type::PhpType;
-use crate::symbol_map::{LaravelStringKind, SymbolKind, SymbolMap};
+use crate::symbol_map::{StringKeyKind, SymbolKind, SymbolMap};
 use crate::type_engine::resolver::{FileCtx, Loaders};
 use crate::type_engine::variable::resolution::VarQuery;
 
@@ -273,8 +273,8 @@ impl Backend {
         let keys: Vec<crate::reference_index::ReferenceIndexKey> = view_names
             .iter()
             .map(
-                |name| crate::reference_index::ReferenceIndexKey::LaravelString {
-                    kind: LaravelStringKind::View,
+                |name| crate::reference_index::ReferenceIndexKey::StringKey {
+                    kind: StringKeyKind::View,
                     key: name.clone(),
                 },
             )
@@ -360,8 +360,8 @@ impl Backend {
                 .iter()
                 .chain(extra.iter())
                 .filter_map(|span| match &span.kind {
-                    SymbolKind::LaravelStringKey {
-                        kind: LaravelStringKind::View,
+                    SymbolKind::StringKey {
+                        kind: StringKeyKind::View,
                         key,
                         ..
                     } if view_names.iter().any(|n| n == key) => Some(span.start),
@@ -523,8 +523,8 @@ impl Backend {
                         || map.spans.iter().any(|span| {
                             matches!(
                                 &span.kind,
-                                SymbolKind::LaravelStringKey {
-                                    kind: LaravelStringKind::View,
+                                SymbolKind::StringKey {
+                                    kind: StringKeyKind::View,
                                     ..
                                 }
                             )
@@ -544,8 +544,8 @@ impl Backend {
                     .spans
                     .iter()
                     .filter_map(|span| match &span.kind {
-                        SymbolKind::LaravelStringKey {
-                            kind: LaravelStringKind::View,
+                        SymbolKind::StringKey {
+                            kind: StringKeyKind::View,
                             key,
                             ..
                         } => Some(key.as_str()),

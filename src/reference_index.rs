@@ -18,7 +18,7 @@ use crate::Backend;
 use crate::atom::{Atom, AtomMap, AtomSet, atom};
 use crate::backend::file_access::namespace_in_spans;
 use crate::names::resolve_to_fqn;
-use crate::symbol_map::{LaravelStringKind, SelfStaticParentKind, SymbolKind, SymbolMap};
+use crate::symbol_map::{SelfStaticParentKind, StringKeyKind, SymbolKind, SymbolMap};
 use crate::types::NamespaceSpan;
 use crate::util::{build_fqn, short_name, strip_fqn_prefix};
 
@@ -42,33 +42,30 @@ pub(crate) enum ReferenceIndexKey {
         name: String,
         is_static: bool,
     },
-    LaravelString {
-        kind: LaravelStringKind,
+    StringKey {
+        kind: StringKeyKind,
         key: String,
     },
 }
 
-/// Build the one index identity shared by a Laravel string-key usage and its
+/// Build the one index identity shared by a string-key usage and its
 /// config-backed aliases.
 ///
 /// Resource spans deliberately retain their short source text (for example,
 /// `redis`), while the reference index stores the canonical config address
 /// (`cache.stores.redis`). This keeps one entry per semantic identity without
 /// changing the exact source range consumers return.
-pub(crate) fn laravel_string_reference_key(
-    kind: LaravelStringKind,
-    key: &str,
-) -> ReferenceIndexKey {
+pub(crate) fn string_key_reference_key(kind: StringKeyKind, key: &str) -> ReferenceIndexKey {
     match kind {
-        LaravelStringKind::ConfigResource(resource)
+        StringKeyKind::ConfigResource(resource)
             if !crate::symbol_map::laravel_resources::is_implicit_resource_name(resource, key) =>
         {
-            ReferenceIndexKey::LaravelString {
-                kind: LaravelStringKind::Config,
+            ReferenceIndexKey::StringKey {
+                kind: StringKeyKind::Config,
                 key: crate::symbol_map::laravel_resources::config_key(resource, key),
             }
         }
-        _ => ReferenceIndexKey::LaravelString {
+        _ => ReferenceIndexKey::StringKey {
             kind,
             key: key.to_string(),
         },
@@ -110,7 +107,7 @@ impl ReferenceIndexKey {
         match self {
             Self::Class(s) | Self::Function(s) | Self::Constant(s) => s.capacity(),
             Self::Member { name, .. } => name.capacity(),
-            Self::LaravelString { key, .. } => key.capacity(),
+            Self::StringKey { key, .. } => key.capacity(),
         }
     }
 }
@@ -719,8 +716,8 @@ impl Backend {
         if self.resolved_class_cache.read().laravel().is_enabled() {
             for site in &symbol_map.view_receiver_sites {
                 entries.push((
-                    ReferenceIndexKey::LaravelString {
-                        kind: crate::symbol_map::LaravelStringKind::View,
+                    ReferenceIndexKey::StringKey {
+                        kind: crate::symbol_map::StringKeyKind::View,
                         key: site.key.clone(),
                     },
                     false,
@@ -728,8 +725,8 @@ impl Backend {
             }
             for site in &symbol_map.morph_column_sites {
                 entries.push((
-                    ReferenceIndexKey::LaravelString {
-                        kind: crate::symbol_map::LaravelStringKind::MorphAlias,
+                    ReferenceIndexKey::StringKey {
+                        kind: crate::symbol_map::StringKeyKind::MorphAlias,
                         key: site.key.clone(),
                     },
                     false,
@@ -846,8 +843,8 @@ impl Backend {
                     true,
                 )]
             }
-            SymbolKind::LaravelStringKey { kind, key, .. } => {
-                vec![(laravel_string_reference_key(*kind, key), true)]
+            SymbolKind::StringKey { kind, key, .. } => {
+                vec![(string_key_reference_key(*kind, key), true)]
             }
             _ => Vec::new(),
         }
@@ -1157,8 +1154,8 @@ mod tests {
         );
         assert_candidate_contains(
             &backend,
-            ReferenceIndexKey::LaravelString {
-                kind: LaravelStringKind::Config,
+            ReferenceIndexKey::StringKey {
+                kind: StringKeyKind::Config,
                 key: "app.name".to_string(),
             },
             uri,
@@ -1179,35 +1176,34 @@ mod tests {
         backend.reindex_references_for_symbol_maps_batch(vec![
             (
                 resource_uri.to_string(),
-                laravel_string_map(
-                    LaravelStringKind::ConfigResource(LaravelConfigResource::CacheStore),
+                string_key_map(
+                    StringKeyKind::ConfigResource(LaravelConfigResource::CacheStore),
                     "redis",
                 ),
             ),
             (
                 config_uri.to_string(),
-                laravel_string_map(LaravelStringKind::Config, "cache.stores.redis"),
+                string_key_map(StringKeyKind::Config, "cache.stores.redis"),
             ),
             (
                 queue_uri.to_string(),
-                laravel_string_map(
-                    LaravelStringKind::ConfigResource(LaravelConfigResource::QueueConnection),
+                string_key_map(
+                    StringKeyKind::ConfigResource(LaravelConfigResource::QueueConnection),
                     "redis",
                 ),
             ),
         ]);
 
-        let resource_key = laravel_string_reference_key(
-            LaravelStringKind::ConfigResource(LaravelConfigResource::CacheStore),
+        let resource_key = string_key_reference_key(
+            StringKeyKind::ConfigResource(LaravelConfigResource::CacheStore),
             "redis",
         );
-        let config_key =
-            laravel_string_reference_key(LaravelStringKind::Config, "cache.stores.redis");
+        let config_key = string_key_reference_key(StringKeyKind::Config, "cache.stores.redis");
         assert_eq!(resource_key, config_key);
         assert_candidate_contains(&backend, config_key.clone(), resource_uri);
         assert_candidate_contains(&backend, config_key, config_uri);
-        let queue_key = laravel_string_reference_key(
-            LaravelStringKind::ConfigResource(LaravelConfigResource::QueueConnection),
+        let queue_key = string_key_reference_key(
+            StringKeyKind::ConfigResource(LaravelConfigResource::QueueConnection),
             "redis",
         );
         assert_candidate_contains(&backend, queue_key.clone(), queue_uri);
@@ -1223,29 +1219,29 @@ mod tests {
     #[test]
     fn non_config_laravel_string_keys_keep_their_original_identity() {
         assert_eq!(
-            laravel_string_reference_key(LaravelStringKind::View, "dashboard"),
-            ReferenceIndexKey::LaravelString {
-                kind: LaravelStringKind::View,
+            string_key_reference_key(StringKeyKind::View, "dashboard"),
+            ReferenceIndexKey::StringKey {
+                kind: StringKeyKind::View,
                 key: "dashboard".to_string(),
             }
         );
         assert_eq!(
-            laravel_string_reference_key(
-                LaravelStringKind::ConfigResource(LaravelConfigResource::CacheStore),
+            string_key_reference_key(
+                StringKeyKind::ConfigResource(LaravelConfigResource::CacheStore),
                 "null",
             ),
-            ReferenceIndexKey::LaravelString {
-                kind: LaravelStringKind::ConfigResource(LaravelConfigResource::CacheStore),
+            ReferenceIndexKey::StringKey {
+                kind: StringKeyKind::ConfigResource(LaravelConfigResource::CacheStore),
                 key: "null".to_string(),
             }
         );
         assert_eq!(
-            laravel_string_reference_key(
-                LaravelStringKind::ConfigResource(LaravelConfigResource::DatabaseConnection),
+            string_key_reference_key(
+                StringKeyKind::ConfigResource(LaravelConfigResource::DatabaseConnection),
                 "mysql::read",
             ),
-            ReferenceIndexKey::LaravelString {
-                kind: LaravelStringKind::Config,
+            ReferenceIndexKey::StringKey {
+                kind: StringKeyKind::Config,
                 key: "database.connections.mysql".to_string(),
             }
         );
@@ -1606,12 +1602,12 @@ mod tests {
         })
     }
 
-    fn laravel_string_map(kind: LaravelStringKind, key: &str) -> Arc<SymbolMap> {
+    fn string_key_map(kind: StringKeyKind, key: &str) -> Arc<SymbolMap> {
         Arc::new(SymbolMap {
             spans: vec![SymbolSpan {
                 start: 0,
                 end: key.len() as u32,
-                kind: SymbolKind::LaravelStringKey {
+                kind: SymbolKind::StringKey {
                     kind,
                     key: key.to_string(),
                     is_write: false,

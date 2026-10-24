@@ -185,9 +185,9 @@ pub(crate) enum VarDefKind {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct SymbolMap {
     pub spans: Vec<SymbolSpan>,
-    /// Laravel string spans gated by cross-file function/class membership.
+    /// String-key spans gated by cross-file function/class membership.
     /// Empty for ordinary PHP files and never consulted by request handlers.
-    pub conditional_laravel_spans: Vec<ConditionalLaravelStringSpan>,
+    pub conditional_string_key_spans: Vec<ConditionalStringKeySpan>,
     /// Member-access span indices keyed by member name.
     ///
     /// This lets references/rename jump straight to relevant `->name` /
@@ -277,7 +277,7 @@ pub(crate) struct SymbolMap {
     ///
     /// Empty for all but the handful of files that call a view factory or
     /// a mailable through something other than the spellings
-    /// [`SymbolKind::LaravelStringKey`] is emitted for.
+    /// [`SymbolKind::StringKey`] is emitted for.
     pub view_receiver_sites: Vec<ViewReceiverSite>,
     /// Literal comparisons whose receivers and columns must be confirmed
     /// as Eloquent morph type columns, sorted by `start`.

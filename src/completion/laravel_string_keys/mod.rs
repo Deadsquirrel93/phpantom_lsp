@@ -14,7 +14,7 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::symbol_map::{LaravelConfigResource, LaravelStringKind};
+use crate::symbol_map::{LaravelConfigResource, StringKeyKind};
 use crate::types::FileContext;
 
 mod context;
@@ -26,21 +26,19 @@ use context::*;
 
 /// The icon an editor shows beside a completed string key: whatever the key
 /// names is what it should look like.
-fn string_key_item_kind(kind: &LaravelStringKind) -> CompletionItemKind {
+fn string_key_item_kind(kind: &StringKeyKind) -> CompletionItemKind {
     match kind {
-        LaravelStringKind::Config | LaravelStringKind::ConfigResource(_) => {
-            CompletionItemKind::PROPERTY
-        }
-        LaravelStringKind::View => CompletionItemKind::FILE,
-        LaravelStringKind::Trans => CompletionItemKind::TEXT,
-        LaravelStringKind::MorphAlias => CompletionItemKind::ENUM_MEMBER,
-        LaravelStringKind::GateAbility => CompletionItemKind::METHOD,
-        LaravelStringKind::Env => CompletionItemKind::CONSTANT,
-        LaravelStringKind::Route
-        | LaravelStringKind::Command
-        | LaravelStringKind::Section
-        | LaravelStringKind::Stack
-        | LaravelStringKind::ContainerBinding => CompletionItemKind::VALUE,
+        StringKeyKind::Config | StringKeyKind::ConfigResource(_) => CompletionItemKind::PROPERTY,
+        StringKeyKind::View => CompletionItemKind::FILE,
+        StringKeyKind::Trans => CompletionItemKind::TEXT,
+        StringKeyKind::MorphAlias => CompletionItemKind::ENUM_MEMBER,
+        StringKeyKind::GateAbility => CompletionItemKind::METHOD,
+        StringKeyKind::Env => CompletionItemKind::CONSTANT,
+        StringKeyKind::Route
+        | StringKeyKind::Command
+        | StringKeyKind::Section
+        | StringKeyKind::Stack
+        | StringKeyKind::ContainerBinding => CompletionItemKind::VALUE,
     }
 }
 
@@ -73,7 +71,7 @@ impl Backend {
             crate::text_position::offset_to_position(content, span.end as usize),
         );
         let items = self
-            .string_key_candidates(&LaravelStringKind::MorphAlias, prefix)
+            .string_key_candidates(&StringKeyKind::MorphAlias, prefix)
             .iter()
             .filter(|alias| alias.starts_with(prefix))
             .map(|alias| CompletionItem {
@@ -100,11 +98,11 @@ impl Backend {
     /// valid, which ordinary class completion already offers, and the set of
     /// keys is open besides — a list of them would read as the whole answer
     /// when it is not.
-    fn string_key_candidates(&self, kind: &LaravelStringKind, typed_prefix: &str) -> Arc<[String]> {
+    fn string_key_candidates(&self, kind: &StringKeyKind, typed_prefix: &str) -> Arc<[String]> {
         match kind {
-            LaravelStringKind::Route => self.cached_route_names(),
-            LaravelStringKind::Config => self.cached_config_keys(),
-            LaravelStringKind::ConfigResource(resource) => {
+            StringKeyKind::Route => self.cached_route_names(),
+            StringKeyKind::Config => self.cached_config_keys(),
+            StringKeyKind::ConfigResource(resource) => {
                 // `#[Database('mysql')]` completes the keys under
                 // `database.connections.` with that prefix stripped.
                 let prefix =
@@ -147,21 +145,19 @@ impl Backend {
                     names.into()
                 }
             }
-            LaravelStringKind::View => self.cached_view_names(),
-            LaravelStringKind::Trans => self.cached_trans_keys(),
-            LaravelStringKind::Command => self.laravel.commands.read().all_names().into(),
-            LaravelStringKind::MorphAlias => {
+            StringKeyKind::View => self.cached_view_names(),
+            StringKeyKind::Trans => self.cached_trans_keys(),
+            StringKeyKind::Command => self.laravel.commands.read().all_names().into(),
+            StringKeyKind::MorphAlias => {
                 let mut aliases = self.laravel.morph_map.read().all_aliases();
                 aliases.sort();
                 aliases.into()
             }
-            LaravelStringKind::GateAbility => self.cached_gate_abilities(),
-            LaravelStringKind::Env => {
-                crate::virtual_members::laravel::enumerate_env_keys(self).into()
+            StringKeyKind::GateAbility => self.cached_gate_abilities(),
+            StringKeyKind::Env => crate::virtual_members::laravel::enumerate_env_keys(self).into(),
+            StringKeyKind::Section | StringKeyKind::Stack | StringKeyKind::ContainerBinding => {
+                Arc::new([])
             }
-            LaravelStringKind::Section
-            | LaravelStringKind::Stack
-            | LaravelStringKind::ContainerBinding => Arc::new([]),
         }
     }
 

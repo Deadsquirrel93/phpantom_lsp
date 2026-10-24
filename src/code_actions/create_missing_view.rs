@@ -14,7 +14,7 @@ use tower_lsp::lsp_types::*;
 use crate::Backend;
 use crate::diagnostics::checked_byte_range_to_lsp_range;
 use crate::diagnostics::helpers::make_diagnostic;
-use crate::symbol_map::{LaravelStringKind, SymbolKind};
+use crate::symbol_map::{StringKeyKind, SymbolKind};
 use crate::text_position::ranges_overlap;
 
 impl Backend {
@@ -43,8 +43,8 @@ impl Backend {
         let mut view_names: Option<std::sync::Arc<[String]>> = None;
 
         for span in symbol_map.spans.iter().chain(extra.iter()) {
-            let SymbolKind::LaravelStringKey {
-                kind: LaravelStringKind::View,
+            let SymbolKind::StringKey {
+                kind: StringKeyKind::View,
                 key,
                 is_write: false,
                 is_optional: false,

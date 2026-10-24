@@ -270,7 +270,7 @@ impl Backend {
             SymbolKind::ConstantReference { name, .. } => {
                 self.hover_constant_reference(&site, symbol.start, name)
             }
-            SymbolKind::LaravelStringKey { kind, key, .. } => {
+            SymbolKind::StringKey { kind, key, .. } => {
                 if !self.resolved_class_cache.read().laravel().is_enabled() {
                     return None;
                 }

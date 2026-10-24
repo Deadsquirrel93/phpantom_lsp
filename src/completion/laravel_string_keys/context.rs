@@ -10,7 +10,7 @@ use tower_lsp::lsp_types::Position;
 
 use std::cell::OnceCell;
 
-use crate::symbol_map::LaravelStringKind;
+use crate::symbol_map::StringKeyKind;
 use crate::symbol_map::extraction::laravel::{
     MethodReceiver, argument_takes_name_list, facade_static_call_arg_kind,
     helper_function_accepts_name_list, helper_function_first_arg_kind, instance_method_arg_kind,
@@ -22,7 +22,7 @@ use crate::text_scan::{
 };
 
 pub(super) struct LaravelStringKeyContext<'a> {
-    pub(super) kind: LaravelStringKind,
+    pub(super) kind: StringKeyKind,
     pub(super) prefix: &'a str,
     /// Byte offset of the string content start (right after the opening quote).
     pub(super) content_start_offset: usize,
@@ -526,9 +526,7 @@ pub(super) fn receiver_chain_start(prefix: &str) -> usize {
     boundary
 }
 
-pub(super) fn middleware_completion_context(
-    prefix: &str,
-) -> Option<(LaravelStringKind, &str, usize)> {
+pub(super) fn middleware_completion_context(prefix: &str) -> Option<(StringKeyKind, &str, usize)> {
     let colon = prefix.find(':')?;
     let alias = &prefix[..=colon];
     if alias != "auth:" {
@@ -542,7 +540,7 @@ pub(super) fn middleware_completion_context(
         .map_or(payload, |(_, current)| current);
     let current = raw_current.trim_start();
     let start = prefix.len().saturating_sub(raw_current.len());
-    Some((LaravelStringKind::ConfigResource(resource), current, start))
+    Some((StringKeyKind::ConfigResource(resource), current, start))
 }
 
 pub(super) fn chain_starts_at_laravel_facade(
@@ -811,7 +809,7 @@ impl StringCall<'_, '_> {
     /// Whether the string can name a `kind` in the shape it was written in:
     /// as a scalar, or as a bare entry of a list the call takes (a value
     /// under `'key' =>` is not one).
-    fn shape_fits(&self, kind: &LaravelStringKind) -> bool {
+    fn shape_fits(&self, kind: &StringKeyKind) -> bool {
         match self.argument.shape {
             StringArgumentShape::Scalar => true,
             StringArgumentShape::ArrayValue => {
@@ -825,10 +823,10 @@ impl StringCall<'_, '_> {
 /// being typed.
 enum StringKey<'a> {
     /// The whole literal typed so far is the key.
-    Whole(LaravelStringKind),
+    Whole(StringKeyKind),
     /// The key is the part of a middleware string after its `alias:`.
     Middleware {
-        kind: LaravelStringKind,
+        kind: StringKeyKind,
         prefix: &'a str,
         start: usize,
     },
@@ -846,7 +844,7 @@ fn middleware_key(literal: &str) -> Option<StringKey<'_>> {
 
 /// A string inside a PHP attribute's arguments: `#[Config('app.name')]`,
 /// grouped attributes, and fully-qualified container attributes.
-fn attribute_key(call: &StringCall<'_, '_>, attr_start: usize) -> Option<LaravelStringKind> {
+fn attribute_key(call: &StringCall<'_, '_>, attr_start: usize) -> Option<StringKeyKind> {
     if call.argument.shape != StringArgumentShape::Scalar {
         return None;
     }
@@ -864,12 +862,12 @@ fn attribute_key(call: &StringCall<'_, '_>, attr_start: usize) -> Option<Laravel
     .is_some()
     {
         slot.is_first_or_named("key")
-            .then_some(LaravelStringKind::Config)
+            .then_some(StringKeyKind::Config)
     } else if let Some(trigger) =
         config_resource_attribute_trigger(call.content, reference, call.indexed_class_exists)
     {
         slot.is_first_or_named(trigger.argument)
-            .then_some(LaravelStringKind::ConfigResource(trigger.kind))
+            .then_some(StringKeyKind::ConfigResource(trigger.kind))
     } else if resolve_known_class_reference(
         call.content,
         reference,
@@ -880,7 +878,7 @@ fn attribute_key(call: &StringCall<'_, '_>, attr_start: usize) -> Option<Laravel
     )
     .is_some()
     {
-        (slot == ArgumentSlot::Positional(0)).then_some(LaravelStringKind::Route)
+        (slot == ArgumentSlot::Positional(0)).then_some(StringKeyKind::Route)
     } else {
         None
     }
@@ -913,7 +911,7 @@ fn static_call_key<'a>(call: &StringCall<'a, '_>, before_colons: &'a str) -> Opt
             StringArgumentShape::ArrayValue => trigger.shape.accepts_array(),
         };
         return (slot.is_first_or_named(trigger.argument) && shape_fits).then_some(
-            StringKey::Whole(LaravelStringKind::ConfigResource(trigger.kind)),
+            StringKey::Whole(StringKeyKind::ConfigResource(trigger.kind)),
         );
     }
     if call.name.eq_ignore_ascii_case("middleware")
@@ -967,7 +965,7 @@ fn instance_call_key<'a>(
 
 /// A string passed to a function: `route('…')`, `config('…')`, and the
 /// markers Blade directives lower to.
-fn function_call_key(call: &StringCall<'_, '_>) -> Option<LaravelStringKind> {
+fn function_call_key(call: &StringCall<'_, '_>) -> Option<StringKeyKind> {
     let slot = call.argument.slot;
     if call.argument.shape != StringArgumentShape::Scalar
         && (!helper_function_accepts_name_list(call.name) || call.before_quote.ends_with("=>"))
@@ -991,7 +989,7 @@ fn function_call_key(call: &StringCall<'_, '_>) -> Option<LaravelStringKind> {
         call.indexed_function_exists,
     ) {
         slot.is_first_or_named(trigger.argument)
-            .then_some(LaravelStringKind::ConfigResource(trigger.kind))
+            .then_some(StringKeyKind::ConfigResource(trigger.kind))
     } else if slot == ArgumentSlot::Positional(0) {
         helper_function_first_arg_kind(call.name)
     } else {

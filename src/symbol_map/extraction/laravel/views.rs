@@ -22,15 +22,15 @@ pub(in crate::symbol_map::extraction) fn try_emit_blade_block_span(
     use crate::blade::markers::{
         PUSH_IF as PUSH_IF_MARKER, SECTION as SECTION_MARKER, STACK as STACK_MARKER,
     };
-    use crate::symbol_map::LaravelStringKind;
+    use crate::symbol_map::StringKeyKind;
 
     let (kind, index) = if name.eq_ignore_ascii_case(SECTION_MARKER) {
-        (LaravelStringKind::Section, 0)
+        (StringKeyKind::Section, 0)
     } else if name.eq_ignore_ascii_case(STACK_MARKER) {
-        (LaravelStringKind::Stack, 0)
+        (StringKeyKind::Stack, 0)
     } else if name.eq_ignore_ascii_case(PUSH_IF_MARKER) {
         (
-            LaravelStringKind::Stack,
+            StringKeyKind::Stack,
             argument_list.arguments.len().saturating_sub(1),
         )
     } else {
@@ -52,7 +52,7 @@ pub(in crate::symbol_map::extraction) fn try_emit_laravel_view_span_at(
     content: &str,
     spans: &mut Vec<SymbolSpan>,
 ) {
-    let kind = crate::symbol_map::LaravelStringKind::View;
+    let kind = crate::symbol_map::StringKeyKind::View;
     let Some(arg) = argument_list.arguments.iter().nth(index) else {
         return;
     };
@@ -101,7 +101,7 @@ pub(in crate::symbol_map::extraction) fn try_emit_mailable_content_view_spans(
         };
         if names_view {
             push_laravel_string_span(
-                crate::symbol_map::LaravelStringKind::View,
+                crate::symbol_map::StringKeyKind::View,
                 false,
                 false,
                 argument.value(),
@@ -175,7 +175,7 @@ pub(in crate::symbol_map::extraction) fn try_emit_render_each_view_spans(
     for index in RENDER_EACH_VIEW_ARGS {
         if names_a_render_each_template(index, argument_list, content) {
             try_emit_laravel_string_span_at(
-                crate::symbol_map::LaravelStringKind::View,
+                crate::symbol_map::StringKeyKind::View,
                 index,
                 argument_list,
                 content,
@@ -270,7 +270,7 @@ pub(in crate::symbol_map::extraction) fn record_view_receiver_sites(
         }
     }
     for span in spans {
-        let SymbolKind::LaravelStringKey {
+        let SymbolKind::StringKey {
             key, is_optional, ..
         } = span.kind
         else {

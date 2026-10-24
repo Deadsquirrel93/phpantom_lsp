@@ -81,7 +81,7 @@ impl Backend {
                 self.highlight_keyword(symbol_map, content, *ssp_kind, span.start, uri)
             }
             SymbolKind::NamespaceDeclaration { .. }
-            | SymbolKind::LaravelStringKey { .. }
+            | SymbolKind::StringKey { .. }
             | SymbolKind::LaravelMacroString { .. }
             | SymbolKind::CommandOwnParam { .. }
             | SymbolKind::Keyword

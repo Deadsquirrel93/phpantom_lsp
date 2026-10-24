@@ -78,9 +78,9 @@ struct ExtractionCtx<'a> {
     /// indexing supplies this so Laravel-specific syntax does not guess from
     /// an alias or a namespace-local homonym. Syntax-only tests omit it.
     resolved_names: Option<&'a OwnedResolvedNames>,
-    /// Laravel strings whose meaning depends on a workspace symbol being
+    /// String keys whose meaning depends on a workspace symbol being
     /// absent. They are activated after the batch publishes its declarations.
-    conditional_laravel_spans: Vec<super::ConditionalLaravelStringSpan>,
+    conditional_string_key_spans: Vec<super::ConditionalStringKeySpan>,
     /// Closures and arrow functions passed as arguments to callable-typed
     /// parameters, used by inlay hints.
     untyped_closure_sites: Vec<UntypedClosureSite>,
@@ -203,19 +203,19 @@ impl<'a> ExtractionCtx<'a> {
         self.push_var_def(start, name, kind, scope_start, start);
     }
 
-    /// Move Laravel string spans emitted since `start` into the dormant
+    /// Move string-key spans emitted since `start` into the dormant
     /// candidate list. The tail is normally one span, so removing in place
     /// avoids allocating a temporary vector on this already-rare path.
-    fn defer_laravel_spans_since(
+    fn defer_string_key_spans_since(
         &mut self,
         start: usize,
-        dependency: super::LaravelStringDependency,
+        dependency: super::StringKeyDependency,
     ) {
         let spans = &mut self.spans;
-        let candidates = &mut self.conditional_laravel_spans;
+        let candidates = &mut self.conditional_string_key_spans;
         for span in spans.drain(start..) {
-            debug_assert!(matches!(&span.kind, SymbolKind::LaravelStringKey { .. }));
-            candidates.push(super::ConditionalLaravelStringSpan::new(dependency, span));
+            debug_assert!(matches!(&span.kind, SymbolKind::StringKey { .. }));
+            candidates.push(super::ConditionalStringKeySpan::new(dependency, span));
         }
     }
 }
@@ -272,7 +272,7 @@ pub(crate) fn extract_symbol_map_with_resolved_names(
     resolved_names: &OwnedResolvedNames,
 ) -> SymbolMap {
     let mut map = extract_symbol_map_inner(program, content, Some(resolved_names));
-    map.refresh_conditional_laravel_spans(None, |_| false);
+    map.refresh_conditional_string_key_spans(None, |_| false);
     map
 }
 
@@ -309,7 +309,7 @@ fn extract_symbol_map_inner(
         trivias: program.trivia.as_slice(),
         content,
         resolved_names,
-        conditional_laravel_spans: Vec::new(),
+        conditional_string_key_spans: Vec::new(),
         untyped_closure_sites: Vec::new(),
         view_receiver_sites: Vec::new(),
         morph_column_sites: Vec::new(),
@@ -434,7 +434,7 @@ fn extract_symbol_map_inner(
 
     SymbolMap {
         spans: ctx.spans,
-        conditional_laravel_spans: ctx.conditional_laravel_spans,
+        conditional_string_key_spans: ctx.conditional_string_key_spans,
         member_access_indices,
         var_defs: ctx.var_defs,
         var_defs_by_name,

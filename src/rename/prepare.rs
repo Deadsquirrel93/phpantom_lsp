@@ -594,7 +594,7 @@ impl Backend {
             SymbolKind::NamespaceDeclaration { name } => Some((name.to_string(), range)),
             SymbolKind::LaravelMacroString { name } => Some((name.clone(), range)),
             SymbolKind::SelfStaticParent { .. } => None,
-            SymbolKind::LaravelStringKey { .. }
+            SymbolKind::StringKey { .. }
             | SymbolKind::CommandOwnParam { .. }
             | SymbolKind::Keyword
             | SymbolKind::CastType
@@ -672,12 +672,12 @@ impl Backend {
 }
 
 fn is_config_resource_identity(kind: &SymbolKind) -> bool {
-    let SymbolKind::LaravelStringKey { kind, key, .. } = kind else {
+    let SymbolKind::StringKey { kind, key, .. } = kind else {
         return false;
     };
     match kind {
-        crate::symbol_map::LaravelStringKind::ConfigResource(_) => true,
-        crate::symbol_map::LaravelStringKind::Config => {
+        crate::symbol_map::StringKeyKind::ConfigResource(_) => true,
+        crate::symbol_map::StringKeyKind::Config => {
             crate::symbol_map::laravel_resources::resource_from_config_key(key).is_some()
         }
         _ => false,
@@ -687,10 +687,10 @@ fn is_config_resource_identity(kind: &SymbolKind) -> bool {
 #[cfg(test)]
 mod config_resource_identity_tests {
     use super::*;
-    use crate::symbol_map::{LaravelConfigResource, LaravelStringKind};
+    use crate::symbol_map::{LaravelConfigResource, StringKeyKind};
 
-    fn string_kind(kind: LaravelStringKind, key: &str) -> SymbolKind {
-        SymbolKind::LaravelStringKey {
+    fn string_kind(kind: StringKeyKind, key: &str) -> SymbolKind {
+        SymbolKind::StringKey {
             kind,
             key: key.to_string(),
             is_write: false,
@@ -701,19 +701,19 @@ mod config_resource_identity_tests {
     #[test]
     fn only_config_resource_identities_are_held_for_laravel_string_rename() {
         assert!(is_config_resource_identity(&string_kind(
-            LaravelStringKind::ConfigResource(LaravelConfigResource::CacheStore),
+            StringKeyKind::ConfigResource(LaravelConfigResource::CacheStore),
             "redis",
         )));
         assert!(is_config_resource_identity(&string_kind(
-            LaravelStringKind::Config,
+            StringKeyKind::Config,
             "cache.stores.redis",
         )));
         assert!(!is_config_resource_identity(&string_kind(
-            LaravelStringKind::Config,
+            StringKeyKind::Config,
             "app.name",
         )));
         assert!(!is_config_resource_identity(&string_kind(
-            LaravelStringKind::View,
+            StringKeyKind::View,
             "dashboard",
         )));
         assert!(!is_config_resource_identity(&SymbolKind::Keyword));

@@ -30,7 +30,7 @@ use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity};
 
 use crate::Backend;
 use crate::blade::contract::{AcceptedNames, TemplateContract};
-use crate::symbol_map::{LaravelStringKind, SymbolKind};
+use crate::symbol_map::{StringKeyKind, SymbolKind};
 
 use super::helpers::make_diagnostic;
 use super::type_errors::is_type_compatible;
@@ -66,8 +66,8 @@ impl Backend {
             .chain(extra.iter())
             .filter(|span| super::incremental::reports_site(span.start))
             .filter_map(|span| match &span.kind {
-                SymbolKind::LaravelStringKey {
-                    kind: LaravelStringKind::View,
+                SymbolKind::StringKey {
+                    kind: StringKeyKind::View,
                     key,
                     is_write: false,
                     ..

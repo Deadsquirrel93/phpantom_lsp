@@ -44,7 +44,7 @@ pub(crate) fn find_route_registration_references(
     position: Position,
     include_declaration: bool,
 ) -> Option<Vec<Location>> {
-    use crate::symbol_map::LaravelStringKind;
+    use crate::symbol_map::StringKeyKind;
 
     let is_route_file = uri.contains("/routes/")
         || crate::util::uri_to_path(uri).is_some_and(|path| {
@@ -67,12 +67,10 @@ pub(crate) fn find_route_registration_references(
 
     let keys: Vec<_> = names
         .iter()
-        .map(
-            |key| crate::reference_index::ReferenceIndexKey::LaravelString {
-                kind: LaravelStringKind::Route,
-                key: key.clone(),
-            },
-        )
+        .map(|key| crate::reference_index::ReferenceIndexKey::StringKey {
+            kind: StringKeyKind::Route,
+            key: key.clone(),
+        })
         .collect();
     let snapshot = backend.user_file_symbol_maps_for_reference_keys(&keys);
     let mut locations: Vec<Location> = Vec::new();
@@ -80,7 +78,7 @@ pub(crate) fn find_route_registration_references(
         locations.extend(
             crate::virtual_members::laravel::find_laravel_string_key_references(
                 backend,
-                &LaravelStringKind::Route,
+                &StringKeyKind::Route,
                 name,
                 uri,
                 &snapshot,
