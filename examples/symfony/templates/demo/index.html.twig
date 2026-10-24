@@ -1,6 +1,8 @@
 {% extends 'base.html.twig' %}
 
 {% block body %}
+  {# Try: find references on 'demo.title'. DemoController translates it too,
+     and translations/messages.en.yaml declares it. #}
   <h1>{{ 'demo.title'|trans }}</h1>
   {% include 'demo/_card.html.twig' %}
   {# Try: go-to-definition on a route name below. app_demo is declared by the

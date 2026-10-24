@@ -85,13 +85,14 @@ impl Backend {
             return Some(response);
         }
 
-        // ── Symfony service IDs and container parameters ────────
-        // `$container->get('|')`, `service('|')`, `#[Autowire(param: '|')]`.
+        // ── Symfony names ───────────────────────────────────────
+        // `$container->get('|')`, `service('|')`, `#[Autowire(param: '|')]`,
+        // `$translator->trans('|')`.
         if matches!(string_ctx, StringContext::InStringLiteral)
             && self.is_symfony_project()
             && let Some(code) = code_ctx.as_ref()
             && let Some(response) =
-                self.try_symfony_string_key_completion(content, position, code, ctx)
+                self.try_symfony_string_key_completion(uri, content, position, code, ctx)
         {
             return Some(response);
         }

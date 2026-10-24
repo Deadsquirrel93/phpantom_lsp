@@ -498,6 +498,7 @@ impl Backend {
         ]);
         if is_symfony {
             patterns.push(("**/*.twig".to_string(), watch_all));
+            patterns.push(("**/*.{xlf,xliff}".to_string(), watch_all));
         }
         if is_laravel {
             patterns.extend([

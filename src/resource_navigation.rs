@@ -5,8 +5,9 @@
 //! without knowing the schema of the file that contains them, then delegates
 //! declaration lookup to the normal PHP class loader.
 //!
-//! Twig templates are resource documents too, read only for the Symfony
-//! names they hold (see [`crate::symfony::routes`]).
+//! Twig templates and XLIFF catalogues are resource documents too, read
+//! only for the Symfony names they hold (see [`crate::symfony::routes`] and
+//! [`crate::symfony::translations`]).
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -35,7 +36,7 @@ struct ScannedResourceSymbol {
 }
 
 /// Whether `uri` names a YAML or XML document that can carry PHP symbols,
-/// or a Twig template.
+/// a Twig template, or an XLIFF translation catalogue.
 pub(crate) fn is_resource_document(uri: &str) -> bool {
     let path = uri
         .split(['?', '#'])
@@ -51,12 +52,20 @@ pub(crate) fn is_resource_document(uri: &str) -> bool {
         ".yml.dist",
         ".xml.dist",
         ".twig",
+        ".xlf",
+        ".xliff",
     ]
     .iter()
     .any(|suffix| path.ends_with(suffix))
 }
 
-/// Whether a filesystem path is a YAML/XML resource document.
+/// Whether `uri` is a resource document only a Symfony project reads: a
+/// Twig template or an XLIFF catalogue, which hold no PHP class names.
+pub(crate) fn is_symfony_only_document(uri: &str) -> bool {
+    crate::symfony::routes::is_twig_uri(uri) || crate::symfony::translations::is_xliff_uri(uri)
+}
+
+/// Whether a filesystem path is a resource document.
 pub(crate) fn is_resource_path(path: &Path) -> bool {
     path.file_name()
         .and_then(|name| name.to_str())
@@ -114,12 +123,12 @@ impl Backend {
 
     /// Index resource files discovered during the workspace walk.
     pub(crate) fn index_resource_paths_batch(&self, files: &[(String, PathBuf)]) {
-        // A template holds nothing but Symfony names, so it is not even read
-        // in another project.
+        // A template or an XLIFF catalogue holds nothing but Symfony names,
+        // so it is not even read in another project.
         let is_symfony = self.is_symfony_project();
         let maps: Vec<(String, Arc<SymbolMap>)> = files
             .iter()
-            .filter(|(uri, _)| is_symfony || !crate::symfony::routes::is_twig_uri(uri))
+            .filter(|(uri, _)| is_symfony || !is_symfony_only_document(uri))
             .filter_map(|(uri, path)| {
                 let content = std::fs::read_to_string(path).ok()?;
                 self.index_framework_uri_content(uri, &content);
@@ -139,11 +148,18 @@ impl Backend {
 
     fn resource_symbol_map(&self, uri: &str, content: &str) -> SymbolMap {
         let is_symfony = self.is_symfony_project();
-        if crate::symfony::routes::is_twig_uri(uri) {
-            let spans = if is_symfony {
-                crate::symfony::routes::twig_route_spans(content)
-            } else {
+        if is_symfony_only_document(uri) {
+            let spans = if !is_symfony {
                 Vec::new()
+            } else if crate::symfony::routes::is_twig_uri(uri) {
+                let mut spans = crate::symfony::routes::twig_route_spans(content);
+                spans.extend(crate::symfony::translations::twig_translation_spans(
+                    content,
+                ));
+                spans.sort_by_key(|span| span.start);
+                spans
+            } else {
+                crate::symfony::translations::catalogue_spans(uri, content)
             };
             return SymbolMap {
                 spans,
@@ -158,6 +174,9 @@ impl Backend {
             if crate::symfony::routes::is_routing_config_uri(uri) {
                 spans.extend(crate::symfony::routes::routing_key_spans(uri, content));
             }
+        }
+        if is_symfony {
+            spans.extend(crate::symfony::translations::catalogue_spans(uri, content));
         }
         for symbol in scan_symbols(content) {
             spans.push(SymbolSpan {

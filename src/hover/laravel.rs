@@ -48,6 +48,8 @@ impl Backend {
     ) -> Option<Hover> {
         use crate::symbol_map::StringKeyKind;
 
+        // A translation key is shown as the message it looks up.
+        let mut shown = key;
         let (label, detail) = match kind {
             StringKeyKind::Section => ("Section", self.blade_block_detail(uri, kind, key)),
             StringKeyKind::Stack => ("Stack", self.blade_block_detail(uri, kind, key)),
@@ -198,25 +200,41 @@ impl Backend {
             }
             StringKeyKind::ServiceId
             | StringKeyKind::ContainerParameter
-            | StringKeyKind::SymfonyRoute => {
+            | StringKeyKind::SymfonyRoute
+            | StringKeyKind::SymfonyTranslation
+            | StringKeyKind::TranslationDomain => {
                 let label = match kind {
                     StringKeyKind::ServiceId => "Service",
                     StringKeyKind::ContainerParameter => "Parameter",
-                    _ => "Route",
+                    StringKeyKind::SymfonyRoute => "Route",
+                    StringKeyKind::SymfonyTranslation => "Translation",
+                    _ => "Translation domain",
                 };
                 let declared = self.symfony_declaration_locations(*kind, key);
-                let detail = match declared
+                let mut detail = match declared
                     .first()
                     .and_then(|location| self.workspace_relative_path(location.uri.as_str()))
                 {
                     Some(path) => format!("Declared in `{}`", path),
+                    None if kind.is_symfony_translation() => {
+                        "Not declared in the project's catalogues".to_string()
+                    }
                     None => "Not declared in the project's configuration".to_string(),
                 };
+                if *kind == StringKeyKind::SymfonyTranslation {
+                    let (domain, message) =
+                        crate::symfony::translations::split_translation_key(key);
+                    shown = message;
+                    detail = format!("Domain `{}`\n\n{}", domain, detail);
+                }
                 (label, detail)
             }
         };
 
-        Some(make_hover(format!("**{}** `{}`\n\n{}", label, key, detail)))
+        Some(make_hover(format!(
+            "**{}** `{}`\n\n{}",
+            label, shown, detail
+        )))
     }
 
     /// Describe where the other half of a Blade section or stack name is:

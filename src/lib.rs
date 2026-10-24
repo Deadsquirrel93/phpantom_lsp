@@ -142,7 +142,7 @@ pub(crate) struct WatchedFileInputs {
     /// schema watchers.
     pub(crate) is_laravel: bool,
     /// Whether the project was classified as Symfony, which adds the Twig
-    /// template watcher.
+    /// template and XLIFF catalogue watchers.
     pub(crate) is_symfony: bool,
     /// Directory symlinks the index reached through, one relative-pattern
     /// watcher each. Empty when the client cannot match a relative

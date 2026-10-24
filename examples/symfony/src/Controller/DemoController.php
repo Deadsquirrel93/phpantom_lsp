@@ -36,7 +36,11 @@ final class DemoController extends AbstractController
         $supportEmail = $this->getParameter('app.support_email');
         // Try: complete a route name inside generateUrl('').
         $this->generateUrl('app_demo', ['userId' => $userId]);
+        // Try: go-to-definition on a translation key, or complete one inside
+        // trans(''). A key is looked up in the domain the call names, so
+        // 'user.invalid_email' is found in translations/validators.en.xlf.
         $title = $this->translator->trans('demo.title');
+        $this->translator->trans('user.invalid_email', [], 'validators');
         $this->events->dispatch(new OrderPlaced($userId), 'app.order.placed');
         $this->commandBus->dispatch(new SendWelcomeEmail($userId));
 

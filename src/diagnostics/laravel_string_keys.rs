@@ -63,8 +63,13 @@ impl CheckedStringKind {
             // this one does not.  And anything at all can be bound at
             // runtime, so an unrecognised container key proves nothing —
             // nor does an environment variable absent from `.env`, since
-            // the environment a process runs with is not on disk.
-            StringKeyKind::Section
+            // the environment a process runs with is not on disk.  A
+            // translation key no catalogue of the project declares may be
+            // one an installed bundle's does, or a message that is its own
+            // translation.
+            StringKeyKind::SymfonyTranslation
+            | StringKeyKind::TranslationDomain
+            | StringKeyKind::Section
             | StringKeyKind::Stack
             | StringKeyKind::ContainerBinding
             | StringKeyKind::Env => return None,

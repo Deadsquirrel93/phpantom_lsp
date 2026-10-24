@@ -81,3 +81,35 @@ fn nothing_is_read_outside_a_symfony_project() {
             .is_empty()
     );
 }
+
+#[test]
+fn catalogues_nobody_opened_are_found_by_the_workspace_walk() {
+    let dir = tempfile::tempdir().unwrap();
+    let catalogues = [
+        ("translations/messages.en.yaml", "demo:\n    title: Demo\n"),
+        (
+            "translations/validators.en.xlf",
+            "<xliff version=\"1.2\"><file><body><trans-unit id=\"1\" resname=\"user.email\"><source>user.email</source></trans-unit></body></file></xliff>\n",
+        ),
+    ];
+    for (path, content) in catalogues {
+        let full = dir.path().join(path);
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        std::fs::write(&full, content).unwrap();
+    }
+    let backend = crate::Backend::new_test_with_workspace(dir.path().to_path_buf(), vec![]);
+    backend.ensure_workspace_indexed();
+
+    let key = super::translations::translation_key;
+    assert_eq!(
+        backend.symfony_declared_names(StringKeyKind::SymfonyTranslation),
+        vec![
+            key("messages", "demo.title"),
+            key("validators", "user.email")
+        ]
+    );
+    assert_eq!(
+        backend.symfony_declared_names(StringKeyKind::TranslationDomain),
+        vec!["messages".to_string(), "validators".to_string()]
+    );
+}

@@ -560,3 +560,58 @@ missed:
 **Where to look:** `src/symfony/routes.rs`,
 `src/symbol_map/extraction/symfony.rs`, `src/symbol_map/string_keys.rs`
 (`ReceiverClass::RoutingConfigurator`).
+
+---
+
+## F29. Report Symfony translation keys nothing declares
+
+**Impact: Medium · Complexity: Medium**
+
+```php
+$translator->trans('demo.titel'); // a typo of demo.title
+```
+
+Translation keys complete and navigate within their domain, but one that no
+catalogue declares is not reported. Service IDs and routes are only judged
+under the application's own `app.` and `app_` prefixes; translation keys
+have no such convention, so judging needs a fuller picture of what is
+declared:
+
+- the catalogues installed bundles ship (`validators`, `security`, and any
+  bundle's own domain), which a key in the same domain may come from;
+- the project's messages that are their own translation (`trans('Save')`
+  with no catalogue entry translates to `Save`), which only a domain the
+  project declares keys in, and keys that look like keys, can tell apart.
+
+A starting point is to judge only domains no installed package ships a
+catalogue for, and only keys spelled like dotted identifiers.
+
+**Where to look:** `src/diagnostics/laravel_string_keys.rs`
+(`CheckedStringKind::of`), `src/symfony/translations.rs`.
+
+---
+
+## F30. Symfony translations outside YAML, XLIFF, and the `trans` filter
+
+**Impact: Low-Medium · Complexity: Medium**
+
+Catalogues are read when they are YAML or XLIFF files under a
+`translations/` directory, and keys are read from a translator's `trans()`,
+`TranslatableMessage`, `t()`, and Twig's `trans` filter. These are missed:
+
+- PHP catalogues (`translations/messages.en.php` returning an array). They
+  are PHP, so they have to be read from the AST during symbol-map
+  extraction, which does not know the file's path today. The array walk
+  can share `virtual_members/laravel/array_file.rs` (`for_each_entry`,
+  `dotted_key`) with Laravel's `trans_keys.rs`.
+- JSON, CSV, INI, and the other formats Symfony loads, and catalogue
+  directories configured under `framework.translator.paths`.
+- The catalogues installed bundles ship, so their keys neither complete
+  nor navigate.
+- Twig's `{% trans %}…{% endtrans %}` block and its `from 'domain'`
+  clause.
+- Keys in other domains by convention: validation constraint messages
+  (`validators`) and form labels under a form's `translation_domain`.
+
+**Where to look:** `src/symfony/translations.rs`,
+`src/symbol_map/extraction/symfony.rs` (`push_translatable_spans`).

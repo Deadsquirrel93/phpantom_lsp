@@ -248,7 +248,8 @@ use subject_text::*;
 use symfony::*;
 
 pub(crate) use symfony::{
-    configurator_function_kind, is_autowire_attribute, symfony_receiver_method,
+    configurator_function_kind, is_autowire_attribute, is_translatable_message,
+    is_translate_function, symfony_receiver_method,
 };
 
 /// Descend generically through a node the typed dispatchers have no arm for,

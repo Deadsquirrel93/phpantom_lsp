@@ -1,4 +1,5 @@
-//! Symfony service ID, container parameter, and route name completion.
+//! Symfony service ID, container parameter, route name, and translation
+//! completion.
 //!
 //! In PHP the cursor's call is read from the raw buffer, which is mid-edit
 //! and usually does not parse, and is judged by the same predicates the
@@ -10,7 +11,13 @@
 //! In YAML and XML configuration the line before the cursor says it: an `@`
 //! starts a service reference, an unclosed `%` a parameter placeholder, and
 //! a handful of XML attributes take a service ID.  In a Twig template, the
-//! first argument of `path()` and `url()` is a route name.
+//! first argument of `path()` and `url()` is a route name, and a string the
+//! `trans` filter is applied to a translation key.
+//!
+//! A translation key is completed from the domain it is looked up in.  In
+//! PHP that is read from the symbol map, whose site for the string being
+//! edited records it, and is the default domain while the call does not
+//! parse yet.
 
 use tower_lsp::lsp_types::{CompletionResponse, Position};
 
@@ -21,18 +28,21 @@ use crate::completion::laravel_string_keys::{
     string_key_response,
 };
 use crate::completion::source::code_context::CodeContext;
-use crate::symbol_map::StringKeyKind;
 use crate::symbol_map::extraction::{
-    configurator_function_kind, is_autowire_attribute, symfony_receiver_method,
+    configurator_function_kind, is_autowire_attribute, is_translatable_message,
+    is_translate_function, symfony_receiver_method,
 };
+use crate::symbol_map::{StringKeyKind, SymbolKind};
+use crate::symfony::translations::{DEFAULT_DOMAIN, split_translation_key};
 use crate::text_position::position_to_offset;
 use crate::types::{AccessKind, FileContext};
 
 impl Backend {
-    /// Complete the service ID, parameter, or route name a PHP string
-    /// literal is being typed as.
+    /// Complete the service ID, parameter, route name, or translation key or
+    /// domain a PHP string literal is being typed as.
     pub(crate) fn try_symfony_string_key_completion(
         &self,
+        uri: &str,
         content: &str,
         position: Position,
         code: &CodeContext<'_>,
@@ -47,12 +57,58 @@ impl Backend {
             .symfony_call_key(content, cursor, code, ctx)
             .map(|kind| (kind, literal_start))
             .or_else(|| autowire_key(content, quote, literal, literal_start, ctx))?;
+        if kind == StringKeyKind::SymfonyTranslation {
+            let domain = self.translation_domain_at(uri, content, literal_start);
+            let messages = self.symfony_translation_messages(&domain);
+            return self.symfony_names_response(
+                kind,
+                messages,
+                content,
+                prefix_start,
+                cursor,
+                position,
+            );
+        }
         self.symfony_key_response(kind, content, prefix_start, cursor, position)
     }
 
+    /// The domain the translation key whose string starts at
+    /// `literal_start` is looked up in, as the file's symbol map recorded
+    /// it, or the default domain when it has no record of the string.
+    fn translation_domain_at(&self, uri: &str, content: &str, literal_start: usize) -> String {
+        let start = literal_start as u32;
+        let recorded = self
+            .symbol_map_for(uri)
+            .filter(|map| map.matches_source(content))
+            .and_then(|map| {
+                let span_key = map.spans.iter().find_map(|span| match &span.kind {
+                    SymbolKind::StringKey {
+                        kind: StringKeyKind::SymfonyTranslation,
+                        key,
+                        ..
+                    } if span.start == start => Some(key.clone()),
+                    _ => None,
+                });
+                span_key.or_else(|| {
+                    map.typed_receiver_sites
+                        .iter()
+                        .find(|site| {
+                            site.start == start
+                                && site.receiver == crate::symbol_map::ReceiverClass::Translator
+                        })
+                        .map(|site| site.key.clone())
+                })
+            });
+        recorded.map_or_else(
+            || DEFAULT_DOMAIN.to_string(),
+            |key| split_translation_key(&key).0.to_string(),
+        )
+    }
+
     /// What a string passed straight to a method or function call names:
-    /// a container lookup or a configurator call on a receiver the type
-    /// engine confirms, or a configurator function.
+    /// a container lookup, a configurator call, or a translation on a
+    /// receiver the type engine confirms, a configurator function, `t()`,
+    /// or a `TranslatableMessage`.
     fn symfony_call_key(
         &self,
         content: &str,
@@ -66,13 +122,25 @@ impl Backend {
         }
         let call = detect_string_call_context(content, cursor, code)?;
         let Some(subject) = call.subject.as_deref() else {
-            if call.arg_index != 0 {
-                return None;
-            }
             let paren = code.enclosing_paren()?;
             let written = trailing_name(&content[..paren.code_before]);
             let offset = (paren.code_before - written.len()) as u32;
-            return configurator_function_kind(&resolve_function_name(ctx, written, offset));
+            let translates = if is_instantiation(&content[..offset as usize]) {
+                is_translatable_message(&ctx.resolve_name_at(written, offset))
+            } else {
+                let function = resolve_function_name(ctx, written, offset);
+                if call.arg_index == 0
+                    && let Some(kind) = configurator_function_kind(&function)
+                {
+                    return Some(kind);
+                }
+                is_translate_function(&function)
+            };
+            return match call.arg_index {
+                0 if translates => Some(StringKeyKind::SymfonyTranslation),
+                2 if translates => Some(StringKeyKind::TranslationDomain),
+                _ => None,
+            };
         };
         if call.is_static {
             return None;
@@ -100,9 +168,23 @@ impl Backend {
         cursor: usize,
         position: Position,
     ) -> Option<CompletionResponse> {
+        let names = self.symfony_declared_names(kind);
+        self.symfony_names_response(kind, names, content, prefix_start, cursor, position)
+    }
+
+    /// The completion response offering those of `names` that start with
+    /// what is typed between `prefix_start` and `cursor`.
+    fn symfony_names_response(
+        &self,
+        kind: StringKeyKind,
+        names: Vec<String>,
+        content: &str,
+        prefix_start: usize,
+        cursor: usize,
+        position: Position,
+    ) -> Option<CompletionResponse> {
         let prefix = content.get(prefix_start..cursor)?.as_bytes();
-        let names: Vec<String> = self
-            .symfony_declared_names(kind)
+        let names: Vec<String> = names
             .into_iter()
             .filter(|name| {
                 name.as_bytes()
@@ -120,7 +202,8 @@ impl Backend {
     }
 
     /// Complete a service reference or parameter placeholder in a YAML or
-    /// XML configuration file, or a route name in a Twig template.
+    /// XML configuration file, or a route name or translation key in a Twig
+    /// template.
     pub(crate) fn try_symfony_resource_completion(
         &self,
         uri: &str,
@@ -132,6 +215,19 @@ impl Backend {
         }
         let cursor = position_to_offset(content, position) as usize;
         let (kind, prefix_start) = if crate::symfony::routes::is_twig_uri(uri) {
+            if let Some((start, domain)) =
+                crate::symfony::translations::twig_translation_completion(content, cursor)
+            {
+                let messages = self.symfony_translation_messages(&domain);
+                return self.symfony_names_response(
+                    StringKeyKind::SymfonyTranslation,
+                    messages,
+                    content,
+                    start,
+                    cursor,
+                    position,
+                );
+            }
             let start = crate::symfony::routes::twig_route_name_start(content, cursor)?;
             (StringKeyKind::SymfonyRoute, start)
         } else if crate::symfony::resources::is_container_config_uri(uri) {
@@ -221,6 +317,17 @@ fn resource_key_at(content: &str, cursor: usize) -> Option<(StringKeyKind, usize
         _ => false,
     };
     takes_service.then_some((StringKeyKind::ServiceId, line_start + name_start))
+}
+
+/// Whether `before`, the text before a callee's name, ends with `new`.
+fn is_instantiation(before: &str) -> bool {
+    let before = before.trim_end();
+    before.strip_suffix("new").is_some_and(|rest| {
+        !rest
+            .bytes()
+            .next_back()
+            .is_some_and(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'$')
+    })
 }
 
 /// The (possibly qualified) name `text` ends with.

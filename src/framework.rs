@@ -68,10 +68,10 @@ pub(crate) type DoctrineRepositoryIndex =
     Arc<RwLock<HashMap<String, Arc<Vec<DoctrineRepositoryMapping>>>>>;
 
 /// Whether `uri` is a YAML or XML document, whose class names, paths, and
-/// Doctrine mappings this index reads.  A Twig template is a resource
-/// document too, but holds none of them.
+/// Doctrine mappings this index reads.  A Twig template or an XLIFF
+/// catalogue is a resource document too, but holds none of them.
 fn is_framework_config_document(uri: &str) -> bool {
-    is_resource_document(uri) && !crate::symfony::routes::is_twig_uri(uri)
+    is_resource_document(uri) && !crate::resource_navigation::is_symfony_only_document(uri)
 }
 
 pub(crate) fn new_framework_reference_index() -> FrameworkReferenceIndex {

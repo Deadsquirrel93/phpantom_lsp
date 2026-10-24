@@ -27,6 +27,11 @@ catalogues together, the way a real Symfony project does.
   `app_demo` or `app_demo_legacy`, find references on `app_demo` in
   `DemoController`, or complete a name inside `generateUrl('')` or
   `path('')`.
+- Translation keys navigate between the YAML and XLIFF catalogues in
+  `translations/` and the PHP and Twig that translate them, within the
+  domain each call names. In `DemoController`, go to the definition of
+  `demo.title` or `user.invalid_email`, or complete a key inside
+  `trans('')`.
 - Open `src/Entity/User.php` and `src/Repository/UserRepository.php`. The
   CodeLens above each class links the entity and its repository.
 

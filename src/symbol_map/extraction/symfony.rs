@@ -1,21 +1,25 @@
 //! The names Symfony takes as strings in PHP: service IDs, container
-//! parameters, and route names.
+//! parameters, route names, and translation keys and domains.
 //!
-//! The configurator functions (`service('app.mailer')`, `param('app.name')`)
-//! and the `#[Autowire]` and `#[Route]` attributes are recognised by their
-//! resolved name.  A method call names one only on the right receiver:
-//! `get()` on a container, `set()` on a configurator, `generate()` on a URL
-//! generator.  Those names are far too common to claim on sight, and the
+//! The configurator functions (`service('app.mailer')`, `param('app.name')`),
+//! the `#[Autowire]` and `#[Route]` attributes, `TranslatableMessage`, and
+//! `t()` are recognised by their resolved name.  A method call names one
+//! only on the right receiver: `get()` on a container, `set()` on a
+//! configurator, `generate()` on a URL generator, `trans()` on a
+//! translator.  Those names are far too common to claim on sight, and the
 //! receiver's spelling does not settle what it is (`$container` may be
 //! anything), so each call is recorded as a [`TypedReceiverSite`] for the
 //! type engine to confirm (see [`symfony_receiver_method`]).
 
 use super::*;
 use crate::symbol_map::{ReceiverClass, SYMFONY_CONTAINER_CONFIGURATOR_NS, StringKeyKind};
+use crate::symfony::translations::{DEFAULT_DOMAIN, is_domain_name, translation_key};
 use crate::virtual_members::laravel::helpers::{resolved_string_literal, string_literal_at_range};
 
 const CONFIGURATOR_NS: &str = SYMFONY_CONTAINER_CONFIGURATOR_NS;
 const AUTOWIRE_ATTRIBUTE: &str = "Symfony\\Component\\DependencyInjection\\Attribute\\Autowire";
+const TRANSLATABLE_MESSAGE: &str = "Symfony\\Component\\Translation\\TranslatableMessage";
+const TRANSLATE_FUNCTION: &str = "Symfony\\Component\\Translation\\t";
 const ROUTE_ATTRIBUTES: [&str; 2] = [
     "Symfony\\Component\\Routing\\Attribute\\Route",
     "Symfony\\Component\\Routing\\Annotation\\Route",
@@ -36,7 +40,7 @@ pub(crate) fn symfony_receiver_method(
     // turned away on a single byte.
     if !matches!(
         member_name.as_bytes().first().map(u8::to_ascii_lowercase),
-        Some(b'g' | b'h' | b's' | b'a' | b'd' | b'r')
+        Some(b'g' | b'h' | b's' | b'a' | b'd' | b'r' | b't')
     ) {
         return None;
     }
@@ -58,6 +62,8 @@ pub(crate) fn symfony_receiver_method(
         0 if is("alias") => Some((ReceiverClass::ServicesConfigurator, true)),
         1 if is("alias") => Some((ReceiverClass::ServicesConfigurator, false)),
         0 if is("decorate") => Some((ReceiverClass::ServiceConfigurator, false)),
+        0 if is("trans") => Some((ReceiverClass::Translator, false)),
+        2 if is("trans") => Some((ReceiverClass::TranslatorDomain, false)),
         _ => None,
     }
 }
@@ -70,6 +76,10 @@ pub(in crate::symbol_map::extraction) fn record_symfony_receiver_sites(
     ctx: &mut ExtractionCtx<'_>,
 ) {
     if !ctx.symfony {
+        return;
+    }
+    if member_name.eq_ignore_ascii_case("trans") {
+        record_translator_sites(argument_list, ctx);
         return;
     }
     for (index, argument) in argument_list.arguments.iter().take(2).enumerate() {
@@ -98,6 +108,168 @@ pub(in crate::symbol_map::extraction) fn record_symfony_receiver_sites(
             is_optional: false,
             receiver,
         });
+    }
+}
+
+/// How a call that translates a message names its domain.
+enum DomainArgument<'e, 'a> {
+    /// Not at all, or with a literal `null`: the default domain applies.
+    Default,
+    /// With a string literal.
+    Literal(&'e Expression<'a>),
+    /// With something else, so which domain the message is in is unknown.
+    Unknown,
+}
+
+/// The arguments of a call that translates a message: the message, under
+/// the parameter name `message_parameter` when it is passed by name, and
+/// the domain.
+fn translation_arguments<'e, 'a>(
+    argument_list: &'e ArgumentList<'a>,
+    message_parameter: &str,
+) -> (Option<&'e Expression<'a>>, DomainArgument<'e, 'a>) {
+    let mut message = None;
+    let mut domain = DomainArgument::Default;
+    for (index, argument) in argument_list.arguments.iter().enumerate() {
+        let (parameter, value) = match argument {
+            Argument::Named(named) => (bytes_to_str(named.name.value), named.value),
+            Argument::Positional(positional) => match index {
+                0 => (message_parameter, positional.value),
+                2 => ("domain", positional.value),
+                _ => continue,
+            },
+        };
+        if parameter == message_parameter {
+            message = Some(value);
+        } else if parameter == "domain" {
+            domain = match value {
+                Expression::Literal(Literal::Null(_)) => DomainArgument::Default,
+                Expression::Literal(Literal::String(_)) => DomainArgument::Literal(value),
+                _ => DomainArgument::Unknown,
+            };
+        }
+    }
+    (message, domain)
+}
+
+/// The domain a call translates in, and the range of the literal naming
+/// it, or `None` when that cannot be told.
+fn translation_domain<'c>(
+    domain: DomainArgument<'_, '_>,
+    content: &'c str,
+) -> Option<(&'c str, Option<(usize, usize)>)> {
+    match domain {
+        DomainArgument::Default => Some((DEFAULT_DOMAIN, None)),
+        DomainArgument::Literal(literal) => {
+            let (name, start, end) = string_literal_at_range(literal, content)?;
+            is_domain_name(name).then_some((name, Some((start as usize, end as usize))))
+        }
+        DomainArgument::Unknown => None,
+    }
+}
+
+/// Record the translation key and domain a `trans()` call names, for the
+/// type engine to confirm that its receiver is a translator.  The key is
+/// recorded in the domain the call names, so a call whose domain is not a
+/// literal records none.
+fn record_translator_sites(argument_list: &ArgumentList<'_>, ctx: &mut ExtractionCtx<'_>) {
+    let (message, domain) = translation_arguments(argument_list, "id");
+    let Some((domain, domain_range)) = translation_domain(domain, ctx.content) else {
+        return;
+    };
+    if let Some((message, start, end)) =
+        message.and_then(|message| resolved_string_literal(message, ctx.content))
+        && !message.trim().is_empty()
+    {
+        ctx.typed_receiver_sites.push(TypedReceiverSite {
+            start: start as u32,
+            end: end as u32,
+            key: translation_key(domain, message),
+            is_write: false,
+            is_optional: false,
+            receiver: ReceiverClass::Translator,
+        });
+    }
+    if let Some((start, end)) = domain_range {
+        ctx.typed_receiver_sites.push(TypedReceiverSite {
+            start: start as u32,
+            end: end as u32,
+            key: domain.to_string(),
+            is_write: false,
+            is_optional: false,
+            receiver: ReceiverClass::TranslatorDomain,
+        });
+    }
+}
+
+/// Emit the translation key and domain a message translated later names:
+/// `new TranslatableMessage('key', [], 'domain')` and `t('key', [], 'domain')`.
+fn push_translatable_spans(argument_list: &ArgumentList<'_>, ctx: &mut ExtractionCtx<'_>) {
+    let (message, domain) = translation_arguments(argument_list, "message");
+    let Some((domain, domain_range)) = translation_domain(domain, ctx.content) else {
+        return;
+    };
+    if let Some((message, start, end)) =
+        message.and_then(|message| resolved_string_literal(message, ctx.content))
+        && !message.trim().is_empty()
+    {
+        ctx.spans.push(SymbolSpan {
+            start: start as u32,
+            end: end as u32,
+            kind: SymbolKind::StringKey {
+                kind: StringKeyKind::SymfonyTranslation,
+                key: translation_key(domain, message),
+                is_write: false,
+                is_optional: false,
+            },
+        });
+    }
+    if let Some((start, end)) = domain_range {
+        ctx.spans.push(SymbolSpan {
+            start: start as u32,
+            end: end as u32,
+            kind: SymbolKind::StringKey {
+                kind: StringKeyKind::TranslationDomain,
+                key: domain.to_string(),
+                is_write: false,
+                is_optional: false,
+            },
+        });
+    }
+}
+
+/// Whether `resolved` names Symfony's `TranslatableMessage`.
+pub(crate) fn is_translatable_message(resolved: &str) -> bool {
+    resolved
+        .trim_start_matches('\\')
+        .eq_ignore_ascii_case(TRANSLATABLE_MESSAGE)
+}
+
+/// Whether `resolved` names Symfony's `t()` function.
+pub(crate) fn is_translate_function(resolved: &str) -> bool {
+    resolved
+        .trim_start_matches('\\')
+        .eq_ignore_ascii_case(TRANSLATE_FUNCTION)
+}
+
+/// Emit the spans a `new TranslatableMessage(…)` names.
+pub(in crate::symbol_map::extraction) fn emit_symfony_instantiation_spans(
+    class: &Expression<'_>,
+    argument_list: &ArgumentList<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.symfony {
+        return;
+    }
+    let Expression::Identifier(identifier) = class else {
+        return;
+    };
+    let written = bytes_to_str(identifier.value());
+    let resolved = ctx
+        .resolved_name_at(identifier.span().start.offset)
+        .unwrap_or(written);
+    if is_translatable_message(resolved) {
+        push_translatable_spans(argument_list, ctx);
     }
 }
 
@@ -154,10 +326,14 @@ pub(in crate::symbol_map::extraction) fn emit_symfony_function_call_span(
     if !ctx.symfony {
         return;
     }
-    let Some(kind) = ctx
-        .resolved_name_at(name_offset)
-        .and_then(configurator_function_kind)
-    else {
+    let Some(resolved) = ctx.resolved_name_at(name_offset) else {
+        return;
+    };
+    if is_translate_function(resolved) {
+        push_translatable_spans(argument_list, ctx);
+        return;
+    }
+    let Some(kind) = configurator_function_kind(resolved) else {
         return;
     };
     if let Some(Argument::Positional(argument)) = argument_list.arguments.iter().next() {
@@ -522,6 +698,25 @@ mod tests {
                 ("app.base", ReceiverClass::ServiceConfigurator, false),
                 ("app.alias", ReceiverClass::ServicesConfigurator, true),
                 ("app.mailer", ReceiverClass::ServicesConfigurator, false),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_translation_is_recorded_in_the_domain_its_call_names() {
+        let php = "<?php\nfunction f($translator, string $d) {\n    $translator->trans('a');\n    $translator->trans('b', [], 'admin');\n    $translator->trans(domain: null, id: 'c');\n    $translator->trans('d', [], $d);\n}\n";
+        let sites: Vec<(String, ReceiverClass)> = map_of(php)
+            .typed_receiver_sites
+            .iter()
+            .map(|site| (site.key.replace('\u{1f}', "/"), site.receiver))
+            .collect();
+        assert_eq!(
+            sites,
+            vec![
+                ("messages/a".to_string(), ReceiverClass::Translator),
+                ("admin/b".to_string(), ReceiverClass::Translator),
+                ("admin".to_string(), ReceiverClass::TranslatorDomain),
+                ("messages/c".to_string(), ReceiverClass::Translator),
             ]
         );
     }

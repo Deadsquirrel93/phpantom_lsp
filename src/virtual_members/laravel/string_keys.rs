@@ -69,7 +69,9 @@ pub(crate) fn resolve_laravel_string_key(
         StringKeyKind::Env => super::env_vars::resolve_env_definitions(backend, key),
         StringKeyKind::ServiceId
         | StringKeyKind::ContainerParameter
-        | StringKeyKind::SymfonyRoute => backend.symfony_declaration_locations(*kind, key),
+        | StringKeyKind::SymfonyRoute
+        | StringKeyKind::SymfonyTranslation
+        | StringKeyKind::TranslationDomain => backend.symfony_declaration_locations(*kind, key),
     }
 }
 
@@ -256,8 +258,14 @@ pub(crate) fn find_laravel_string_key_references(
         // any use, so the usages already hold it.
         StringKeyKind::ServiceId
         | StringKeyKind::ContainerParameter
-        | StringKeyKind::SymfonyRoute => {
+        | StringKeyKind::SymfonyRoute
+        | StringKeyKind::SymfonyTranslation => {
             return find_string_key_usages(kind, key, backend, snapshot, include_declaration);
+        }
+        // The catalogues named after a domain declare it, and are added
+        // below.
+        StringKeyKind::TranslationDomain => {
+            find_string_key_usages(kind, key, backend, snapshot, false)
         }
     };
 

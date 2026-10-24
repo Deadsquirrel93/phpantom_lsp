@@ -31,7 +31,8 @@ pub(crate) fn string_key_item_kind(kind: &StringKeyKind) -> CompletionItemKind {
     match kind {
         StringKeyKind::Config | StringKeyKind::ConfigResource(_) => CompletionItemKind::PROPERTY,
         StringKeyKind::View => CompletionItemKind::FILE,
-        StringKeyKind::Trans => CompletionItemKind::TEXT,
+        StringKeyKind::Trans | StringKeyKind::SymfonyTranslation => CompletionItemKind::TEXT,
+        StringKeyKind::TranslationDomain => CompletionItemKind::MODULE,
         StringKeyKind::MorphAlias => CompletionItemKind::ENUM_MEMBER,
         StringKeyKind::GateAbility => CompletionItemKind::METHOD,
         StringKeyKind::Env => CompletionItemKind::CONSTANT,
@@ -161,10 +162,14 @@ impl Backend {
             StringKeyKind::Env => crate::virtual_members::laravel::enumerate_env_keys(self).into(),
             StringKeyKind::ServiceId
             | StringKeyKind::ContainerParameter
-            | StringKeyKind::SymfonyRoute => self.symfony_declared_names(*kind).into(),
-            StringKeyKind::Section | StringKeyKind::Stack | StringKeyKind::ContainerBinding => {
-                Arc::new([])
-            }
+            | StringKeyKind::SymfonyRoute
+            | StringKeyKind::TranslationDomain => self.symfony_declared_names(*kind).into(),
+            // A translation key is completed in the domain it is looked up
+            // in, which only the Symfony completion knows.
+            StringKeyKind::SymfonyTranslation
+            | StringKeyKind::Section
+            | StringKeyKind::Stack
+            | StringKeyKind::ContainerBinding => Arc::new([]),
         }
     }
 

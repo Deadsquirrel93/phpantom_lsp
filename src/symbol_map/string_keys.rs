@@ -75,6 +75,15 @@ pub(crate) enum StringKeyKind {
     /// `redirectToRoute()`, a URL generator's `generate()`, and Twig's
     /// `path()` and `url()`.
     SymfonyRoute,
+    /// A Symfony translation key, together with the domain it is looked up
+    /// in (see `symfony::translations::translation_key`): declared by a YAML
+    /// or XLIFF catalogue, and read by a translator's `trans()`, a
+    /// `TranslatableMessage`, `t()`, and Twig's `trans` filter.
+    SymfonyTranslation,
+    /// A Symfony translation domain: the one a `trans()` call or a Twig
+    /// `trans` filter names, or a template's `trans_default_domain`.  The
+    /// catalogues named after it declare it.
+    TranslationDomain,
 }
 
 impl StringKeyKind {
@@ -83,11 +92,20 @@ impl StringKeyKind {
         matches!(self, Self::Config | Self::ConfigResource(_))
     }
 
+    /// Whether this key is a Symfony translation key or domain.
+    pub(crate) const fn is_symfony_translation(self) -> bool {
+        matches!(self, Self::SymfonyTranslation | Self::TranslationDomain)
+    }
+
     /// Whether this key belongs to Symfony rather than to Laravel.
     pub(crate) const fn is_symfony(self) -> bool {
         matches!(
             self,
-            Self::ServiceId | Self::ContainerParameter | Self::SymfonyRoute
+            Self::ServiceId
+                | Self::ContainerParameter
+                | Self::SymfonyRoute
+                | Self::SymfonyTranslation
+                | Self::TranslationDomain
         )
     }
 }
@@ -285,6 +303,7 @@ const SYMFONY_PARAMETERS_CONFIGURATOR: &str =
 const SYMFONY_URL_GENERATOR: &str = "Symfony\\Component\\Routing\\Generator\\UrlGeneratorInterface";
 const SYMFONY_ROUTING_CONFIGURATOR: &str =
     "Symfony\\Component\\Routing\\Loader\\Configurator\\RoutingConfigurator";
+const SYMFONY_TRANSLATOR: &str = "Symfony\\Contracts\\Translation\\TranslatorInterface";
 
 /// The namespace of the PHP configurators that build Symfony's service
 /// container.
@@ -334,13 +353,20 @@ pub(crate) enum ReceiverClass {
     UrlGenerator,
     /// A PHP routing configurator, whose `add()` declares a route.
     RoutingConfigurator,
+    /// A translator, whose `trans()` takes a translation key.
+    Translator,
+    /// A translator again, for the domain its `trans()` takes.
+    TranslatorDomain,
 }
 
 impl ReceiverClass {
     /// Each class the receiver's type can be a subtype of, most specific
     /// first, with the kind of key the call names when it is.
     pub(crate) fn targets(self) -> &'static [(&'static str, StringKeyKind)] {
-        use StringKeyKind::{ContainerParameter, ServiceId, SymfonyRoute, View};
+        use StringKeyKind::{
+            ContainerParameter, ServiceId, SymfonyRoute, SymfonyTranslation, TranslationDomain,
+            View,
+        };
         match self {
             // The concrete `Illuminate\View\Factory` implements the
             // contract, so the contract covers both spellings.
@@ -376,6 +402,8 @@ impl ReceiverClass {
             // Only the top-level configurator: a route a collection's
             // `add()` declares takes the collection's name prefix.
             Self::RoutingConfigurator => &[(SYMFONY_ROUTING_CONFIGURATOR, SymfonyRoute)],
+            Self::Translator => &[(SYMFONY_TRANSLATOR, SymfonyTranslation)],
+            Self::TranslatorDomain => &[(SYMFONY_TRANSLATOR, TranslationDomain)],
         }
     }
 

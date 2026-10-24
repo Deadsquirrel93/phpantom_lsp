@@ -1,11 +1,13 @@
-//! Symfony's service container and router: the service IDs, parameters,
-//! and route names a project declares, and where.
+//! Symfony's service container, router, and translator: the service IDs,
+//! parameters, route names, and translation keys a project declares, and
+//! where.
 //!
 //! Every declaration and every use is a
 //! [`StringKey`](crate::symbol_map::SymbolKind::StringKey) span in some
-//! file's symbol map: YAML and XML configuration and Twig templates through
-//! the resource symbol maps (see [`resources`] and [`routes`]), and PHP
-//! through symbol-map extraction.
+//! file's symbol map: YAML and XML configuration, translation catalogues,
+//! and Twig templates through the resource symbol maps (see [`resources`],
+//! [`routes`], and [`translations`]), and PHP through symbol-map
+//! extraction.
 //! A declaration is a span with `is_write` set, or a configurator call
 //! whose receiver only the type engine can confirm (a
 //! [`TypedReceiverSite`](crate::symbol_map::TypedReceiverSite) with
@@ -14,6 +16,7 @@
 
 pub(crate) mod resources;
 pub(crate) mod routes;
+pub(crate) mod translations;
 
 use std::collections::HashSet;
 use std::sync::atomic::Ordering;
@@ -26,14 +29,15 @@ use crate::symbol_map::{StringKeyKind, SymbolKind, SymbolMap};
 use crate::text_position::LineIndex;
 
 /// The files whose symbol maps declare a Symfony service ID, container
-/// parameter, or route.
+/// parameter, route, or translation key.
 #[derive(Default)]
 pub(crate) struct SymfonyState {
     declaring_uris: RwLock<HashSet<String>>,
 }
 
-/// Whether `map` declares a service ID, a container parameter, or a route,
-/// outright or through a configurator call still to be confirmed.
+/// Whether `map` declares a service ID, a container parameter, a route, or
+/// a translation key, outright or through a configurator call still to be
+/// confirmed.
 fn declares_symfony_keys(map: &SymbolMap) -> bool {
     map.spans.iter().any(|span| {
         matches!(
@@ -144,27 +148,77 @@ impl Backend {
         }
     }
 
-    /// Every service ID, container parameter, or route name the project
-    /// declares, sorted.
+    /// Every service ID, container parameter, route name, translation key
+    /// (with its domain, see [`translations::translation_key`]), or
+    /// translation domain the project declares, sorted.
     pub(crate) fn symfony_declared_names(&self, kind: StringKeyKind) -> Vec<String> {
         let mut names = Vec::new();
-        self.visit_symfony_declarations(kind, |_, _, _, key| names.push(key.to_string()));
+        if kind == StringKeyKind::TranslationDomain {
+            self.visit_symfony_declarations(StringKeyKind::SymfonyTranslation, |_, _, _, key| {
+                let (domain, _) = translations::split_translation_key(key);
+                if names.last().is_none_or(|last: &String| last != domain) {
+                    names.push(domain.to_string());
+                }
+            });
+        } else {
+            self.visit_symfony_declarations(kind, |_, _, _, key| names.push(key.to_string()));
+        }
         names.sort_unstable();
         names.dedup();
         names
     }
 
-    /// Where the project declares the service ID, container parameter, or
-    /// route name `key`.
+    /// The messages the project declares in the translation domain
+    /// `domain`, sorted.
+    pub(crate) fn symfony_translation_messages(&self, domain: &str) -> Vec<String> {
+        let mut messages = Vec::new();
+        self.visit_symfony_declarations(StringKeyKind::SymfonyTranslation, |_, _, _, key| {
+            let (declared, message) = translations::split_translation_key(key);
+            if declared == domain {
+                messages.push(message.to_string());
+            }
+        });
+        messages.sort_unstable();
+        messages.dedup();
+        messages
+    }
+
+    /// The catalogues that declare the translation domain `domain`, each
+    /// located at its start.
+    fn symfony_domain_locations(&self, domain: &str) -> Vec<Location> {
+        let mut uris: Vec<String> = self
+            .symfony
+            .declaring_uris
+            .read()
+            .iter()
+            .filter(|uri| translations::catalogue_domain(uri) == Some(domain))
+            .cloned()
+            .collect();
+        uris.sort_unstable();
+        uris.iter()
+            .filter_map(|uri| crate::util::parse_url(uri))
+            .map(|uri| Location {
+                uri,
+                range: Range::default(),
+            })
+            .collect()
+    }
+
+    /// Where the project declares the service ID, container parameter,
+    /// route name, translation key, or translation domain `key`.
     ///
     /// A service declared under its own class name is that class, and its
     /// ID is spelled as one: one with no declaration of its own (the usual
-    /// autowired service) resolves to the class.
+    /// autowired service) resolves to the class.  A translation domain is
+    /// declared by the catalogues named after it.
     pub(crate) fn symfony_declaration_locations(
         &self,
         kind: StringKeyKind,
         key: &str,
     ) -> Vec<Location> {
+        if kind == StringKeyKind::TranslationDomain {
+            return self.symfony_domain_locations(key);
+        }
         let mut found: Vec<(String, u32, u32)> = Vec::new();
         self.visit_symfony_declarations(kind, |uri, start, end, declared| {
             if declared == key {
