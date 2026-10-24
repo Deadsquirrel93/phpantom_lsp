@@ -132,6 +132,7 @@ unlikely to move the needle for most users.
 | F36 | [Twig block navigation](todo/lsp-features.md#f36-twig-block-navigation) | Medium      | Medium      |
 | F34 | [Template names a PHP wrapper builds](todo/lsp-features.md#f34-template-names-a-php-wrapper-builds) (depends on F33) | Medium      | Medium-High |
 | F37 | [Twig template variables](todo/lsp-features.md#f37-twig-template-variables) | Medium      | Medium-High |
+| F39 | [Report unknown Symfony configuration keys](todo/lsp-features.md#f39-report-unknown-symfony-configuration-keys) | Medium      | Medium-High |
 | F7  | [Evaluatable expression support (DAP integration)](todo/lsp-features.md#f7-evaluatable-expression-support-dap-integration)                                                  | Low-Medium  | Low         |
 | F15 | [Go-to-declaration](todo/lsp-features.md#f15-go-to-declaration)                                                                                                              | Low-Medium  | Low         |
 | F14 | [Helix upstream PR](todo/lsp-features.md#f14-helix-upstream-pr)                                                                                                             | Low-Medium  | Low         |
@@ -140,6 +141,8 @@ unlikely to move the needle for most users.
 | F28 | [Symfony route names a loader composes](todo/lsp-features.md#f28-symfony-route-names-a-loader-composes) | Low-Medium  | Medium      |
 | F30 | [Symfony translations outside YAML, XLIFF, and the `trans` filter](todo/lsp-features.md#f30-symfony-translations-outside-yaml-xliff-and-the-trans-filter) | Low-Medium  | Medium      |
 | F31 | [Symfony Twig templates outside `templates/`](todo/lsp-features.md#f31-symfony-twig-templates-outside-templates) | Low-Medium  | Medium      |
+| F40 | [Symfony configuration schemas the `TreeBuilder` walk misses](todo/lsp-features.md#f40-symfony-configuration-schemas-the-treebuilder-walk-misses) | Low-Medium  | Medium      |
+| F41 | [Symfony forms and validation beyond a form type's own data class](todo/lsp-features.md#f41-symfony-forms-and-validation-beyond-a-form-types-own-data-class) | Low-Medium  | Medium      |
 | F22 | [Merge a namespace onto one that shares a class name](todo/lsp-features.md#f22-merge-a-namespace-onto-one-that-shares-a-class-name)                                        | Low-Medium  | Medium-High |
 | F38 | [Twig components](todo/lsp-features.md#f38-twig-components) | Low-Medium  | Medium-High |
 | F23 | [Rename a class through its XML entity-escaped occurrences](todo/lsp-features.md#f23-rename-a-class-through-its-xml-entity-escaped-occurrences) | Low         | Medium      |

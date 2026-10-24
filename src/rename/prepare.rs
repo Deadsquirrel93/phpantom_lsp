@@ -446,7 +446,9 @@ impl Backend {
         content: &str,
         position: Position,
     ) -> Option<PrepareRenameResponse> {
-        let reference = self.framework_reference_at_position(uri, content, position)?;
+        let Some(reference) = self.framework_reference_at_position(uri, content, position) else {
+            return self.resource_member_prepare_rename(uri, content, position);
+        };
         let (start, end, placeholder) = match reference.kind {
             FrameworkReferenceKind::Class { fqn } => {
                 let source = content.get(reference.start as usize..reference.end as usize)?;
@@ -496,7 +498,18 @@ impl Backend {
         new_name: &str,
     ) -> RenameOutcome {
         let Some(reference) = self.framework_reference_at_position(uri, content, position) else {
-            return Ok(None);
+            if self
+                .resource_member_prepare_rename(uri, content, position)
+                .is_none()
+            {
+                return Ok(None);
+            }
+            let Some((target_uri, target_content, target_position)) =
+                self.framework_rename_target(uri, content, position)
+            else {
+                return Ok(None);
+            };
+            return self.handle_rename(&target_uri, &target_content, target_position, new_name);
         };
 
         match reference.kind {
@@ -524,6 +537,37 @@ impl Backend {
         }
     }
 
+    /// The range and name of the property a resource's symbol map records
+    /// under the cursor, which a validation mapping names by its bare name,
+    /// so the PHP rename's edit is written over it as it stands.
+    fn resource_member_prepare_rename(
+        &self,
+        uri: &str,
+        content: &str,
+        position: Position,
+    ) -> Option<PrepareRenameResponse> {
+        let span = self.lookup_symbol_at_position(uri, content, position)?;
+        let SymbolKind::MemberAccess {
+            subject_text: crate::symbol_map::SubjectText::Owned(_),
+            member_name,
+            is_method_call: false,
+            ..
+        } = &span.kind
+        else {
+            return None;
+        };
+        if content.get(span.start as usize..span.end as usize) != Some(member_name.as_str()) {
+            return None;
+        }
+        Some(PrepareRenameResponse::RangeWithPlaceholder {
+            range: Range {
+                start: offset_to_position(content, span.start as usize),
+                end: offset_to_position(content, span.end as usize),
+            },
+            placeholder: member_name.to_string(),
+        })
+    }
+
     /// The PHP declaration a resource occurrence names, resolved the way
     /// go-to-definition resolves it, as the file, its text, and the position
     /// of the declared name.
@@ -535,6 +579,10 @@ impl Backend {
     ) -> Option<(String, String, Position)> {
         let target = self
             .resolve_resource_symbol_definition(content, position)
+            .or_else(|| {
+                let mut definitions = self.resolve_resource_definition(uri, content, position);
+                (definitions.len() == 1).then(|| definitions.remove(0))
+            })
             .or_else(|| {
                 let mut definitions = self.resolve_definition(uri, content, position);
                 (definitions.len() == 1).then(|| definitions.remove(0))

@@ -140,3 +140,41 @@ fn templates_nobody_opened_are_found_by_the_workspace_walk() {
         ]
     );
 }
+
+#[test]
+fn forms_validation_and_configuration_are_read_only_in_a_symfony_project() {
+    let dir = tempfile::tempdir().unwrap();
+    let backend = crate::Backend::new_test_with_workspace(dir.path().to_path_buf(), vec![]);
+    backend.set_is_symfony(false);
+    let mapped = |uri: &str| {
+        backend.symbol_map_for(uri).is_some_and(|map| {
+            map.spans.iter().any(|span| {
+                matches!(
+                    &span.kind,
+                    crate::symbol_map::SymbolKind::MemberAccess {
+                        subject_text: crate::symbol_map::SubjectText::Owned(_),
+                        ..
+                    } | crate::symbol_map::SymbolKind::StringKey { .. }
+                )
+            })
+        })
+    };
+
+    let validation = crate::util::path_to_uri(&dir.path().join("config/validator/User.yaml"));
+    backend.update_resource_symbol_index(
+        &validation,
+        "App\\Entity\\User:\n    properties:\n        email:\n            - NotBlank: ~\n",
+    );
+    assert!(!mapped(&validation));
+
+    let package = crate::util::path_to_uri(&dir.path().join("config/packages/acme.yaml"));
+    backend.update_resource_symbol_index(&package, "acme:\n    api_key: x\n");
+    assert!(!mapped(&package));
+
+    let configuration = crate::util::path_to_uri(&dir.path().join("src/Configuration.php"));
+    backend.update_ast(
+        &configuration,
+        "<?php\nuse Symfony\\Component\\Config\\Definition\\Builder\\TreeBuilder;\nclass Configuration {\n    public function getConfigTreeBuilder() {\n        $tb = new TreeBuilder('acme');\n        $tb->getRootNode()->children()->scalarNode('api_key')->end();\n        return $tb;\n    }\n}\n",
+    );
+    assert!(!mapped(&configuration));
+}

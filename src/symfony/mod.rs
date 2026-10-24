@@ -1,23 +1,29 @@
-//! Symfony's service container, router, translator, and Twig: the service
-//! IDs, parameters, route names, translation keys, and templates a project
-//! declares, and where.
+//! Symfony's service container, router, translator, Twig, and bundle
+//! configuration: the service IDs, parameters, route names, translation
+//! keys, templates, and configuration keys a project declares, and where.
 //!
 //! Every declaration and every use is a
 //! [`StringKey`](crate::symbol_map::SymbolKind::StringKey) span in some
 //! file's symbol map: YAML and XML configuration, translation catalogues,
 //! and Twig templates through the resource symbol maps (see [`resources`],
-//! [`routes`], [`translations`], and [`templates`]), and PHP through
-//! symbol-map extraction.
+//! [`routes`], [`translations`], [`templates`], and [`config_tree`]), and
+//! PHP through symbol-map extraction.
+//!
+//! Form fields and validation mappings name a class's properties, so they
+//! are member accesses instead (see [`forms`] and [`validation`]).
 //! A declaration is a span with `is_write` set, or a configurator call
 //! whose receiver only the type engine can confirm (a
 //! [`TypedReceiverSite`](crate::symbol_map::TypedReceiverSite) with
 //! `is_write` set).  The few files holding one are tracked here, so the
 //! declared names are read from those maps rather than from a second index.
 
+pub(crate) mod config_tree;
+pub(crate) mod forms;
 pub(crate) mod resources;
 pub(crate) mod routes;
 pub(crate) mod templates;
 pub(crate) mod translations;
+pub(crate) mod validation;
 
 use std::collections::HashSet;
 use std::sync::atomic::Ordering;
@@ -30,15 +36,15 @@ use crate::symbol_map::{StringKeyKind, SymbolKind, SymbolMap};
 use crate::text_position::LineIndex;
 
 /// The files whose symbol maps declare a Symfony service ID, container
-/// parameter, route, translation key, or Twig template.
+/// parameter, route, translation key, Twig template, or configuration key.
 #[derive(Default)]
 pub(crate) struct SymfonyState {
     declaring_uris: RwLock<HashSet<String>>,
 }
 
 /// Whether `map` declares a service ID, a container parameter, a route, a
-/// translation key, or a template, outright or through a configurator call
-/// still to be confirmed.
+/// translation key, a template, or a configuration key, outright or through
+/// a configurator call still to be confirmed.
 fn declares_symfony_keys(map: &SymbolMap) -> bool {
     map.spans.iter().any(|span| {
         matches!(

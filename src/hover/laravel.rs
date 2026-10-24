@@ -240,6 +240,19 @@ impl Backend {
                 }
                 (label, detail)
             }
+            // An installed bundle's schema is not read, so a key no schema
+            // of the project's declares is only not one of its own.
+            StringKeyKind::SymfonyConfigKey => {
+                let detail = self
+                    .symfony_declaration_locations(*kind, key)
+                    .first()
+                    .and_then(|location| self.workspace_relative_path(location.uri.as_str()))
+                    .map_or_else(
+                        || "Not declared by the project's own bundles".to_string(),
+                        |path| format!("Declared in `{}`", path),
+                    );
+                ("Configuration key", detail)
+            }
         };
 
         Some(make_hover(format!(

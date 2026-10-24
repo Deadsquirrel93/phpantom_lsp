@@ -85,13 +85,15 @@ impl Backend {
             ResourceSymbol::Member {
                 class_fqn,
                 member_name,
-            } => self.class_member_declaration_location(&class_fqn, &member_name),
+            } => self.class_member_declaration_location(&class_fqn, &member_name, false),
         }
     }
 
     /// Go-to-definition in a YAML/XML document: the PHP class or member
-    /// under the cursor, or else the declarations of the string key there
-    /// (a Symfony service ID or container parameter).
+    /// under the cursor, or else what the file's symbol map records there:
+    /// the declarations of a string key (a Symfony service ID or container
+    /// parameter), a property a validation mapping names, or a constraint
+    /// class it names by its short name.
     pub(crate) fn resolve_resource_definition(
         &self,
         uri: &str,
@@ -101,13 +103,25 @@ impl Backend {
         if let Some(location) = self.resolve_resource_symbol_definition(content, position) {
             return vec![location];
         }
-        match self.lookup_symbol_at_position(uri, content, position) {
-            Some(SymbolSpan {
-                kind: SymbolKind::StringKey { kind, key, .. },
-                ..
-            }) if self.string_key_kind_enabled(kind) => {
+        let Some(span) = self.lookup_symbol_at_position(uri, content, position) else {
+            return Vec::new();
+        };
+        match span.kind {
+            SymbolKind::StringKey { kind, key, .. } if self.string_key_kind_enabled(kind) => {
                 crate::virtual_members::laravel::resolve_laravel_string_key(self, &kind, &key, uri)
             }
+            SymbolKind::MemberAccess {
+                subject_text: SubjectText::Owned(class_fqn),
+                member_name,
+                is_method_call,
+                ..
+            } => self
+                .class_member_declaration_location(&class_fqn, &member_name, !is_method_call)
+                .into_iter()
+                .collect(),
+            SymbolKind::ClassReference {
+                name, is_fqn: true, ..
+            } => self.class_declaration_location(&name).into_iter().collect(),
             _ => Vec::new(),
         }
     }
@@ -181,6 +195,12 @@ impl Backend {
         }
         if is_symfony {
             spans.extend(crate::symfony::translations::catalogue_spans(uri, content));
+            if crate::symfony::validation::is_validation_mapping_uri(uri) {
+                spans.extend(crate::symfony::validation::validation_spans(uri, content));
+            }
+            if crate::symfony::config_tree::is_bundle_config_uri(uri) {
+                spans.extend(crate::symfony::config_tree::config_key_spans(content));
+            }
         }
         for symbol in scan_symbols(content) {
             spans.push(SymbolSpan {

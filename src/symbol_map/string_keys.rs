@@ -90,6 +90,11 @@ pub(crate) enum StringKeyKind {
     /// `textTemplate()`, `#[Template]`, and a template's `extends`,
     /// `include`, and the other tags and functions that load one.
     TwigTemplate,
+    /// A bundle configuration key, as its dotted path from the bundle's
+    /// root (`acme_demo.mailer.dsn`): declared by a `TreeBuilder` schema in
+    /// a `getConfigTreeBuilder()` (see `symfony::config_tree`), and read by
+    /// the keys under `config/packages/`.
+    SymfonyConfigKey,
 }
 
 impl StringKeyKind {
@@ -113,6 +118,7 @@ impl StringKeyKind {
                 | Self::SymfonyTranslation
                 | Self::TranslationDomain
                 | Self::TwigTemplate
+                | Self::SymfonyConfigKey
         )
     }
 }

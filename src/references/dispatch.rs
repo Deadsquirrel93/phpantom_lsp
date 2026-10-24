@@ -106,11 +106,15 @@ impl Backend {
             // through the framework resource index, which keeps each
             // occurrence's spelling, so they are left out here.  A member
             // occurrence (`Controller::action`) covers the bare member name,
-            // which the PHP edit replaces as written.
+            // which the PHP edit replaces as written, and so does a property a
+            // validation mapping names, reached from the property's
+            // declaration (a `Variable` span).
             if mode == ReferenceSearchMode::Rename
                 && !matches!(
                     sym.kind,
-                    SymbolKind::MemberAccess { .. } | SymbolKind::MemberDeclaration { .. }
+                    SymbolKind::MemberAccess { .. }
+                        | SymbolKind::MemberDeclaration { .. }
+                        | SymbolKind::Variable { .. }
                 )
             {
                 locations.retain(|location| {

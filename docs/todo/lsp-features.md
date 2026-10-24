@@ -844,3 +844,76 @@ can share before writing a second implementation.
 
 **Where to look:** `src/blade/component_tags/`, `src/blade/discovery.rs`,
 `src/symfony/templates.rs`.
+
+---
+
+## F39. Report unknown Symfony configuration keys
+
+**Impact: Medium · Complexity: Medium-High**
+
+```yaml
+# config/packages/acme_demo.yaml
+acme_demo:
+    mailer:
+        dns: smtp://localhost # a typo of dsn
+```
+
+A key the project's own `TreeBuilder` schema declares completes and
+navigates, but one it does not declare is not reported. Judging needs the
+schema's open nodes, which the walk does not record today: a
+`variableNode()` and a prototyped node take any key, `ignoreExtraKeys()`
+lets an array node take any, `canBeEnabled()` and `canBeDisabled()` add an
+`enabled` key no string names, and `fixXmlConfig()` lets the YAML spell a
+key in its plural. A key is only worth judging under a root a project
+schema declares, and only once its parent is a closed array node the schema
+fully describes. Diagnostics are not run on resource documents yet either
+(see F32).
+
+**Where to look:** `src/symfony/config_tree.rs` (`tree_builder_keys`),
+`src/diagnostics/laravel_string_keys.rs` (`CheckedStringKind::of`).
+
+---
+
+## F40. Symfony configuration schemas the `TreeBuilder` walk misses
+
+**Impact: Low-Medium · Complexity: Medium**
+
+Keys are declared by a chain of node builders in a
+`getConfigTreeBuilder()`, and read from YAML under `config/packages/`.
+These are missed:
+
+- the keys under a prototyped node (a map of named entries), whose path
+  holds a name the configuration chooses;
+- a bundle's schema in `AbstractBundle::configure(DefinitionConfigurator
+  $definition)`, whose root is the bundle's extension alias;
+- nodes a helper method builds and `append()` adds, and node definitions
+  held in a variable between statements;
+- installed bundles' schemas (`framework`, `doctrine`, `twig`), so their
+  keys neither complete nor navigate;
+- configuration written in PHP (`config/packages/*.php`) or XML.
+
+**Where to look:** `src/symfony/config_tree.rs`.
+
+---
+
+## F41. Symfony forms and validation beyond a form type's own data class
+
+**Impact: Low-Medium · Complexity: Medium**
+
+A form field navigates to the property of the `data_class` its form type's
+`configureOptions()` sets, and a validation mapping's `properties:` to the
+class's properties. These are missed:
+
+- a `data_class` a parent form type sets, or one passed to `createForm()`
+  in its options;
+- a field the property accessor reaches through a getter, an isser, or a
+  hasser rather than a property, which navigates nowhere;
+- the fields of a child builder, `$builder->get('address')->add('street')`,
+  which belong to the child's data class;
+- a validation mapping's `getters:`, which name the `get`, `is`, or `has`
+  method they read by its property-like name;
+- in YAML, the constraints another constraint's options hold (`All`,
+  `Sequentially`, `AtLeastOneOf`), and constraints under a `namespaces:`
+  alias.
+
+**Where to look:** `src/symfony/forms.rs`, `src/symfony/validation.rs`.

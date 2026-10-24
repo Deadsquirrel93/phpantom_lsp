@@ -1,5 +1,5 @@
-//! Symfony service ID, container parameter, route name, translation, and
-//! Twig template completion.
+//! Symfony service ID, container parameter, route name, translation, Twig
+//! template, form field, and bundle configuration key completion.
 //!
 //! In PHP the cursor's call is read from the raw buffer, which is mid-edit
 //! and usually does not parse, and is judged by the same predicates the
@@ -15,6 +15,12 @@
 //! `trans` filter is applied to a translation key, and the name an
 //! `extends`, an `include`, or another tag that loads a template takes a
 //! template name.
+//!
+//! A form field is completed from its form type's data class, by the same
+//! reading of the form type the symbol map makes (see
+//! [`crate::symfony::forms`]), and a configuration key in
+//! `config/packages/` from the keys declared under the one it is nested in
+//! (see [`crate::symfony::config_tree`]).
 //!
 //! A translation key is completed from the domain it is looked up in.  In
 //! PHP that is read from the symbol map, whose site for the string being
@@ -55,6 +61,12 @@ impl Backend {
         let literal_start = quote + 1;
         let literal = content.get(literal_start..cursor)?;
 
+        if let Some(response) =
+            self.symfony_form_field_completion(content, literal_start, cursor, position, ctx)
+        {
+            return Some(response);
+        }
+
         let (kind, prefix_start) = self
             .symfony_call_key(content, cursor, code, ctx)
             .map(|kind| (kind, literal_start))
@@ -72,6 +84,61 @@ impl Backend {
             );
         }
         self.symfony_key_response(kind, content, prefix_start, cursor, position)
+    }
+
+    /// Complete a form field from the properties of the form type's data
+    /// class, when the string starting at `literal_start` is one the form
+    /// type's `buildForm()` names a field by (see
+    /// [`crate::symfony::forms`]).
+    fn symfony_form_field_completion(
+        &self,
+        content: &str,
+        literal_start: usize,
+        cursor: usize,
+        position: Position,
+        ctx: &FileContext,
+    ) -> Option<CompletionResponse> {
+        // Only a form type is worth parsing the buffer for.
+        if !content.contains("buildForm") {
+            return None;
+        }
+        let start = literal_start as u32;
+        let data_class =
+            crate::parser::with_parsed_program(content, "symfony_form_fields", |program, _| {
+                let class = class_at(program.statements.iter(), start)?;
+                let resolve = |written: &str, offset: u32| ctx.resolve_name_at(written, offset);
+                let form = crate::symfony::forms::form_fields(class, &resolve)?;
+                form.fields
+                    .iter()
+                    .any(|(field_start, field_end)| {
+                        *field_start == start && cursor as u32 <= *field_end
+                    })
+                    .then(|| resolve(form.data_class.0, form.data_class.1))
+            })?;
+
+        let loaders = self.file_loaders(ctx);
+        let class = (loaders.resolved_class_loader())(crate::Fqn::new(&data_class))?;
+        let mut properties: Vec<String> = class
+            .properties
+            .iter()
+            .filter(|property| !property.is_static)
+            .map(|property| property.name.trim_start_matches('$').to_string())
+            .collect();
+        properties.sort_unstable();
+        properties.dedup();
+        let prefix = content.get(literal_start..cursor)?.as_bytes();
+        properties.retain(|name| {
+            name.as_bytes()
+                .get(..prefix.len())
+                .is_some_and(|start| start.eq_ignore_ascii_case(prefix))
+        });
+        string_key_response(
+            properties,
+            tower_lsp::lsp_types::CompletionItemKind::PROPERTY,
+            content,
+            literal_start,
+            position,
+        )
     }
 
     /// The domain the translation key whose string starts at
@@ -239,7 +306,24 @@ impl Backend {
                 (StringKeyKind::SymfonyRoute, start)
             }
         } else if crate::symfony::resources::is_container_config_uri(uri) {
-            resource_key_at(content, cursor)?
+            match resource_key_at(content, cursor) {
+                Some(found) => found,
+                None if crate::symfony::config_tree::is_bundle_config_uri(uri) => {
+                    let (parent, start) =
+                        crate::symfony::config_tree::config_key_completion(content, cursor)?;
+                    let declared = self.symfony_declared_names(StringKeyKind::SymfonyConfigKey);
+                    let children = crate::symfony::config_tree::child_keys(&declared, &parent);
+                    return self.symfony_names_response(
+                        StringKeyKind::SymfonyConfigKey,
+                        children,
+                        content,
+                        start,
+                        cursor,
+                        position,
+                    );
+                }
+                None => return None,
+            }
         } else {
             return None;
         };
@@ -334,6 +418,29 @@ fn resource_key_at(content: &str, cursor: usize) -> Option<(StringKeyKind, usize
         _ => false,
     };
     takes_service.then_some((StringKeyKind::ServiceId, line_start + name_start))
+}
+
+/// The class whose body holds `offset`, among `statements` and the
+/// namespaces they declare.
+fn class_at<'p, 'a>(
+    statements: impl Iterator<Item = &'p mago_syntax::cst::Statement<'a>>,
+    offset: u32,
+) -> Option<&'p mago_syntax::cst::Class<'a>>
+where
+    'a: 'p,
+{
+    use mago_span::HasSpan;
+    use mago_syntax::cst::Statement;
+    for statement in statements {
+        match statement {
+            Statement::Class(class) if class.span().has_offset(offset) => return Some(class),
+            Statement::Namespace(namespace) if namespace.span().has_offset(offset) => {
+                return class_at(namespace.statements().iter(), offset);
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 /// Whether `before`, the text before a callee's name, ends with `new`.

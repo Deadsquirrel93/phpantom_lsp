@@ -65,4 +65,24 @@ No outstanding items.
 
 ## Miscellaneous
 
-No outstanding items.
+### B675. Member references mix up a property and a method of the same name
+
+**Impact: Medium · Complexity: Medium**
+
+```php
+class User {
+    public function __construct(private string $email) {}
+    public function email(): string { return $this->email; }
+}
+```
+
+Find References on the `$email` property lists the `email()` method's
+declaration as well, and renaming the property renames the method too. The
+member reference search matches by name and static-ness only: a declaration
+span or an access counts whether it is a method or a property, so the
+`is_method_call` an access records and the kind of the declaration are
+never compared with what was searched for. The search has to carry the kind
+of member it is after, and every caller (references, rename, the reference
+lens) has to pass it. The same name on both is common on value objects and
+Symfony entities, whose validation mappings and form fields name the
+property.

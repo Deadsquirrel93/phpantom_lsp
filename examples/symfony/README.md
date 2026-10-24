@@ -37,6 +37,16 @@ catalogues together, the way a real Symfony project does.
   `DemoController`, go to the definition of `demo/index.html.twig`, or
   complete a name inside `render('')` or `{% include '' %}`. A template that
   does not exist is reported, with a quick fix that creates it.
+- Form fields and validation mappings name the properties of the class they
+  map. In `src/Form/RegistrationType.php` or `config/validator/User.yaml`, go
+  to the definition of `email`, find the references of `$displayName` in
+  `src/Entity/User.php`, or complete a field inside `->add('')`. A constraint
+  such as `NotBlank` goes to its class.
+- Bundle configuration keys navigate between the schema in
+  `src/DependencyInjection/Configuration.php` and
+  `config/packages/acme_demo.yaml`. Go to the definition of `dsn`, find the
+  references of `'api_key'`, or complete a key on a new line under
+  `mailer:`.
 - Open `src/Entity/User.php` and `src/Repository/UserRepository.php`. The
   CodeLens above each class links the entity and its repository.
 

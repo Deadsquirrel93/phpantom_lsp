@@ -127,6 +127,13 @@ pub(crate) enum DocblockMemberRef {
     /// PHPUnit errors out on metadata that names nothing — so it is still
     /// checked.
     PhpUnit,
+    /// A Symfony form field, naming the property path of the form's data
+    /// class it reads and writes.
+    ///
+    /// The property accessor reaches a path through a getter, an isser, or
+    /// a hasser as readily as through a property, so a field with no
+    /// property of its name is not an error.
+    PropertyPath,
 }
 
 impl DocblockMemberRef {
@@ -141,7 +148,7 @@ impl DocblockMemberRef {
     /// Whether a target that resolves to nothing is acceptable rather than
     /// a diagnostic.
     pub(crate) fn tolerates_missing_target(self) -> bool {
-        matches!(self, Self::See)
+        matches!(self, Self::See | Self::PropertyPath)
     }
 }
 

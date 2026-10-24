@@ -67,13 +67,16 @@ impl CheckedStringKind {
             // the environment a process runs with is not on disk.  A
             // translation key no catalogue of the project declares may be
             // one an installed bundle's does, or a message that is its own
-            // translation.
+            // translation.  A configuration key is only declared by the
+            // project's own schemas so far, which say nothing about what
+            // a key under an open node or an installed bundle may be.
             StringKeyKind::SymfonyTranslation
             | StringKeyKind::TranslationDomain
             | StringKeyKind::Section
             | StringKeyKind::Stack
             | StringKeyKind::ContainerBinding
-            | StringKeyKind::Env => return None,
+            | StringKeyKind::Env
+            | StringKeyKind::SymfonyConfigKey => return None,
         })
     }
 }

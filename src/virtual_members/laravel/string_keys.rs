@@ -72,7 +72,8 @@ pub(crate) fn resolve_laravel_string_key(
         | StringKeyKind::SymfonyRoute
         | StringKeyKind::SymfonyTranslation
         | StringKeyKind::TranslationDomain
-        | StringKeyKind::TwigTemplate => backend.symfony_declaration_locations(*kind, key),
+        | StringKeyKind::TwigTemplate
+        | StringKeyKind::SymfonyConfigKey => backend.symfony_declaration_locations(*kind, key),
     }
 }
 
@@ -261,7 +262,8 @@ pub(crate) fn find_laravel_string_key_references(
         | StringKeyKind::ContainerParameter
         | StringKeyKind::SymfonyRoute
         | StringKeyKind::SymfonyTranslation
-        | StringKeyKind::TwigTemplate => {
+        | StringKeyKind::TwigTemplate
+        | StringKeyKind::SymfonyConfigKey => {
             return find_string_key_usages(kind, key, backend, snapshot, include_declaration);
         }
         // The catalogues named after a domain declare it, and are added

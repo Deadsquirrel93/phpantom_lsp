@@ -99,7 +99,7 @@ src/
 ├── hover/                  # Hover: symbol-map dispatch, type/signature/docblock formatting
 ├── definition/             # Go-to-definition (resolve, member, variable/, implementation, type_definition)
 ├── resource_navigation.rs  # Schema-free PHP class/member indexing and navigation in YAML/XML
-├── symfony/                # Symfony service IDs, container parameters, routes, translations, and Twig templates: YAML/XML/XLIFF/Twig scanners, declaring files
+├── symfony/                # Symfony service IDs, container parameters, routes, translations, Twig templates, bundle configuration keys, form fields, and validation mappings: YAML/XML/XLIFF/Twig scanners, declaring files
 ├── references/, rename/, highlight/
 ├── signature_help.rs, semantic_tokens.rs, inlay_hints.rs, folding.rs, code_lens.rs
 ├── document_symbols.rs, document_links.rs, workspace_symbols.rs, formatting/

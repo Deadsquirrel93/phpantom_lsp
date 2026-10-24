@@ -1,6 +1,7 @@
 //! The names Symfony takes as strings in PHP: service IDs, container
-//! parameters, route names, translation keys and domains, and Twig
-//! templates.
+//! parameters, route names, translation keys and domains, Twig templates,
+//! the configuration keys a bundle's schema declares, and the data-class
+//! properties a form type's fields map to.
 //!
 //! The configurator functions (`service('app.mailer')`, `param('app.name')`),
 //! the `#[Autowire]`, `#[Route]`, and `#[Template]` attributes,
@@ -551,6 +552,74 @@ pub(in crate::symbol_map::extraction) fn emit_symfony_route_spans(
         push_action_route_spans(&class_routes, "", derive, invoke, ctx.content, &mut spans);
     }
     ctx.spans.extend(spans);
+}
+
+/// Emit the fields a form type maps to its data class, as accesses to the
+/// data class's properties (see [`crate::symfony::forms`]).
+pub(in crate::symbol_map::extraction) fn emit_symfony_form_field_spans(
+    class: &Class<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.symfony {
+        return;
+    }
+    let resolve = |written: &str, offset: u32| {
+        ctx.resolved_name_at(offset)
+            .map_or_else(|| written.to_string(), str::to_string)
+    };
+    let Some(form) = crate::symfony::forms::form_fields(class, &resolve) else {
+        return;
+    };
+    let (written, offset) = form.data_class;
+    // Rooted, so the class is not read again against this file's
+    // namespace and imports.
+    let data_class = format!("\\{}", resolve(written, offset).trim_start_matches('\\'));
+    for (start, end) in form.fields {
+        let field = &ctx.content[start as usize..end as usize];
+        if !is_identifier(field) {
+            continue;
+        }
+        ctx.spans.push(SymbolSpan {
+            start,
+            end,
+            kind: SymbolKind::MemberAccess {
+                subject_text: SubjectText::owned(data_class.clone()),
+                member_name: crate::atom::atom(field),
+                is_static: false,
+                is_method_call: false,
+                docblock_ref: DocblockMemberRef::PropertyPath,
+                is_array_callable: false,
+                is_nullsafe: false,
+            },
+        });
+    }
+}
+
+/// Emit the configuration keys a bundle's `getConfigTreeBuilder()`
+/// declares (see [`crate::symfony::config_tree`]).
+pub(in crate::symbol_map::extraction) fn emit_symfony_config_tree_spans(
+    class: &Class<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.symfony {
+        return;
+    }
+    let resolve = |written: &str, offset: u32| {
+        ctx.resolved_name_at(offset)
+            .map_or_else(|| written.to_string(), str::to_string)
+    };
+    let keys = crate::symfony::config_tree::tree_builder_keys(class, &resolve);
+    ctx.spans
+        .extend(keys.into_iter().map(|(key, start, end)| SymbolSpan {
+            start,
+            end,
+            kind: SymbolKind::StringKey {
+                kind: StringKeyKind::SymfonyConfigKey,
+                key,
+                is_write: true,
+                is_optional: false,
+            },
+        }));
 }
 
 /// The spans the `#[Route]`s of one action declare.  `derive_from` is the

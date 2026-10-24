@@ -15,6 +15,8 @@ pub(super) fn extract_from_class<'a>(class: &'a Class<'a>, ctx: &mut ExtractionC
 
     extract_from_attribute_lists(&class.attribute_lists, ctx, 0);
     emit_symfony_route_spans(class, ctx);
+    emit_symfony_form_field_spans(class, ctx);
+    emit_symfony_config_tree_spans(class, ctx);
 
     if let Some(ref extends) = class.extends {
         for ident in extends.types.iter() {
