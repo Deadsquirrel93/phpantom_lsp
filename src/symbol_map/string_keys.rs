@@ -327,6 +327,42 @@ pub(crate) struct MessengerHandlerSite {
     pub message: Atom,
 }
 
+// ─── Container declarations ─────────────────────────────────────────────────
+
+/// What a Symfony service or container parameter declaration says about the
+/// value it declares, keyed back to the declaration's span (or, for a PHP
+/// configurator, its still-to-be-confirmed site) by `start`.
+///
+/// Kept beside the spans rather than in them, since only the declarations
+/// that give a class, an alias, or a value have one, and only the type
+/// engine reads it: `$container->get('app.mailer')` is the class the
+/// service is built from, and `getParameter('app.sender')` the type of the
+/// parameter's value.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ContainerValueSite {
+    /// Byte offset of the declared name's first character, matching the
+    /// declaration's [`SymbolKind::StringKey`] span or
+    /// [`TypedReceiverSite`].
+    pub start: u32,
+    /// What the declaration gives.
+    pub value: ContainerValue,
+}
+
+/// The value a container declaration gives, read by the kind of name it
+/// turns out to declare.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum ContainerValue {
+    /// A class name, fully qualified: the class a service is built from, or
+    /// a parameter's string value that could name one.  A whole `%name%`
+    /// placeholder is the value of the parameter `name`, as a service's
+    /// class and as a parameter's value alike.
+    Class(Atom),
+    /// The service an alias points at.
+    Alias(Atom),
+    /// The type of a parameter's value, generalized (`'en'` is a `string`).
+    Type(crate::php_type::PhpType),
+}
+
 // ─── String keys behind a typed receiver ────────────────────────────────────
 
 const PSR_CONTAINER: &str = "Psr\\Container\\ContainerInterface";

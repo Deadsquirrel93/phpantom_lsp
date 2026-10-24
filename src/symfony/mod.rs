@@ -14,7 +14,9 @@
 //! methods an event subscription names name a class's members, so they are
 //! member accesses instead (see [`forms`] and [`validation`]).  The
 //! Messenger handlers a project registers are recorded beside the spans of
-//! the file that declares them (see [`messenger`]).
+//! the file that declares them (see [`messenger`]).  What a service or
+//! parameter declaration gives its name, a class or a value, is recorded
+//! beside its span too, for the type engine (see [`container`]).
 //! A declaration is a span with `is_write` set, or a configurator call
 //! whose receiver only the type engine can confirm (a
 //! [`TypedReceiverSite`](crate::symbol_map::TypedReceiverSite) with
@@ -23,6 +25,7 @@
 //! from a second index.
 
 pub(crate) mod config_tree;
+pub(crate) mod container;
 pub(crate) mod forms;
 pub(crate) mod messenger;
 pub(crate) mod resources;
@@ -200,12 +203,12 @@ impl Backend {
         }
     }
 
-    /// Visit every declaration of a `kind` key: the file, the span's byte
-    /// range, and the key.
+    /// Visit every declaration of a `kind` key: the file and its symbol
+    /// map, the span's byte range, and the key.
     fn visit_symfony_declarations(
         &self,
         kind: StringKeyKind,
-        mut visit: impl FnMut(&str, u32, u32, &str),
+        mut visit: impl FnMut(&str, &SymbolMap, u32, u32, &str),
     ) {
         let mut uris: Vec<String> = self.symfony.declaring_uris.read().iter().cloned().collect();
         uris.sort_unstable();
@@ -231,7 +234,7 @@ impl Backend {
                 } = &span.kind
                     && *span_kind == kind
                 {
-                    visit(&uri, span.start, span.end, key);
+                    visit(&uri, &map, span.start, span.end, key);
                 }
             }
         }
@@ -254,14 +257,17 @@ impl Backend {
     ) -> Vec<String> {
         let mut names = Vec::new();
         if kind == StringKeyKind::TranslationDomain {
-            self.visit_symfony_declarations(StringKeyKind::SymfonyTranslation, |_, _, _, key| {
-                let (domain, _) = translations::split_translation_key(key);
-                if names.last().is_none_or(|last: &String| last != domain) {
-                    names.push(domain.to_string());
-                }
-            });
+            self.visit_symfony_declarations(
+                StringKeyKind::SymfonyTranslation,
+                |_, _, _, _, key| {
+                    let (domain, _) = translations::split_translation_key(key);
+                    if names.last().is_none_or(|last: &String| last != domain) {
+                        names.push(domain.to_string());
+                    }
+                },
+            );
         } else {
-            self.visit_symfony_declarations(kind, |uri, start, _, key| {
+            self.visit_symfony_declarations(kind, |uri, _, start, _, key| {
                 if except != Some((uri, start)) {
                     names.push(key.to_string());
                 }
@@ -276,7 +282,7 @@ impl Backend {
     /// `domain`, sorted.
     pub(crate) fn symfony_translation_messages(&self, domain: &str) -> Vec<String> {
         let mut messages = Vec::new();
-        self.visit_symfony_declarations(StringKeyKind::SymfonyTranslation, |_, _, _, key| {
+        self.visit_symfony_declarations(StringKeyKind::SymfonyTranslation, |_, _, _, _, key| {
             let (declared, message) = translations::split_translation_key(key);
             if declared == domain {
                 messages.push(message.to_string());
@@ -324,7 +330,7 @@ impl Backend {
             return self.symfony_domain_locations(key);
         }
         let mut found: Vec<(String, u32, u32)> = Vec::new();
-        self.visit_symfony_declarations(kind, |uri, start, end, declared| {
+        self.visit_symfony_declarations(kind, |uri, _, start, end, declared| {
             if declared == key {
                 found.push((uri.to_string(), start, end));
             }

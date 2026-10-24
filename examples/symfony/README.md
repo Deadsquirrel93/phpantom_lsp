@@ -58,6 +58,11 @@ catalogues together, the way a real Symfony project does.
   `command.bus`. The CodeLens above its `__invoke()` opens the message it
   handles, and the one above `src/Message/SendWelcomeEmail.php` opens the
   handler.
+- Services, parameters, and query results are typed by what the
+  configuration declares. In `DemoController`, hover `$mailer`, fetched by
+  the service ID `app.mailer`, or `$supportEmail`, read with
+  `getParameter()`. In `src/Query/QueryBus.php`, hover `$count`, which
+  `HandleTrait::handle()` gets back from the message's handler.
 - Open `src/Entity/User.php` and `src/Repository/UserRepository.php`. The
   CodeLens above each class links the entity and its repository.
 

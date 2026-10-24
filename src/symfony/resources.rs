@@ -10,8 +10,14 @@
 //!
 //! A service ID spelled as a class name is left to the class reference the
 //! resource symbol map already records over the same text.
+//!
+//! A declaration also records what it gives the name, when the text says:
+//! a service's `class` or the service an alias points at, and the value a
+//! parameter is set to (see [`super::container`]).
 
-use crate::symbol_map::{StringKeyKind, SymbolKind, SymbolSpan};
+use crate::symbol_map::{
+    ContainerValue, ContainerValueSite, StringKeyKind, SymbolKind, SymbolSpan,
+};
 
 /// Whether `uri` is a file Symfony loads container configuration from: a
 /// YAML or XML file under a `config` directory (the application's
@@ -28,23 +34,30 @@ pub(crate) fn is_container_config_uri(uri: &str) -> bool {
 }
 
 /// The service-ID and container-parameter spans of one YAML or XML
-/// configuration file, sorted by offset.
-pub(crate) fn container_key_spans(uri: &str, content: &str) -> Vec<SymbolSpan> {
-    let path = uri
-        .split(['?', '#'])
-        .next()
-        .unwrap_or(uri)
-        .to_ascii_lowercase();
-    let path = path.strip_suffix(".dist").unwrap_or(&path);
+/// configuration file, sorted by offset, and what its declarations give
+/// the names they declare, sorted the same way.
+pub(crate) fn container_declarations(
+    uri: &str,
+    content: &str,
+) -> (Vec<SymbolSpan>, Vec<ContainerValueSite>) {
     let mut spans = Vec::new();
-    if path.ends_with(".yaml") || path.ends_with(".yml") {
-        scan_yaml(content, &mut spans);
-    } else if path.ends_with(".xml") {
-        scan_xml(content, &mut spans);
+    let mut values = Vec::new();
+    match super::config_format(uri) {
+        Some(super::ConfigFormat::Yaml) => scan_yaml(content, &mut spans, &mut values),
+        Some(super::ConfigFormat::Xml) => scan_xml(content, &mut spans, &mut values),
+        None => {}
     }
     spans.sort_by_key(|span| (span.start, span.end));
     spans.dedup_by(|b, a| a.start == b.start && a.end == b.end);
-    spans
+    values.sort_by_key(|site| site.start);
+    (spans, values)
+}
+
+fn value_site(start: usize, value: ContainerValue) -> ContainerValueSite {
+    ContainerValueSite {
+        start: start as u32,
+        value,
+    }
 }
 
 fn key_span(kind: StringKeyKind, key: &str, start: usize, is_write: bool) -> SymbolSpan {
@@ -97,8 +110,19 @@ fn yaml_section(trimmed: &str) -> Option<YamlSection> {
     }
 }
 
-fn scan_yaml(content: &str, spans: &mut Vec<SymbolSpan>) {
+/// A declaration whose value is written on the lines nested under it: a
+/// service's `class:` or `alias:`, or a parameter's block of entries.
+struct OpenDeclaration {
+    /// Where the declared name starts.
+    start: usize,
+    kind: YamlSection,
+    /// The indentation of the service's own keys, from the first one.
+    indent: Option<usize>,
+}
+
+fn scan_yaml(content: &str, spans: &mut Vec<SymbolSpan>, values: &mut Vec<ContainerValueSite>) {
     let mut section: Option<OpenSection> = None;
+    let mut declaration: Option<OpenDeclaration> = None;
     for (line_start, line) in crate::framework::line_offsets(content) {
         let semantic = yaml_content_before_comment(line);
         let trimmed = semantic.trim();
@@ -110,6 +134,30 @@ fn scan_yaml(content: &str, spans: &mut Vec<SymbolSpan>) {
         scan_parameter_placeholders(semantic, line_start, spans);
 
         let indent = crate::framework::leading_spaces(semantic);
+        let child_indent = section.as_ref().and_then(|open| open.child_indent);
+        if let Some(open) = declaration.take() {
+            let nested = child_indent.is_some_and(|child| indent > child)
+                && section
+                    .as_ref()
+                    .is_some_and(|section| indent > section.indent);
+            match (open.kind, nested) {
+                // A parameter with nothing after its colon is the block of
+                // entries nested under it, or null when nothing is.
+                (YamlSection::Parameters, nested) => {
+                    let ty = if nested {
+                        crate::php_type::PhpType::array()
+                    } else {
+                        crate::php_type::PhpType::null()
+                    };
+                    values.push(value_site(open.start, ContainerValue::Type(ty)));
+                }
+                (YamlSection::Services, true) => {
+                    declaration = Some(service_property(open, semantic, indent, values));
+                }
+                (YamlSection::Services, false) => {}
+            }
+        }
+
         if let Some(kind) = yaml_section(trimmed) {
             section = Some(OpenSection {
                 kind,
@@ -142,13 +190,122 @@ fn scan_yaml(content: &str, spans: &mut Vec<SymbolSpan>) {
                     YamlSection::Services => StringKeyKind::ServiceId,
                     YamlSection::Parameters => StringKeyKind::ContainerParameter,
                 };
-                spans.push(key_span(kind, key, key_start + quote, true));
+                let start = key_start + quote;
+                spans.push(key_span(kind, key, start, true));
+                let after_colon = &semantic[key_start - line_start + raw_key.len()..];
+                let inline = after_colon
+                    .trim_start()
+                    .strip_prefix(':')
+                    .unwrap_or("")
+                    .trim();
+                declaration = declared_inline(open.kind, start, inline, values);
             }
         }
         if open.kind == YamlSection::Services {
             scan_service_references(semantic, line_start, spans);
         }
     }
+    if let Some(open) = declaration
+        && open.kind == YamlSection::Parameters
+    {
+        values.push(value_site(
+            open.start,
+            ContainerValue::Type(crate::php_type::PhpType::null()),
+        ));
+    }
+}
+
+/// Record what a declaration written on its key's own line gives the name
+/// at `start`, or open the declaration when it is written on the lines
+/// nested under it.
+fn declared_inline(
+    kind: YamlSection,
+    start: usize,
+    inline: &str,
+    values: &mut Vec<ContainerValueSite>,
+) -> Option<OpenDeclaration> {
+    let open = OpenDeclaration {
+        start,
+        kind,
+        indent: None,
+    };
+    match kind {
+        YamlSection::Parameters if inline.is_empty() => return Some(open),
+        YamlSection::Parameters => {
+            if let Some(value) = super::container::yaml_scalar_value(inline) {
+                values.push(value_site(start, value));
+            }
+        }
+        YamlSection::Services if inline.is_empty() || inline == "~" => return Some(open),
+        YamlSection::Services => {
+            if let Some(body) = inline.strip_prefix('{') {
+                let body = body.strip_suffix('}').unwrap_or(body);
+                for pair in body.split(',') {
+                    if let Some((key, value)) = pair.split_once(':') {
+                        push_service_property(start, key.trim(), value.trim(), values);
+                    }
+                }
+            } else if let Some(target) = service_reference(inline) {
+                values.push(value_site(
+                    start,
+                    ContainerValue::Alias(crate::atom::atom(target)),
+                ));
+            }
+        }
+    }
+    None
+}
+
+/// Read one line nested under a service declaration, recording the
+/// `class:` or `alias:` at the service's own level.
+fn service_property(
+    mut open: OpenDeclaration,
+    line: &str,
+    indent: usize,
+    values: &mut Vec<ContainerValueSite>,
+) -> OpenDeclaration {
+    let at = *open.indent.get_or_insert(indent);
+    if indent == at
+        && let Some((key, value)) = line.trim().split_once(':')
+    {
+        push_service_property(open.start, key.trim(), value.trim(), values);
+    }
+    open
+}
+
+/// Record a service's `class` or `alias` property.
+fn push_service_property(
+    start: usize,
+    key: &str,
+    value: &str,
+    values: &mut Vec<ContainerValueSite>,
+) {
+    let (key, _) = crate::framework::strip_yaml_quotes(key);
+    let (value, _) = crate::framework::strip_yaml_quotes(value);
+    match key {
+        "class" if !value.is_empty() => {
+            let class = value.strip_prefix('\\').unwrap_or(value);
+            values.push(value_site(
+                start,
+                ContainerValue::Class(crate::atom::atom(&class.replace("\\\\", "\\"))),
+            ));
+        }
+        "alias" if is_container_key(value) => {
+            values.push(value_site(
+                start,
+                ContainerValue::Alias(crate::atom::atom(value)),
+            ));
+        }
+        _ => {}
+    }
+}
+
+/// The service a `'@id'` value names, the whole of a service's declaration
+/// when it is an alias.
+fn service_reference(value: &str) -> Option<&str> {
+    let (value, _) = crate::framework::strip_yaml_quotes(value);
+    let id = value.strip_prefix('@')?;
+    is_container_key(id).then_some(id)
 }
 
 /// The key of a `key: value` line and its absolute offset.
@@ -255,7 +412,7 @@ fn scan_parameter_placeholders(text: &str, absolute_start: usize, spans: &mut Ve
 
 // ─── XML ────────────────────────────────────────────────────────────────────
 
-fn scan_xml(content: &str, spans: &mut Vec<SymbolSpan>) {
+fn scan_xml(content: &str, spans: &mut Vec<SymbolSpan>, values: &mut Vec<ContainerValueSite>) {
     if !content.contains("<service")
         && !content.contains("<parameter")
         && !content.contains("<argument")
@@ -311,6 +468,18 @@ fn scan_xml(content: &str, spans: &mut Vec<SymbolSpan>) {
                     start,
                     true,
                 ));
+                let type_attribute = crate::framework::xml_attr_value(tag, tag_start, &["type"]);
+                let text = if self_closing {
+                    ""
+                } else {
+                    &content[tag_end..text_end]
+                };
+                if let Some(value) = super::container::xml_parameter_value(
+                    text,
+                    type_attribute.as_ref().map(|(value, _, _)| value.as_str()),
+                ) {
+                    values.push(value_site(start, value));
+                }
             }
             if !self_closing {
                 parameter_depth += 1;
@@ -327,6 +496,24 @@ fn scan_xml(content: &str, spans: &mut Vec<SymbolSpan>) {
         };
         match name {
             "service" => {
+                if let Some((id, start, _)) = attribute(&["id"])
+                    && is_container_key(&id)
+                {
+                    if let Some((class, _, _)) = attribute(&["class"]) {
+                        let class = class.strip_prefix('\\').unwrap_or(&class);
+                        values.push(value_site(
+                            start,
+                            ContainerValue::Class(crate::atom::atom(class)),
+                        ));
+                    } else if let Some((target, _, _)) = attribute(&["alias"])
+                        && is_container_key(&target)
+                    {
+                        values.push(value_site(
+                            start,
+                            ContainerValue::Alias(crate::atom::atom(&target)),
+                        ));
+                    }
+                }
                 service(attribute(&["id"]), true, spans);
                 for name in ["alias", "decorates", "parent"] {
                     service(attribute(&[name]), false, spans);
@@ -353,7 +540,8 @@ mod tests {
     use super::*;
 
     fn keys(uri: &str, content: &str) -> Vec<(StringKeyKind, String, bool, String)> {
-        container_key_spans(uri, content)
+        container_declarations(uri, content)
+            .0
             .into_iter()
             .map(|span| {
                 let SymbolKind::StringKey {
@@ -455,6 +643,82 @@ mod tests {
                 (Service, "app.mailer_alias", true),
                 (Service, "app.mailer", false),
             ]
+        );
+    }
+
+    /// What each declaration gives, by the name it declares.
+    fn values(uri: &str, content: &str) -> Vec<(String, String)> {
+        let (spans, values) = container_declarations(uri, content);
+        values
+            .into_iter()
+            .map(|site| {
+                let span = spans
+                    .iter()
+                    .find(|span| span.start == site.start)
+                    .expect("a value belongs to a declaration");
+                let name = content[span.start as usize..span.end as usize].to_string();
+                let value = match site.value {
+                    ContainerValue::Class(class) => format!("class {class}"),
+                    ContainerValue::Alias(id) => format!("alias {id}"),
+                    ContainerValue::Type(ty) => ty.to_string(),
+                };
+                (name, value)
+            })
+            .collect()
+    }
+
+    fn pairs(expected: &[(&str, &str)]) -> Vec<(String, String)> {
+        expected
+            .iter()
+            .map(|(name, value)| (name.to_string(), value.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn yaml_declarations_give_classes_aliases_and_values() {
+        let yaml = "parameters:\n    app.name: PHPantom\n    app.port: 25\n    app.list:\n        - a\n    app.empty:\n    app.class: 'App\\Mailer'\nservices:\n    app.mailer:\n        arguments: ['@app.transport']\n        class: App\\Mailer\n    app.alias: '@app.mailer'\n    app.long_alias:\n        alias: app.mailer\n    app.flow: { class: App\\Flow, public: true }\n    app.bare: ~\nwhen@dev:\n    parameters:\n        app.last:\n";
+        assert_eq!(
+            values("file:///p/config/services.yaml", yaml),
+            pairs(&[
+                ("app.name", "string"),
+                ("app.port", "int"),
+                ("app.list", "array"),
+                ("app.empty", "null"),
+                ("app.class", "class App\\Mailer"),
+                ("app.mailer", "class App\\Mailer"),
+                ("app.alias", "alias app.mailer"),
+                ("app.long_alias", "alias app.mailer"),
+                ("app.flow", "class App\\Flow"),
+                ("app.last", "null"),
+            ])
+        );
+    }
+
+    #[test]
+    fn xml_declarations_give_classes_aliases_and_values() {
+        let xml = r#"<container>
+  <parameters>
+    <parameter key="app.count">3</parameter>
+    <parameter key="app.label" type="string">3</parameter>
+    <parameter key="app.list" type="collection">
+      <parameter>a</parameter>
+    </parameter>
+  </parameters>
+  <services>
+    <service id="app.mailer" class="App\Mailer"/>
+    <service id="app.alias" alias="app.mailer"/>
+  </services>
+</container>
+"#;
+        assert_eq!(
+            values("file:///p/config/services.xml", xml),
+            pairs(&[
+                ("app.count", "int"),
+                ("app.label", "string"),
+                ("app.list", "array"),
+                ("app.mailer", "class App\\Mailer"),
+                ("app.alias", "alias app.mailer"),
+            ])
         );
     }
 

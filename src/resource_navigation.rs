@@ -187,6 +187,7 @@ impl Backend {
         }
 
         let mut spans = Vec::new();
+        let mut container_values = Vec::new();
         if is_symfony && crate::symfony::resources::is_container_config_uri(uri) {
             // A bus is declared by a key under `config/packages/`, which is
             // a configuration key too; the bus is the one that means
@@ -195,7 +196,10 @@ impl Backend {
             let mut slots = crate::symfony::tags::tag_slots(uri, content);
             slots.extend(crate::symfony::messenger::bus_slots(uri, content));
             spans = crate::symfony::slot_spans(content, slots);
-            spans.extend(crate::symfony::resources::container_key_spans(uri, content));
+            let (container_spans, values) =
+                crate::symfony::resources::container_declarations(uri, content);
+            spans.extend(container_spans);
+            container_values = values;
             if crate::symfony::routes::is_routing_config_uri(uri) {
                 spans.extend(crate::symfony::routes::routing_key_spans(uri, content));
             }
@@ -252,6 +256,7 @@ impl Backend {
         SymbolMap {
             spans,
             member_access_indices,
+            container_values,
             source_len: u32::try_from(content.len()).unwrap_or(u32::MAX),
             ..SymbolMap::default()
         }

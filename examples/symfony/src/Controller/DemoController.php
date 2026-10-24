@@ -34,6 +34,12 @@ final class DemoController extends AbstractController
         // getParameter(''). The receiver's type is what makes these names.
         $container->has('app.welcome_mailer');
         $supportEmail = $this->getParameter('app.support_email');
+        // Try: hover $mailer and $supportEmail, or complete after $mailer->.
+        // app.mailer is an alias of a service config/services.php builds
+        // from WelcomeMailer, and the parameter's value in
+        // config/services.yaml is a string.
+        $mailer = $container->get('app.mailer');
+        $mailer->send($userId);
         // Try: complete a route name inside generateUrl('').
         $this->generateUrl('app_demo', ['userId' => $userId]);
         // Try: go-to-definition on a translation key, or complete one inside

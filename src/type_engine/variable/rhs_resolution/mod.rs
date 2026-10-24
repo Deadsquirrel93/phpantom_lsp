@@ -85,6 +85,7 @@ mod property_access;
 mod scalar_fold;
 mod scope_reads;
 mod static_calls;
+mod symfony_calls;
 mod unary_prefix;
 
 pub(crate) use scalar_fold::{fold_concat_types, is_literal_string_type};

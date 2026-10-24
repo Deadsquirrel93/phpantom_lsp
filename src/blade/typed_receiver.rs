@@ -76,6 +76,14 @@ impl Backend {
             return empty_spans();
         }
 
+        // Confirming a site resolves its receiver, which can read the
+        // declarations a configurator file makes (a `get('app.mailer')` is
+        // typed by them), and so come back here for the file still being
+        // confirmed.  That file's declarations are not known yet: it reads
+        // as declaring nothing, and the partial answer is not cached.
+        let Some(_confirming) = ConfirmingGuard::enter(uri) else {
+            return empty_spans();
+        };
         let spans =
             Arc::new(self.confirm_typed_receiver_sites(uri, &content, &map.typed_receiver_sites));
         self.blade
@@ -157,6 +165,34 @@ impl Backend {
             confirmed.sort_by_key(|span| span.start);
             confirmed
         })
+    }
+}
+
+thread_local! {
+    /// The files whose sites are being confirmed on this thread.
+    static CONFIRMING: std::cell::RefCell<std::collections::HashSet<String>> =
+        std::cell::RefCell::default();
+}
+
+/// Marks one file as being confirmed for as long as it lives.
+struct ConfirmingGuard {
+    uri: String,
+}
+
+impl ConfirmingGuard {
+    /// Mark `uri`, unless it is already being confirmed further up.
+    fn enter(uri: &str) -> Option<Self> {
+        CONFIRMING
+            .with(|confirming| confirming.borrow_mut().insert(uri.to_string()))
+            .then(|| Self {
+                uri: uri.to_string(),
+            })
+    }
+}
+
+impl Drop for ConfirmingGuard {
+    fn drop(&mut self) {
+        CONFIRMING.with(|confirming| confirming.borrow_mut().remove(&self.uri));
     }
 }
 

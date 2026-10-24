@@ -269,6 +269,7 @@ mod signature_from_call_site;
 mod signature_help;
 mod smoke;
 mod symfony_container;
+mod symfony_container_types;
 mod symfony_events;
 mod symfony_forms;
 mod symfony_routes;

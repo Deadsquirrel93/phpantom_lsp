@@ -289,6 +289,10 @@ pub(crate) struct SymbolMap {
     /// The Messenger handlers the file's `#[AsMessageHandler]` attributes
     /// register.  Empty for every file that declares none.
     pub messenger_handlers: Vec<MessengerHandlerSite>,
+    /// The classes, aliases, and values the file's service and container
+    /// parameter declarations give, sorted by `start`.  Empty for every file
+    /// that declares none.
+    pub container_values: Vec<ContainerValueSite>,
     /// Byte length of the source text this map was extracted from, or
     /// `u32::MAX` for a file larger than 4 GiB (whose offsets do not fit
     /// in the `u32` fields above anyway).

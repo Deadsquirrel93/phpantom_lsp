@@ -93,6 +93,9 @@ struct ExtractionCtx<'a> {
     /// The Messenger handlers the file's `#[AsMessageHandler]` attributes
     /// register.
     messenger_handlers: Vec<crate::symbol_map::MessengerHandlerSite>,
+    /// What the file's PHP configurator calls declare a service or a
+    /// parameter as.
+    container_values: Vec<crate::symbol_map::ContainerValueSite>,
     /// Current conditional nesting depth (if/else, switch, while, for, etc.).
     /// Incremented when entering a conditional block, decremented when leaving.
     cond_nesting_depth: u16,
@@ -339,6 +342,7 @@ fn extract_symbol_map_inner(
         morph_column_sites: Vec::new(),
         gate_subjects: Vec::new(),
         messenger_handlers: Vec::new(),
+        container_values: Vec::new(),
         cond_nesting_depth: 0,
         cond_block_end_stack: Vec::new(),
         has_laravel_container_attrs: None,
@@ -448,6 +452,7 @@ fn extract_symbol_map_inner(
     ctx.static_method_scopes.sort_by_key(|s| s.0);
     ctx.typed_receiver_sites.sort_by_key(|s| s.start);
     ctx.morph_column_sites.sort_by_key(|s| s.start);
+    ctx.container_values.sort_by_key(|s| s.start);
 
     let mut member_access_indices: crate::atom::AtomMap<Vec<usize>> =
         crate::atom::AtomMap::default();
@@ -483,6 +488,7 @@ fn extract_symbol_map_inner(
         morph_column_sites: ctx.morph_column_sites,
         gate_subjects: ctx.gate_subjects,
         messenger_handlers: ctx.messenger_handlers,
+        container_values: ctx.container_values,
         source_len: u32::try_from(content.len()).unwrap_or(u32::MAX),
         source_hash: None,
     }

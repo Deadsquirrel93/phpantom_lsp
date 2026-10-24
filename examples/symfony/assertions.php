@@ -18,8 +18,12 @@ use App\DependencyInjection\Configuration;
 use App\Entity\User;
 use App\EventListener\OrderPlacedListener;
 use App\Form\RegistrationType;
+use App\Message\CountWelcomeEmails;
 use App\Message\SendWelcomeEmail;
+use App\MessageHandler\CountWelcomeEmailsHandler;
 use App\MessageHandler\SendWelcomeEmailHandler;
+use App\Query\QueryBus;
+use App\Service\WelcomeMailer;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
 use Symfony\Bridge\Twig\Extension\RoutingExtension;
 use Symfony\Bridge\Twig\Extension\TranslationExtension;
@@ -35,6 +39,7 @@ use Symfony\Component\DependencyInjection\Loader\YamlFileLoader as ServicesYamlL
 use Symfony\Component\EventDispatcher\Attribute\AsEventListener;
 use Symfony\Component\Form\Forms;
 use Symfony\Component\Messenger\Attribute\AsMessageHandler;
+use Symfony\Component\Messenger\HandleTrait;
 use Symfony\Component\Routing\Generator\UrlGenerator;
 use Symfony\Component\Routing\Loader\AttributeDirectoryLoader;
 use Symfony\Component\Routing\Loader\YamlFileLoader as RoutesYamlLoader;
@@ -108,6 +113,8 @@ check('app.mailer is an alias of app.welcome_mailer', $container->hasAlias('app.
 check("app.legacy_mailer ('@app.welcome_mailer' in YAML) is an alias of app.welcome_mailer", $container->hasAlias('app.legacy_mailer') && (string) $container->getAlias('app.legacy_mailer') === 'app.welcome_mailer');
 check('app.sender_name is a parameter declared in config/services.php', $container->getParameter('app.sender_name') === 'PHPantom');
 check('app.support_email is a parameter declared in config/services.yaml', $container->getParameter('app.support_email') === 'support@example.com');
+check('app.welcome_mailer, which app.mailer aliases, is built from WelcomeMailer', $container->getDefinition('app.welcome_mailer')->getClass() === WelcomeMailer::class);
+check('app.support_email is a string', is_string($container->getParameter('app.support_email')));
 check('The App\\ resource registers the controller as a service', $container->hasDefinition(DemoController::class));
 
 // ─── Events ─────────────────────────────────────────────────────────────────
@@ -137,6 +144,16 @@ $handler = attributeArguments(new ReflectionClass(SendWelcomeEmailHandler::class
 check('The handler names a bus messenger.yaml declares', in_array($handler['bus'] ?? null, $buses, true));
 $handled = (new ReflectionMethod(SendWelcomeEmailHandler::class, '__invoke'))->getParameters()[0]->getType();
 check('The handler receives SendWelcomeEmail', $handled instanceof ReflectionNamedType && $handled->getName() === SendWelcomeEmail::class);
+
+// QueryBus::countWelcomeEmails() hands CountWelcomeEmails to HandleTrait,
+// which returns what the message's one handler returns.
+$queryHandler = attributeArguments(new ReflectionClass(CountWelcomeEmailsHandler::class), AsMessageHandler::class);
+check('The query handler names a bus messenger.yaml declares', in_array($queryHandler['bus'] ?? null, $buses, true));
+$queryMethod = new ReflectionMethod(CountWelcomeEmailsHandler::class, '__invoke');
+$queried = $queryMethod->getParameters()[0]->getType();
+check('The query handler receives CountWelcomeEmails', $queried instanceof ReflectionNamedType && $queried->getName() === CountWelcomeEmails::class);
+check('The query handler returns an int', (string) $queryMethod->getReturnType() === 'int');
+check('QueryBus uses HandleTrait', in_array(HandleTrait::class, class_uses(QueryBus::class), true));
 
 // ─── Bundle configuration ───────────────────────────────────────────────────
 

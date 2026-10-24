@@ -479,7 +479,7 @@ PHPStan's framework extensions, `phpstan/phpstan-symfony` and
 Doctrine project expects its types to be. Their `tests/Type/**/data/*.php`
 files are `assertType()` fixtures, the format `tests/assert_type_runner.rs`
 already runs for PHPStan's and Psalm's own corpora. Porting them is the
-measuring stick for T51 to T53, F42 to F44, and D30 to D31: each item there
+measuring stick for T52 to T55, F42 to F44, and D30 to D31: each item there
 lands when its fixtures pass, and the ones that cannot yet carry a `// SKIP`
 naming the item.
 
@@ -506,44 +506,6 @@ loosening the comparison, as for the other corpora.
 **Where to look:** `tests/assert_type_runner.rs` (the `datatest_stable`
 roots), `tests/fixture_runner.rs`, and the extensions' `tests/Type/` and
 `tests/Rules/`.
-
----
-
-## T51. Symfony return types the service container decides
-
-**Impact: Medium · Complexity: Medium-High**
-
-Blocks full Symfony support: the README keeps Symfony marked as partial until this lands.
-
-```php
-$mailer = $container->get('app.mailer');      // mixed, should be App\Service\Mailer
-$sender = $this->getParameter('app.sender');  // mixed, should be string
-$result = $this->handle(new GetOrder($id));   // mixed, should be the handler's return type
-```
-
-A container lookup by class name is typed already. One by service ID is
-not, though the service declaration says what it builds: a `class:` key or
-`class` attribute, an ID spelled as the class, or a PHP configurator's
-`set('app.mailer', Mailer::class)`. A parameter's type is its declared
-value's. A query bus's `HandleTrait::handle()` returns what the message's
-handler returns, the handler being the `#[AsMessageHandler]` class (or
-`messenger.message_handler` service) whose `__invoke()` takes that message.
-The attribute half of that lookup exists:
-`Backend::symfony_message_handlers` answers a message's handlers, with the
-method that handles it, from the side table extraction records.
-PHPStan's Symfony extension answers all three from the compiled container;
-the static service and parameter declarations PHPantom already indexes
-carry the same facts for the project's own services.
-
-This is a return-type hook in the type engine, so completion, hover,
-diagnostics, and references all see it, fed by `symfony_declaration_locations`
-and its index rather than a second reading of the configuration. Services
-installed bundles declare stay `mixed` until F26.
-
-**Where to look:** `src/symfony/mod.rs`, `src/symfony/resources.rs`,
-`src/symfony/messenger.rs`, method-call return resolution under `src/type_engine/variable/rhs_resolution/`,
-and PHPStan's Symfony extension (`ServiceDynamicReturnTypeExtension`,
-`ParameterDynamicReturnTypeExtension`, `MessengerHandleTraitReturnTypeExtension`).
 
 ---
 
@@ -598,3 +560,56 @@ declare.
 **Where to look:** the narrowing under `src/type_engine/`, and PHPStan's
 Doctrine extension (`Type/Doctrine/Collection/IsEmptyTypeSpecifyingExtension`,
 `DoctrineSelectableClassReflectionExtension`).
+
+---
+
+## T54. Messenger handlers a service tag registers
+
+**Impact: Low-Medium · Complexity: Medium**
+
+```yaml
+services:
+    App\Handler\GetOrderHandler:
+        tags: [messenger.message_handler]
+```
+
+A query bus's `HandleTrait::handle()` returns what the message's one
+handler returns, but only a handler `#[AsMessageHandler]` registers is
+found. One registered by a `messenger.message_handler` tag in YAML or
+XML, or autoconfigured because it implements the old
+`MessageHandlerInterface` or `MessageSubscriberInterface`, is not, so
+`handle()` stays `mixed` for its message, and the message's CodeLens
+does not list it. A tag can name the message (`handles`) and the method
+(`method`); without them the message is the type of the method's first
+parameter, which only the class says, so a tag-registered handler has to
+be recorded with its message still to be read from the class.
+
+**Where to look:** `src/symfony/tags.rs` (which already reads the tag's
+`bus`), `MessengerHandlerSite` and `Backend::symfony_message_handlers` in
+`src/symfony/messenger.rs`, and PHPStan's Symfony extension
+(`MessageMapFactory`).
+
+---
+
+## T55. Symfony array parameters are typed as plain `array`
+
+**Impact: Low · Complexity: Medium**
+
+```yaml
+parameters:
+    app.locales: [en, da]        # array, PHPStan says array<int, string>
+    app.mailer:
+        dsn: smtp://localhost    # array, PHPStan says array{dsn: string}
+```
+
+`getParameter()` is typed by the parameter's declared value, but an
+array value is typed as `array` whatever it holds. PHPStan's Symfony
+extension gives a map with string keys its shape and a list its element
+type, each scalar generalized. The YAML scan reads values line by line
+and records only the type of the whole value; reading the entries needs
+the nested lines (and the flow sequences and mappings) read as values
+too.
+
+**Where to look:** `src/symfony/resources.rs` (`scan_yaml`) and
+`src/symfony/container.rs`, and PHPStan's Symfony extension
+(`ParameterDynamicReturnTypeExtension::generalizeTypeFromValue`).

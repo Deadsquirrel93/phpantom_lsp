@@ -427,7 +427,7 @@ fn extract_method_call<'a>(
     if let ClassLikeMemberSelector::Identifier(ident) = method {
         let member_name = crate::atom::atom_bytes(ident.value);
         emit_laravel_method_call_spans(object, &member_name, argument_list, ctx);
-        record_symfony_receiver_sites(&member_name, argument_list, ctx);
+        record_symfony_receiver_sites(object, &member_name, argument_list, ctx);
         // Recorded with `->` for both spellings so callable resolution
         // treats them alike.
         emit_call_site(

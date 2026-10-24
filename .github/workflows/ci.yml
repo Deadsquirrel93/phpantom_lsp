@@ -119,6 +119,12 @@ jobs:
     permissions:
       contents: write
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # Both jobs push their results to gh-pages. Two pushes to main in
+    # quick succession would otherwise race, and the later push is
+    # rejected as a non-fast-forward.
+    concurrency:
+      group: gh-pages
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -266,6 +272,10 @@ jobs:
     permissions:
       contents: write
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # Shares the gh-pages lock with the Benchmark job.
+    concurrency:
+      group: gh-pages
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

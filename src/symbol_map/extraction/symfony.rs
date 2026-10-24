@@ -20,7 +20,8 @@
 
 use super::*;
 use crate::symbol_map::{
-    MessengerHandlerSite, ReceiverClass, SYMFONY_CONTAINER_CONFIGURATOR_NS, StringKeyKind,
+    ContainerValue, ContainerValueSite, MessengerHandlerSite, ReceiverClass,
+    SYMFONY_CONTAINER_CONFIGURATOR_NS, StringKeyKind,
 };
 use crate::symfony::translations::{DEFAULT_DOMAIN, is_domain_name, translation_key};
 use crate::virtual_members::laravel::helpers::{resolved_string_literal, string_literal_at_range};
@@ -114,8 +115,10 @@ pub(crate) fn symfony_receiver_method(
 }
 
 /// Record the service IDs and parameter names a method call may name, for
-/// the type engine to confirm against its receiver.
+/// the type engine to confirm against its receiver, and what a configurator
+/// call declares one as.
 pub(in crate::symbol_map::extraction) fn record_symfony_receiver_sites(
+    object: &Expression<'_>,
     member_name: &str,
     argument_list: &ArgumentList<'_>,
     ctx: &mut ExtractionCtx<'_>,
@@ -125,6 +128,10 @@ pub(in crate::symbol_map::extraction) fn record_symfony_receiver_sites(
     }
     if member_name.eq_ignore_ascii_case("trans") {
         record_translator_sites(argument_list, ctx);
+        return;
+    }
+    if member_name.eq_ignore_ascii_case("class") {
+        record_configured_class(object, argument_list, ctx);
         return;
     }
     for (index, argument) in argument_list.arguments.iter().take(2).enumerate() {
@@ -158,7 +165,104 @@ pub(in crate::symbol_map::extraction) fn record_symfony_receiver_sites(
             is_optional: false,
             receiver,
         });
+        if is_write {
+            record_declared_value(receiver, start as u32, argument_list, ctx);
+        }
     }
+}
+
+/// Record what a configurator's `set('app.mailer', Mailer::class)` or
+/// `alias('app.mailer', 'app.smtp_mailer')` declares its name as, keyed
+/// by the name's site at `start`.
+fn record_declared_value(
+    receiver: ReceiverClass,
+    start: u32,
+    argument_list: &ArgumentList<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    let Some(Argument::Positional(value)) = argument_list.arguments.get(1) else {
+        return;
+    };
+    let value = match receiver {
+        ReceiverClass::ConfiguratorSet => configured_value(value.value, ctx),
+        ReceiverClass::ServicesConfigurator => resolved_string_literal(value.value, ctx.content)
+            .filter(|(target, _, _)| !target.is_empty())
+            .map(|(target, _, _)| ContainerValue::Alias(crate::atom::atom(target))),
+        _ => None,
+    };
+    if let Some(value) = value {
+        ctx.container_values
+            .push(ContainerValueSite { start, value });
+    }
+}
+
+/// Record the class a configurator's `->set('app.mailer')->class(Mailer::class)`
+/// builds the service from, keyed by the ID the chain's `set()` names.
+fn record_configured_class(
+    object: &Expression<'_>,
+    argument_list: &ArgumentList<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    let Some(Argument::Positional(class)) = argument_list.arguments.first() else {
+        return;
+    };
+    // The configurator methods in between (`->args()`, `->tag()`) return
+    // the same service's configurator.
+    let mut link = object;
+    let set = loop {
+        let Expression::Call(Call::Method(call)) = link else {
+            return;
+        };
+        if let ClassLikeMemberSelector::Identifier(name) = &call.method
+            && name.value.eq_ignore_ascii_case(b"set")
+        {
+            break call;
+        }
+        link = call.object;
+    };
+    let Some(Argument::Positional(id)) = set.argument_list.arguments.first() else {
+        return;
+    };
+    let Some((_, start, _)) = resolved_string_literal(id.value, ctx.content) else {
+        return;
+    };
+    if !uses_configurators(CONFIGURATOR_NS, ctx) {
+        return;
+    }
+    if let Some(value @ ContainerValue::Class(_)) = configured_value(class.value, ctx) {
+        ctx.container_values.push(ContainerValueSite {
+            start: start as u32,
+            value,
+        });
+    }
+}
+
+/// What a configurator argument gives a service or parameter as: a class
+/// (`Mailer::class`, or a string spelled as one), or a literal's type.
+fn configured_value(value: &Expression<'_>, ctx: &ExtractionCtx<'_>) -> Option<ContainerValue> {
+    use crate::php_type::PhpType;
+    if let Some(identifier) = crate::parser::class_fetch_identifier(value) {
+        let written = bytes_to_str(identifier.value());
+        let resolved = ctx
+            .resolved_name_at(identifier.span().start.offset)
+            .unwrap_or(written);
+        return Some(ContainerValue::Class(crate::atom::atom(
+            resolved.trim_start_matches('\\'),
+        )));
+    }
+    let ty = match value {
+        Expression::Literal(Literal::String(_)) => {
+            let (text, _, _) = resolved_string_literal(value, ctx.content)?;
+            return Some(crate::symfony::container::string_value(text));
+        }
+        Expression::Literal(Literal::Integer(_)) => PhpType::int(),
+        Expression::Literal(Literal::Float(_)) => PhpType::float(),
+        Expression::Literal(Literal::True(_) | Literal::False(_)) => PhpType::bool(),
+        Expression::Literal(Literal::Null(_)) => PhpType::null(),
+        Expression::Array(_) | Expression::LegacyArray(_) => PhpType::array(),
+        _ => return None,
+    };
+    Some(ContainerValue::Type(ty))
 }
 
 /// How a call that translates a message names its domain.
@@ -1225,6 +1329,40 @@ mod tests {
                 ("app.base", ReceiverClass::ServiceConfigurator, false),
                 ("app.alias", ReceiverClass::ServicesConfigurator, true),
                 ("app.mailer", ReceiverClass::ServicesConfigurator, false),
+            ]
+        );
+    }
+
+    #[test]
+    fn configurator_calls_record_what_they_declare() {
+        use crate::symbol_map::ContainerValue;
+        let php = "<?php\nnamespace Symfony\\Component\\DependencyInjection\\Loader\\Configurator;\nuse App\\Mailer;\nreturn static function (ContainerConfigurator $c): void {\n    $c->services()->set('app.mailer', Mailer::class);\n    $c->services()->set('app.smtp')->args([])->class('App\\\\Smtp');\n    $c->services()->alias('app.alias', 'app.mailer');\n    $c->parameters()->set('app.port', 25);\n    $c->parameters()->set('app.name', 'PHPantom');\n};\n";
+        let map = map_of(php);
+        let values: Vec<(&str, String)> = map
+            .container_values
+            .iter()
+            .map(|site| {
+                let key = map
+                    .typed_receiver_sites
+                    .iter()
+                    .find(|receiver| receiver.start == site.start)
+                    .map_or("", |receiver| receiver.key.as_str());
+                let value = match &site.value {
+                    ContainerValue::Class(class) => format!("class {class}"),
+                    ContainerValue::Alias(id) => format!("alias {id}"),
+                    ContainerValue::Type(ty) => ty.to_string(),
+                };
+                (key, value)
+            })
+            .collect();
+        assert_eq!(
+            values,
+            vec![
+                ("app.mailer", "class App\\Mailer".to_string()),
+                ("app.smtp", "class App\\Smtp".to_string()),
+                ("app.alias", "alias app.mailer".to_string()),
+                ("app.port", "int".to_string()),
+                ("app.name", "string".to_string()),
             ]
         );
     }
