@@ -41,6 +41,10 @@ final class DemoController extends AbstractController
         // 'user.invalid_email' is found in translations/validators.en.xlf.
         $title = $this->translator->trans('demo.title');
         $this->translator->trans('user.invalid_email', [], 'validators');
+        // Try: go-to-definition on the event name. It lists every listener
+        // that subscribes to it: the #[AsEventListener] in
+        // src/EventListener/OrderPlacedListener.php and the tag in
+        // config/services.yaml.
         $this->events->dispatch(new OrderPlaced($userId), 'app.order.placed');
         $this->commandBus->dispatch(new SendWelcomeEmail($userId));
 

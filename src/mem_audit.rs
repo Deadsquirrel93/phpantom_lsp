@@ -1377,6 +1377,10 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
             for site in &sm.typed_receiver_sites {
                 sym.add(site.key.capacity());
             }
+            sym.add(
+                sm.messenger_handlers.capacity()
+                    * size_of::<crate::symbol_map::MessengerHandlerSite>(),
+            );
         }
     }
     eprintln!(

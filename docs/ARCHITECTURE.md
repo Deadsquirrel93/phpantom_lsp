@@ -99,7 +99,7 @@ src/
 ├── hover/                  # Hover: symbol-map dispatch, type/signature/docblock formatting
 ├── definition/             # Go-to-definition (resolve, member, variable/, implementation, type_definition)
 ├── resource_navigation.rs  # Schema-free PHP class/member indexing and navigation in YAML/XML
-├── symfony/                # Symfony service IDs, container parameters, routes, translations, Twig templates, bundle configuration keys, form fields, and validation mappings: YAML/XML/XLIFF/Twig scanners, declaring files
+├── symfony/                # Symfony service IDs, container parameters, routes, translations, Twig templates, bundle configuration keys, form fields, validation mappings, event names, and Messenger buses and handlers: YAML/XML/XLIFF/Twig scanners, declaring files
 ├── references/, rename/, highlight/
 ├── signature_help.rs, semantic_tokens.rs, inlay_hints.rs, folding.rs, code_lens.rs
 ├── document_symbols.rs, document_links.rs, workspace_symbols.rs, formatting/
@@ -240,9 +240,10 @@ The symbol map also stores:
 - **Variable definition sites** (`var_defs`): records every assignment, parameter, foreach binding, catch variable, static/global declaration, and destructuring site with its byte offset, scope boundary, and `effective_from` offset (for assignments, this is the end of the statement so the RHS sees the previous definition). Go-to-definition for `$var` finds the most recent definition before the cursor within the enclosing scope via binary search.
 - **Scope boundaries** (`scopes`): function, method, closure, and arrow function body ranges. Used by `find_enclosing_scope` to determine which scope the cursor is in.
 - **Template parameter definitions** (`template_defs`): `@template` tag locations so that template parameter names (e.g. `TKey`, `TModel`) that appear in docblock types can be resolved to their declaration site.
-- **Candidate typed-receiver sites** (`typed_receiver_sites`): the string keys a method call spells when only the receiver's *type* decides what it names — a constructor-injected `Factory $views` behind `$this->views->make('page')`, a mailable held in a local, a Symfony `ContainerInterface $container` behind `$container->get('app.mailer')`, a configurator's `$services->set('app.mailer')`, a URL generator's `$urls->generate('blog_index')`, a translator's `$translator->trans('demo.title')`, a controller's or Twig's `render('page.html.twig')`. Each site records the classes its receiver may be and the kind of key each makes it (`ReceiverClass::targets`). Extraction runs before the file's classes are resolved and cannot type the receiver, so it records the candidates and `blade/typed_receiver.rs` confirms them lazily through the shared type engine, once per file. Consumers of those keys (the call-site diagnostics, call-site inference, `lookup_symbol_map`, find-references, the Symfony declaration lookup) read the confirmed spans alongside the map's own `StringKey` spans. The reference candidate index takes the *unconfirmed* candidates, under every kind each could turn out to be, since a file has to be findable before it can be asked.
+- **Candidate typed-receiver sites** (`typed_receiver_sites`): the string keys a method call spells when only the receiver's *type* decides what it names — a constructor-injected `Factory $views` behind `$this->views->make('page')`, a mailable held in a local, a Symfony `ContainerInterface $container` behind `$container->get('app.mailer')`, a configurator's `$services->set('app.mailer')`, a URL generator's `$urls->generate('blog_index')`, a translator's `$translator->trans('demo.title')`, a controller's or Twig's `render('page.html.twig')`, an event dispatcher's `$events->dispatch($event, 'app.order.placed')`. Each site records the classes its receiver may be and the kind of key each makes it (`ReceiverClass::targets`). Extraction runs before the file's classes are resolved and cannot type the receiver, so it records the candidates and `blade/typed_receiver.rs` confirms them lazily through the shared type engine, once per file. Consumers of those keys (the call-site diagnostics, call-site inference, `lookup_symbol_map`, find-references, the Symfony declaration lookup) read the confirmed spans alongside the map's own `StringKey` spans. The reference candidate index takes the *unconfirmed* candidates, under every kind each could turn out to be, since a file has to be findable before it can be asked.
 - **Config-backed Laravel resource names**: one declarative table maps direct helpers, facades, contextual attributes, and middleware parameters to their config subtrees. A `SymbolSpan` whose string-key kind is `ConfigResource(...)` stores the short source name, while completion, navigation, diagnostics, and references derive the full dot key only at the config boundary. This keeps source ranges and reference identity exact without duplicating one trigger table across LSP features.
 - **Candidate morph-column aliases** (`morph_column_sites`): literals compared with properties or query columns are confirmed lazily by `virtual_members/laravel/typed_morph_columns.rs`. The shared type engine identifies the receiver model, and its parsed `morphTo()` metadata identifies the column. Array values in one query share a single model and column check. Confirmed literals become ordinary `MorphAlias` spans for completion, navigation, references, and diagnostics. Model metadata changes invalidate dependent confirmations, including when a relation's column changes without changing its PHP signature.
+- **Messenger handlers** (`messenger_handlers`): each method a Symfony `#[AsMessageHandler]` registers, with the message class it receives, read from the attribute's `handles:` or the method's first parameter type. A handler is a fact about a class rather than a string at a cursor, so it is a side table rather than a span. The files holding one are among the Symfony declaring files (`symfony/mod.rs`), which is how the CodeLens on a message class finds the handlers that receive it.
 
 ### Tier 2: Stored Byte Offsets (cross-file jumps)
 
@@ -264,6 +265,47 @@ Variable go-to-definition (`$var` → jump to definition) uses two layers:
 
 1. **Symbol map** (`var_defs`): the primary path. Finds the most recent `VarDefSite` before the cursor within the enclosing scope. When the cursor is physically on a definition token (parameter, foreach binding, catch variable), it returns `None` so the caller can fall through to type-hint resolution.
 2. **AST-based search** (`resolve_variable_definition_ast`): parses the file and walks the enclosing scope to find the definition site. Handles destructuring (`[$a, $b] = ...`, `list($a, $b) = ...`) and nested scopes correctly. Used as a fallback when the symbol map doesn't have a match. Returns `None` when the AST parse fails.
+
+## Framework Names in Strings
+
+Frameworks name things in strings: a Laravel `route('home')` or
+`config('app.name')`, a Symfony `$container->get('app.mailer')`,
+`generateUrl('app_home')`, or `dispatch($event, 'app.order.placed')`. Each
+such string is a `SymbolKind::StringKey` span whose `StringKeyKind` says
+what it names, and whose `is_write` flag says whether it declares the name
+or reads it. Hover, go-to-definition, find references, highlights,
+semantic tokens, and the unknown-name diagnostics all read those spans, so
+a new kind of name is a new `StringKeyKind` variant plus the code that
+emits it.
+
+The spans come from two places, and nowhere else:
+
+- **PHP** is read from the AST during symbol-map extraction
+  (`symbol_map/extraction/laravel/` and `symbol_map/extraction/symfony.rs`).
+  A function, an attribute, or a `new` is recognised by its resolved name.
+  A method call whose name is too common to claim on sight (`get()`,
+  `set()`, `render()`, `dispatch()`) is recorded as a candidate
+  typed-receiver site (see above) and settled by the shared type engine,
+  never by guessing from the receiver's spelling.
+- **YAML, XML, XLIFF, and Twig** are read as text by the scanners in
+  `symfony/`, which build each resource file's symbol map
+  (`resource_navigation.rs`). These files have no AST we share, and their
+  shapes are small enough that a line-oriented scan reads them reliably.
+
+Completion asks the same questions: it judges the call under the cursor
+with the predicates extraction uses (`symfony_receiver_method`, the
+attribute checks), and a configuration file through the same scan, so
+completion and navigation cannot disagree about which strings name what.
+
+A Symfony name is declared by a span with `is_write` set, so there is no
+separate table of declarations. `symfony/mod.rs` only tracks which files
+hold one (the configuration, the controllers with `#[Route]`s, the
+listeners, the catalogues), and reads the declared names out of those
+files' symbol maps on demand. The maps are kept current by the ordinary
+document and watched-file lifecycle, and the reference index files every
+span by its key, so references need no second walk. All of it is gated on
+the project: Symfony names are only read when the project builds a Symfony
+container, and Laravel's only when it is a Laravel application.
 
 ## Go-to-Type-Definition Architecture
 

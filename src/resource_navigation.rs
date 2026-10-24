@@ -188,7 +188,14 @@ impl Backend {
 
         let mut spans = Vec::new();
         if is_symfony && crate::symfony::resources::is_container_config_uri(uri) {
-            spans = crate::symfony::resources::container_key_spans(uri, content);
+            // A bus is declared by a key under `config/packages/`, which is
+            // a configuration key too; the bus is the one that means
+            // something, and the first of two spans over the same text is
+            // the one kept.
+            let mut slots = crate::symfony::tags::tag_slots(uri, content);
+            slots.extend(crate::symfony::messenger::bus_slots(uri, content));
+            spans = crate::symfony::slot_spans(content, slots);
+            spans.extend(crate::symfony::resources::container_key_spans(uri, content));
             if crate::symfony::routes::is_routing_config_uri(uri) {
                 spans.extend(crate::symfony::routes::routing_key_spans(uri, content));
             }
@@ -230,6 +237,7 @@ impl Backend {
             }
         }
         spans.sort_by_key(|span| span.start);
+        spans.dedup_by(|b, a| a.start == b.start && a.end == b.end);
 
         let mut member_access_indices = AtomMap::default();
         for (index, span) in spans.iter().enumerate() {

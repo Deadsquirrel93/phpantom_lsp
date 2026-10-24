@@ -38,6 +38,7 @@ enum CheckedStringKind {
     ContainerParameter,
     SymfonyRoute,
     TwigTemplate,
+    MessengerBus,
 }
 
 impl CheckedStringKind {
@@ -59,6 +60,7 @@ impl CheckedStringKind {
             StringKeyKind::ContainerParameter => Self::ContainerParameter,
             StringKeyKind::SymfonyRoute => Self::SymfonyRoute,
             StringKeyKind::TwigTemplate => Self::TwigTemplate,
+            StringKeyKind::MessengerBus => Self::MessengerBus,
             // A section or stack name is judged against the templates that
             // render the one it is written in, which the Blade pass has and
             // this one does not.  And anything at all can be bound at
@@ -69,14 +71,17 @@ impl CheckedStringKind {
             // one an installed bundle's does, or a message that is its own
             // translation.  A configuration key is only declared by the
             // project's own schemas so far, which say nothing about what
-            // a key under an open node or an installed bundle may be.
+            // a key under an open node or an installed bundle may be.  An
+            // event is declared by the listeners that subscribe to it, and
+            // dispatching one nobody listens to is no mistake.
             StringKeyKind::SymfonyTranslation
             | StringKeyKind::TranslationDomain
             | StringKeyKind::Section
             | StringKeyKind::Stack
             | StringKeyKind::ContainerBinding
             | StringKeyKind::Env
-            | StringKeyKind::SymfonyConfigKey => return None,
+            | StringKeyKind::SymfonyConfigKey
+            | StringKeyKind::SymfonyEvent => return None,
         })
     }
 }
@@ -121,6 +126,8 @@ struct DeclaredKeys<'a> {
     symfony_routes: Vec<String>,
     /// The Twig templates the project holds, sorted.
     twig_templates: Vec<String>,
+    /// The Messenger buses the project's configuration declares, sorted.
+    messenger_buses: Vec<String>,
 }
 
 impl<'a> DeclaredKeys<'a> {
@@ -145,6 +152,7 @@ impl<'a> DeclaredKeys<'a> {
         let has_parameter = names(|kind| kind == CheckedStringKind::ContainerParameter);
         let has_symfony_route = names(|kind| kind == CheckedStringKind::SymfonyRoute);
         let has_twig_template = names(|kind| kind == CheckedStringKind::TwigTemplate);
+        let has_messenger_bus = names(|kind| kind == CheckedStringKind::MessengerBus);
 
         // A package with no routes of its own, whose names are registered
         // by the host application, cannot be judged: the valid set is
@@ -270,6 +278,12 @@ impl<'a> DeclaredKeys<'a> {
             Vec::new()
         };
 
+        let messenger_buses = if has_messenger_bus {
+            backend.symfony_declared_names(crate::symbol_map::StringKeyKind::MessengerBus)
+        } else {
+            Vec::new()
+        };
+
         Self {
             backend,
             routes,
@@ -286,6 +300,7 @@ impl<'a> DeclaredKeys<'a> {
             parameters,
             symfony_routes,
             twig_templates,
+            messenger_buses,
         }
     }
 
@@ -344,7 +359,23 @@ impl<'a> DeclaredKeys<'a> {
                     .map(|valid| (valid, "route", "invalid_symfony_route"))
             }
             CheckedStringKind::TwigTemplate => self.judge_twig_template(key),
+            CheckedStringKind::MessengerBus => self.judge_messenger_bus(key),
         }
+    }
+
+    /// A bus is only ever declared by the application's own Messenger
+    /// configuration, so a name it does not declare is wrong.  A project
+    /// that declares none was not read at all (its configuration may be
+    /// PHP), and its one bus is the default one besides.
+    fn judge_messenger_bus(&self, key: &str) -> Verdict {
+        if self.messenger_buses.is_empty() {
+            return None;
+        }
+        let valid = self
+            .messenger_buses
+            .binary_search_by(|name| name.as_str().cmp(key))
+            .is_ok();
+        Some((valid, "Messenger bus", "invalid_symfony_messenger_bus"))
     }
 
     /// A template under a Twig namespace (`@Acme/…`) is a bundle's, whose

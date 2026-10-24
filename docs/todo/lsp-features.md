@@ -1016,3 +1016,263 @@ half and the one an editor user notices; result types follow.
 **Where to look:** `src/framework.rs` (the Doctrine mapping index), and
 PHPStan's Doctrine extension (`Rules/Doctrine/ORM/DqlRule`,
 `QueryBuilderDqlRule`, `Type/Doctrine/Query/`, `Type/Doctrine/QueryBuilder/`).
+
+---
+
+## F45. Symfony events named by their class or a constant
+
+**Impact: Medium · Complexity: Medium**
+
+```php
+$dispatcher->dispatch(new OrderPlaced($order));   // which listeners?
+
+#[AsEventListener]
+public function onOrderPlaced(OrderPlaced $event): void {}
+
+public static function getSubscribedEvents(): array
+{
+    return [KernelEvents::REQUEST => 'onRequest'];
+}
+```
+
+An event name written as a string navigates between its dispatchers and
+its listeners. Most events are not: an event dispatched without a name is
+named by its class, an `#[AsEventListener]` without an `event:` subscribes
+to the class its method's first parameter is typed with, and a
+subscriber's map is usually keyed by `OrderPlaced::class` or a constant
+such as `KernelEvents::REQUEST`. None of these link a dispatch to its
+listeners. Symfony's own language server shows a CodeLens over an event
+class listing its listeners, and one over a listener listing its events,
+the way the Messenger lenses link a message and its handlers.
+
+A constant key resolves to the string it holds, which also gives
+completion the framework's own events (`kernel.request`,
+`console.command`, `security.interactive_login`): only the names a
+project's listeners subscribe to are offered today, since nothing the
+installed bundles declare is read.
+
+**Where to look:** `src/symbol_map/extraction/symfony.rs`
+(`emit_symfony_listener_spans`), `src/symfony/messenger.rs` (the handler
+side table to mirror), and `references/symfony-language-tools`
+(`docs/features/events.rst`).
+
+---
+
+## F46. Symfony listener methods a tag or a default names
+
+**Impact: Low-Medium · Complexity: Low-Medium**
+
+The method an `#[AsEventListener(method: …)]` or a subscriber's map names
+navigates to the listener's method, and one that does not exist is
+reported. Two other ways of naming it do not: the `method` of a
+`kernel.event_listener` tag in YAML or XML, which names a method of the
+tagged service's class, and no method at all, where Symfony calls
+`on` followed by the event name in camel case, else `__invoke()`. The
+second also leaves a listener whose method name is never written
+anywhere looking unused.
+
+**Where to look:** `src/symfony/tags.rs` (the tag scan, which already
+reads the `event` beside the `method`), `src/resource_navigation.rs` (the
+`Class::member` spans a resource map already holds).
+
+---
+
+## F47. Symfony Messenger transports
+
+**Impact: Low-Medium · Complexity: Medium**
+
+```yaml
+framework:
+    messenger:
+        failure_transport: failed
+        transports:
+            async: '%env(MESSENGER_TRANSPORT_DSN)%'
+            failed: 'doctrine://default?queue_name=failed'
+        routing:
+            App\Message\SendWelcomeEmail: async
+```
+
+A bus name navigates, completes, and is reported when nothing declares
+it. A transport name does none of this, in `routing`, `failure_transport`,
+a transport's own `failure_transport`, `#[AsMessageHandler(fromTransport:
+…)]`, and `#[AsMessage(transport: …)]`. A transport, like a bus, is only
+ever declared by the application's Messenger configuration, so an unknown
+one can be reported the same way.
+
+Two smaller gaps sit beside it. A bus declared in a PHP configuration file
+(`$framework->messenger()->bus('command.bus')`) is not read, so a project
+that configures Messenger in PHP gets no bus names at all. And a handler
+whose `handles:` names a message its method's parameter cannot accept is
+not reported.
+
+**Where to look:** `src/symfony/messenger.rs`, and
+`references/symfony-language-tools` (`docs/features/messenger.rst`).
+
+---
+
+## F48. Symfony environment variables
+
+**Impact: Medium · Complexity: Low-Medium**
+
+```yaml
+parameters:
+    app.secret: '%env(APP_SECRET)%'
+    app.port: '%env(int:DATABASE_PORT)%'
+```
+
+A Laravel `env('APP_NAME')` completes, jumps to the line of `.env` that
+declares it, and lists its references. The `%env(…)%` placeholders a
+Symfony project reads its environment through, in YAML, XML, PHP, and
+Twig configuration, do none of this: the `ContainerParameter` scan skips
+them. The name is the last segment after the processors (`int:`,
+`json:`, `default:fallback:`), and Symfony also reads `.env.local`,
+`.env.<environment>`, and `.env.<environment>.local`.
+
+Reuse the `Env` string-key kind and its `.env` reader rather than adding
+a second one.
+
+**Where to look:** `src/symfony/resources.rs`
+(`scan_parameter_placeholders`), `src/virtual_members/laravel/` (the
+`.env` reader), and `references/symfony-language-tools`
+(`docs/features/environment.rst`).
+
+---
+
+## F49. Symfony security names
+
+**Impact: Low-Medium · Complexity: Medium**
+
+The firewalls and user providers `security.yaml` declares, the provider a
+firewall names, and the roles `#[IsGranted]`, `denyAccessUnlessGranted()`,
+`isGranted()`, and Twig's `is_granted()` check neither complete nor
+navigate. Firewalls and providers are declared only by the application's
+security configuration, so an unknown one can be reported. Roles cannot
+be: an application can grant any role from code. They can still complete
+and navigate from the `role_hierarchy` and `access_control` that name
+them.
+
+**Where to look:** `src/symfony/`, and `references/symfony-language-tools`
+(`docs/features/security.rst`).
+
+---
+
+## F50. Twig filters and functions
+
+**Impact: Medium · Complexity: Medium**
+
+A project's Twig extensions declare filters and functions with `new
+TwigFilter('price', …)` and `new TwigFunction('icon', …)` in
+`getFilters()` and `getFunctions()`, or with `#[AsTwigFilter]` and
+`#[AsTwigFunction]` on a method. A template's `{{ amount|price }}` and
+`{{ icon('x') }}` neither complete, navigate to the PHP method behind
+them, nor show its signature on hover, and an unknown one is not
+reported. Twig's own filters and functions come from its core extension,
+which is read the same way.
+
+This applies to Twig outside Symfony too (F33).
+
+**Where to look:** `src/symfony/templates.rs` (the Twig scan), and
+`references/symfony-language-tools` (`docs/features/twig-callables.rst`)
+and `references/twigstan`.
+
+---
+
+## F51. Class names in Twig's `constant()` and `enum()`
+
+**Impact: Low · Complexity: Low-Medium**
+
+```twig
+{% if user.status == constant('App\\Entity\\User::ACTIVE') %}
+{% for case in enum_cases('App\\Enum\\Status') %}
+```
+
+The class, constant, and enum case Twig's `constant()`, `enum()`, and
+`enum_cases()` name as strings neither complete nor navigate. They are
+ordinary class and member references once read, the same spans the
+resource maps record for a `Class::member` in YAML.
+
+**Where to look:** `src/symfony/templates.rs`, `src/resource_navigation.rs`
+(`scan_symbols`), and `references/symfony-language-tools`
+(`docs/features/twig-constants-enums.rst`).
+
+---
+
+## F52. Asset paths in Twig
+
+**Impact: Low · Complexity: Low-Medium**
+
+The path a Twig `asset('images/logo.png')` names, and the entrypoint an
+`importmap('app')` names, neither complete nor navigate to the file under
+`public/` (or the AssetMapper's `assets/`), and a missing file is not
+reported. Laravel's `asset()` has the same gap (see `laravel.md`), so the
+two should share the path completion.
+
+**Where to look:** `src/symfony/templates.rs`, and
+`references/symfony-language-tools` (`docs/features/assets.rst`).
+
+---
+
+## F53. Stimulus controllers in Twig
+
+**Impact: Low · Complexity: Medium**
+
+A Twig template names a Stimulus controller in `data-controller`, its
+actions in `data-action`, and its targets in `data-*-target`, or through
+`stimulus_controller()`, `stimulus_action()`, and `stimulus_target()`. The
+controller is a JavaScript file under `assets/controllers/`
+(`hello_controller.js` for `hello`). None of these navigate or complete.
+It is the one Symfony integration whose declarations are not PHP, YAML,
+or XML, so it needs a scan of the controller files' class members.
+
+**Where to look:** `references/symfony-language-tools`
+(`docs/features/stimulus.rst`).
+
+---
+
+## F54. Symfony form options, constraint options, and serializer groups
+
+**Impact: Low-Medium · Complexity: Medium**
+
+```php
+$builder->add('email', EmailType::class, ['requird' => true]);  // a typo, not reported
+#[Assert\Length(mni: 3)]                                        // likewise
+#[Groups(['user:read'])]                                         // used where?
+```
+
+A form type's options are the ones its `configureOptions()` and its
+parents' define, and a constraint's are its constructor's parameters. The
+keys of a `createForm()` or `$builder->add()` options array neither
+complete nor get checked against them. Serializer groups, named by
+`#[Groups]`, `#[Context]`, the `groups` a serializer or a controller's
+`json()` is given, and the `groups` keys of a YAML serializer mapping,
+neither navigate between their uses nor complete.
+
+**Where to look:** `src/symfony/forms.rs`, `src/symfony/validation.rs`,
+and `references/symfony-language-tools` (`docs/features/metadata.rst`).
+
+---
+
+## F55. Symfony ExpressionLanguage strings
+
+**Impact: Low · Complexity: Medium-High**
+
+```php
+#[IsGranted(new Expression('is_granted("ROLE_ADMIN") or user.isOwner(subject)'))]
+#[Route('/admin', condition: "request.headers.get('X-Admin') == '1'")]
+```
+
+An ExpressionLanguage string is a small language of its own, with
+variables Symfony binds per site: `user`, `subject`, `token`, and
+`request` in a security expression, `context` and `request` in a route
+condition, the service container's functions in `@=` service
+arguments. The member chains in it (`user.isOwner(subject)`) neither
+navigate nor get checked.
+
+The built-in sites bind fixed variables, so they can work without
+configuration: parse the expression, give each variable its class, and
+hand the member chains to the shared type engine. A per-project rule
+language for custom attributes was proposed and declined, since it does
+nothing for a project until someone writes its rules.
+
+**Where to look:** `src/symbol_map/extraction/symfony.rs`, and Symfony's
+`ExpressionLanguage` component (`Lexer`, `Parser`) for the grammar.

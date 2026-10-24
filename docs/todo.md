@@ -128,6 +128,7 @@ unlikely to move the needle for most users.
 | FX2 | [`unused_variable` — remove unused variables](todo/fix-cli.md#fx2-unused_variable-remove-unused-variables)                                                                 | Medium      | Medium      |
 |     | **[LSP Features](todo/lsp-features.md)**                                                                                                                                    |             |             |
 | F12 | [IntelliJ / PHPStorm plugin](todo/lsp-features.md#f12-intellij-phpstorm-plugin)                                                                                            | High        | Medium-High |
+| F48 | [Symfony environment variables](todo/lsp-features.md#f48-symfony-environment-variables) | Medium      | Low-Medium  |
 | F11 | [Windows code signing](todo/lsp-features.md#f11-windows-code-signing)                                                                                                        | Medium      | Medium      |
 | F17 | [Wire class move to `workspace/willRenameFiles`](todo/lsp-features.md#f17-wire-class-move-to-workspacewillrenamefiles)                                                       | Medium      | Medium      |
 | F24 | [Doctrine lenses miss attribute mappings and generic repositories](todo/lsp-features.md#f24-doctrine-lenses-miss-attribute-mappings-and-generic-repositories) | Medium      | Medium      |
@@ -136,6 +137,8 @@ unlikely to move the needle for most users.
 | F29 | [Report Symfony translation keys nothing declares](todo/lsp-features.md#f29-report-symfony-translation-keys-nothing-declares) | Medium      | Medium      |
 | F32 | [Report unknown Symfony names in Twig templates](todo/lsp-features.md#f32-report-unknown-symfony-names-in-twig-templates) | Medium      | Medium      |
 | F36 | [Twig block navigation](todo/lsp-features.md#f36-twig-block-navigation) | Medium      | Medium      |
+| F45 | [Symfony events named by their class or a constant](todo/lsp-features.md#f45-symfony-events-named-by-their-class-or-a-constant) | Medium      | Medium      |
+| F50 | [Twig filters and functions](todo/lsp-features.md#f50-twig-filters-and-functions) | Medium      | Medium      |
 | F42 | [Symfony console arguments and options](todo/lsp-features.md#f42-symfony-console-arguments-and-options) | Medium      | Medium      |
 | F34 | [Template names a PHP wrapper builds](todo/lsp-features.md#f34-template-names-a-php-wrapper-builds) (depends on F33) | Medium      | Medium-High |
 | F37 | [Twig template variables](todo/lsp-features.md#f37-twig-template-variables) | Medium      | Medium-High |
@@ -146,15 +149,23 @@ unlikely to move the needle for most users.
 | F15 | [Go-to-declaration](todo/lsp-features.md#f15-go-to-declaration)                                                                                                              | Low-Medium  | Low         |
 | F14 | [Helix upstream PR](todo/lsp-features.md#f14-helix-upstream-pr)                                                                                                             | Low-Medium  | Low         |
 | F35 | [Suggest a close name for an unknown template or view](todo/lsp-features.md#f35-suggest-a-close-name-for-an-unknown-template-or-view) | Low-Medium  | Low         |
+| F46 | [Symfony listener methods a tag or a default names](todo/lsp-features.md#f46-symfony-listener-methods-a-tag-or-a-default-names) | Low-Medium  | Low-Medium  |
 | F26 | [Symfony service IDs a bundle or a definition API declares](todo/lsp-features.md#f26-symfony-service-ids-a-bundle-or-a-definition-api-declares) | Low-Medium  | Medium      |
 | F28 | [Symfony route names a loader composes](todo/lsp-features.md#f28-symfony-route-names-a-loader-composes) | Low-Medium  | Medium      |
 | F30 | [Symfony translations outside YAML, XLIFF, and the `trans` filter](todo/lsp-features.md#f30-symfony-translations-outside-yaml-xliff-and-the-trans-filter) | Low-Medium  | Medium      |
 | F31 | [Symfony Twig templates outside `templates/`](todo/lsp-features.md#f31-symfony-twig-templates-outside-templates) | Low-Medium  | Medium      |
 | F40 | [Symfony configuration schemas the `TreeBuilder` walk misses](todo/lsp-features.md#f40-symfony-configuration-schemas-the-treebuilder-walk-misses) | Low-Medium  | Medium      |
 | F41 | [Symfony forms and validation beyond a form type's own data class](todo/lsp-features.md#f41-symfony-forms-and-validation-beyond-a-form-types-own-data-class) | Low-Medium  | Medium      |
+| F47 | [Symfony Messenger transports](todo/lsp-features.md#f47-symfony-messenger-transports) | Low-Medium  | Medium      |
+| F49 | [Symfony security names](todo/lsp-features.md#f49-symfony-security-names) | Low-Medium  | Medium      |
+| F54 | [Symfony form options, constraint options, and serializer groups](todo/lsp-features.md#f54-symfony-form-options-constraint-options-and-serializer-groups) | Low-Medium  | Medium      |
 | F22 | [Merge a namespace onto one that shares a class name](todo/lsp-features.md#f22-merge-a-namespace-onto-one-that-shares-a-class-name)                                        | Low-Medium  | Medium-High |
 | F38 | [Twig components](todo/lsp-features.md#f38-twig-components) | Low-Medium  | Medium-High |
 | F23 | [Rename a class through its XML entity-escaped occurrences](todo/lsp-features.md#f23-rename-a-class-through-its-xml-entity-escaped-occurrences) | Low         | Medium      |
+| F51 | [Class names in Twig's `constant()` and `enum()`](todo/lsp-features.md#f51-class-names-in-twigs-constant-and-enum) | Low         | Low-Medium  |
+| F52 | [Asset paths in Twig](todo/lsp-features.md#f52-asset-paths-in-twig) | Low         | Low-Medium  |
+| F53 | [Stimulus controllers in Twig](todo/lsp-features.md#f53-stimulus-controllers-in-twig) | Low         | Medium      |
+| F55 | [Symfony ExpressionLanguage strings](todo/lsp-features.md#f55-symfony-expressionlanguage-strings) | Low         | Medium-High |
 | F16 | [On-type `}` brace de-indent](todo/lsp-features.md#f16-on-type-brace-de-indent)                                                                                            | Low         | Low         |
 |     | **[Signature Help](todo/signature-help.md)**                                                                                                                                |             |             |
 | S2  | [Closure / arrow function parameter signature help](todo/signature-help.md#s2-closure-arrow-function-parameter-signature-help)                                             | Medium      | Medium      |

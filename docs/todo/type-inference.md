@@ -526,6 +526,9 @@ not, though the service declaration says what it builds: a `class:` key or
 value's. A query bus's `HandleTrait::handle()` returns what the message's
 handler returns, the handler being the `#[AsMessageHandler]` class (or
 `messenger.message_handler` service) whose `__invoke()` takes that message.
+The attribute half of that lookup exists:
+`Backend::symfony_message_handlers` answers a message's handlers, with the
+method that handles it, from the side table extraction records.
 PHPStan's Symfony extension answers all three from the compiled container;
 the static service and parameter declarations PHPantom already indexes
 carry the same facts for the project's own services.
@@ -536,7 +539,7 @@ and its index rather than a second reading of the configuration. Services
 installed bundles declare stay `mixed` until F26.
 
 **Where to look:** `src/symfony/mod.rs`, `src/symfony/resources.rs`,
-method-call return resolution under `src/type_engine/variable/rhs_resolution/`,
+`src/symfony/messenger.rs`, method-call return resolution under `src/type_engine/variable/rhs_resolution/`,
 and PHPStan's Symfony extension (`ServiceDynamicReturnTypeExtension`,
 `ParameterDynamicReturnTypeExtension`, `MessengerHandleTraitReturnTypeExtension`).
 

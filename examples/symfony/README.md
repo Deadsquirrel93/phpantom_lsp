@@ -47,6 +47,17 @@ catalogues together, the way a real Symfony project does.
   `config/packages/acme_demo.yaml`. Go to the definition of `dsn`, find the
   references of `'api_key'`, or complete a key on a new line under
   `mailer:`.
+- Event names navigate from the dispatcher to every listener that subscribes
+  to them. In `DemoController`, go to the definition of `app.order.placed`
+  to reach the `#[AsEventListener]` in
+  `src/EventListener/OrderPlacedListener.php` and the tag in
+  `config/services.yaml`, or complete a name inside `dispatch($event, '')`.
+- Messenger buses navigate between `config/packages/messenger.yaml` and the
+  handlers that name them. In
+  `src/MessageHandler/SendWelcomeEmailHandler.php`, go to the definition of
+  `command.bus`. The CodeLens above its `__invoke()` opens the message it
+  handles, and the one above `src/Message/SendWelcomeEmail.php` opens the
+  handler.
 - Open `src/Entity/User.php` and `src/Repository/UserRepository.php`. The
   CodeLens above each class links the entity and its repository.
 

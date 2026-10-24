@@ -95,6 +95,16 @@ pub(crate) enum StringKeyKind {
     /// a `getConfigTreeBuilder()` (see `symfony::config_tree`), and read by
     /// the keys under `config/packages/`.
     SymfonyConfigKey,
+    /// A Symfony event name: declared by each listener that subscribes to
+    /// it (an `#[AsEventListener]`, a `getSubscribedEvents()` key, a
+    /// `kernel.event_listener` tag, or an event dispatcher's
+    /// `addListener()`), and read by the dispatcher's `dispatch()` and the
+    /// rest of its listener API.
+    SymfonyEvent,
+    /// A Symfony Messenger bus name: declared under
+    /// `framework.messenger.buses`, and read by `default_bus`,
+    /// `#[AsMessageHandler(bus: …)]`, and a `BusNameStamp`.
+    MessengerBus,
 }
 
 impl StringKeyKind {
@@ -119,6 +129,8 @@ impl StringKeyKind {
                 | Self::TranslationDomain
                 | Self::TwigTemplate
                 | Self::SymfonyConfigKey
+                | Self::SymfonyEvent
+                | Self::MessengerBus
         )
     }
 }
@@ -295,6 +307,26 @@ impl SymbolMap {
     }
 }
 
+// ─── Messenger handlers ─────────────────────────────────────────────────────
+
+/// A Symfony Messenger handler: a method an `#[AsMessageHandler]` registers
+/// for a message class.  Symfony takes the message from the attribute's
+/// `handles:`, else from the type of the method's first parameter, one
+/// handler per class of a union.
+///
+/// Kept in a side table rather than as a span, since a handler is a fact
+/// about a class rather than about a string at a cursor: the code lenses
+/// that link a message and its handlers read it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MessengerHandlerSite {
+    /// The handler class, fully qualified.
+    pub handler: Atom,
+    /// The method that handles the message.
+    pub method: Atom,
+    /// The message class, fully qualified.
+    pub message: Atom,
+}
+
 // ─── String keys behind a typed receiver ────────────────────────────────────
 
 const PSR_CONTAINER: &str = "Psr\\Container\\ContainerInterface";
@@ -321,6 +353,10 @@ const SYMFONY_CONTROLLER_HELPER: &str =
     "Symfony\\Bundle\\FrameworkBundle\\Controller\\ControllerHelper";
 const TWIG_ENVIRONMENT: &str = "Twig\\Environment";
 const SYMFONY_TEMPLATED_EMAIL: &str = "Symfony\\Bridge\\Twig\\Mime\\TemplatedEmail";
+const SYMFONY_EVENT_DISPATCHER_CONTRACT: &str =
+    "Symfony\\Contracts\\EventDispatcher\\EventDispatcherInterface";
+const SYMFONY_EVENT_DISPATCHER: &str =
+    "Symfony\\Component\\EventDispatcher\\EventDispatcherInterface";
 
 /// The namespace of the PHP configurators that build Symfony's service
 /// container.
@@ -380,6 +416,14 @@ pub(crate) enum ReceiverClass {
     /// A templated email, whose `htmlTemplate()` and `textTemplate()` name
     /// the templates its bodies are rendered from.
     TemplatedEmail,
+    /// An event dispatcher, whose `dispatch()` takes the event's name after
+    /// the event itself.
+    EventDispatcher,
+    /// An event dispatcher that keeps listeners, whose `addListener()`
+    /// subscribes one to an event name and whose `removeListener()`,
+    /// `hasListeners()`, `getListeners()`, and `getListenerPriority()`
+    /// look listeners up by it.
+    EventListeners,
 }
 
 impl ReceiverClass {
@@ -387,8 +431,8 @@ impl ReceiverClass {
     /// first, with the kind of key the call names when it is.
     pub(crate) fn targets(self) -> &'static [(&'static str, StringKeyKind)] {
         use StringKeyKind::{
-            ContainerParameter, ServiceId, SymfonyRoute, SymfonyTranslation, TranslationDomain,
-            TwigTemplate, View,
+            ContainerParameter, ServiceId, SymfonyEvent, SymfonyRoute, SymfonyTranslation,
+            TranslationDomain, TwigTemplate, View,
         };
         match self {
             // The concrete `Illuminate\View\Factory` implements the
@@ -433,6 +477,10 @@ impl ReceiverClass {
                 (TWIG_ENVIRONMENT, TwigTemplate),
             ],
             Self::TemplatedEmail => &[(SYMFONY_TEMPLATED_EMAIL, TwigTemplate)],
+            // The component's dispatcher extends the contract, so the
+            // contract covers both.
+            Self::EventDispatcher => &[(SYMFONY_EVENT_DISPATCHER_CONTRACT, SymfonyEvent)],
+            Self::EventListeners => &[(SYMFONY_EVENT_DISPATCHER, SymfonyEvent)],
         }
     }
 

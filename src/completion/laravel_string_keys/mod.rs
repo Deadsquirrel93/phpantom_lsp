@@ -39,6 +39,8 @@ pub(crate) fn string_key_item_kind(kind: &StringKeyKind) -> CompletionItemKind {
         StringKeyKind::ServiceId => CompletionItemKind::REFERENCE,
         StringKeyKind::ContainerParameter => CompletionItemKind::PROPERTY,
         StringKeyKind::SymfonyConfigKey => CompletionItemKind::FIELD,
+        StringKeyKind::SymfonyEvent => CompletionItemKind::EVENT,
+        StringKeyKind::MessengerBus => CompletionItemKind::REFERENCE,
         StringKeyKind::Route
         | StringKeyKind::SymfonyRoute
         | StringKeyKind::Command
@@ -165,7 +167,9 @@ impl Backend {
             | StringKeyKind::ContainerParameter
             | StringKeyKind::SymfonyRoute
             | StringKeyKind::TranslationDomain
-            | StringKeyKind::TwigTemplate => self.symfony_declared_names(*kind).into(),
+            | StringKeyKind::TwigTemplate
+            | StringKeyKind::SymfonyEvent
+            | StringKeyKind::MessengerBus => self.symfony_declared_names(*kind).into(),
             // A translation key is completed in the domain it is looked up
             // in, and a configuration key under the key it is nested in,
             // which only the Symfony completion knows.

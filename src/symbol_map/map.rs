@@ -286,6 +286,9 @@ pub(crate) struct SymbolMap {
     /// its ability span by [`GateSubject::ability_start`].  Empty for every
     /// file that performs no authorization checks.
     pub gate_subjects: Vec<GateSubject>,
+    /// The Messenger handlers the file's `#[AsMessageHandler]` attributes
+    /// register.  Empty for every file that declares none.
+    pub messenger_handlers: Vec<MessengerHandlerSite>,
     /// Byte length of the source text this map was extracted from, or
     /// `u32::MAX` for a file larger than 4 GiB (whose offsets do not fit
     /// in the `u32` fields above anyway).

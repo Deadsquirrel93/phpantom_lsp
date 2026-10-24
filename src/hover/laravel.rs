@@ -240,6 +240,28 @@ impl Backend {
                 }
                 (label, detail)
             }
+            // Every listener declares the event it subscribes to, so the
+            // declarations are its listeners.
+            StringKeyKind::SymfonyEvent => {
+                let listeners = self.symfony_declaration_locations(*kind, key).len();
+                let detail = match listeners {
+                    0 => "No listener in the project subscribes to it".to_string(),
+                    1 => "1 listener in the project".to_string(),
+                    count => format!("{count} listeners in the project"),
+                };
+                ("Event", detail)
+            }
+            StringKeyKind::MessengerBus => {
+                let detail = self
+                    .symfony_declaration_locations(*kind, key)
+                    .first()
+                    .and_then(|location| self.workspace_relative_path(location.uri.as_str()))
+                    .map_or_else(
+                        || "Not declared in the project's configuration".to_string(),
+                        |path| format!("Declared in `{}`", path),
+                    );
+                ("Messenger bus", detail)
+            }
             // An installed bundle's schema is not read, so a key no schema
             // of the project's declares is only not one of its own.
             StringKeyKind::SymfonyConfigKey => {

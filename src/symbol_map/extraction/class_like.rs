@@ -17,6 +17,8 @@ pub(super) fn extract_from_class<'a>(class: &'a Class<'a>, ctx: &mut ExtractionC
     emit_symfony_route_spans(class, ctx);
     emit_symfony_form_field_spans(class, ctx);
     emit_symfony_config_tree_spans(class, ctx);
+    emit_symfony_listener_spans(class, ctx);
+    emit_messenger_handler_sites(class, ctx);
 
     if let Some(ref extends) = class.extends {
         for ident in extends.types.iter() {

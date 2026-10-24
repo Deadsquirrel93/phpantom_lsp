@@ -90,6 +90,9 @@ struct ExtractionCtx<'a> {
     morph_column_sites: Vec<MorphColumnSite>,
     /// The model argument of each authorization check that named one.
     gate_subjects: Vec<crate::symbol_map::GateSubject>,
+    /// The Messenger handlers the file's `#[AsMessageHandler]` attributes
+    /// register.
+    messenger_handlers: Vec<crate::symbol_map::MessengerHandlerSite>,
     /// Current conditional nesting depth (if/else, switch, while, for, etc.).
     /// Incremented when entering a conditional block, decremented when leaving.
     cond_nesting_depth: u16,
@@ -248,7 +251,8 @@ use subject_text::*;
 use symfony::*;
 
 pub(crate) use symfony::{
-    configurator_function_kind, is_autowire_attribute, is_template_attribute,
+    configurator_function_kind, is_autowire_attribute, is_bus_name_stamp,
+    is_event_listener_attribute, is_message_handler_attribute, is_template_attribute,
     is_translatable_message, is_translate_function, symfony_receiver_method,
 };
 
@@ -334,6 +338,7 @@ fn extract_symbol_map_inner(
         typed_receiver_sites: Vec::new(),
         morph_column_sites: Vec::new(),
         gate_subjects: Vec::new(),
+        messenger_handlers: Vec::new(),
         cond_nesting_depth: 0,
         cond_block_end_stack: Vec::new(),
         has_laravel_container_attrs: None,
@@ -477,6 +482,7 @@ fn extract_symbol_map_inner(
         typed_receiver_sites: ctx.typed_receiver_sites,
         morph_column_sites: ctx.morph_column_sites,
         gate_subjects: ctx.gate_subjects,
+        messenger_handlers: ctx.messenger_handlers,
         source_len: u32::try_from(content.len()).unwrap_or(u32::MAX),
         source_hash: None,
     }

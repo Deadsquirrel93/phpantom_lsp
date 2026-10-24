@@ -9,18 +9,25 @@
 //! [`routes`], [`translations`], [`templates`], and [`config_tree`]), and
 //! PHP through symbol-map extraction.
 //!
-//! Form fields and validation mappings name a class's properties, so they
-//! are member accesses instead (see [`forms`] and [`validation`]).
+//! Event names and Messenger bus names are string keys too (see [`tags`]
+//! and [`messenger`]).  Form fields, validation mappings, and the listener
+//! methods an event subscription names name a class's members, so they are
+//! member accesses instead (see [`forms`] and [`validation`]).  The
+//! Messenger handlers a project registers are recorded beside the spans of
+//! the file that declares them (see [`messenger`]).
 //! A declaration is a span with `is_write` set, or a configurator call
 //! whose receiver only the type engine can confirm (a
 //! [`TypedReceiverSite`](crate::symbol_map::TypedReceiverSite) with
-//! `is_write` set).  The few files holding one are tracked here, so the
-//! declared names are read from those maps rather than from a second index.
+//! `is_write` set).  The few files holding one, or a Messenger handler, are
+//! tracked here, so the declared names are read from those maps rather than
+//! from a second index.
 
 pub(crate) mod config_tree;
 pub(crate) mod forms;
+pub(crate) mod messenger;
 pub(crate) mod resources;
 pub(crate) mod routes;
+pub(crate) mod tags;
 pub(crate) mod templates;
 pub(crate) mod translations;
 pub(crate) mod validation;
@@ -32,33 +39,90 @@ use parking_lot::RwLock;
 use tower_lsp::lsp_types::{Location, Range};
 
 use crate::Backend;
-use crate::symbol_map::{StringKeyKind, SymbolKind, SymbolMap};
+use crate::symbol_map::{StringKeyKind, SymbolKind, SymbolMap, SymbolSpan};
 use crate::text_position::LineIndex;
 
+/// The two formats Symfony's configuration is read from as text.
+pub(crate) enum ConfigFormat {
+    Yaml,
+    Xml,
+}
+
+/// The format of the configuration file at `uri`, by its extension.
+pub(crate) fn config_format(uri: &str) -> Option<ConfigFormat> {
+    let path = uri
+        .split(['?', '#'])
+        .next()
+        .unwrap_or(uri)
+        .to_ascii_lowercase();
+    let path = path.strip_suffix(".dist").unwrap_or(&path);
+    if path.ends_with(".yaml") || path.ends_with(".yml") {
+        Some(ConfigFormat::Yaml)
+    } else if path.ends_with(".xml") {
+        Some(ConfigFormat::Xml)
+    } else {
+        None
+    }
+}
+
+/// A place in a configuration file that holds a name: the content range of
+/// the value, which is empty while the name is still being typed, so that
+/// completion and the symbol map read the file the same way.
+pub(crate) struct NameSlot {
+    pub kind: StringKeyKind,
+    pub start: usize,
+    pub end: usize,
+    pub is_write: bool,
+}
+
+/// The spans the `slots` of `content` that hold a name make.
+pub(crate) fn slot_spans(content: &str, slots: Vec<NameSlot>) -> Vec<SymbolSpan> {
+    slots
+        .into_iter()
+        .filter(|slot| slot.start < slot.end)
+        .filter_map(|slot| {
+            Some(SymbolSpan {
+                start: slot.start as u32,
+                end: slot.end as u32,
+                kind: SymbolKind::StringKey {
+                    kind: slot.kind,
+                    key: content.get(slot.start..slot.end)?.to_string(),
+                    is_write: slot.is_write,
+                    is_optional: false,
+                },
+            })
+        })
+        .collect()
+}
+
 /// The files whose symbol maps declare a Symfony service ID, container
-/// parameter, route, translation key, Twig template, or configuration key.
+/// parameter, route, translation key, Twig template, configuration key,
+/// event listener, or Messenger bus, or register a Messenger handler.
 #[derive(Default)]
 pub(crate) struct SymfonyState {
     declaring_uris: RwLock<HashSet<String>>,
 }
 
 /// Whether `map` declares a service ID, a container parameter, a route, a
-/// translation key, a template, or a configuration key, outright or through
-/// a configurator call still to be confirmed.
+/// translation key, a template, a configuration key, an event listener, or
+/// a Messenger bus, outright or through a configurator call still to be
+/// confirmed, or registers a Messenger handler.
 fn declares_symfony_keys(map: &SymbolMap) -> bool {
-    map.spans.iter().any(|span| {
-        matches!(
-            &span.kind,
-            SymbolKind::StringKey {
-                kind,
-                is_write: true,
-                ..
-            } if kind.is_symfony()
-        )
-    }) || map
-        .typed_receiver_sites
-        .iter()
-        .any(|site| site.is_write && site.receiver.is_symfony())
+    !map.messenger_handlers.is_empty()
+        || map.spans.iter().any(|span| {
+            matches!(
+                &span.kind,
+                SymbolKind::StringKey {
+                    kind,
+                    is_write: true,
+                    ..
+                } if kind.is_symfony()
+            )
+        })
+        || map
+            .typed_receiver_sites
+            .iter()
+            .any(|site| site.is_write && site.receiver.is_symfony())
 }
 
 impl Backend {
@@ -177,6 +241,17 @@ impl Backend {
     /// (with its domain, see [`translations::translation_key`]),
     /// translation domain, or template the project declares, sorted.
     pub(crate) fn symfony_declared_names(&self, kind: StringKeyKind) -> Vec<String> {
+        self.symfony_declared_names_except(kind, None)
+    }
+
+    /// [`Self::symfony_declared_names`], leaving out the declaration that
+    /// starts at `except` (a file and an offset): the one being typed,
+    /// which an event listener's subscription is.
+    pub(crate) fn symfony_declared_names_except(
+        &self,
+        kind: StringKeyKind,
+        except: Option<(&str, u32)>,
+    ) -> Vec<String> {
         let mut names = Vec::new();
         if kind == StringKeyKind::TranslationDomain {
             self.visit_symfony_declarations(StringKeyKind::SymfonyTranslation, |_, _, _, key| {
@@ -186,7 +261,11 @@ impl Backend {
                 }
             });
         } else {
-            self.visit_symfony_declarations(kind, |_, _, _, key| names.push(key.to_string()));
+            self.visit_symfony_declarations(kind, |uri, start, _, key| {
+                if except != Some((uri, start)) {
+                    names.push(key.to_string());
+                }
+            });
         }
         names.sort_unstable();
         names.dedup();

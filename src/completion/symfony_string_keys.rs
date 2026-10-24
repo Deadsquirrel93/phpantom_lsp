@@ -1,16 +1,19 @@
 //! Symfony service ID, container parameter, route name, translation, Twig
-//! template, form field, and bundle configuration key completion.
+//! template, form field, bundle configuration key, event name, and
+//! Messenger bus completion.
 //!
 //! In PHP the cursor's call is read from the raw buffer, which is mid-edit
 //! and usually does not parse, and is judged by the same predicates the
 //! symbol map uses (`symfony_receiver_method`, the configurator functions,
-//! `#[Autowire]`, `#[Template]`), so completion and navigation agree on which strings name
-//! what.  A method call's receiver is resolved by the type engine, as the
-//! symbol map's is.
+//! and the attributes), so completion and navigation agree on which strings
+//! name what.  A method call's receiver is resolved by the type engine, as
+//! the symbol map's is.
 //!
 //! In YAML and XML configuration the line before the cursor says it: an `@`
 //! starts a service reference, an unclosed `%` a parameter placeholder, and
-//! a handful of XML attributes take a service ID.  In a Twig template, the
+//! a handful of XML attributes take a service ID.  An event or a bus is
+//! read by the same scan of the file the symbol map makes (see
+//! [`crate::symfony::tags`] and [`crate::symfony::messenger`]).  In a Twig template, the
 //! first argument of `path()` and `url()` is a route name, a string the
 //! `trans` filter is applied to a translation key, and the name an
 //! `extends`, an `include`, or another tag that loads a template takes a
@@ -37,7 +40,8 @@ use crate::completion::laravel_string_keys::{
 };
 use crate::completion::source::code_context::CodeContext;
 use crate::symbol_map::extraction::{
-    configurator_function_kind, is_autowire_attribute, is_template_attribute,
+    configurator_function_kind, is_autowire_attribute, is_bus_name_stamp,
+    is_event_listener_attribute, is_message_handler_attribute, is_template_attribute,
     is_translatable_message, is_translate_function, symfony_receiver_method,
 };
 use crate::symbol_map::{StringKeyKind, SymbolKind};
@@ -83,7 +87,7 @@ impl Backend {
                 position,
             );
         }
-        self.symfony_key_response(kind, content, prefix_start, cursor, position)
+        self.symfony_key_response(uri, kind, content, prefix_start, cursor, position)
     }
 
     /// Complete a form field from the properties of the form type's data
@@ -195,7 +199,11 @@ impl Backend {
             let written = trailing_name(&content[..paren.code_before]);
             let offset = (paren.code_before - written.len()) as u32;
             let translates = if is_instantiation(&content[..offset as usize]) {
-                is_translatable_message(&ctx.resolve_name_at(written, offset))
+                let class = ctx.resolve_name_at(written, offset);
+                if call.arg_index == 0 && is_bus_name_stamp(&class) {
+                    return Some(StringKeyKind::MessengerBus);
+                }
+                is_translatable_message(&class)
             } else {
                 let function = resolve_function_name(ctx, written, offset);
                 if call.arg_index == 0
@@ -231,13 +239,14 @@ impl Backend {
 
     fn symfony_key_response(
         &self,
+        uri: &str,
         kind: StringKeyKind,
         content: &str,
         prefix_start: usize,
         cursor: usize,
         position: Position,
     ) -> Option<CompletionResponse> {
-        let names = self.symfony_declared_names(kind);
+        let names = self.symfony_declared_names_except(kind, Some((uri, prefix_start as u32)));
         self.symfony_names_response(kind, names, content, prefix_start, cursor, position)
     }
 
@@ -306,7 +315,8 @@ impl Backend {
                 (StringKeyKind::SymfonyRoute, start)
             }
         } else if crate::symfony::resources::is_container_config_uri(uri) {
-            match resource_key_at(content, cursor) {
+            match config_slot_at(uri, content, cursor).or_else(|| resource_key_at(content, cursor))
+            {
                 Some(found) => found,
                 None if crate::symfony::config_tree::is_bundle_config_uri(uri) => {
                     let (parent, start) =
@@ -327,14 +337,16 @@ impl Backend {
         } else {
             return None;
         };
-        self.symfony_key_response(kind, content, prefix_start, cursor, position)
+        self.symfony_key_response(uri, kind, content, prefix_start, cursor, position)
     }
 }
 
-/// What an `#[Autowire]` or `#[Template]` string names, and where the name
-/// in it starts: `service:` a service, `param:` a parameter, and its value
-/// an `@id` service reference or a `%name%` placeholder; a `#[Template]`'s
-/// `template:` a template.
+/// What an `#[Autowire]`, `#[Template]`, `#[AsEventListener]`, or
+/// `#[AsMessageHandler]` string names, and where the name in it starts:
+/// `service:` a service, `param:` a parameter, and its value an `@id`
+/// service reference or a `%name%` placeholder; a `#[Template]`'s
+/// `template:` a template; an `#[AsEventListener]`'s `event:` an event; an
+/// `#[AsMessageHandler]`'s `bus:` a bus.
 fn attribute_key(
     content: &str,
     quote: usize,
@@ -354,6 +366,20 @@ fn attribute_key(
             ArgumentSlot::Named("template") | ArgumentSlot::Positional(0)
         )
         .then_some((StringKeyKind::TwigTemplate, literal_start));
+    }
+    if is_event_listener_attribute(&attribute) {
+        return matches!(
+            slot,
+            ArgumentSlot::Named("event") | ArgumentSlot::Positional(0)
+        )
+        .then_some((StringKeyKind::SymfonyEvent, literal_start));
+    }
+    if is_message_handler_attribute(&attribute) {
+        return matches!(
+            slot,
+            ArgumentSlot::Named("bus") | ArgumentSlot::Positional(0)
+        )
+        .then_some((StringKeyKind::MessengerBus, literal_start));
     }
     if !is_autowire_attribute(&attribute) {
         return None;
@@ -376,6 +402,22 @@ fn attribute_key(
 fn open_placeholder(text: &str) -> Option<usize> {
     let percents = text.bytes().filter(|byte| *byte == b'%').count();
     (percents % 2 == 1).then(|| text.rfind('%').map(|index| index + 1))?
+}
+
+/// The event a listener tag subscribes to, or the bus a handler tag or the
+/// Messenger configuration reads, being typed at `cursor`, and where it
+/// starts.  A bus a key declares is not completed: it is a new name.
+fn config_slot_at(uri: &str, content: &str, cursor: usize) -> Option<(StringKeyKind, usize)> {
+    let mut slots = crate::symfony::tags::tag_slots(uri, content);
+    slots.extend(crate::symfony::messenger::bus_slots(uri, content));
+    slots
+        .into_iter()
+        .find(|slot| {
+            slot.start <= cursor
+                && cursor <= slot.end
+                && (slot.kind == StringKeyKind::SymfonyEvent || !slot.is_write)
+        })
+        .map(|slot| (slot.kind, slot.start))
 }
 
 /// The service reference or parameter placeholder being typed at `cursor`

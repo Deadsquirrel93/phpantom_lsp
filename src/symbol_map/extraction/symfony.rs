@@ -1,20 +1,27 @@
 //! The names Symfony takes as strings in PHP: service IDs, container
 //! parameters, route names, translation keys and domains, Twig templates,
-//! the configuration keys a bundle's schema declares, and the data-class
-//! properties a form type's fields map to.
+//! the configuration keys a bundle's schema declares, the data-class
+//! properties a form type's fields map to, event names and the listener
+//! methods that subscribe to them, and Messenger bus names.  The Messenger
+//! handlers a class registers are recorded beside them.
 //!
 //! The configurator functions (`service('app.mailer')`, `param('app.name')`),
-//! the `#[Autowire]`, `#[Route]`, and `#[Template]` attributes,
-//! `TranslatableMessage`, and `t()` are recognised by their resolved name.
+//! the `#[Autowire]`, `#[Route]`, `#[Template]`, `#[AsEventListener]`, and
+//! `#[AsMessageHandler]` attributes, `TranslatableMessage`, `BusNameStamp`,
+//! and `t()` are recognised by their resolved name.
 //! A method call names one only on the right receiver: `get()` on a
 //! container, `set()` on a configurator, `generate()` on a URL generator,
-//! `trans()` on a translator, `render()` on a controller or Twig.  Those names are far too common to claim on sight, and the
-//! receiver's spelling does not settle what it is (`$container` may be
-//! anything), so each call is recorded as a [`TypedReceiverSite`] for the
-//! type engine to confirm (see [`symfony_receiver_method`]).
+//! `trans()` on a translator, `render()` on a controller or Twig,
+//! `dispatch()` on an event dispatcher.  Those names are far too common to
+//! claim on sight, and the receiver's spelling does not settle what it is
+//! (`$container` may be anything), so each call is recorded as a
+//! [`TypedReceiverSite`] for the type engine to confirm (see
+//! [`symfony_receiver_method`]).
 
 use super::*;
-use crate::symbol_map::{ReceiverClass, SYMFONY_CONTAINER_CONFIGURATOR_NS, StringKeyKind};
+use crate::symbol_map::{
+    MessengerHandlerSite, ReceiverClass, SYMFONY_CONTAINER_CONFIGURATOR_NS, StringKeyKind,
+};
 use crate::symfony::translations::{DEFAULT_DOMAIN, is_domain_name, translation_key};
 use crate::virtual_members::laravel::helpers::{resolved_string_literal, string_literal_at_range};
 
@@ -23,6 +30,20 @@ const AUTOWIRE_ATTRIBUTE: &str = "Symfony\\Component\\DependencyInjection\\Attri
 const TEMPLATE_ATTRIBUTE: &str = "Symfony\\Bridge\\Twig\\Attribute\\Template";
 const TRANSLATABLE_MESSAGE: &str = "Symfony\\Component\\Translation\\TranslatableMessage";
 const TRANSLATE_FUNCTION: &str = "Symfony\\Component\\Translation\\t";
+const AS_EVENT_LISTENER: &str = "Symfony\\Component\\EventDispatcher\\Attribute\\AsEventListener";
+const AS_MESSAGE_HANDLER: &str = "Symfony\\Component\\Messenger\\Attribute\\AsMessageHandler";
+const BUS_NAME_STAMP: &str = "Symfony\\Component\\Messenger\\Stamp\\BusNameStamp";
+/// `AsEventListener`'s constructor parameters, in order.
+const EVENT_LISTENER_PARAMETERS: &[&str] = &["event", "method", "priority", "dispatcher"];
+/// `AsMessageHandler`'s constructor parameters, in order.
+const MESSAGE_HANDLER_PARAMETERS: &[&str] = &[
+    "bus",
+    "fromTransport",
+    "handles",
+    "method",
+    "priority",
+    "sign",
+];
 const ROUTE_ATTRIBUTES: [&str; 2] = [
     "Symfony\\Component\\Routing\\Attribute\\Route",
     "Symfony\\Component\\Routing\\Annotation\\Route",
@@ -78,6 +99,15 @@ pub(crate) fn symfony_receiver_method(
         }
         0 if is("htmlTemplate") || is("textTemplate") => {
             Some((ReceiverClass::TemplatedEmail, false))
+        }
+        1 if is("dispatch") => Some((ReceiverClass::EventDispatcher, false)),
+        0 if is("addListener") => Some((ReceiverClass::EventListeners, true)),
+        0 if is("removeListener")
+            || is("hasListeners")
+            || is("getListeners")
+            || is("getListenerPriority") =>
+        {
+            Some((ReceiverClass::EventListeners, false))
         }
         _ => None,
     }
@@ -290,7 +320,48 @@ pub(in crate::symbol_map::extraction) fn emit_symfony_instantiation_spans(
         .unwrap_or(written);
     if is_translatable_message(resolved) {
         push_translatable_spans(argument_list, ctx);
+    } else if is_bus_name_stamp(resolved) {
+        let bus = argument_list
+            .arguments
+            .iter()
+            .find_map(|argument| match argument {
+                Argument::Positional(positional) => Some(positional.value),
+                Argument::Named(named) if named.name.value == b"busName" => Some(named.value),
+                Argument::Named(_) => None,
+            });
+        if let Some(bus) = bus {
+            push_laravel_string_span(
+                StringKeyKind::MessengerBus,
+                false,
+                false,
+                bus,
+                ctx.content,
+                &mut ctx.spans,
+            );
+        }
     }
+}
+
+/// Whether `resolved` names Messenger's `BusNameStamp`, which sends a
+/// message down the bus its constructor names.
+pub(crate) fn is_bus_name_stamp(resolved: &str) -> bool {
+    resolved
+        .trim_start_matches('\\')
+        .eq_ignore_ascii_case(BUS_NAME_STAMP)
+}
+
+/// Whether `resolved` names Symfony's `#[AsEventListener]`.
+pub(crate) fn is_event_listener_attribute(resolved: &str) -> bool {
+    resolved
+        .trim_start_matches('\\')
+        .eq_ignore_ascii_case(AS_EVENT_LISTENER)
+}
+
+/// Whether `resolved` names Messenger's `#[AsMessageHandler]`.
+pub(crate) fn is_message_handler_attribute(resolved: &str) -> bool {
+    resolved
+        .trim_start_matches('\\')
+        .eq_ignore_ascii_case(AS_MESSAGE_HANDLER)
 }
 
 /// Whether the file names anything from one of Symfony's configurator
@@ -622,6 +693,349 @@ pub(in crate::symbol_map::extraction) fn emit_symfony_config_tree_spans(
         }));
 }
 
+/// The attributes among `attribute_lists` that resolve to `class_name`.
+fn attributes_named<'e, 'a>(
+    attribute_lists: &'e Sequence<'a, AttributeList<'a>>,
+    class_name: &'e str,
+    ctx: &'e ExtractionCtx<'_>,
+) -> impl Iterator<Item = &'e Attribute<'a>> {
+    attribute_lists
+        .iter()
+        .flat_map(|list| list.attributes.iter())
+        .filter(move |attribute| {
+            let written = bytes_to_str(attribute.name.value());
+            ctx.resolved_name_at(attribute.name.span().start.offset)
+                .unwrap_or(written)
+                .trim_start_matches('\\')
+                .eq_ignore_ascii_case(class_name)
+        })
+}
+
+/// The arguments of `attribute`, each with the constructor parameter it is
+/// passed to: a named one by its name, a positional one by its place in
+/// `parameters`.
+fn attribute_arguments<'e, 'a>(
+    attribute: &'e Attribute<'a>,
+    parameters: &[&'static str],
+) -> Vec<(&'e str, &'e Expression<'a>)> {
+    let Some(arguments) = &attribute.argument_list else {
+        return Vec::new();
+    };
+    arguments
+        .arguments
+        .iter()
+        .enumerate()
+        .filter_map(|(index, argument)| match argument {
+            PartialArgument::Named(named) => Some((bytes_to_str(named.name.value), named.value)),
+            PartialArgument::Positional(positional) => parameters
+                .get(index)
+                .map(|parameter| (*parameter, positional.value)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Push a span for the method of the class `subject` a string names, as
+/// the listener method an event subscription or a handler's `method:`
+/// gives.  Symfony calls it on an instance of the class.
+fn push_own_method_span(
+    subject: &str,
+    method: &Expression<'_>,
+    content: &str,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    let Some((name, start, end)) = resolved_string_literal(method, content) else {
+        return;
+    };
+    if !is_identifier(name) {
+        return;
+    }
+    spans.push(SymbolSpan {
+        start: start as u32,
+        end: end as u32,
+        kind: SymbolKind::MemberAccess {
+            subject_text: SubjectText::owned(subject.to_string()),
+            member_name: crate::atom::atom(name),
+            is_static: false,
+            is_method_call: true,
+            docblock_ref: DocblockMemberRef::No,
+            is_array_callable: false,
+            is_nullsafe: false,
+        },
+    });
+}
+
+/// Emit the event names a class's listeners subscribe to and the methods
+/// they name: an `#[AsEventListener]` on the class or one of its methods,
+/// and the event-to-method map a subscriber's `getSubscribedEvents()`
+/// returns.  Each subscription declares the event name.
+pub(in crate::symbol_map::extraction) fn emit_symfony_listener_spans(
+    class: &Class<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.symfony {
+        return;
+    }
+    // Rooted, so the class is not read again against the file's namespace
+    // and imports.
+    let subject = ctx
+        .resolved_name_at(class.name.span.start.offset)
+        .map(|fqn| format!("\\{}", fqn.trim_start_matches('\\')));
+    let mut spans = Vec::new();
+    for attribute in attributes_named(&class.attribute_lists, AS_EVENT_LISTENER, ctx) {
+        for (parameter, value) in attribute_arguments(attribute, EVENT_LISTENER_PARAMETERS) {
+            match parameter {
+                "event" => push_event_span(value, ctx.content, &mut spans),
+                "method" => {
+                    if let Some(subject) = &subject {
+                        push_own_method_span(subject, value, ctx.content, &mut spans);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    for member in class.members.iter() {
+        let ClassLikeMember::Method(method) = member else {
+            continue;
+        };
+        // On a method, the method is the listener.
+        for attribute in attributes_named(&method.attribute_lists, AS_EVENT_LISTENER, ctx) {
+            for (parameter, value) in attribute_arguments(attribute, EVENT_LISTENER_PARAMETERS) {
+                if parameter == "event" {
+                    push_event_span(value, ctx.content, &mut spans);
+                }
+            }
+        }
+        if method.modifiers.contains_static()
+            && method
+                .name
+                .value
+                .eq_ignore_ascii_case(b"getSubscribedEvents")
+            && let MethodBody::Concrete(body) = &method.body
+        {
+            for statement in body.statements.iter() {
+                if let Statement::Return(statement) = statement
+                    && let Some(events) = statement.value
+                {
+                    push_subscribed_event_spans(
+                        events,
+                        subject.as_deref(),
+                        ctx.content,
+                        &mut spans,
+                    );
+                }
+            }
+        }
+    }
+    ctx.spans.extend(spans);
+}
+
+/// Push the event name a listener subscribes to, when it is a string.
+fn push_event_span(event: &Expression<'_>, content: &str, spans: &mut Vec<SymbolSpan>) {
+    push_laravel_string_span(
+        StringKeyKind::SymfonyEvent,
+        true,
+        false,
+        event,
+        content,
+        spans,
+    );
+}
+
+/// Push the spans of the map a `getSubscribedEvents()` returns: each key
+/// an event name, each value the method that listens to it, alone, with a
+/// priority (`['onEvent', 10]`), or as a list of either.
+fn push_subscribed_event_spans(
+    events: &Expression<'_>,
+    subject: Option<&str>,
+    content: &str,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    let Some(entries) = crate::parser::array_literal_elements(events) else {
+        return;
+    };
+    for entry in entries.iter() {
+        let ArrayElement::KeyValue(entry) = entry else {
+            continue;
+        };
+        push_event_span(entry.key, content, spans);
+        let Some(subject) = subject else {
+            continue;
+        };
+        let Some(listeners) = crate::parser::array_literal_elements(entry.value) else {
+            push_own_method_span(subject, entry.value, content, spans);
+            continue;
+        };
+        let mut values = listeners.iter().filter_map(|element| match element {
+            ArrayElement::Value(value) => Some(value.value),
+            _ => None,
+        });
+        match values.next() {
+            // `['onEvent', 10]`: the method, then its priority.
+            Some(first @ Expression::Literal(Literal::String(_))) => {
+                push_own_method_span(subject, first, content, spans);
+            }
+            // `[['onEvent', 10], ['onOther']]`: one listener per entry.
+            Some(first) => {
+                for listener in std::iter::once(first).chain(values) {
+                    if let Some(method) = crate::parser::array_literal_elements(listener)
+                        .and_then(|listener| listener.iter().next())
+                        .and_then(|element| match element {
+                            ArrayElement::Value(value) => Some(value.value),
+                            _ => None,
+                        })
+                    {
+                        push_own_method_span(subject, method, content, spans);
+                    }
+                }
+            }
+            None => {}
+        }
+    }
+}
+
+/// Record the Messenger handlers a class's `#[AsMessageHandler]`
+/// attributes register, and emit the bus each one names and the method a
+/// class-level one names.
+///
+/// A class-level attribute registers the method its `method:` names,
+/// `__invoke()` when it names none; one on a method registers that method.
+/// The message is the attribute's `handles:`, else each class the method's
+/// first parameter is typed with.
+pub(in crate::symbol_map::extraction) fn emit_messenger_handler_sites(
+    class: &Class<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.symfony {
+        return;
+    }
+    let Some(handler) = ctx
+        .resolved_name_at(class.name.span.start.offset)
+        .map(|fqn| fqn.trim_start_matches('\\'))
+    else {
+        return;
+    };
+    let subject = format!("\\{handler}");
+    let method_named = |name: &[u8]| {
+        class.members.iter().find_map(|member| match member {
+            ClassLikeMember::Method(method) if method.name.value.eq_ignore_ascii_case(name) => {
+                Some(method)
+            }
+            _ => None,
+        })
+    };
+
+    let mut spans = Vec::new();
+    let mut sites = Vec::new();
+    let mut register = |attribute: &Attribute<'_>,
+                        method: Option<&Method<'_>>,
+                        method_name: &str,
+                        spans: &mut Vec<SymbolSpan>| {
+        let mut handles = None;
+        for (parameter, value) in attribute_arguments(attribute, MESSAGE_HANDLER_PARAMETERS) {
+            match parameter {
+                "bus" => push_laravel_string_span(
+                    StringKeyKind::MessengerBus,
+                    false,
+                    false,
+                    value,
+                    ctx.content,
+                    spans,
+                ),
+                "handles" => handles = Some(value),
+                _ => {}
+            }
+        }
+        let messages = match handles {
+            Some(handles) => message_class(handles, ctx).into_iter().collect(),
+            None => method
+                .and_then(|method| method.parameter_list.parameters.iter().next())
+                .and_then(|parameter| parameter.hint.as_ref())
+                .map(|hint| hint_classes(hint, ctx))
+                .unwrap_or_default(),
+        };
+        for message in messages {
+            sites.push(MessengerHandlerSite {
+                handler: crate::atom::atom(handler),
+                method: crate::atom::atom(method_name),
+                message: crate::atom::atom(&message),
+            });
+        }
+    };
+
+    for attribute in attributes_named(&class.attribute_lists, AS_MESSAGE_HANDLER, ctx) {
+        let named = attribute_arguments(attribute, MESSAGE_HANDLER_PARAMETERS)
+            .into_iter()
+            .find(|(parameter, _)| *parameter == "method")
+            .map(|(_, value)| value);
+        if let Some(named) = named {
+            push_own_method_span(&subject, named, ctx.content, &mut spans);
+        }
+        let method_name = named
+            .and_then(|named| resolved_string_literal(named, ctx.content))
+            .map_or("__invoke", |(name, _, _)| name);
+        register(
+            attribute,
+            method_named(method_name.as_bytes()),
+            method_name,
+            &mut spans,
+        );
+    }
+    for member in class.members.iter() {
+        let ClassLikeMember::Method(method) = member else {
+            continue;
+        };
+        for attribute in attributes_named(&method.attribute_lists, AS_MESSAGE_HANDLER, ctx) {
+            register(
+                attribute,
+                Some(method),
+                bytes_to_str(method.name.value),
+                &mut spans,
+            );
+        }
+    }
+    ctx.spans.extend(spans);
+    ctx.messenger_handlers.extend(sites);
+}
+
+/// The message class a `handles:` names: `Foo::class`, or a class name
+/// written out as a string.
+fn message_class(handles: &Expression<'_>, ctx: &ExtractionCtx<'_>) -> Option<String> {
+    if let Some(identifier) = crate::parser::class_fetch_identifier(handles) {
+        let written = bytes_to_str(identifier.value());
+        let resolved = ctx
+            .resolved_name_at(identifier.span().start.offset)
+            .unwrap_or(written);
+        return Some(resolved.trim_start_matches('\\').to_string());
+    }
+    let (name, _, _) = resolved_string_literal(handles, ctx.content)?;
+    let name = name.trim_start_matches('\\');
+    (!name.is_empty()).then(|| name.to_string())
+}
+
+/// The classes a parameter type names: the class itself, each class of a
+/// union, and the class behind a `?`.
+fn hint_classes(hint: &Hint<'_>, ctx: &ExtractionCtx<'_>) -> Vec<String> {
+    match hint {
+        Hint::Identifier(identifier) => {
+            let written = bytes_to_str(identifier.value());
+            let resolved = ctx
+                .resolved_name_at(identifier.span().start.offset)
+                .unwrap_or(written);
+            vec![resolved.trim_start_matches('\\').to_string()]
+        }
+        Hint::Nullable(nullable) => hint_classes(nullable.hint, ctx),
+        Hint::Parenthesized(inner) => hint_classes(inner.hint, ctx),
+        Hint::Union(union) => {
+            let mut classes = hint_classes(union.left, ctx);
+            classes.extend(hint_classes(union.right, ctx));
+            classes
+        }
+        _ => Vec::new(),
+    }
+}
+
 /// The spans the `#[Route]`s of one action declare.  `derive_from` is the
 /// class to derive a name from for a route that has none; Symfony numbers
 /// the unnamed routes of one action from the second one on.
@@ -922,6 +1336,148 @@ mod tests {
         assert_eq!(
             super::default_route_name("App\\Controller\\DemoController", "listAction", 2),
             "app_demo_list_2"
+        );
+    }
+
+    /// The string keys of `kind` a map holds, with whether each declares.
+    fn keys_of(map: &SymbolMap, kind: crate::symbol_map::StringKeyKind) -> Vec<(String, bool)> {
+        map.spans
+            .iter()
+            .filter_map(|span| match &span.kind {
+                crate::symbol_map::SymbolKind::StringKey {
+                    kind: span_kind,
+                    key,
+                    is_write,
+                    ..
+                } if *span_kind == kind => Some((key.clone(), *is_write)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The methods a map's member accesses name, with their subject.
+    fn methods(map: &SymbolMap, php: &str) -> Vec<(String, String)> {
+        let source = map.source(php).expect("the map is built from `php`");
+        map.spans
+            .iter()
+            .filter_map(|span| match &span.kind {
+                crate::symbol_map::SymbolKind::MemberAccess {
+                    subject_text,
+                    member_name,
+                    ..
+                } => Some((
+                    subject_text.as_str(source).to_string(),
+                    member_name.to_string(),
+                )),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn listeners_declare_their_events_and_name_their_methods() {
+        let php = "<?php\nnamespace App\\Listener;\nuse Symfony\\Component\\EventDispatcher\\Attribute\\AsEventListener;\nuse Symfony\\Component\\EventDispatcher\\EventSubscriberInterface;\n#[AsEventListener(event: 'app.order.placed', method: 'onPlaced')]\n#[AsEventListener('app.order.shipped')]\nclass OrderListener implements EventSubscriberInterface {\n    #[AsEventListener(event: 'app.order.paid')]\n    public function onPaid(): void {}\n    public static function getSubscribedEvents(): array {\n        return [\n            'app.order.cancelled' => 'onCancelled',\n            'app.order.refunded' => ['onRefunded', 10],\n            'app.order.returned' => [['onReturned', 10], ['onRestocked']],\n            Other::NAME => 'onOther',\n        ];\n    }\n}\n";
+        let map = map_of(php);
+        let events: Vec<String> = keys_of(&map, crate::symbol_map::StringKeyKind::SymfonyEvent)
+            .into_iter()
+            .map(|(key, is_write)| {
+                assert!(is_write, "a subscription declares its event");
+                key
+            })
+            .collect();
+        assert_eq!(
+            events,
+            vec![
+                "app.order.placed",
+                "app.order.shipped",
+                "app.order.paid",
+                "app.order.cancelled",
+                "app.order.refunded",
+                "app.order.returned",
+            ]
+        );
+        let subject = "\\App\\Listener\\OrderListener".to_string();
+        let named: Vec<String> = methods(&map, php)
+            .into_iter()
+            .filter(|(on, _)| *on == subject)
+            .map(|(_, method)| method)
+            .collect();
+        assert_eq!(
+            named,
+            vec![
+                "onPlaced",
+                "onCancelled",
+                "onRefunded",
+                "onReturned",
+                "onRestocked",
+                "onOther",
+            ]
+        );
+    }
+
+    #[test]
+    fn message_handlers_are_recorded_with_their_messages_and_buses() {
+        let php = "<?php\nnamespace App\\Handler;\nuse App\\Message\\{PlaceOrder, CancelOrder, RefundOrder};\nuse Symfony\\Component\\Messenger\\Attribute\\AsMessageHandler;\nuse Symfony\\Component\\Messenger\\Stamp\\BusNameStamp;\n#[AsMessageHandler(bus: 'command.bus')]\nfinal class PlaceOrderHandler {\n    public function __invoke(PlaceOrder $message): void {\n        new BusNameStamp('query.bus');\n    }\n}\n#[AsMessageHandler(handles: RefundOrder::class, method: 'refund')]\nfinal class RefundHandler {\n    public function refund(object $message): void {}\n}\nfinal class OrderHandlers {\n    #[AsMessageHandler]\n    public function cancel(CancelOrder|PlaceOrder $message): void {}\n    public function notAHandler(PlaceOrder $message): void {}\n}\n";
+        let map = map_of(php);
+        let sites: Vec<(&str, &str, &str)> = map
+            .messenger_handlers
+            .iter()
+            .map(|site| {
+                (
+                    site.handler.as_str(),
+                    site.method.as_str(),
+                    site.message.as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            sites,
+            vec![
+                (
+                    "App\\Handler\\PlaceOrderHandler",
+                    "__invoke",
+                    "App\\Message\\PlaceOrder"
+                ),
+                (
+                    "App\\Handler\\RefundHandler",
+                    "refund",
+                    "App\\Message\\RefundOrder"
+                ),
+                (
+                    "App\\Handler\\OrderHandlers",
+                    "cancel",
+                    "App\\Message\\CancelOrder"
+                ),
+                (
+                    "App\\Handler\\OrderHandlers",
+                    "cancel",
+                    "App\\Message\\PlaceOrder"
+                ),
+            ]
+        );
+        assert_eq!(
+            keys_of(&map, crate::symbol_map::StringKeyKind::MessengerBus),
+            vec![
+                ("command.bus".to_string(), false),
+                ("query.bus".to_string(), false),
+            ]
+        );
+        assert!(methods(&map, php).contains(&(
+            "\\App\\Handler\\RefundHandler".to_string(),
+            "refund".to_string()
+        )));
+    }
+
+    #[test]
+    fn dispatcher_calls_are_recorded_for_the_type_engine() {
+        let php = "<?php\nfunction f($events) {\n    $events->dispatch($event, 'app.order.placed');\n    $events->addListener('app.order.paid', $listener);\n    $events->hasListeners('app.order.shipped');\n}\n";
+        assert_eq!(
+            receivers(&map_of(php)),
+            vec![
+                ("app.order.placed", ReceiverClass::EventDispatcher, false),
+                ("app.order.paid", ReceiverClass::EventListeners, true),
+                ("app.order.shipped", ReceiverClass::EventListeners, false),
+            ]
         );
     }
 

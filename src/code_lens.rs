@@ -1,8 +1,8 @@
 //! Code Lens (`textDocument/codeLens`) support.
 //!
 //! Shows reference and implementation counts, override/implement
-//! annotations, and the links between a Doctrine entity and its
-//! repository.
+//! annotations, the links between a Doctrine entity and its repository,
+//! and the links between a Messenger message and its handlers.
 
 use std::sync::Arc;
 
@@ -70,8 +70,9 @@ impl Backend {
     /// Returns reference lenses for PHP declarations, implementation
     /// lenses for interfaces and abstract classes and their methods,
     /// navigation lenses for methods that override or implement an
-    /// ancestor declaration, and in a Doctrine project the lenses that link
-    /// an entity and its repository.
+    /// ancestor declaration, in a Doctrine project the lenses that link an
+    /// entity and its repository, and in a Symfony project the ones that
+    /// link a Messenger message and its handlers.
     pub fn handle_code_lens(&self, uri: &str, content: &str) -> Option<Vec<CodeLens>> {
         let classes = {
             let map = self.symbols.uri_classes_index.read();
@@ -87,6 +88,7 @@ impl Backend {
         let mut lenses = Vec::new();
         let class_loader = |name: Fqn<'_>| self.find_or_load_class(&name);
         let is_doctrine = self.is_doctrine_project();
+        let is_symfony = self.is_symfony_project();
 
         for class in &classes {
             let class_fqn = class.fqn();
@@ -120,6 +122,10 @@ impl Backend {
 
             if is_doctrine && class.kind == ClassLikeKind::Class {
                 self.push_doctrine_lenses(class, &index, &mut lenses);
+            }
+
+            if is_symfony {
+                self.push_messenger_lenses(uri, class, &index, &mut lenses);
             }
 
             for method in &class.methods {
@@ -665,6 +671,69 @@ impl Backend {
                 )),
                 data: None,
             });
+        }
+    }
+
+    /// The lenses linking a Messenger message to the handlers that receive
+    /// it, on the class declaration line, and a handler method to the
+    /// message it handles, on the method's.
+    fn push_messenger_lenses(
+        &self,
+        uri: &str,
+        class: &ClassInfo,
+        index: &LineIndex,
+        lenses: &mut Vec<CodeLens>,
+    ) {
+        if class.keyword_offset == 0 {
+            return;
+        }
+        let mut push = |offset: u32, title: String, location: Location| {
+            let line = index.line_of(offset as usize);
+            let position = Position {
+                line: line as u32,
+                character: line_indent(index, line),
+            };
+            lenses.push(CodeLens {
+                range: Range {
+                    start: position,
+                    end: position,
+                },
+                command: Some(self.build_code_lens_command(
+                    title,
+                    location.uri,
+                    location.range.start,
+                )),
+                data: None,
+            });
+        };
+
+        for (message, method) in self.symfony_handled_messages(uri, class.fqn()) {
+            let Some(location) = self.class_declaration_location(&message) else {
+                continue;
+            };
+            let offset = class
+                .methods
+                .iter()
+                .find(|candidate| candidate.name.eq_ignore_ascii_case(&method))
+                .map_or(class.keyword_offset, |method| method.name_offset);
+            let title = format!("Messenger message: {}", crate::util::short_name(&message));
+            push(offset, title, location);
+        }
+
+        if class.kind == ClassLikeKind::Interface || class.kind == ClassLikeKind::Class {
+            for handler in self.symfony_message_handlers(class) {
+                let Some(location) = self
+                    .class_member_declaration_location(&handler.handler, &handler.method, false)
+                    .or_else(|| self.class_declaration_location(&handler.handler))
+                else {
+                    continue;
+                };
+                let title = format!(
+                    "Messenger handler: {}",
+                    crate::util::short_name(&handler.handler)
+                );
+                push(class.keyword_offset, title, location);
+            }
         }
     }
 
