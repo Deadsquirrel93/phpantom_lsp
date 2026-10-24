@@ -513,6 +513,8 @@ roots), `tests/fixture_runner.rs`, and the extensions' `tests/Type/` and
 
 **Impact: Medium · Complexity: Medium-High**
 
+Blocks full Symfony support: the README keeps Symfony marked as partial until this lands.
+
 ```php
 $mailer = $container->get('app.mailer');      // mixed, should be App\Service\Mailer
 $sender = $this->getParameter('app.sender');  // mixed, should be string

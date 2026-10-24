@@ -508,6 +508,8 @@ for a project with dozens of bundles.
 
 **Impact: Medium · Complexity: Medium**
 
+Blocks full Symfony support: the README keeps Symfony marked as partial until this lands.
+
 ```php
 #[Route('/post/{slug}', name: 'blog_post')]
 public function show(string $slug): Response { … }
@@ -566,6 +568,8 @@ missed:
 ## F29. Report Symfony translation keys nothing declares
 
 **Impact: Medium · Complexity: Medium**
+
+Blocks full Symfony support: the README keeps Symfony marked as partial until this lands.
 
 ```php
 $translator->trans('demo.titel'); // a typo of demo.title
@@ -647,6 +651,8 @@ extra directory `paths:` adds without a namespace is, so reading
 ## F32. Report unknown Symfony names in Twig templates
 
 **Impact: Medium · Complexity: Medium**
+
+Blocks full Twig support: the README keeps Twig marked as partial until this lands.
 
 ```twig
 {% include 'partials/crad.html.twig' %}
@@ -781,6 +787,8 @@ kinds already go through one collector, so one change serves both.
 
 **Impact: Medium · Complexity: Medium**
 
+Blocks full Twig support: the README keeps Twig marked as partial until this lands.
+
 ```twig
 {% extends 'base.html.twig' %}
 {% block body %}…{% endblock %}
@@ -803,6 +811,8 @@ block, and complete the block names a child can override.
 ## F37. Twig template variables
 
 **Impact: Medium · Complexity: Medium-High**
+
+Blocks full Twig support: the README keeps Twig marked as partial until this lands.
 
 ```php
 return $this->render('post/show.html.twig', ['post' => $post]);
@@ -1160,6 +1170,8 @@ them.
 
 **Impact: Medium · Complexity: Medium**
 
+Blocks full Twig support: the README keeps Twig marked as partial until this lands.
+
 A project's Twig extensions declare filters and functions with `new
 TwigFilter('price', …)` and `new TwigFunction('icon', …)` in
 `getFilters()` and `getFunctions()`, or with `#[AsTwigFilter]` and
@@ -1276,3 +1288,66 @@ nothing for a project until someone writes its rules.
 
 **Where to look:** `src/symbol_map/extraction/symfony.rs`, and Symfony's
 `ExpressionLanguage` component (`Lexer`, `Parser`) for the grammar.
+
+---
+
+## F56. Live components
+
+**Impact: Low-Medium · Complexity: Medium-High**
+
+```php
+#[AsLiveComponent]
+final class SearchBox
+{
+    use DefaultActionTrait;
+
+    #[LiveProp(writable: true)]
+    public string $query = '';
+
+    #[LiveAction]
+    public function clear(): void { … }
+}
+```
+
+```twig
+<input data-model="query">
+<button data-action="live#action" data-live-action-param="clear">Clear</button>
+```
+
+With `symfony/ux-live-component`, a component's template names its class's
+`#[LiveProp]` properties in `data-model` (and `data-model="on(change)|query"`),
+and its `#[LiveAction]` methods in `data-live-action-param`. None of these
+complete, navigate, or show up in the property's or method's references and
+renames, and a name the class does not declare is not reported. Only a
+writable prop can be bound by `data-model`, and only a `#[LiveAction]`
+method can be called, so completion should offer just those. The template
+also sees the component's public properties and methods as `this.…` and
+bare variables, which F37's template variables would type. Builds on F38's
+link between a component class and its template.
+
+**Where to look:** `src/symfony/templates.rs`, `src/blade/component_tags/`
+(the Livewire `wire:model` handling is the closest counterpart).
+
+---
+
+## F57. "Add translation" quick fix for an undeclared Symfony key
+
+**Impact: Medium · Complexity: Medium** (depends on F29)
+
+```php
+$translator->trans('checkout.confirm'); // not in any catalogue
+```
+
+Laravel offers to add a missing translation to each locale's language file
+(`insert_translation_key.rs`). Symfony keys get no such fix. Once F29
+reports an undeclared key, offer one action per catalogue of the key's
+domain (`messages.en.yaml`, `messages.da.xlf`, …) that inserts the key with
+an empty or source-text value: nested under its dotted parents in YAML,
+or flat when the file already spells its keys flat, and as a new
+`<trans-unit>` (XLIFF 1.2) or `<unit>` (XLIFF 2) with a fresh id in XLIFF.
+When the domain has no catalogue yet, offer to create
+`translations/<domain>.<default_locale>.yaml`.
+
+**Where to look:** `src/code_actions/insert_translation_key.rs`,
+`src/symfony/translations.rs` (`catalogue_spans`, `scan_yaml`,
+`scan_xliff`).

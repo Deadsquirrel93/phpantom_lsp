@@ -41,6 +41,12 @@ contributor even though it's short.
 | D24  | [A `match` that does not cover every enum case is not reported](todo/diagnostics.md#d24-a-match-that-does-not-cover-every-enum-case-is-not-reported) | Medium | Medium |
 | P84 | [Class lookups re-apply the Laravel patches on every call](todo/performance.md#p84-class-lookups-re-apply-the-laravel-patches-on-every-call) | Medium-High | Medium |
 | F33 | [Twig templates outside Symfony](todo/lsp-features.md#f33-twig-templates-outside-symfony) | Medium-High | Medium-High |
+| F27 | [Symfony route parameters](todo/lsp-features.md#f27-symfony-route-parameters) (blocks full Symfony support) | Medium      | Medium      |
+| F29 | [Report Symfony translation keys nothing declares](todo/lsp-features.md#f29-report-symfony-translation-keys-nothing-declares) (blocks full Symfony support) | Medium      | Medium      |
+| F32 | [Report unknown Symfony names in Twig templates](todo/lsp-features.md#f32-report-unknown-symfony-names-in-twig-templates) (blocks full Twig support) | Medium      | Medium      |
+| F36 | [Twig block navigation](todo/lsp-features.md#f36-twig-block-navigation) (blocks full Twig support) | Medium      | Medium      |
+| F50 | [Twig filters and functions](todo/lsp-features.md#f50-twig-filters-and-functions) (blocks full Twig support) | Medium      | Medium      |
+| F37 | [Twig template variables](todo/lsp-features.md#f37-twig-template-variables) (blocks full Twig support) | Medium      | Medium-High |
 | P85 | [One keystroke parses the open file three times](todo/performance.md#p85-one-keystroke-parses-the-open-file-three-times) | Medium | Medium-High |
 | D26  | [Reading a typed property that nothing initialises is not reported](todo/diagnostics.md#d26-reading-a-typed-property-that-nothing-initialises-is-not-reported) | Low-Medium | Medium-High |
 | L1  | [Facade completion](todo/laravel.md#l1-facade-completion-upstream-method-generator-improvement) (upstream `facade-documenter` PRs)                              | High        | High        |
@@ -49,6 +55,20 @@ contributor even though it's short.
 | F21 | [Static `typeHierarchyProvider` advertisement](todo/lsp-features.md#f21-static-typehierarchyprovider-advertisement-depends-on-f20) (depends on F20; also needs an upstream `lsp-types` fix) | Low-Medium  | Low |
 | BL1  | [Blade-aware code actions](todo/blade.md#bl1-blade-aware-code-actions)                                                      | Medium     | Medium-High |
 |     | **Release 1.0.0 + IDE extensions**                                                                                                                              |             |             |
+
+## Sprint 9 — Symfony & Twig
+
+| #   | Item                                                                                                                                                            | Impact      | Complexity  |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
+| F35 | [Suggest a close name for an unknown template or view](todo/lsp-features.md#f35-suggest-a-close-name-for-an-unknown-template-or-view) | Low-Medium  | Low         |
+| F57 | ["Add translation" quick fix for an undeclared Symfony key](todo/lsp-features.md#f57-add-translation-quick-fix-for-an-undeclared-symfony-key) (depends on F29) | Medium      | Medium      |
+| F31 | [Symfony Twig templates outside `templates/`](todo/lsp-features.md#f31-symfony-twig-templates-outside-templates) | Low-Medium  | Medium      |
+| F30 | [Symfony translations outside YAML, XLIFF, and the `trans` filter](todo/lsp-features.md#f30-symfony-translations-outside-yaml-xliff-and-the-trans-filter) | Low-Medium  | Medium      |
+| F28 | [Symfony route names a loader composes](todo/lsp-features.md#f28-symfony-route-names-a-loader-composes) | Low-Medium  | Medium      |
+| F34 | [Template names a PHP wrapper builds](todo/lsp-features.md#f34-template-names-a-php-wrapper-builds) (depends on F33) | Medium      | Medium-High |
+| F38 | [Twig components](todo/lsp-features.md#f38-twig-components) | Low-Medium  | Medium-High |
+| F56 | [Live components](todo/lsp-features.md#f56-live-components) (depends on F38) | Low-Medium  | Medium-High |
+| F44 | [Doctrine DQL and query builder strings](todo/lsp-features.md#f44-doctrine-dql-and-query-builder-strings) | Medium      | High        |
 
 # Backlog
 
@@ -74,7 +94,7 @@ unlikely to move the needle for most users.
 | T49 | [A closure passed to a constructor gets no parameter types from it](todo/type-inference.md#t49-a-closure-passed-to-a-constructor-gets-no-parameter-types-from-it) | Medium      | Medium      |
 | T50 | [Port the PHPStan Symfony and Doctrine extensions' type fixtures](todo/type-inference.md#t50-port-the-phpstan-symfony-and-doctrine-extensions-type-fixtures) | Medium      | Medium      |
 | T34 | [`static::CONST` over-narrows to the declaring class's value](todo/type-inference.md#t34-staticconst-over-narrows-to-the-declaring-classs-value)                            | Medium      | Medium-High |
-| T51 | [Symfony return types the service container decides](todo/type-inference.md#t51-symfony-return-types-the-service-container-decides) (depends on T50) | Medium      | Medium-High |
+| T51 | [Symfony return types the service container decides](todo/type-inference.md#t51-symfony-return-types-the-service-container-decides) (depends on T50; blocks full Symfony support) | Medium      | Medium-High |
 | T29 | [Definite vs possible variable existence tracking](todo/type-inference.md#t29-definite-vs-possible-variable-existence-tracking)                                             | Medium      | High        |
 | T46 | [Template arguments are not inferred from how the object is used later](todo/type-inference.md#t46-template-arguments-are-not-inferred-from-how-the-object-is-used-later) | Medium      | High        |
 | T47 | [A closure assigned to a variable gets no parameter types from where it is used](todo/type-inference.md#t47-a-closure-assigned-to-a-variable-gets-no-parameter-types-from-where-it-is-used) | Medium      | High        |
@@ -133,34 +153,21 @@ unlikely to move the needle for most users.
 | F17 | [Wire class move to `workspace/willRenameFiles`](todo/lsp-features.md#f17-wire-class-move-to-workspacewillrenamefiles)                                                       | Medium      | Medium      |
 | F24 | [Doctrine lenses miss attribute mappings and generic repositories](todo/lsp-features.md#f24-doctrine-lenses-miss-attribute-mappings-and-generic-repositories) | Medium      | Medium      |
 | F25 | [Names a PHP configurator spells as strings](todo/lsp-features.md#f25-names-a-php-configurator-spells-as-strings) | Medium      | Medium      |
-| F27 | [Symfony route parameters](todo/lsp-features.md#f27-symfony-route-parameters) | Medium      | Medium      |
-| F29 | [Report Symfony translation keys nothing declares](todo/lsp-features.md#f29-report-symfony-translation-keys-nothing-declares) | Medium      | Medium      |
-| F32 | [Report unknown Symfony names in Twig templates](todo/lsp-features.md#f32-report-unknown-symfony-names-in-twig-templates) | Medium      | Medium      |
-| F36 | [Twig block navigation](todo/lsp-features.md#f36-twig-block-navigation) | Medium      | Medium      |
 | F45 | [Symfony events named by their class or a constant](todo/lsp-features.md#f45-symfony-events-named-by-their-class-or-a-constant) | Medium      | Medium      |
-| F50 | [Twig filters and functions](todo/lsp-features.md#f50-twig-filters-and-functions) | Medium      | Medium      |
 | F42 | [Symfony console arguments and options](todo/lsp-features.md#f42-symfony-console-arguments-and-options) | Medium      | Medium      |
-| F34 | [Template names a PHP wrapper builds](todo/lsp-features.md#f34-template-names-a-php-wrapper-builds) (depends on F33) | Medium      | Medium-High |
-| F37 | [Twig template variables](todo/lsp-features.md#f37-twig-template-variables) | Medium      | Medium-High |
 | F39 | [Report unknown Symfony configuration keys](todo/lsp-features.md#f39-report-unknown-symfony-configuration-keys) | Medium      | Medium-High |
 | F43 | [Doctrine entity fields in repository calls](todo/lsp-features.md#f43-doctrine-entity-fields-in-repository-calls) (depends on T45) | Medium      | Medium-High |
-| F44 | [Doctrine DQL and query builder strings](todo/lsp-features.md#f44-doctrine-dql-and-query-builder-strings) | Medium      | High        |
 | F7  | [Evaluatable expression support (DAP integration)](todo/lsp-features.md#f7-evaluatable-expression-support-dap-integration)                                                  | Low-Medium  | Low         |
 | F15 | [Go-to-declaration](todo/lsp-features.md#f15-go-to-declaration)                                                                                                              | Low-Medium  | Low         |
 | F14 | [Helix upstream PR](todo/lsp-features.md#f14-helix-upstream-pr)                                                                                                             | Low-Medium  | Low         |
-| F35 | [Suggest a close name for an unknown template or view](todo/lsp-features.md#f35-suggest-a-close-name-for-an-unknown-template-or-view) | Low-Medium  | Low         |
 | F46 | [Symfony listener methods a tag or a default names](todo/lsp-features.md#f46-symfony-listener-methods-a-tag-or-a-default-names) | Low-Medium  | Low-Medium  |
 | F26 | [Symfony service IDs a bundle or a definition API declares](todo/lsp-features.md#f26-symfony-service-ids-a-bundle-or-a-definition-api-declares) | Low-Medium  | Medium      |
-| F28 | [Symfony route names a loader composes](todo/lsp-features.md#f28-symfony-route-names-a-loader-composes) | Low-Medium  | Medium      |
-| F30 | [Symfony translations outside YAML, XLIFF, and the `trans` filter](todo/lsp-features.md#f30-symfony-translations-outside-yaml-xliff-and-the-trans-filter) | Low-Medium  | Medium      |
-| F31 | [Symfony Twig templates outside `templates/`](todo/lsp-features.md#f31-symfony-twig-templates-outside-templates) | Low-Medium  | Medium      |
 | F40 | [Symfony configuration schemas the `TreeBuilder` walk misses](todo/lsp-features.md#f40-symfony-configuration-schemas-the-treebuilder-walk-misses) | Low-Medium  | Medium      |
 | F41 | [Symfony forms and validation beyond a form type's own data class](todo/lsp-features.md#f41-symfony-forms-and-validation-beyond-a-form-types-own-data-class) | Low-Medium  | Medium      |
 | F47 | [Symfony Messenger transports](todo/lsp-features.md#f47-symfony-messenger-transports) | Low-Medium  | Medium      |
 | F49 | [Symfony security names](todo/lsp-features.md#f49-symfony-security-names) | Low-Medium  | Medium      |
 | F54 | [Symfony form options, constraint options, and serializer groups](todo/lsp-features.md#f54-symfony-form-options-constraint-options-and-serializer-groups) | Low-Medium  | Medium      |
 | F22 | [Merge a namespace onto one that shares a class name](todo/lsp-features.md#f22-merge-a-namespace-onto-one-that-shares-a-class-name)                                        | Low-Medium  | Medium-High |
-| F38 | [Twig components](todo/lsp-features.md#f38-twig-components) | Low-Medium  | Medium-High |
 | F23 | [Rename a class through its XML entity-escaped occurrences](todo/lsp-features.md#f23-rename-a-class-through-its-xml-entity-escaped-occurrences) | Low         | Medium      |
 | F51 | [Class names in Twig's `constant()` and `enum()`](todo/lsp-features.md#f51-class-names-in-twigs-constant-and-enum) | Low         | Low-Medium  |
 | F52 | [Asset paths in Twig](todo/lsp-features.md#f52-asset-paths-in-twig) | Low         | Low-Medium  |
