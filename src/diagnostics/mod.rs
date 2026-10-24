@@ -289,7 +289,7 @@ pub(crate) mod unused_variables;
 pub(crate) mod use_statements;
 pub(crate) mod workspace;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 
@@ -529,8 +529,8 @@ mod tests {
 
         let diag = |line: u32| Diagnostic {
             range: Range::new(Position::new(line, 0), Position::new(line, 5)),
-            severity: Some(DiagnosticSeverity::ERROR),
-            message: "boom".to_string(),
+            severity: Some(DiagnosticSeverity::Error),
+            message: "boom".to_string().into(),
             ..Default::default()
         };
         let result_id = || backend.diag.result_ids.lock().get(uri).copied();
@@ -601,8 +601,8 @@ mod tests {
             uri.to_string(),
             vec![Diagnostic {
                 range: Range::new(Position::new(0, 0), Position::new(0, 1)),
-                severity: Some(DiagnosticSeverity::ERROR),
-                message: "boom".to_string(),
+                severity: Some(DiagnosticSeverity::Error),
+                message: "boom".to_string().into(),
                 ..Default::default()
             }],
         );
@@ -624,8 +624,8 @@ mod tests {
                 uri.to_string(),
                 vec![Diagnostic {
                     range: Range::new(Position::new(0, 0), Position::new(0, 1)),
-                    severity: Some(DiagnosticSeverity::ERROR),
-                    message: "boom again".to_string(),
+                    severity: Some(DiagnosticSeverity::Error),
+                    message: "boom again".to_string().into(),
                     ..Default::default()
                 }],
             );

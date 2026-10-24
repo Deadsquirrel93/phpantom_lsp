@@ -9,7 +9,7 @@
 
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use super::helpers;
 use crate::Backend;
@@ -587,7 +587,7 @@ impl Backend {
                 let label = if *is_option { "option" } else { "argument" };
                 out.push(helpers::make_diagnostic(
                     range,
-                    DiagnosticSeverity::WARNING,
+                    DiagnosticSeverity::Warning,
                     "invalid_command_parameter",
                     format!("Unknown command {}: '{}'", label, name),
                 ));
@@ -674,7 +674,7 @@ impl Backend {
                 {
                     out.push(helpers::make_diagnostic(
                         range,
-                        DiagnosticSeverity::WARNING,
+                        DiagnosticSeverity::Warning,
                         "invalid_laravel_ability",
                         message,
                     ));
@@ -686,7 +686,7 @@ impl Backend {
             {
                 out.push(helpers::make_diagnostic(
                     range,
-                    DiagnosticSeverity::WARNING,
+                    DiagnosticSeverity::Warning,
                     code,
                     format!("Unknown {}: '{}'", label, key),
                 ));

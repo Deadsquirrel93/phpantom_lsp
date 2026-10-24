@@ -23,7 +23,7 @@ use std::collections::HashMap;
 use std::ops::Range as Lines;
 
 use similar::{Algorithm, DiffOp, capture_diff_slices};
-use tower_lsp::lsp_types::{Position, Range, TextEdit};
+use tower_lsp_server::gen_lsp_types::{Position, Range, TextEdit};
 
 /// The `TextEdit`s that turn `original` into `formatted` within `range`.
 ///

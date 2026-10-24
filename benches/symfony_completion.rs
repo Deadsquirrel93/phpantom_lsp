@@ -3,8 +3,8 @@ use phpantom_lsp::Backend;
 use std::fmt::Write as _;
 use std::fs;
 use std::hint::black_box;
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 /// Controllers in the generated application, each declaring `ACTIONS`
 /// routes and rendering one template per route.
@@ -179,8 +179,8 @@ async fn setup_symfony_backend() -> (Backend, tempfile::TempDir) {
         backend
             .did_open(DidOpenTextDocumentParams {
                 text_document: TextDocumentItem {
-                    uri: Url::from_file_path(dir.path().join(path)).unwrap(),
-                    language_id: language_id(path).to_string(),
+                    uri: Uri::from_file_path(dir.path().join(path)).unwrap(),
+                    language_id: language_id(path).to_string().into(),
                     version: 1,
                     text: content.clone(),
                 },
@@ -192,20 +192,20 @@ async fn setup_symfony_backend() -> (Backend, tempfile::TempDir) {
 
 /// Completion params with the cursor just before the closing quote of
 /// `needle`'s first occurrence in `content`.
-fn params_at(uri: &Url, content: &str, needle: &str) -> CompletionParams {
+fn params_at(uri: &Uri, content: &str, needle: &str) -> CompletionParams {
     let offset = content.find(needle).expect("needle should exist") + needle.len() - 1;
     let before = &content[..offset];
     let line = before.matches('\n').count() as u32;
     let character = before.rsplit('\n').next().unwrap().len() as u32;
     CompletionParams {
-        text_document_position: TextDocumentPositionParams {
+        text_document_position_params: TextDocumentPositionParams {
             text_document: TextDocumentIdentifier { uri: uri.clone() },
             position: Position { line, character },
         },
         work_done_progress_params: WorkDoneProgressParams::default(),
         partial_result_params: PartialResultParams::default(),
         context: Some(CompletionContext {
-            trigger_kind: CompletionTriggerKind::INVOKED,
+            trigger_kind: CompletionTriggerKind::Invoked,
             trigger_character: None,
         }),
     }
@@ -213,8 +213,8 @@ fn params_at(uri: &Url, content: &str, needle: &str) -> CompletionParams {
 
 fn labels(response: Option<CompletionResponse>) -> Vec<String> {
     let items = match response {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => Vec::new(),
     };
     items.into_iter().map(|item| item.label).collect()
@@ -224,8 +224,8 @@ fn bench_symfony_name_completion(c: &mut Criterion) {
     let runtime = rt();
     let (backend, dir) = runtime.block_on(setup_symfony_backend());
     let php_uri =
-        Url::from_file_path(dir.path().join("src/Controller/ConsumerController.php")).unwrap();
-    let twig_uri = Url::from_file_path(dir.path().join("templates/consumer.html.twig")).unwrap();
+        Uri::from_file_path(dir.path().join("src/Controller/ConsumerController.php")).unwrap();
+    let twig_uri = Uri::from_file_path(dir.path().join("templates/consumer.html.twig")).unwrap();
 
     // (benchmark, document, its text, the literal to complete inside, a
     // name the completion must offer)

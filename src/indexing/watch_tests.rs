@@ -9,8 +9,8 @@ fn non_laravel_projects_ignore_schema_watch_changes() {
 
     let params = DidChangeWatchedFilesParams {
         changes: vec![FileEvent {
-            uri: Url::from_file_path(&schema).unwrap(),
-            typ: FileChangeType::CREATED,
+            uri: Uri::from_file_path(&schema).unwrap(),
+            kind: FileChangeType::Created,
         }],
     };
 
@@ -53,8 +53,8 @@ fn seed_resolved_class(backend: &Backend) {
 fn created_event(path: &std::path::Path) -> DidChangeWatchedFilesParams {
     DidChangeWatchedFilesParams {
         changes: vec![FileEvent {
-            uri: Url::from_file_path(path).unwrap(),
-            typ: FileChangeType::CREATED,
+            uri: Uri::from_file_path(path).unwrap(),
+            kind: FileChangeType::Created,
         }],
     }
 }
@@ -66,7 +66,7 @@ fn created_event(path: &std::path::Path) -> DidChangeWatchedFilesParams {
 fn deleting_a_template_drops_its_lowered_php_and_source_map() {
     let dir = tempfile::tempdir().unwrap();
     let template = dir.path().join("resources/views/welcome.blade.php");
-    let url = Url::from_file_path(&template).unwrap();
+    let url = Uri::from_file_path(&template).unwrap();
     let uri = url.to_string();
 
     let backend = Backend::new_test();
@@ -77,7 +77,7 @@ fn deleting_a_template_drops_its_lowered_php_and_source_map() {
     let params = DidChangeWatchedFilesParams {
         changes: vec![FileEvent {
             uri: url,
-            typ: FileChangeType::DELETED,
+            kind: FileChangeType::Deleted,
         }],
     };
     backend.apply_watched_file_changes(&params, dir.path());
@@ -93,7 +93,7 @@ fn deleting_a_template_drops_its_lowered_php_and_source_map() {
 fn deleting_a_provider_drops_its_gate_and_macro_registrations() {
     let dir = tempfile::tempdir().unwrap();
     let provider = dir.path().join("app/Providers/AuthServiceProvider.php");
-    let url = Url::from_file_path(&provider).unwrap();
+    let url = Uri::from_file_path(&provider).unwrap();
     let uri = url.to_string();
 
     let backend = Backend::new_test();
@@ -128,7 +128,7 @@ fn deleting_a_provider_drops_its_gate_and_macro_registrations() {
     let params = DidChangeWatchedFilesParams {
         changes: vec![FileEvent {
             uri: url,
-            typ: FileChangeType::DELETED,
+            kind: FileChangeType::Deleted,
         }],
     };
     backend.apply_watched_file_changes(&params, dir.path());
@@ -289,7 +289,7 @@ fn deleting_one_of_two_declaring_files_keeps_the_class() {
     backend.reindex_files_batch(&[(
         "file:///a_rich.php".to_string(),
         PathBuf::from("/a_rich.php"),
-        FileChangeType::DELETED,
+        FileChangeType::Deleted,
     )]);
 
     assert_eq!(
@@ -332,12 +332,12 @@ fn deleting_the_last_declaring_file_drops_the_class() {
         (
             "file:///a_rich.php".to_string(),
             PathBuf::from("/a_rich.php"),
-            FileChangeType::DELETED,
+            FileChangeType::Deleted,
         ),
         (
             "file:///b_bare.php".to_string(),
             PathBuf::from("/b_bare.php"),
-            FileChangeType::DELETED,
+            FileChangeType::Deleted,
         ),
     ]);
 
@@ -380,8 +380,8 @@ fn non_laravel_project_reloads_its_own_config_on_change() {
 
     let params = DidChangeWatchedFilesParams {
         changes: vec![FileEvent {
-            uri: Url::from_file_path(&config_path).unwrap(),
-            typ: FileChangeType::CHANGED,
+            uri: Uri::from_file_path(&config_path).unwrap(),
+            kind: FileChangeType::Changed,
         }],
     };
     assert!(backend.apply_watched_file_changes(&params, dir.path()));
@@ -757,8 +757,8 @@ fn a_real_path_event_is_respelled_through_the_link() {
     let params = DidChangeWatchedFilesParams {
         changes: vec![FileEvent {
             // Resolve system temp-directory symlinks as well as the watched link.
-            uri: Url::from_file_path(real.join("src/Help.php").canonicalize().unwrap()).unwrap(),
-            typ: FileChangeType::CREATED,
+            uri: Uri::from_file_path(real.join("src/Help.php").canonicalize().unwrap()).unwrap(),
+            kind: FileChangeType::Created,
         }],
     };
     backend.apply_watched_file_changes(&params, &root);

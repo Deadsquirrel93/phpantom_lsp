@@ -28,7 +28,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use tower_lsp::lsp_types::Location;
+use tower_lsp_server::gen_lsp_types::Location;
 
 use crate::Backend;
 use crate::atom::Atom;

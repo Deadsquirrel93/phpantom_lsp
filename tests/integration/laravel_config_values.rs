@@ -13,7 +13,7 @@ use crate::common::{
     LARAVEL_APP_COMPOSER, complete_labels_at_opened, create_initialized_psr4_workspace,
     definitions_at, hover_on, messages_with_code, position_after, position_of,
 };
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 /// An application with a package installed under `vendor/acme/widgets`.
 const PACKAGE_COMPOSER: &str = r#"{
@@ -72,7 +72,7 @@ fn demo(body: &str) -> String {
 }
 
 /// The `invalid_laravel_config` messages the slow pass reports on `uri`.
-fn config_diagnostics(backend: &phpantom_lsp::Backend, uri: &Url, content: &str) -> Vec<String> {
+fn config_diagnostics(backend: &phpantom_lsp::Backend, uri: &Uri, content: &str) -> Vec<String> {
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(uri.as_str(), content, &mut diags);
     messages_with_code(&diags, "invalid_laravel_config")

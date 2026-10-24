@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 
@@ -222,14 +222,14 @@ impl Backend {
                     // scan itself put in the plan, so it needs no
                     // discovery check -- and the file is gone from disk
                     // by now, so a walk could not find it anyway.
-                    if change.typ == FileChangeType::DELETED
+                    if change.kind == FileChangeType::Deleted
                         || migration_discovery.is_discoverable(
                             root,
                             &laravel_config.migrations,
                             &file_path,
                         )
                     {
-                        batch.migration_changes.push((file_path, change.typ));
+                        batch.migration_changes.push((file_path, change.kind));
                     }
                 } else {
                     batch.schema_full_rebuild = true;
@@ -263,7 +263,7 @@ impl Backend {
                 if filters.is_excluded_path(&file_path, false) {
                     continue;
                 }
-                if change.typ == FileChangeType::CHANGED && !is_twig_candidate {
+                if change.kind == FileChangeType::Changed && !is_twig_candidate {
                     let canonical_uri = crate::util::path_to_uri(&file_path);
                     if self.symbol_map_for(&uri_str).is_none()
                         && self.symbol_map_for(&canonical_uri).is_none()
@@ -273,7 +273,7 @@ impl Backend {
                 }
                 batch
                     .resource_changes
-                    .push((uri_str, file_path, change.typ));
+                    .push((uri_str, file_path, change.kind));
                 continue;
             }
             let is_php = std::path::Path::new(path_str)
@@ -298,7 +298,7 @@ impl Backend {
                 continue;
             }
 
-            if change.typ == FileChangeType::CHANGED {
+            if change.kind == FileChangeType::Changed {
                 // `parsed_uris` records the editor URI for open files and
                 // the canonical `file://` URI for lazily loaded ones;
                 // check both spellings.
@@ -311,7 +311,7 @@ impl Backend {
                 }
             }
 
-            batch.php_changes.push((uri_str, file_path, change.typ));
+            batch.php_changes.push((uri_str, file_path, change.kind));
         }
         batch
     }
@@ -365,7 +365,7 @@ impl Backend {
             resource_changes.len()
         );
         for (uri, path, change_type) in resource_changes {
-            if *change_type == FileChangeType::DELETED {
+            if *change_type == FileChangeType::Deleted {
                 self.clear_file_maps(uri);
                 self.forget_twig_source(uri);
             } else if let Ok(content) = std::fs::read_to_string(path) {
@@ -397,7 +397,7 @@ impl Backend {
             Ok(cfg) => self.set_config(cfg),
             Err(e) => {
                 self.log_detached(
-                    MessageType::WARNING,
+                    MessageType::Warning,
                     format!("Failed to reload .phpantom.toml: {}", e),
                 );
                 return;
@@ -519,7 +519,7 @@ impl Backend {
         let mut watchers: Vec<FileSystemWatcher> = patterns
             .iter()
             .map(|(pattern, kind)| FileSystemWatcher {
-                glob_pattern: GlobPattern::String(pattern.clone()),
+                glob_pattern: GlobPattern::Pattern(pattern.clone()),
                 kind: Some(*kind),
             })
             .collect();
@@ -535,8 +535,8 @@ impl Backend {
                 continue;
             };
             watchers.extend(patterns.iter().map(|(pattern, kind)| FileSystemWatcher {
-                glob_pattern: GlobPattern::Relative(RelativePattern {
-                    base_uri: OneOf::Right(base.clone()),
+                glob_pattern: GlobPattern::RelativePattern(RelativePattern {
+                    base_uri: BaseUri::Uri(base.clone()),
                     pattern: pattern.clone(),
                 }),
                 kind: Some(*kind),
@@ -651,7 +651,7 @@ impl Backend {
     /// The global config lives outside every workspace, so it can never
     /// match a client-side `**/…` file watcher glob (workspace-relative by
     /// definition) and dynamic registration with an absolute
-    /// [`RelativePattern`](tower_lsp::lsp_types::RelativePattern) base is
+    /// [`RelativePattern`](tower_lsp_server::gen_lsp_types::RelativePattern) base is
     /// unevenly supported across editors. Polling one file's mtime is a
     /// single `stat` call, cheap enough to just always do ourselves rather
     /// than depend on client capabilities.

@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use parking_lot::RwLock;
-use tower_lsp::lsp_types::Range;
+use tower_lsp_server::gen_lsp_types::Range;
 
 use crate::Backend;
 use crate::atom::{Atom, AtomMap, AtomSet, atom};

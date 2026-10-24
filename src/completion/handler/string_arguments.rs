@@ -5,7 +5,7 @@
 //! column names, the strings a parameter's declared type asks for, and
 //! method names in route-controller groups and array callables.
 
-use tower_lsp::lsp_types::CompletionResponse;
+use tower_lsp_server::gen_lsp_types::CompletionResponse;
 
 use crate::Backend;
 use crate::completion::comment_position::StringContext;

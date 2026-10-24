@@ -1,13 +1,14 @@
 //! Twig template names, from the templates a Symfony project holds to the
 //! controllers, emails, and other templates that name them.
+use crate::common::message_text;
 
 use crate::common::{
     completion_response, create_psr4_workspace, find_action, get_code_actions_in_range,
     offset_position, open_document, response_labels,
 };
 use phpantom_lsp::Backend;
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 const COMPOSER: &str = r#"{
     "require": { "symfony/framework-bundle": "^7.3" },
@@ -89,8 +90,8 @@ async fn workspace(files: &[(&str, &str)]) -> (Backend, tempfile::TempDir) {
     (backend, dir)
 }
 
-fn uri_for(dir: &tempfile::TempDir, rel: &str) -> Url {
-    Url::from_file_path(dir.path().join(rel)).unwrap()
+fn uri_for(dir: &tempfile::TempDir, rel: &str) -> Uri {
+    Uri::from_file_path(dir.path().join(rel)).unwrap()
 }
 
 /// The position `inside` bytes into the first occurrence of `needle`.
@@ -101,9 +102,9 @@ fn position_in(content: &str, needle: &str, inside: usize) -> Position {
     )
 }
 
-async fn definitions(backend: &Backend, uri: &Url, position: Position) -> Vec<(Url, u32)> {
+async fn definitions(backend: &Backend, uri: &Uri, position: Position) -> Vec<(Uri, u32)> {
     let response = backend
-        .goto_definition(GotoDefinitionParams {
+        .goto_definition(DefinitionParams {
             text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: uri.clone() },
                 position,
@@ -115,9 +116,9 @@ async fn definitions(backend: &Backend, uri: &Url, position: Position) -> Vec<(U
         .unwrap();
     let locations = match response {
         None => Vec::new(),
-        Some(GotoDefinitionResponse::Scalar(location)) => vec![location],
-        Some(GotoDefinitionResponse::Array(locations)) => locations,
-        Some(GotoDefinitionResponse::Link(_)) => panic!("unexpected location links"),
+        Some(DefinitionResponse::Definition(Definition::Location(location))) => vec![location],
+        Some(DefinitionResponse::Definition(Definition::LocationList(locations))) => locations,
+        Some(DefinitionResponse::DefinitionLinkList(_)) => panic!("unexpected location links"),
     };
     locations
         .into_iter()
@@ -125,10 +126,10 @@ async fn definitions(backend: &Backend, uri: &Url, position: Position) -> Vec<(U
         .collect()
 }
 
-async fn references(backend: &Backend, uri: &Url, position: Position) -> Vec<(Url, u32)> {
-    let mut found: Vec<(Url, u32)> = backend
+async fn references(backend: &Backend, uri: &Uri, position: Position) -> Vec<(Uri, u32)> {
+    let mut found: Vec<(Uri, u32)> = backend
         .references(ReferenceParams {
-            text_document_position: TextDocumentPositionParams {
+            text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: uri.clone() },
                 position,
             },
@@ -148,7 +149,7 @@ async fn references(backend: &Backend, uri: &Url, position: Position) -> Vec<(Ur
     found
 }
 
-async fn completion_labels(backend: &Backend, uri: &Url, position: Position) -> Vec<String> {
+async fn completion_labels(backend: &Backend, uri: &Uri, position: Position) -> Vec<String> {
     response_labels(
         completion_response(backend, uri, position.line, position.character, None).await,
     )
@@ -330,10 +331,10 @@ async fn only_missing_project_templates_are_reported() {
         .filter(|diagnostic| {
             matches!(
                 &diagnostic.code,
-                Some(NumberOrString::String(code)) if code == "invalid_symfony_template"
+                Some(Code::String(code)) if code == "invalid_symfony_template"
             )
         })
-        .map(|diagnostic| diagnostic.message.clone())
+        .map(|diagnostic| message_text(&diagnostic.message).to_string())
         .collect();
     assert_eq!(
         reported,
@@ -359,7 +360,7 @@ async fn a_missing_template_can_be_created() {
     );
     let action = find_action(&actions, "Create missing template 'missing/page.html.twig'")
         .expect("should offer to create the template");
-    let Some(DocumentChanges::Operations(ops)) = action
+    let Some(ops) = action
         .edit
         .as_ref()
         .and_then(|edit| edit.document_changes.as_ref())
@@ -367,7 +368,7 @@ async fn a_missing_template_can_be_created() {
         panic!("expected resource operations");
     };
     match &ops[0] {
-        DocumentChangeOperation::Op(ResourceOp::Create(create)) => assert_eq!(
+        DocumentChange::CreateFile(create) => assert_eq!(
             create.uri.to_file_path().unwrap(),
             dir.path().join("templates/missing/page.html.twig")
         ),

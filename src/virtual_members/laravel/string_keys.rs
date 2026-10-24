@@ -13,7 +13,7 @@ use super::{
 };
 use super::{route_names, trans_keys, view_names};
 
-use tower_lsp::lsp_types::Location;
+use tower_lsp_server::gen_lsp_types::Location;
 
 /// Unified go-to-definition entry point for all Laravel string-key spans.
 ///
@@ -430,7 +430,7 @@ mod tests {
         assert_eq!(generic.len(), 1);
         assert_eq!(
             generic[0].range.start,
-            tower_lsp::lsp_types::Position::new(0, 0)
+            tower_lsp_server::gen_lsp_types::Position::new(0, 0)
         );
     }
 }

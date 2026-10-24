@@ -194,7 +194,7 @@ fn test_preprocess_with_vars_injects_declarations() {
     assert_eq!(map.prologue_lines, super::super::PROLOGUE_LINES + 4);
 
     // Round trip: blade (0,0) → php and back lands on the same line.
-    let php_pos = map.blade_to_php(tower_lsp::lsp_types::Position {
+    let php_pos = map.blade_to_php(tower_lsp_server::gen_lsp_types::Position {
         line: 0,
         character: 3,
     });
@@ -1965,7 +1965,7 @@ fn test_preprocess_use_directive_function_modifier() {
 /// position in the template would map that many lines off.
 #[test]
 fn test_preprocess_wrapped_use_directive_keeps_positions_aligned() {
-    use tower_lsp::lsp_types::Position;
+    use tower_lsp_server::gen_lsp_types::Position;
 
     let content = "@use('App\\Models\\{\n    Post,\n    Comment,\n}')\n<p>{{ $title }}</p>\n";
     let (php, map) = preprocess(content);

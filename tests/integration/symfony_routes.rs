@@ -1,13 +1,14 @@
 //! Symfony route names, from their declarations in `#[Route]` attributes,
 //! routing YAML and XML, and PHP routing configurators to the PHP and Twig
 //! that generate their URLs.
+use crate::common::message_text;
 
 use crate::common::{
     completion_response, create_psr4_workspace, offset_position, open_document, response_labels,
 };
 use phpantom_lsp::Backend;
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 const COMPOSER: &str = r#"{
     "require": { "symfony/framework-bundle": "^7.3" },
@@ -121,8 +122,8 @@ async fn workspace(files: &[(&str, &str)]) -> (Backend, tempfile::TempDir) {
     (backend, dir)
 }
 
-fn uri_for(dir: &tempfile::TempDir, rel: &str) -> Url {
-    Url::from_file_path(dir.path().join(rel)).unwrap()
+fn uri_for(dir: &tempfile::TempDir, rel: &str) -> Uri {
+    Uri::from_file_path(dir.path().join(rel)).unwrap()
 }
 
 /// The position `inside` bytes into the first occurrence of `needle`.
@@ -133,9 +134,9 @@ fn position_in(content: &str, needle: &str, inside: usize) -> Position {
     )
 }
 
-async fn definitions(backend: &Backend, uri: &Url, position: Position) -> Vec<(Url, u32)> {
+async fn definitions(backend: &Backend, uri: &Uri, position: Position) -> Vec<(Uri, u32)> {
     let response = backend
-        .goto_definition(GotoDefinitionParams {
+        .goto_definition(DefinitionParams {
             text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: uri.clone() },
                 position,
@@ -147,9 +148,9 @@ async fn definitions(backend: &Backend, uri: &Url, position: Position) -> Vec<(U
         .unwrap();
     let locations = match response {
         None => Vec::new(),
-        Some(GotoDefinitionResponse::Scalar(location)) => vec![location],
-        Some(GotoDefinitionResponse::Array(locations)) => locations,
-        Some(GotoDefinitionResponse::Link(_)) => panic!("unexpected location links"),
+        Some(DefinitionResponse::Definition(Definition::Location(location))) => vec![location],
+        Some(DefinitionResponse::Definition(Definition::LocationList(locations))) => locations,
+        Some(DefinitionResponse::DefinitionLinkList(_)) => panic!("unexpected location links"),
     };
     locations
         .into_iter()
@@ -157,10 +158,10 @@ async fn definitions(backend: &Backend, uri: &Url, position: Position) -> Vec<(U
         .collect()
 }
 
-async fn references(backend: &Backend, uri: &Url, position: Position) -> Vec<(Url, u32)> {
-    let mut found: Vec<(Url, u32)> = backend
+async fn references(backend: &Backend, uri: &Uri, position: Position) -> Vec<(Uri, u32)> {
+    let mut found: Vec<(Uri, u32)> = backend
         .references(ReferenceParams {
-            text_document_position: TextDocumentPositionParams {
+            text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: uri.clone() },
                 position,
             },
@@ -180,12 +181,12 @@ async fn references(backend: &Backend, uri: &Url, position: Position) -> Vec<(Ur
     found
 }
 
-fn sorted(mut locations: Vec<(Url, u32)>) -> Vec<(Url, u32)> {
+fn sorted(mut locations: Vec<(Uri, u32)>) -> Vec<(Uri, u32)> {
     locations.sort();
     locations
 }
 
-async fn completion_labels(backend: &Backend, uri: &Url, position: Position) -> Vec<String> {
+async fn completion_labels(backend: &Backend, uri: &Uri, position: Position) -> Vec<String> {
     response_labels(
         completion_response(backend, uri, position.line, position.character, None).await,
     )
@@ -380,10 +381,10 @@ final class CheckController extends AbstractController
         .filter(|diagnostic| {
             matches!(
                 &diagnostic.code,
-                Some(NumberOrString::String(code)) if code == "invalid_symfony_route"
+                Some(Code::String(code)) if code == "invalid_symfony_route"
             )
         })
-        .map(|diagnostic| diagnostic.message.clone())
+        .map(|diagnostic| message_text(&diagnostic.message).to_string())
         .collect();
     // `app_check_check` is the name Symfony gives the unnamed route above.
     assert_eq!(reported, vec!["Unknown route: 'app_missing'".to_string()]);

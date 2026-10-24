@@ -1178,7 +1178,7 @@ fn builtin_strategy_skips_whitespace_sensitive_templates() {
 
 #[test]
 fn lsp_options_choose_the_indent_unit() {
-    use tower_lsp::lsp_types::FormattingOptions;
+    use tower_lsp_server::gen_lsp_types::FormattingOptions;
     let spaces = options_from_lsp(&FormattingOptions {
         tab_size: 2,
         insert_spaces: true,

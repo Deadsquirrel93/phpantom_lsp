@@ -2,7 +2,7 @@
 //! leaves in the caller's variable, including a PHPStan conditional keyed
 //! on what the caller passed.
 
-use tower_lsp::lsp_types::Url;
+use tower_lsp_server::gen_lsp_types::Uri;
 
 use crate::common::{create_test_backend, hover_last, line_char_of, markup_hover_at, open_php};
 
@@ -121,7 +121,7 @@ function f(): void {
     // The body is read back from the open document, so it has to be opened
     // rather than only parsed.
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     open_php(&backend, &uri, content).await;
     let (line, character) = line_char_of(content, "$a;");
     let text = markup_hover_at(&backend, &uri, line, character).await;

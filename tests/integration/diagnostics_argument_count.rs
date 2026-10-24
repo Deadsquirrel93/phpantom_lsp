@@ -1,10 +1,11 @@
 #[cfg(test)]
 mod tests {
     use crate::common::collect_diagnostics_with;
+    use crate::common::message_text;
     use std::collections::HashMap;
 
     use phpantom_lsp::Backend;
-    use tower_lsp::lsp_types::*;
+    use tower_lsp_server::gen_lsp_types::*;
 
     /// Enable the `extra-arguments` diagnostic on the given backend.
     fn enable_extra_args(backend: &Backend) {
@@ -104,16 +105,16 @@ function test(): void {
         let diags = collect_with_stubs(php);
         assert_eq!(diags.len(), 1, "got: {diags:?}");
         assert!(
-            diags[0].message.contains("Expected 1 argument"),
+            message_text(&diags[0].message).contains("Expected 1 argument"),
             "message: {}",
-            diags[0].message,
+            message_text(&diags[0].message),
         );
         assert!(
-            diags[0].message.contains("got 0"),
+            message_text(&diags[0].message).contains("got 0"),
             "message: {}",
-            diags[0].message,
+            message_text(&diags[0].message),
         );
-        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::ERROR));
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Error));
     }
 
     #[test]
@@ -131,7 +132,9 @@ function test(): void {
 "#;
         let diags = collect(php);
         assert!(
-            diags.iter().any(|d| d.message.contains("got 0")),
+            diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("got 0")),
             "Expected too-few-args diagnostic, got: {diags:?}",
         );
     }
@@ -150,9 +153,10 @@ function test(): void {
 "#;
         let diags = collect(php);
         assert!(
-            diags
-                .iter()
-                .any(|d| d.message.contains("Expected 2 arguments") && d.message.contains("got 1")),
+            diags.iter().any(
+                |d| message_text(&d.message).contains("Expected 2 arguments")
+                    && message_text(&d.message).contains("got 1")
+            ),
             "Expected too-few-args diagnostic, got: {diags:?}",
         );
     }
@@ -220,9 +224,9 @@ function test(): void {
         let diags = collect_with_stubs_extra(php);
         assert_eq!(diags.len(), 1, "got: {diags:?}");
         assert!(
-            diags[0].message.contains("got 2"),
+            message_text(&diags[0].message).contains("got 2"),
             "message: {}",
-            diags[0].message,
+            message_text(&diags[0].message),
         );
     }
 
@@ -241,7 +245,9 @@ function test(): void {
 "#;
         let diags = collect_extra(php);
         assert!(
-            diags.iter().any(|d| d.message.contains("got 3")),
+            diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("got 3")),
             "Expected too-many-args diagnostic, got: {diags:?}",
         );
     }
@@ -268,7 +274,7 @@ function test(Query $q): void {
 "#;
         let diags = collect_extra(php);
         assert_eq!(diags.len(), 1, "only `strict` should be flagged: {diags:?}");
-        assert!(diags[0].message.contains("Expected 1 argument"));
+        assert!(message_text(&diags[0].message).contains("Expected 1 argument"));
     }
 
     #[test]
@@ -376,7 +382,7 @@ function test(): void {
         assert!(
             diags
                 .iter()
-                .any(|d| d.message.contains("at least 1 argument")),
+                .any(|d| message_text(&d.message).contains("at least 1 argument")),
             "Expected too-few-args diagnostic for variadic function, got: {diags:?}",
         );
     }
@@ -428,7 +434,8 @@ function test(): void {
         assert!(
             diags
                 .iter()
-                .any(|d| d.message.contains("Expected 2") && d.message.contains("got 1")),
+                .any(|d| message_text(&d.message).contains("Expected 2")
+                    && message_text(&d.message).contains("got 1")),
             "Expected too-few-args diagnostic, got: {diags:?}",
         );
     }
@@ -445,7 +452,8 @@ function test(): void {
         assert!(
             diags
                 .iter()
-                .any(|d| d.message.contains("Expected 1 argument") && d.message.contains("got 2")),
+                .any(|d| message_text(&d.message).contains("Expected 1 argument")
+                    && message_text(&d.message).contains("got 2")),
             "Expected too-many-args diagnostic, got: {diags:?}",
         );
     }
@@ -467,7 +475,8 @@ namespace App {
         assert!(
             diags
                 .iter()
-                .any(|d| d.message.contains("Expected 2") && d.message.contains("got 1")),
+                .any(|d| message_text(&d.message).contains("Expected 2")
+                    && message_text(&d.message).contains("got 1")),
             "Expected too-few-args diagnostic, got: {diags:?}",
         );
     }
@@ -499,9 +508,7 @@ function test(): void {
         assert_eq!(diags.len(), 1, "got: {diags:?}");
         assert_eq!(
             diags[0].code,
-            Some(NumberOrString::String(
-                "argument_count_mismatch".to_string()
-            )),
+            Some(Code::String("argument_count_mismatch".to_string())),
         );
         assert_eq!(diags[0].source, Some("phpantom".to_string()));
     }
@@ -522,7 +529,8 @@ function test(): void {
         assert!(
             diags
                 .iter()
-                .any(|d| d.message.contains("Expected 2") && d.message.contains("got 1")),
+                .any(|d| message_text(&d.message).contains("Expected 2")
+                    && message_text(&d.message).contains("got 1")),
             "Expected too-few-args diagnostic for constructor, got: {diags:?}",
         );
     }
@@ -539,7 +547,9 @@ function test(): void {
 "#;
         let diags = collect_extra(php);
         assert!(
-            diags.iter().any(|d| d.message.contains("got 2")),
+            diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("got 2")),
             "Expected too-many-args diagnostic for constructor, got: {diags:?}",
         );
     }
@@ -579,7 +589,8 @@ function slashed(): void {
         assert_eq!(
             diags
                 .iter()
-                .filter(|d| d.message.contains("Expected 2") && d.message.contains("got 1"))
+                .filter(|d| message_text(&d.message).contains("Expected 2")
+                    && message_text(&d.message).contains("got 1"))
                 .count(),
             2,
             "Expected a too-few-args diagnostic at both sites, got: {diags:?}",
@@ -615,7 +626,9 @@ function test(): void {
 "#;
         let diags = collect(php);
         assert!(
-            diags.iter().any(|d| d.message.contains("at least 2")),
+            diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("at least 2")),
             "Expected 'at least' wording, got: {diags:?}",
         );
     }
@@ -630,7 +643,9 @@ function test(): void {
 "#;
         let diags = collect_extra(php);
         assert!(
-            diags.iter().any(|d| d.message.contains("at most 2")),
+            diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("at most 2")),
             "Expected 'at most' wording, got: {diags:?}",
         );
     }
@@ -669,9 +684,9 @@ function test(): void {
             "Only the too-few diagnostic should fire by default, got: {diags:?}",
         );
         assert!(
-            diags[0].message.contains("got 0"),
+            message_text(&diags[0].message).contains("got 0"),
             "message: {}",
-            diags[0].message,
+            message_text(&diags[0].message),
         );
     }
 
@@ -776,7 +791,9 @@ function test(): void {
 "#;
         let diags = collect_with_stubs(php);
         assert!(
-            diags.iter().any(|d| d.message.contains("got 0")),
+            diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("got 0")),
             "array_keys with 0 args should be flagged, got: {diags:?}",
         );
     }
@@ -969,7 +986,9 @@ class Demo {
 "#;
         let diags = collect(php);
         assert!(
-            diags.iter().any(|d| d.message.contains("got 0")),
+            diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("got 0")),
             "Scope method topping() needs 1 arg after $query stripping, got: {diags:?}",
         );
     }
@@ -989,7 +1008,8 @@ function test(): void {
         let diags = collect(php);
         assert!(
             diags.iter().any(
-                |d| d.message.contains("Missing required argument") && d.message.contains("$a")
+                |d| message_text(&d.message).contains("Missing required argument")
+                    && message_text(&d.message).contains("$a")
             ),
             "Expected missing-required-argument diagnostic for $a, got: {diags:?}",
         );
@@ -1035,11 +1055,11 @@ function test(): void {
 "#;
         let diags = collect(php);
         assert!(
-            diags
-                .iter()
-                .any(|d| d.message.contains("Missing required arguments")
-                    && d.message.contains("$a")
-                    && d.message.contains("$b")),
+            diags.iter().any(
+                |d| message_text(&d.message).contains("Missing required arguments")
+                    && message_text(&d.message).contains("$a")
+                    && message_text(&d.message).contains("$b")
+            ),
             "Expected both $a and $b reported missing, got: {diags:?}",
         );
     }
@@ -1071,9 +1091,10 @@ function testB(): void {
 "#;
         let diags = collect(php);
         assert!(
-            diags
-                .iter()
-                .any(|d| d.message.contains("Expected 2 arguments") && d.message.contains("got 1")),
+            diags.iter().any(
+                |d| message_text(&d.message).contains("Expected 2 arguments")
+                    && message_text(&d.message).contains("got 1")
+            ),
             "Expected too-few-args diagnostic for ParserB::parse via $parser, got: {diags:?}",
         );
     }
@@ -1102,9 +1123,10 @@ class Second {
 "#;
         let diags = collect(php);
         assert!(
-            diags
-                .iter()
-                .any(|d| d.message.contains("Expected 2 arguments") && d.message.contains("got 1")),
+            diags.iter().any(
+                |d| message_text(&d.message).contains("Expected 2 arguments")
+                    && message_text(&d.message).contains("got 1")
+            ),
             "Expected too-few-args diagnostic for Second::make via self::, got: {diags:?}",
         );
     }
@@ -1175,7 +1197,8 @@ final class Highlighter
         let diags = collect(php);
         assert_eq!(diags.len(), 1, "got: {diags:?}");
         assert!(
-            diags[0].message.contains("Expected 2 arguments") && diags[0].message.contains("got 1"),
+            message_text(&diags[0].message).contains("Expected 2 arguments")
+                && message_text(&diags[0].message).contains("got 1"),
             "A missing closure argument is still reported, got: {diags:?}",
         );
     }
@@ -1200,7 +1223,8 @@ final class Calculator
         let diags = collect(php);
         assert_eq!(diags.len(), 1, "got: {diags:?}");
         assert!(
-            diags[0].message.contains("Expected 2 arguments") && diags[0].message.contains("got 1"),
+            message_text(&diags[0].message).contains("Expected 2 arguments")
+                && message_text(&diags[0].message).contains("got 1"),
             "An object property is invoked through its __invoke(), not the same-named method, got: {diags:?}",
         );
     }
@@ -1262,7 +1286,8 @@ final class PropertyInvoked
         let diags = collect(php);
         assert_eq!(diags.len(), 1, "got: {diags:?}");
         assert!(
-            diags[0].message.contains("Expected 1 argument") && diags[0].message.contains("got 0"),
+            message_text(&diags[0].message).contains("Expected 1 argument")
+                && message_text(&diags[0].message).contains("got 0"),
             "Calling the method with too few arguments is still reported, got: {diags:?}",
         );
     }

@@ -62,7 +62,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 
-use tower_lsp::lsp_types::{Position, Range, TextEdit};
+use tower_lsp_server::gen_lsp_types::{Position, Range, TextEdit};
 
 use crate::Backend;
 use crate::composer::{self, ComposerPackage};

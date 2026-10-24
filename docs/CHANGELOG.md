@@ -53,6 +53,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Deprecated classes are marked in type hierarchy.** The deprecation tag on a type hierarchy item is now sent as the list the protocol specifies, so editors that strike through deprecated entries do so.
 - **Writing a key into a `string[]` keeps its keys open.** `$args['--admin'] = 1` on an array declared as `string[]` or `array<string>` no longer pins its keys to `int|string`, so passing it on to an `array<string, …>` parameter is no longer reported.
 - **Config keys with no config file are reported.** In a Laravel application, `config('gate.missing')` is now reported as an unknown config key when no config file declares `gate`, not only when the key is a typo inside a file that exists. Keys under a config file a package registers in a way that can't be read are still left alone.
 - **Members of `new $class` resolve.** `(new $class())->name()` and `new $class()->name()` now resolve against the class `$class` names, whether it holds `$obj::class`, `get_class()`, a class name string or a `class-string<T>`. Previously the method could be reported as unverifiable, or as a call on a string.

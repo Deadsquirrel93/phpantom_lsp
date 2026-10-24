@@ -8,10 +8,11 @@
 //! registers from a file we cannot read.  `Config::set()` is a write: it
 //! declares the key it names, so a later read of that key is as valid as a
 //! read of one declared on disk.
+use crate::common::message_text;
 
 use crate::common::{LARAVEL_SRC_COMPOSER, create_psr4_workspace, open_php};
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 /// A package: the framework is a dev dependency of its test suite, and the
 /// configuration it reads belongs to whatever application installs it.
@@ -103,7 +104,7 @@ async fn config_diagnostics_with(
     let (backend, dir) = create_psr4_workspace(composer_json, &files);
     backend.initialized(InitializedParams {}).await;
 
-    let uri = Url::from_file_path(dir.path().join(consumer_path)).unwrap();
+    let uri = Uri::from_file_path(dir.path().join(consumer_path)).unwrap();
     open_php(&backend, &uri, consumer).await;
 
     let mut diags = Vec::new();
@@ -112,9 +113,9 @@ async fn config_diagnostics_with(
     diags
         .iter()
         .filter(
-            |d| matches!(&d.code, Some(NumberOrString::String(s)) if s == "invalid_laravel_config" || s == "invalid_laravel_storage_disk"),
+            |d| matches!(&d.code, Some(Code::String(s)) if s == "invalid_laravel_config" || s == "invalid_laravel_storage_disk"),
         )
-        .map(|d| d.message.clone())
+        .map(|d| message_text(&d.message).to_string())
         .collect()
 }
 

@@ -21,7 +21,7 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use tower_lsp::lsp_types::FileChangeType;
+use tower_lsp_server::gen_lsp_types::FileChangeType;
 
 use crate::Backend;
 use crate::classmap_scanner::IndexFilters;
@@ -156,7 +156,7 @@ impl Backend {
 
         let changes: Vec<(String, PathBuf, FileChangeType)> = filtered
             .into_iter()
-            .map(|(uri, path)| (uri, path, FileChangeType::DELETED))
+            .map(|(uri, path)| (uri, path, FileChangeType::Deleted))
             .collect();
         self.reindex_files_batch(&changes);
         changes.len()
@@ -227,7 +227,7 @@ impl Backend {
             Ok(package) => package,
             Err(e) => {
                 self.log(
-                    tower_lsp::lsp_types::MessageType::WARNING,
+                    tower_lsp_server::gen_lsp_types::MessageType::Warning,
                     format!("{e}; PSR-4 mappings from it are ignored"),
                 )
                 .await;

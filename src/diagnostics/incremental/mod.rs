@@ -53,7 +53,7 @@ mod tests;
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::Diagnostic;
+use tower_lsp_server::gen_lsp_types::Diagnostic;
 
 use crate::Backend;
 use crate::parser::with_parsed_program;

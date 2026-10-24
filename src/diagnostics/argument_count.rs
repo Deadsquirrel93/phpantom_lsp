@@ -22,7 +22,7 @@
 //!   1 or 2-3 arguments, `mt_rand` accepts 0 or 2) that the
 //!   phpstorm-stubs format cannot express with a single declaration.
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::parser::with_parse_cache;
@@ -407,7 +407,7 @@ impl Backend {
 
                 out.push(make_diagnostic(
                     range,
-                    DiagnosticSeverity::ERROR,
+                    DiagnosticSeverity::Error,
                     ARGUMENT_COUNT_MISMATCH_CODE,
                     message,
                 ));
@@ -450,7 +450,7 @@ impl Backend {
 
                 out.push(make_diagnostic(
                     range,
-                    DiagnosticSeverity::ERROR,
+                    DiagnosticSeverity::Error,
                     ARGUMENT_COUNT_MISMATCH_CODE,
                     message,
                 ));

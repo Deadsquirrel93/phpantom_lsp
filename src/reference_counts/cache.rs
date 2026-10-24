@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use parking_lot::{Mutex, RwLock};
-use tower_lsp::lsp_types::{Location, Range};
+use tower_lsp_server::gen_lsp_types::{Location, Range};
 
 use crate::atom::{Atom, AtomMap};
 
@@ -121,7 +121,7 @@ impl RescanPlan {
     }
 }
 
-/// A cached LSP location without a separately allocated `Url` string for
+/// A cached LSP location without a separately allocated `Uri` string for
 /// every occurrence.  URI strings are interned per cache below.
 #[derive(Clone, PartialEq, Eq)]
 pub(super) struct CompactLocation {

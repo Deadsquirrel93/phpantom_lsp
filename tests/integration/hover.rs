@@ -7,7 +7,7 @@ use crate::common::{
     open_php,
 };
 use phpantom_lsp::Backend;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Multi-namespace hover ──────────────────────────────────────────────────
 
@@ -154,7 +154,7 @@ class Service {
 #[tokio::test]
 async fn hover_variable_from_untyped_method_reads_that_methods_body() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let content = r#"<?php
 class Pen { public function first() { return 1; } public function second() { return new Pen(); } }
 class Ink {
@@ -1931,7 +1931,7 @@ $product->saleMinor();
     // Deliberately no `initialized()` and no `did_open`: the file exists
     // only on disk, exactly as it does for a request that beats the
     // index to it.
-    let uri = Url::from_file_path(dir.path().join("src/Product.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("src/Product.php")).unwrap();
     let hover = hover_response(&backend, &uri, 16, 14)
         .await
         .expect("hover on a file the server has not parsed yet");
@@ -15143,7 +15143,7 @@ local_helper();
 
 #[tokio::test]
 async fn hover_vendor_class_shows_package_provenance() {
-    use tower_lsp::LanguageServer;
+    use tower_lsp_server::LanguageServer;
 
     let dir = tempfile::tempdir().expect("failed to create temp dir");
     std::fs::write(
@@ -16932,7 +16932,7 @@ echo $_SERVER;
 #[tokio::test]
 async fn hover_untyped_function_shows_inferred_return_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let content = r#"<?php
 class Pen {}
 function makePen() { return new Pen(); }

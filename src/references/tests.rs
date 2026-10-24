@@ -1,9 +1,9 @@
 use crate::Backend;
 use crate::virtual_members::laravel::extract_macro_registrations;
 use std::sync::atomic::Ordering;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
-fn seed_macro_index(backend: &Backend, uri: &Url, text: &str) {
+fn seed_macro_index(backend: &Backend, uri: &Uri, text: &str) {
     let mut index = backend.laravel.macros.write();
     index.files.set_file(
         uri.to_string(),
@@ -26,7 +26,7 @@ fn macro_targets_leave_the_macro_index_free_while_loading_ancestors() {
         "Countable",
         "<?php interface Countable {}",
     )]));
-    let provider_uri = Url::parse("file:///Provider.php").unwrap();
+    let provider_uri = Uri::parse("file:///Provider.php").unwrap();
     let provider_text = concat!(
         "<?php\n",
         "namespace App;\n",

@@ -24,7 +24,7 @@ LSP has no standard request for this. Phpactor uses a custom
 `experimental.xevaluatableExpressionProvider`), which only its own
 client calls. The choice is between a custom method that our VS Code
 extension consumes, or the standard 3.17 `textDocument/inlineValue`
-request (check whether our `lsp-types` version carries it). Decide that
+request (`InlineValueParams` and `inline_value_provider` are available). Decide that
 before implementing.
 
 ### Supported expression kinds
@@ -243,61 +243,7 @@ machinery to produce the `WorkspaceEdit`. The companion
 
 ---
 
-## F20. Migrate to the maintained `tower-lsp` fork
-
-**Impact: Low-Medium · Complexity: Very High**
-
-`tower-lsp` 0.20 (our current dependency) is the last release of the
-original crate; it's unmaintained upstream. A maintained fork exists
-as `tower-lsp-server` (types crate `ls-types`), actively developed as
-of 2026. Because it's a rename rather than a version bump of the same
-crate, `cargo update`/routine dependency audits will not surface this
-on their own — nothing shows up as "outdated" since no new `tower-lsp`
-version is being withheld. It has to be picked up as a deliberate
-migration.
-
-**Does not unblock A16 or F21.** Checked directly against `ls-types`
-`main` and upstream `lsp-types` 0.97.0 source (not just docs): neither
-crate implements `SnippetTextEdit`/`StringValue` (tracked upstream at
-[gluon-lang/lsp-types#310](https://github.com/gluon-lang/lsp-types/issues/310),
-still open) or a static `type_hierarchy_provider` field on
-`ServerCapabilities` (tracked at
-[gluon-lang/lsp-types#298](https://github.com/gluon-lang/lsp-types/issues/298)
-and [tower-lsp-community/ls-types#38](https://github.com/tower-lsp-community/ls-types/issues/38),
-both open). `ls-types` also removed its generic `"proposed"` 3.18
-feature flag in 0.0.4 ("only applied to a handful of v3.18 items"), so
-there is no version bump or feature flag on our side that grants either
-type today. Both are real 3.18-spec (`@proposed`) features, just not
-yet implemented in any Rust LSP-types crate. The remaining motivation
-for this migration is staying on an actively maintained crate — bug
-and security fixes, and a path to 3.18 support once upstream catches
-up — not unblocking a specific feature now. Re-check A16 and F21 for
-upstream progress before assuming this migration alone resolves them.
-
-**The real complexity driver:** `ls-types`'s `Uri` is a newtype over
-`fluent_uri::Uri<String>`, not `url::Url`. Our code uses `Url`
-(re-exported from `lsp_types`) directly across nearly every module — path manipulation, `to_file_path`/
-`from_file_path`, `.path()`, `.join()`, and more — and `fluent_uri`'s
-API does not mirror `url::Url`'s. This is a project-wide port of the
-document-URI type, not a mechanical import rename (about 110 non-test
-files use `Url` today). Scope it file by
-file before committing to a single PR; it may need a preparatory
-abstraction (e.g. isolate URI construction/parsing behind a narrow
-internal helper) to keep the blast radius reviewable, and likely
-warrants breaking into more than one PR despite the "one task per PR"
-convention — raise that with the maintainer before starting.
-
-**What to also check:** the fork's public API surface relative to
-`tower_lsp::LspService`/`tower_lsp::lsp_types` (import paths, trait
-signatures) to scope the mechanical rename across every file that does
-`use tower_lsp::...` (grep `tower_lsp::` for the full list:
-`src/lsp_dispatch.rs`, `src/inlay_hints.rs`, `src/document_symbols.rs`,
-`src/folding.rs`, `src/phpcs.rs`, `src/fix.rs`,
-`src/selection_range.rs`, `src/text_position.rs`, and others).
-
-**Where to look:** `Cargo.toml`'s `tower-lsp = { version = "0.20", features = ["proposed"] }`.
-
-## F21. Static `typeHierarchyProvider` advertisement (depends on F20)
+## F21. Static `typeHierarchyProvider` advertisement
 
 **Impact: Low-Medium · Complexity: Low**
 
@@ -308,35 +254,20 @@ implemented (`src/type_hierarchy.rs`) and registered dynamically via
 using `type_hierarchy_registration()` from `server.rs`), gated on the client declaring
 `textDocument.typeHierarchy.dynamicRegistration: true`. This works for
 every client that supports dynamic registration, but there is no
-static fallback: `lsp-types` 0.94.1 (pinned by `tower-lsp` 0.20, see
-F20) has no `type_hierarchy_provider` field on `ServerCapabilities`, so
-a client that supports type hierarchy without dynamic registration —
-or any tool that inspects only the `initialize` response's static
-capabilities, such as a feature-conformance probe — sees no type
-hierarchy support at all, even though the feature works end-to-end for
-a real editor that does the dynamic-registration round trip.
+static fallback, so a client that supports type hierarchy without
+dynamic registration, or any tool that inspects only the `initialize`
+response's static capabilities (such as a feature-conformance probe),
+sees no type hierarchy support at all, even though the feature works
+end-to-end for a real editor that does the dynamic-registration round
+trip.
 
-The field is still missing after F20, not just before it: neither
-upstream `lsp-types` nor the maintained `tower-lsp-server`/`ls-types`
-fork that F20 migrates to has added `type_hierarchy_provider` yet
-(tracked at
-[gluon-lang/lsp-types#298](https://github.com/gluon-lang/lsp-types/issues/298)
-and [tower-lsp-community/ls-types#38](https://github.com/tower-lsp-community/ls-types/issues/38),
-both open) — so F20 landing is necessary but not sufficient here; this
-also needs the upstream crate to add the field. Once both have
-happened, add static advertisement (`Boolean(true)` or
-`TypeHierarchyOptions`) in `initialize`'s `ServerCapabilities`,
+`ServerCapabilities` has `type_hierarchy_provider:
+Option<TypeHierarchyProvider>`. Add static advertisement
+(`TypeHierarchyOptions` or the boolean variant) in `initialize`,
 conditional on the client *not* declaring `dynamicRegistration: true`
 for type hierarchy (avoid double-registering: send either the static
 capability or the dynamic registration, not both, per the client's
-declared support). Also
-verify whether the same version bump exposes `diagnostic` client
-capabilities more precisely — pull diagnostics (`diagnostic_provider`
-in `src/backend/startup.rs`) is unaffected by this gap (it's already advertised
-correctly whenever the client declares `textDocument.diagnostic`,
-verified by probing `initialize` directly with that capability set),
-but is worth a quick re-check after the migration in case the newer
-`lsp-types` changes the shape of that capability struct.
+declared support).
 
 **Where to look:** `src/backend/startup.rs` (`initialize`, `initialized`),
 `src/server.rs` (`type_hierarchy_registration`), `src/type_hierarchy.rs`.

@@ -4,7 +4,7 @@
 //! lazily parsing the defining file when the byte-level startup scan only
 //! recorded its path, and jump to the declaration's stored name offset.
 
-use tower_lsp::lsp_types::Location;
+use tower_lsp_server::gen_lsp_types::Location;
 
 use super::point_location;
 use crate::Backend;

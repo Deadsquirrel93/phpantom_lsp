@@ -1,13 +1,14 @@
 //! Twig template names in a project that uses Twig without Symfony: the
 //! roots its loader reads are found from the names its templates
 //! reference, and its templates are `.html` files.
+use crate::common::message_text;
 
 use crate::common::{
     completion_response, initialize_with_options, offset_position, open_document, response_labels,
 };
 use phpantom_lsp::Backend;
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 const COMPOSER: &str = r#"{
     "require": { "twig/twig": "^3.4" },
@@ -94,8 +95,8 @@ async fn workspace(open: &[&str]) -> (Backend, tempfile::TempDir) {
     (backend, dir)
 }
 
-fn uri_for(dir: &tempfile::TempDir, rel: &str) -> Url {
-    Url::from_file_path(dir.path().join(rel)).unwrap()
+fn uri_for(dir: &tempfile::TempDir, rel: &str) -> Uri {
+    Uri::from_file_path(dir.path().join(rel)).unwrap()
 }
 
 /// The position `inside` bytes into the first occurrence of `needle`.
@@ -106,9 +107,9 @@ fn position_in(content: &str, needle: &str, inside: usize) -> Position {
     )
 }
 
-async fn definitions(backend: &Backend, uri: &Url, position: Position) -> Vec<Url> {
+async fn definitions(backend: &Backend, uri: &Uri, position: Position) -> Vec<Uri> {
     let response = backend
-        .goto_definition(GotoDefinitionParams {
+        .goto_definition(DefinitionParams {
             text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: uri.clone() },
                 position,
@@ -118,13 +119,13 @@ async fn definitions(backend: &Backend, uri: &Url, position: Position) -> Vec<Ur
         })
         .await
         .unwrap();
-    let mut found: Vec<Url> = match response {
+    let mut found: Vec<Uri> = match response {
         None => Vec::new(),
-        Some(GotoDefinitionResponse::Scalar(location)) => vec![location.uri],
-        Some(GotoDefinitionResponse::Array(locations)) => {
+        Some(DefinitionResponse::Definition(Definition::Location(location))) => vec![location.uri],
+        Some(DefinitionResponse::Definition(Definition::LocationList(locations))) => {
             locations.into_iter().map(|location| location.uri).collect()
         }
-        Some(GotoDefinitionResponse::Link(_)) => panic!("unexpected location links"),
+        Some(DefinitionResponse::DefinitionLinkList(_)) => panic!("unexpected location links"),
     };
     found.sort();
     found
@@ -214,10 +215,10 @@ async fn only_missing_names_of_a_template_extension_are_reported() {
         .filter(|diagnostic| {
             matches!(
                 &diagnostic.code,
-                Some(NumberOrString::String(code)) if code == "invalid_symfony_template"
+                Some(Code::String(code)) if code == "invalid_symfony_template"
             )
         })
-        .map(|diagnostic| diagnostic.message.clone())
+        .map(|diagnostic| message_text(&diagnostic.message).to_string())
         .collect();
     assert_eq!(
         reported,

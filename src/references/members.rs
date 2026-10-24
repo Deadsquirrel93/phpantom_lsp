@@ -10,7 +10,7 @@
 
 use super::*;
 
-use tower_lsp::lsp_types::{Location, Range};
+use tower_lsp_server::gen_lsp_types::{Location, Range};
 
 use crate::atom::{Atom, AtomMap};
 use crate::references::eloquent::EloquentMagicMember;

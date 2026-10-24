@@ -6,8 +6,8 @@
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use tower_lsp::jsonrpc::Result;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
+use tower_lsp_server::jsonrpc::Result;
 
 use crate::Backend;
 use crate::backend::ClientCaps;
@@ -17,6 +17,10 @@ use crate::server::{run_blocking_cancel_safe, type_hierarchy_registration};
 
 impl Backend {
     pub(crate) async fn on_initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
+        // `rootUri` is deprecated in favour of `workspaceFolders`, but it is
+        // what every client still sends and what the workspace root has
+        // always been read from.
+        #[allow(deprecated)]
         let workspace_root = params.root_uri.as_ref().and_then(crate::util::url_to_path);
 
         if let Some(root) = workspace_root {
@@ -44,7 +48,6 @@ impl Backend {
         *self.client_caps.write() = caps;
 
         Ok(InitializeResult {
-            offset_encoding: None,
             capabilities: ServerCapabilities {
                 signature_help_provider: Some(SignatureHelpOptions {
                     trigger_characters: Some(vec!["(".to_string(), ",".to_string()]),
@@ -73,55 +76,59 @@ impl Backend {
                     },
                     completion_item: None,
                 }),
-                inlay_hint_provider: Some(OneOf::Left(true)),
-                text_document_sync: Some(TextDocumentSyncCapability::Options(
-                    TextDocumentSyncOptions {
-                        open_close: Some(true),
-                        change: Some(TextDocumentSyncKind::INCREMENTAL),
-                        will_save: None,
-                        will_save_wait_until: None,
-                        save: Some(TextDocumentSyncSaveOptions::SaveOptions(SaveOptions {
-                            include_text: Some(false),
-                        })),
-                    },
-                )),
-                hover_provider: Some(HoverProviderCapability::Simple(true)),
-                definition_provider: Some(OneOf::Left(true)),
-                type_definition_provider: Some(TypeDefinitionProviderCapability::Simple(true)),
-                implementation_provider: Some(ImplementationProviderCapability::Simple(true)),
-                references_provider: Some(OneOf::Left(true)),
-                call_hierarchy_provider: Some(CallHierarchyServerCapability::Simple(true)),
-                document_highlight_provider: Some(OneOf::Left(true)),
-                code_action_provider: Some(CodeActionProviderCapability::Options(
+                inlay_hint_provider: Some(InlayHintProvider::Bool(true)),
+                text_document_sync: Some(TextDocumentSync::Options(TextDocumentSyncOptions {
+                    open_close: Some(true),
+                    change: Some(TextDocumentSyncKind::Incremental),
+                    will_save: None,
+                    will_save_wait_until: None,
+                    save: Some(Save::SaveOptions(SaveOptions {
+                        include_text: Some(false),
+                    })),
+                })),
+                hover_provider: Some(HoverProvider::Bool(true)),
+                definition_provider: Some(DefinitionProvider::Bool(true)),
+                type_definition_provider: Some(TypeDefinitionProvider::Bool(true)),
+                implementation_provider: Some(ImplementationProvider::Bool(true)),
+                references_provider: Some(ReferencesProvider::Bool(true)),
+                call_hierarchy_provider: Some(CallHierarchyProvider::Bool(true)),
+                document_highlight_provider: Some(DocumentHighlightProvider::Bool(true)),
+                code_action_provider: Some(CodeActionProvider::CodeActionOptions(
                     CodeActionOptions {
                         code_action_kinds: Some(vec![
-                            CodeActionKind::QUICKFIX,
-                            CodeActionKind::REFACTOR_EXTRACT,
-                            CodeActionKind::REFACTOR_INLINE,
-                            CodeActionKind::SOURCE_ORGANIZE_IMPORTS,
+                            CodeActionKind::QuickFix,
+                            CodeActionKind::RefactorExtract,
+                            CodeActionKind::RefactorInline,
+                            CodeActionKind::SourceOrganizeImports,
                             CodeActionKind::new("source.addMissingImports"),
                         ]),
                         work_done_progress_options: WorkDoneProgressOptions {
                             work_done_progress: None,
                         },
                         resolve_provider: Some(true),
+                        documentation: None,
                     },
                 )),
-                rename_provider: Some(OneOf::Right(RenameOptions {
+                rename_provider: Some(RenameProvider::RenameOptions(RenameOptions {
                     prepare_provider: Some(true),
                     work_done_progress_options: WorkDoneProgressOptions {
                         work_done_progress: None,
                     },
                 })),
-                document_symbol_provider: Some(OneOf::Left(true)),
-                workspace_symbol_provider: Some(OneOf::Left(true)),
-                folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
+                document_symbol_provider: Some(DocumentSymbolProvider::Bool(true)),
+                workspace_symbol_provider: Some(WorkspaceSymbolProvider::Bool(true)),
+                folding_range_provider: Some(FoldingRangeProvider::Bool(true)),
                 code_lens_provider: Some(CodeLensOptions {
                     resolve_provider: Some(true),
+                    work_done_progress_options: WorkDoneProgressOptions {
+                        work_done_progress: None,
+                    },
                 }),
-                selection_range_provider: Some(SelectionRangeProviderCapability::Simple(true)),
-                document_formatting_provider: Some(OneOf::Left(true)),
-                document_range_formatting_provider: Some(OneOf::Left(true)),
+                selection_range_provider: Some(SelectionRangeProvider::Bool(true)),
+                document_formatting_provider: Some(DocumentFormattingProvider::Bool(true)),
+                document_range_formatting_provider: Some(DocumentRangeFormattingProvider::Bool(
+                    true,
+                )),
                 document_on_type_formatting_provider: Some(DocumentOnTypeFormattingOptions {
                     first_trigger_character: "\n".to_string(),
                     more_trigger_character: None,
@@ -132,20 +139,18 @@ impl Backend {
                         work_done_progress: None,
                     },
                 }),
-                semantic_tokens_provider: Some(
-                    SemanticTokensServerCapabilities::SemanticTokensOptions(
-                        SemanticTokensOptions {
-                            work_done_progress_options: WorkDoneProgressOptions {
-                                work_done_progress: None,
-                            },
-                            legend: crate::semantic_tokens::legend(),
-                            range: Some(false),
-                            full: Some(SemanticTokensFullOptions::Bool(true)),
+                semantic_tokens_provider: Some(SemanticTokensProvider::SemanticTokensOptions(
+                    SemanticTokensOptions {
+                        work_done_progress_options: WorkDoneProgressOptions {
+                            work_done_progress: None,
                         },
-                    ),
-                ),
+                        legend: crate::semantic_tokens::legend(),
+                        range: Some(SemanticTokensOptionsRange::Bool(false)),
+                        full: Some(Full::Bool(true)),
+                    },
+                )),
                 diagnostic_provider: if caps.pull_diagnostics {
-                    Some(DiagnosticServerCapabilities::Options(DiagnosticOptions {
+                    Some(DiagnosticProvider::DiagnosticOptions(DiagnosticOptions {
                         identifier: Some("phpantom".to_string()),
                         inter_file_dependencies: true,
                         // The workspace/diagnostic handler reports both
@@ -190,7 +195,7 @@ impl Backend {
                 }
                 Err(e) => {
                     self.log(
-                        MessageType::WARNING,
+                        MessageType::Warning,
                         format!("Failed to load .phpantom.toml: {}", e),
                     )
                     .await;
@@ -204,7 +209,7 @@ impl Backend {
                 Ok(package) => package,
                 Err(e) => {
                     self.log(
-                        MessageType::WARNING,
+                        MessageType::Warning,
                         format!("{e}; PSR-4 mappings and the PHP version from it are ignored"),
                     )
                     .await;
@@ -287,7 +292,7 @@ impl Backend {
                         }
                         Some(Err(e)) => {
                             self.log(
-                                MessageType::WARNING,
+                                MessageType::Warning,
                                 format!("Failed to load Laravel schema dumps: {}", e),
                             )
                             .await;
@@ -319,7 +324,7 @@ impl Backend {
                     .await;
             }
         } else {
-            self.log(MessageType::INFO, "PHPantom initialized!".to_string())
+            self.log(MessageType::Info, "PHPantom initialized!".to_string())
                 .await;
         }
 
@@ -389,9 +394,9 @@ impl Backend {
         }
 
         // ── Dynamic capability registration ─────────────────────────
-        // lsp-types 0.94 does not expose a `type_hierarchy_provider`
-        // field on `ServerCapabilities`, so we register the capability
-        // dynamically via `client/registerCapability` instead.
+        // Type hierarchy is advertised only through
+        // `client/registerCapability`, not as a static
+        // `type_hierarchy_provider` capability in `initialize`.
         let mut registrations = Vec::new();
 
         if self.caps().type_hierarchy_dynamic_registration {

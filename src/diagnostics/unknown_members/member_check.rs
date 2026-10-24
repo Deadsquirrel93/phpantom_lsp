@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity};
+use tower_lsp_server::gen_lsp_types::{Diagnostic, DiagnosticSeverity};
 
 use crate::types::ClassInfo;
 use crate::virtual_members::resolve_class_fully_cached;
@@ -91,7 +91,7 @@ impl UnknownMemberPass<'_> {
         };
         diagnostics.push(make_diagnostic(
             range,
-            DiagnosticSeverity::ERROR,
+            DiagnosticSeverity::Error,
             INVALID_MEMBER_ACCESS_CODE,
             message,
         ));
@@ -270,7 +270,7 @@ impl UnknownMemberPass<'_> {
 
         diagnostics.push(make_diagnostic(
             range,
-            DiagnosticSeverity::WARNING,
+            DiagnosticSeverity::Warning,
             UNKNOWN_MEMBER_CODE,
             message,
         ));

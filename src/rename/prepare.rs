@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::code_actions::multi_file_edit;
@@ -86,7 +86,7 @@ impl Backend {
         uri: &str,
         content: &str,
         position: Position,
-    ) -> Option<PrepareRenameResponse> {
+    ) -> Option<PrepareRenameResult> {
         // A YAML/XML occurrence is a rename site only through the Symfony
         // and Doctrine resource index, which edits a single segment of the
         // name.  Anything else there may be the escaped `App\\Handler` form
@@ -118,10 +118,12 @@ impl Backend {
                 start: offset_to_position(content, span.start as usize),
                 end: offset_to_position(content, span.end as usize),
             };
-            return Some(PrepareRenameResponse::RangeWithPlaceholder {
-                range,
-                placeholder: name.to_string(),
-            });
+            return Some(PrepareRenameResult::PrepareRenamePlaceholder(
+                PrepareRenamePlaceholder {
+                    range,
+                    placeholder: name.to_string(),
+                },
+            ));
         }
 
         // Extract the symbol name and validate it's something we can rename.
@@ -143,7 +145,9 @@ impl Backend {
             name
         };
 
-        Some(PrepareRenameResponse::RangeWithPlaceholder { range, placeholder })
+        Some(PrepareRenameResult::PrepareRenamePlaceholder(
+            PrepareRenamePlaceholder { range, placeholder },
+        ))
     }
 
     /// Whether this rename can reach a file that is not open.
@@ -335,7 +339,7 @@ impl Backend {
         }
 
         // Build the workspace edit.  Group text edits by document URI.
-        let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
+        let mut changes: HashMap<Uri, Vec<TextEdit>> = HashMap::new();
 
         for location in &locations {
             let loc_uri_str = location.uri.to_string();
@@ -444,7 +448,7 @@ impl Backend {
         uri: &str,
         content: &str,
         position: Position,
-    ) -> Option<PrepareRenameResponse> {
+    ) -> Option<PrepareRenameResult> {
         let Some(reference) = self.framework_reference_at_position(uri, content, position) else {
             return self.resource_member_prepare_rename(uri, content, position);
         };
@@ -472,13 +476,15 @@ impl Backend {
             FrameworkReferenceKind::Path { .. } => return None,
         };
 
-        Some(PrepareRenameResponse::RangeWithPlaceholder {
-            range: Range {
-                start: offset_to_position(content, start as usize),
-                end: offset_to_position(content, end as usize),
+        Some(PrepareRenameResult::PrepareRenamePlaceholder(
+            PrepareRenamePlaceholder {
+                range: Range {
+                    start: offset_to_position(content, start as usize),
+                    end: offset_to_position(content, end as usize),
+                },
+                placeholder,
             },
-            placeholder,
-        })
+        ))
     }
 
     /// Rename the PHP symbol a Symfony or Doctrine resource names.
@@ -544,7 +550,7 @@ impl Backend {
         uri: &str,
         content: &str,
         position: Position,
-    ) -> Option<PrepareRenameResponse> {
+    ) -> Option<PrepareRenameResult> {
         let span = self.lookup_symbol_at_position(uri, content, position)?;
         let SymbolKind::MemberAccess {
             subject_text: crate::symbol_map::SubjectText::Owned(_),
@@ -558,13 +564,15 @@ impl Backend {
         if content.get(span.start as usize..span.end as usize) != Some(member_name.as_str()) {
             return None;
         }
-        Some(PrepareRenameResponse::RangeWithPlaceholder {
-            range: Range {
-                start: offset_to_position(content, span.start as usize),
-                end: offset_to_position(content, span.end as usize),
+        Some(PrepareRenameResult::PrepareRenamePlaceholder(
+            PrepareRenamePlaceholder {
+                range: Range {
+                    start: offset_to_position(content, span.start as usize),
+                    end: offset_to_position(content, span.end as usize),
+                },
+                placeholder: member_name.to_string(),
             },
-            placeholder: member_name.to_string(),
-        })
+        ))
     }
 
     /// The PHP declaration a resource occurrence names, resolved the way

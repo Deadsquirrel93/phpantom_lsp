@@ -9,7 +9,7 @@ use super::{
     FormattingStrategy, Tool, compute_edits, compute_range_edits, execute_strategy,
     resolve_strategy,
 };
-use tower_lsp::lsp_types::{Position, Range};
+use tower_lsp_server::gen_lsp_types::{Position, Range};
 
 // ── compute_edits ───────────────────────────────────────────────
 

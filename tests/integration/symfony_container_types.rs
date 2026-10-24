@@ -3,7 +3,7 @@
 //! `HandleTrait::handle()` gets back from the message's handler.
 
 use crate::common::{create_psr4_workspace, hover_text_at, open_document, split_cursor};
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 const COMPOSER: &str = r#"{
     "require": { "symfony/framework-bundle": "^7.3" },
@@ -181,8 +181,8 @@ async fn hover_in(files: &[(&str, &str)], path: &str, source: &str) -> String {
         .unwrap_or_default()
 }
 
-fn uri_for(dir: &tempfile::TempDir, rel: &str) -> Url {
-    Url::from_file_path(dir.path().join(rel)).unwrap()
+fn uri_for(dir: &tempfile::TempDir, rel: &str) -> Uri {
+    Uri::from_file_path(dir.path().join(rel)).unwrap()
 }
 
 /// Whether a variable's hover shows it typed as exactly `ty`.

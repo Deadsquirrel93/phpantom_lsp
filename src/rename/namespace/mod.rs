@@ -8,7 +8,7 @@
 use std::cell::OnceCell;
 use std::collections::HashMap;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::code_actions::{document_changes_edit, multi_file_edit};
@@ -87,7 +87,7 @@ impl Backend {
             return Err(conflict);
         }
 
-        let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
+        let mut changes: HashMap<Uri, Vec<TextEdit>> = HashMap::new();
 
         // Scan all known files. The live per-file maps only contain files
         // that have been fully parsed through update_ast, but workspace
@@ -230,7 +230,7 @@ impl Backend {
         if !psr4_rename_ops.is_empty() {
             let ops = psr4_rename_ops;
             let renames = ops.iter().map(|(old_uri, new_uri)| {
-                ResourceOp::Rename(RenameFile {
+                DocumentChange::RenameFile(RenameFile {
                     old_uri: old_uri.clone(),
                     new_uri: new_uri.clone(),
                     options: None,

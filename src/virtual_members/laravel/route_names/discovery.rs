@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use mago_span::HasSpan;
-use tower_lsp::lsp_types::{Location, Position, Url};
+use tower_lsp_server::gen_lsp_types::{Location, Position, Uri};
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
@@ -131,7 +131,7 @@ pub(crate) struct RouteEntry {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct RouteDeclaration {
     /// The file the registration is written in.
-    pub file: Arc<Url>,
+    pub file: Arc<Uri>,
     /// Where go-to-definition lands: between the quotes of a plain literal
     /// name, and at the start of anything else.
     pub position: Position,
@@ -707,7 +707,7 @@ fn mark_from_vendor(routes: &mut [RouteEntry]) {
 /// accounting for group prefixes and file includes.
 pub(super) fn walk_route_file(
     content: &str,
-    uri: &Url,
+    uri: &Uri,
     file_path: Option<&Path>,
     workspace_root: Option<&Path>,
     macros: &MacroScope,

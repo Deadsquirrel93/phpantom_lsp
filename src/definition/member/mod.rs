@@ -32,7 +32,7 @@ mod file_lookup;
 mod laravel;
 mod shape_keys;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use super::point_location;
 use crate::Backend;

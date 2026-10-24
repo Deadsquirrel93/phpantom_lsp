@@ -7,7 +7,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use super::{classify_class_origin, path_aliases};
 use crate::Backend;
@@ -354,7 +354,7 @@ impl Backend {
             })
             .collect();
         self.log(
-            MessageType::INFO,
+            MessageType::Info,
             format!(
                 "PHPantom: No root composer.json. Found {} Composer project(s):\n{}",
                 subprojects.len(),
@@ -473,7 +473,7 @@ impl Backend {
         progress: Option<&crate::progress::ScanProgress>,
     ) {
         self.log(
-            MessageType::INFO,
+            MessageType::Info,
             "PHPantom: No composer.json found. Scanning workspace for PHP classes.".to_string(),
         )
         .await;
@@ -522,7 +522,7 @@ impl Backend {
             + self.symbols.autoload_constant_index.read().len();
 
         self.log(
-            MessageType::INFO,
+            MessageType::Info,
             format!(
                 "PHPantom v{}: PHP {}, {} symbols from {}, stubs {}",
                 self.version,

@@ -30,7 +30,7 @@
 //! edited records it, and is the default domain while the call does not
 //! parse yet.
 
-use tower_lsp::lsp_types::{CompletionResponse, Position};
+use tower_lsp_server::gen_lsp_types::{CompletionResponse, Position};
 
 use crate::Backend;
 use crate::completion::eloquent_string::detect_string_call_context;
@@ -140,7 +140,7 @@ impl Backend {
         });
         string_key_response(
             properties,
-            tower_lsp::lsp_types::CompletionItemKind::PROPERTY,
+            tower_lsp_server::gen_lsp_types::CompletionItemKind::Property,
             content,
             literal_start,
             position,

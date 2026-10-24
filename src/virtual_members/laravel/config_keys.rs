@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use mago_allocator::LocalArena;
 use mago_database::file::FileId;
-use tower_lsp::lsp_types::{Location, Position, Range, Url};
+use tower_lsp_server::gen_lsp_types::{Location, Position, Range, Uri};
 
 use crate::Backend;
 use crate::references::push_location;
@@ -413,7 +413,7 @@ fn resolve_config_key_declaration_inner(
     fallback.map(|uri| crate::definition::point_location(uri, Position::new(0, 0)))
 }
 
-fn config_declaration_location(uri: Url, content: &str, declaration: &ConfigKeyMatch) -> Location {
+fn config_declaration_location(uri: Uri, content: &str, declaration: &ConfigKeyMatch) -> Location {
     Location {
         uri,
         range: Range::new(
@@ -957,25 +957,25 @@ return array_merge([
             ]);
 
         let app = resolve_config_key_declaration_exact(&backend, "cache.stores.tenant").unwrap();
-        assert_eq!(app.uri, Url::from_file_path(app_config).unwrap());
+        assert_eq!(app.uri, Uri::from_file_path(app_config).unwrap());
         assert_ne!(app.range.start, app.range.end);
 
         let provider =
             resolve_config_key_declaration_exact(&backend, "cache.stores.package").unwrap();
-        assert_eq!(provider.uri, Url::from_file_path(provider_config).unwrap());
+        assert_eq!(provider.uri, Uri::from_file_path(provider_config).unwrap());
 
         let second_provider =
             resolve_config_key_declaration_exact(&backend, "cache.stores.second").unwrap();
         assert_eq!(
             second_provider.uri,
-            Url::from_file_path(second_provider_config).unwrap()
+            Uri::from_file_path(second_provider_config).unwrap()
         );
 
         let framework =
             resolve_config_key_declaration_exact(&backend, "cache.stores.redis").unwrap();
         assert_eq!(
             framework.uri,
-            Url::from_file_path(framework_config).unwrap()
+            Uri::from_file_path(framework_config).unwrap()
         );
 
         assert!(resolve_config_key_declaration_exact(&backend, "cache.stores.missing").is_none());
@@ -1012,11 +1012,11 @@ return array_merge([
             });
 
         let exact = resolve_config_key_declaration_exact(&backend, "cache.stores.shared").unwrap();
-        assert_eq!(exact.uri, Url::from_file_path(&provider_config).unwrap());
+        assert_eq!(exact.uri, Uri::from_file_path(&provider_config).unwrap());
         assert!(resolve_config_key_declaration_exact(&backend, "cache.stores.missing").is_none());
 
         let fallback = resolve_config_key_declaration(&backend, "cache.stores.missing").unwrap();
-        assert_eq!(fallback.uri, Url::from_file_path(provider_config).unwrap());
+        assert_eq!(fallback.uri, Uri::from_file_path(provider_config).unwrap());
         assert_eq!(
             fallback.range,
             Range::new(Position::new(0, 0), Position::new(0, 0))

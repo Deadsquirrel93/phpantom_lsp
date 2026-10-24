@@ -1,12 +1,12 @@
 #[cfg(test)]
 mod tests {
     use crate::common::{apply_edits, create_test_backend, open_document};
-    use tower_lsp::LanguageServer;
-    use tower_lsp::lsp_types::*;
+    use tower_lsp_server::LanguageServer;
+    use tower_lsp_server::gen_lsp_types::*;
 
     async fn format_range(uri: &str, text: &str, start_line: u32, end_line: u32) -> String {
         let backend = create_test_backend();
-        let uri = Url::parse(uri).unwrap();
+        let uri = Uri::parse(uri).unwrap();
         open_document(&backend, &uri, "php", text).await;
 
         let edits = backend

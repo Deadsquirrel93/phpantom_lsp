@@ -25,7 +25,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::{Location, Range};
+use tower_lsp_server::gen_lsp_types::{Location, Range};
 
 use crate::Backend;
 use crate::symbol_map::{SymbolKind, SymbolSpan};

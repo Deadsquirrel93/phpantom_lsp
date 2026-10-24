@@ -6,7 +6,7 @@
 //! symbol map decides the same question for a *complete* file, and the two
 //! are kept in step by hand.
 
-use tower_lsp::lsp_types::Position;
+use tower_lsp_server::gen_lsp_types::Position;
 
 use std::cell::OnceCell;
 

@@ -2,7 +2,7 @@
 //! collector table, the deferred-edit resolution, and the post-processing
 //! every offered edit goes through (template translation, line endings).
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 
@@ -41,7 +41,7 @@ fn skip_leading_whitespace(content: &str, params: &CodeActionParams) -> Option<C
 
 /// A code-action collector: appends the actions it offers for the
 /// request to the list.
-type CollectFn = fn(&Backend, &str, &str, &CodeActionParams, &mut Vec<CodeActionOrCommand>);
+type CollectFn = fn(&Backend, &str, &str, &CodeActionParams, &mut Vec<CodeActionResponse>);
 
 /// Whether a collector's actions are offered for a Blade template, whose
 /// edits are planned against the PHP it lowers to.
@@ -122,7 +122,7 @@ impl Backend {
         uri: &str,
         content: &str,
         params: &CodeActionParams,
-    ) -> Vec<CodeActionOrCommand> {
+    ) -> Vec<CodeActionResponse> {
         let mut actions = Vec::new();
 
         let adjusted = skip_leading_whitespace(content, params);
@@ -145,7 +145,7 @@ impl Backend {
         // to; the editor applies them to the template itself.
         let eol = crate::text_position::line_ending(content);
         for action in &mut actions {
-            if let CodeActionOrCommand::CodeAction(CodeAction {
+            if let CodeActionResponse::CodeAction(CodeAction {
                 edit: Some(edit), ..
             }) = action
             {
@@ -156,10 +156,10 @@ impl Backend {
 
         if !self.caps().code_action_resolve {
             actions.retain_mut(|action| match action {
-                CodeActionOrCommand::CodeAction(action) => {
+                CodeActionResponse::CodeAction(action) => {
                     self.inline_deferred_edit(action, content)
                 }
-                CodeActionOrCommand::Command(_) => true,
+                CodeActionResponse::Command(_) => true,
             });
         }
 
@@ -364,7 +364,7 @@ impl Backend {
     ) {
         use crate::text_position::{line_ending, match_line_ending};
 
-        let eol_of = |target: &Url| {
+        let eol_of = |target: &Uri| {
             if target.as_str() == uri {
                 return eol;
             }

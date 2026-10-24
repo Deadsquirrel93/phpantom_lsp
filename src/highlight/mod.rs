@@ -17,7 +17,7 @@
 
 use crate::types::FileContext;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind, SymbolMap, SymbolSpan, VarDefKind};
@@ -117,9 +117,9 @@ impl Backend {
             }
             seen_offsets.insert(span.start);
             Some(if symbol_map.var_def_kind_at(name, span.start).is_some() {
-                DocumentHighlightKind::WRITE
+                DocumentHighlightKind::Write
             } else {
-                DocumentHighlightKind::READ
+                DocumentHighlightKind::Read
             })
         });
 
@@ -137,7 +137,7 @@ impl Backend {
                         def.offset as usize,
                         end_offset as usize,
                     ),
-                    kind: Some(DocumentHighlightKind::WRITE),
+                    kind: Some(DocumentHighlightKind::Write),
                 });
             }
         }
@@ -157,7 +157,7 @@ impl Backend {
     ) -> Vec<DocumentHighlight> {
         collect_highlights(symbol_map, content, |span| {
             (class_span_fqn(&span.kind, span.start, ctx)? == target_fqn)
-                .then_some(DocumentHighlightKind::READ)
+                .then_some(DocumentHighlightKind::Read)
         })
     }
 
@@ -174,10 +174,10 @@ impl Backend {
     ) -> Vec<DocumentHighlight> {
         collect_highlights(symbol_map, content, |span| match &span.kind {
             SymbolKind::MemberAccess { member_name, .. } if member_name == target_name => {
-                Some(DocumentHighlightKind::READ)
+                Some(DocumentHighlightKind::Read)
             }
             SymbolKind::MemberDeclaration { name, .. } if name == target_name => {
-                Some(DocumentHighlightKind::WRITE)
+                Some(DocumentHighlightKind::Write)
             }
             // Also match property declarations that appear as Variable spans.
             SymbolKind::Variable { name }
@@ -186,7 +186,7 @@ impl Backend {
                         .var_def_kind_at(name, span.start)
                         .is_some_and(|k| *k == VarDefKind::Property) =>
             {
-                Some(DocumentHighlightKind::WRITE)
+                Some(DocumentHighlightKind::Write)
             }
             _ => None,
         })
@@ -201,7 +201,7 @@ impl Backend {
     ) -> Vec<DocumentHighlight> {
         collect_highlights(symbol_map, content, |span| {
             matches!(&span.kind, SymbolKind::FunctionCall { name, .. } if name == target_name)
-                .then_some(DocumentHighlightKind::READ)
+                .then_some(DocumentHighlightKind::Read)
         })
     }
 
@@ -214,7 +214,7 @@ impl Backend {
     ) -> Vec<DocumentHighlight> {
         collect_highlights(symbol_map, content, |span| {
             matches!(&span.kind, SymbolKind::ConstantReference { name, .. } if name == target_name)
-                .then_some(DocumentHighlightKind::READ)
+                .then_some(DocumentHighlightKind::Read)
         })
     }
 
@@ -241,7 +241,7 @@ impl Backend {
         collect_highlights(symbol_map, content, |span| {
             ((class_start..=class_end).contains(&span.start)
                 && matches!(span.kind, SymbolKind::SelfStaticParent(kind) if kind == target_kind))
-            .then_some(DocumentHighlightKind::READ)
+            .then_some(DocumentHighlightKind::Read)
         })
     }
 }

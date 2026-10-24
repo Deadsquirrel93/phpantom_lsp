@@ -15,8 +15,8 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 use parking_lot::RwLock;
-use tower_lsp::lsp_types::{
-    DocumentHighlight, DocumentHighlightKind, Position, Range, TextEdit, Url,
+use tower_lsp_server::gen_lsp_types::{
+    DocumentHighlight, DocumentHighlightKind, Position, Range, TextEdit, Uri,
 };
 
 use crate::Backend;
@@ -243,7 +243,7 @@ impl Backend {
                         start: offset_to_position(content, candidate.start as usize),
                         end: offset_to_position(content, candidate.end as usize),
                     },
-                    kind: Some(DocumentHighlightKind::READ),
+                    kind: Some(DocumentHighlightKind::Read),
                 });
             }
         }
@@ -269,7 +269,7 @@ impl Backend {
         &self,
         old_prefix: &str,
         new_prefix: &str,
-        changes: &mut HashMap<Url, Vec<TextEdit>>,
+        changes: &mut HashMap<Uri, Vec<TextEdit>>,
     ) {
         self.collect_framework_name_edits(old_prefix, new_prefix, true, changes);
     }
@@ -280,7 +280,7 @@ impl Backend {
         &self,
         old_fqn: &str,
         new_fqn: &str,
-        changes: &mut HashMap<Url, Vec<TextEdit>>,
+        changes: &mut HashMap<Uri, Vec<TextEdit>>,
     ) {
         self.collect_framework_name_edits(old_fqn, new_fqn, false, changes);
     }
@@ -300,7 +300,7 @@ impl Backend {
         old_name: &str,
         new_name: &str,
         nested: bool,
-        changes: &mut HashMap<Url, Vec<TextEdit>>,
+        changes: &mut HashMap<Uri, Vec<TextEdit>>,
     ) {
         let old_name = normalize_framework_fqn(old_name);
         let new_name = normalize_framework_fqn(new_name);
@@ -333,7 +333,7 @@ impl Backend {
                 else {
                     break;
                 };
-                let Ok(parsed_uri) = Url::parse(uri) else {
+                let Ok(parsed_uri) = Uri::parse(uri) else {
                     break;
                 };
                 let Some(source) = content.get(reference.start as usize..reference.end as usize)
@@ -363,8 +363,8 @@ impl Backend {
 
     pub(crate) fn collect_framework_path_edits_for_directory_renames(
         &self,
-        directory_renames: &[(Url, Url)],
-        changes: &mut HashMap<Url, Vec<TextEdit>>,
+        directory_renames: &[(Uri, Uri)],
+        changes: &mut HashMap<Uri, Vec<TextEdit>>,
     ) {
         if directory_renames.is_empty() {
             return;
@@ -385,7 +385,7 @@ impl Backend {
         }
 
         for (uri, refs) in self.framework_references.read().iter() {
-            let Ok(parsed_uri) = Url::parse(uri) else {
+            let Ok(parsed_uri) = Uri::parse(uri) else {
                 continue;
             };
             let Ok(file_path) = parsed_uri.to_file_path() else {

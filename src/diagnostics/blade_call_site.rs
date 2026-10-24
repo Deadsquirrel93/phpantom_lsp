@@ -26,7 +26,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity};
+use tower_lsp_server::gen_lsp_types::{Diagnostic, DiagnosticSeverity};
 
 use crate::Backend;
 use crate::blade::contract::{AcceptedNames, TemplateContract};
@@ -138,7 +138,7 @@ impl Backend {
                 };
                 out.push(make_diagnostic(
                     range,
-                    DiagnosticSeverity::ERROR,
+                    DiagnosticSeverity::Error,
                     TYPE_MISMATCH_CODE,
                     format!(
                         "View '{}' expects ${} of type {}, got {}",
@@ -202,7 +202,7 @@ impl Backend {
                     };
                     out.push(make_diagnostic(
                         range,
-                        DiagnosticSeverity::ERROR,
+                        DiagnosticSeverity::Error,
                         MISSING_CODE,
                         format!(
                             "View '{}' expects ${} of type {}, which is not passed",
@@ -233,7 +233,7 @@ impl Backend {
                 };
                 out.push(make_diagnostic(
                     range,
-                    DiagnosticSeverity::WARNING,
+                    DiagnosticSeverity::Warning,
                     UNUSED_CODE,
                     format!("View '{}' has no variable ${}", view_name, var.name),
                 ));
@@ -285,7 +285,7 @@ impl Backend {
         };
         out.push(make_diagnostic(
             range,
-            DiagnosticSeverity::ERROR,
+            DiagnosticSeverity::Error,
             TYPE_MISMATCH_CODE,
             format!(
                 "View '{}' expects ${} of type {}, but {} given by the surrounding scope",

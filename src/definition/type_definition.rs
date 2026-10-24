@@ -16,7 +16,7 @@
 use crate::atom::atom;
 use crate::class_lookup::{ResolvedClassLoader, SourceClassLoader, find_class_at_offset};
 use std::sync::Arc;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::php_type::PhpType;

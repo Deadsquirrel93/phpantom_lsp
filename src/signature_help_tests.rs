@@ -366,8 +366,8 @@ fn build_signature_parameter_offsets() {
     // label: "($a, $b): mixed"
     //         0123456789...
     let pi = sig.parameters.unwrap();
-    assert_eq!(pi[0].label, ParameterLabel::LabelOffsets([1, 3])); // "$a"
-    assert_eq!(pi[1].label, ParameterLabel::LabelOffsets([5, 7])); // "$b"
+    assert_eq!(pi[0].label, ParameterInformationLabel::Tuple((1, 3))); // "$a"
+    assert_eq!(pi[1].label, ParameterInformationLabel::Tuple((5, 7))); // "$b"
 }
 
 #[test]
@@ -420,9 +420,9 @@ fn build_signature_with_default_values() {
     // Verify offsets still track the labels correctly.
     let pi = sig.parameters.unwrap();
     // "(" = 1 char, then "string $name = 'World'" = 22 chars
-    assert_eq!(pi[0].label, ParameterLabel::LabelOffsets([1, 23]));
+    assert_eq!(pi[0].label, ParameterInformationLabel::Tuple((1, 23)));
     // ", " = 2 chars, then "int $count = 1" = 14 chars
-    assert_eq!(pi[1].label, ParameterLabel::LabelOffsets([25, 39]));
+    assert_eq!(pi[1].label, ParameterInformationLabel::Tuple((25, 39)));
 }
 
 #[test]

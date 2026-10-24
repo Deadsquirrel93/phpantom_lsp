@@ -35,7 +35,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use phpantom_lsp::Backend;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Assertion extraction ───────────────────────────────────────────────────
 
@@ -1290,17 +1290,8 @@ fn normalize_generator_params(ty: &str) -> String {
 /// Extract plain text from a Hover response.
 fn extract_hover_text(hover: &Hover) -> String {
     match &hover.contents {
-        HoverContents::Markup(mc) => mc.value.clone(),
-        HoverContents::Scalar(MarkedString::String(s)) => s.clone(),
-        HoverContents::Scalar(MarkedString::LanguageString(ls)) => ls.value.clone(),
-        HoverContents::Array(items) => items
-            .iter()
-            .map(|ms| match ms {
-                MarkedString::String(s) => s.clone(),
-                MarkedString::LanguageString(ls) => ls.value.clone(),
-            })
-            .collect::<Vec<_>>()
-            .join("\n"),
+        Contents::MarkupContent(mc) => mc.value.clone(),
+        other => panic!("expected a markup hover, got {other:?}"),
     }
 }
 
@@ -1373,7 +1364,7 @@ fn fixture_uri(path: &Path) -> String {
             .join(path)
     };
 
-    Url::from_file_path(&absolute)
+    Uri::from_file_path(&absolute)
         .expect("assert-type fixture path should convert to a file URI")
         .to_string()
 }

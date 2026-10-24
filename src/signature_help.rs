@@ -13,7 +13,7 @@
 
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::completion::named_args::{
@@ -209,7 +209,7 @@ fn build_signature(
         let start = offset as u32;
         let end = (offset + pl.len()) as u32;
         param_infos.push(ParameterInformation {
-            label: ParameterLabel::LabelOffsets([start, end]),
+            label: ParameterInformationLabel::Tuple((start, end)),
             documentation: build_param_documentation(param),
         });
         offset += pl.len();
@@ -520,10 +520,10 @@ impl Backend {
         Some(SignatureHelp {
             signatures: vec![sig],
             active_signature: Some(0),
-            active_parameter: Some(clamp_active_param(
+            active_parameter: Some(ActiveParameter::Int(clamp_active_param(
                 site.active_parameter,
                 &resolved.parameters,
-            )),
+            ))),
         })
     }
 

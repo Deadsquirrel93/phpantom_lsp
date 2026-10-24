@@ -1,7 +1,7 @@
 //! Function hover: the signature and docblock of a called function, and
 //! the member an unqualified `@see name()` names on the documented class.
 
-use tower_lsp::lsp_types::Hover;
+use tower_lsp_server::gen_lsp_types::Hover;
 
 use crate::Backend;
 use crate::definition::member::MemberKind;

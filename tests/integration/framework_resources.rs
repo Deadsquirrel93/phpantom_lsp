@@ -1,18 +1,18 @@
 use crate::common::{create_psr4_workspace, edits_for_uri, initialize_with_resource_operations};
 use phpantom_lsp::Backend;
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 const COMPOSER: &str = r#"{
     "autoload": { "psr-4": { "App\\": "src/" } }
 }"#;
 
-async fn open_doc(backend: &Backend, uri: Url, language_id: &str, text: &str) {
+async fn open_doc(backend: &Backend, uri: Uri, language_id: &str, text: &str) {
     backend
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri,
-                language_id: language_id.to_string(),
+                language_id: language_id.to_string().into(),
                 version: 1,
                 text: text.to_string(),
             },
@@ -20,11 +20,11 @@ async fn open_doc(backend: &Backend, uri: Url, language_id: &str, text: &str) {
         .await;
 }
 
-fn uri_for(dir: &tempfile::TempDir, rel: &str) -> Url {
-    Url::from_file_path(dir.path().join(rel)).unwrap()
+fn uri_for(dir: &tempfile::TempDir, rel: &str) -> Uri {
+    Uri::from_file_path(dir.path().join(rel)).unwrap()
 }
 
-fn edit_texts_for_uri(edit: &WorkspaceEdit, uri: &Url) -> Vec<String> {
+fn edit_texts_for_uri(edit: &WorkspaceEdit, uri: &Uri) -> Vec<String> {
     edits_for_uri(edit, uri)
         .into_iter()
         .map(|edit| edit.new_text)
@@ -50,7 +50,7 @@ async fn symfony_yaml_service_class_goes_to_php_definition() {
     open_doc(&backend, yaml_uri.clone(), "yaml", services_yaml).await;
 
     let result = backend
-        .goto_definition(GotoDefinitionParams {
+        .goto_definition(DefinitionParams {
             text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: yaml_uri },
                 position: Position::new(1, 15),
@@ -62,7 +62,7 @@ async fn symfony_yaml_service_class_goes_to_php_definition() {
         .unwrap()
         .expect("YAML service class should resolve to PHP class");
 
-    let GotoDefinitionResponse::Scalar(location) = result else {
+    let DefinitionResponse::Definition(Definition::Location(location)) = result else {
         panic!("expected a single definition location");
     };
     assert!(
@@ -127,7 +127,7 @@ async fn class_references_include_symfony_and_doctrine_yaml_xml() {
 
     let refs = backend
         .references(ReferenceParams {
-            text_document_position: TextDocumentPositionParams {
+            text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: user_uri },
                 position: Position::new(2, 7),
             },
@@ -186,7 +186,7 @@ async fn class_rename_updates_symfony_and_doctrine_resources() {
 
     let edit = backend
         .rename(RenameParams {
-            text_document_position: TextDocumentPositionParams {
+            text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: user_uri },
                 position: Position::new(2, 7),
             },
@@ -231,7 +231,7 @@ async fn symfony_route_controller_action_resolves_and_renames_method() {
     open_doc(&backend, routes_uri.clone(), "yaml", routes_yaml).await;
 
     let definition = backend
-        .goto_definition(GotoDefinitionParams {
+        .goto_definition(DefinitionParams {
             text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier {
                     uri: routes_uri.clone(),
@@ -244,14 +244,14 @@ async fn symfony_route_controller_action_resolves_and_renames_method() {
         .await
         .unwrap()
         .expect("controller method should resolve");
-    let GotoDefinitionResponse::Scalar(location) = definition else {
+    let DefinitionResponse::Definition(Definition::Location(location)) = definition else {
         panic!("expected a single method definition");
     };
     assert_eq!(location.range.start.line, 3);
 
     let edit = backend
         .rename(RenameParams {
-            text_document_position: TextDocumentPositionParams {
+            text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier {
                     uri: routes_uri.clone(),
                 },
@@ -286,7 +286,7 @@ const SERVICES_YAML: &str =
 
 /// Rename the `Service` segment of the `App\Service\:` service key, with or
 /// without a client that can move the PSR-4 directory along.
-async fn rename_service_namespace_segment(file_rename: bool) -> (WorkspaceEdit, Url, Url) {
+async fn rename_service_namespace_segment(file_rename: bool) -> (WorkspaceEdit, Uri, Uri) {
     let (backend, dir) = create_psr4_workspace(
         COMPOSER,
         &[
@@ -305,7 +305,7 @@ async fn rename_service_namespace_segment(file_rename: bool) -> (WorkspaceEdit, 
 
     let edit = backend
         .rename(RenameParams {
-            text_document_position: TextDocumentPositionParams {
+            text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier {
                     uri: yaml_uri.clone(),
                 },
@@ -375,7 +375,7 @@ async fn renaming_a_controller_action_from_php_updates_the_route() {
 
     let edit = backend
         .rename(RenameParams {
-            text_document_position: TextDocumentPositionParams {
+            text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier {
                     uri: controller_uri.clone(),
                 },

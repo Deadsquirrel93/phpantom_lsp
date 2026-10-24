@@ -15,7 +15,7 @@ use crate::text_position::position_to_offset;
 use crate::type_engine::conditional_resolution::TemplateContext;
 use crate::type_engine::resolver::{CtxLoaders, FileCtx, ResolutionCtx};
 
-use tower_lsp::lsp_types::Position;
+use tower_lsp_server::gen_lsp_types::Position;
 
 use super::constant_operands::evaluate_constant_operands;
 use super::target_cache::CALLABLE_TARGET_CACHE;

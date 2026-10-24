@@ -1,5 +1,5 @@
 use super::*;
-use tower_lsp::lsp_types::Position;
+use tower_lsp_server::gen_lsp_types::Position;
 
 fn detect_at_end<'a>(content: &'a str, value: &str) -> Option<LaravelStringKeyContext<'a>> {
     let cursor = content.rfind(value)? + value.len();
@@ -15,8 +15,8 @@ fn storage_source(expression: &str) -> String {
 
 fn completion_response_items(response: CompletionResponse) -> Vec<CompletionItem> {
     match response {
-        CompletionResponse::Array(items) => items,
-        CompletionResponse::List(list) => list.items,
+        CompletionResponse::CompletionItemList(items) => items,
+        CompletionResponse::CompletionList(list) => list.items,
     }
 }
 
@@ -82,22 +82,22 @@ fn configured_resource_candidates_include_database_roles_and_null_drivers() {
 /// Whatever a key names decides the icon beside it.
 #[test]
 fn a_string_key_is_iconed_by_what_it_names() {
-    use tower_lsp::lsp_types::CompletionItemKind;
+    use tower_lsp_server::gen_lsp_types::CompletionItemKind;
     for (kind, expected) in [
-        (StringKeyKind::Config, CompletionItemKind::PROPERTY),
+        (StringKeyKind::Config, CompletionItemKind::Property),
         (
             StringKeyKind::ConfigResource(LaravelConfigResource::CacheStore),
-            CompletionItemKind::PROPERTY,
+            CompletionItemKind::Property,
         ),
-        (StringKeyKind::View, CompletionItemKind::FILE),
-        (StringKeyKind::Trans, CompletionItemKind::TEXT),
-        (StringKeyKind::MorphAlias, CompletionItemKind::ENUM_MEMBER),
-        (StringKeyKind::GateAbility, CompletionItemKind::METHOD),
-        (StringKeyKind::Route, CompletionItemKind::VALUE),
-        (StringKeyKind::Command, CompletionItemKind::VALUE),
-        (StringKeyKind::Section, CompletionItemKind::VALUE),
-        (StringKeyKind::Stack, CompletionItemKind::VALUE),
-        (StringKeyKind::ContainerBinding, CompletionItemKind::VALUE),
+        (StringKeyKind::View, CompletionItemKind::File),
+        (StringKeyKind::Trans, CompletionItemKind::Text),
+        (StringKeyKind::MorphAlias, CompletionItemKind::EnumMember),
+        (StringKeyKind::GateAbility, CompletionItemKind::Method),
+        (StringKeyKind::Route, CompletionItemKind::Value),
+        (StringKeyKind::Command, CompletionItemKind::Value),
+        (StringKeyKind::Section, CompletionItemKind::Value),
+        (StringKeyKind::Stack, CompletionItemKind::Value),
+        (StringKeyKind::ContainerBinding, CompletionItemKind::Value),
     ] {
         assert_eq!(string_key_item_kind(&kind), expected, "for {kind:?}");
     }
@@ -914,7 +914,7 @@ fn forget_disk_array_completion_filters_and_edits_the_current_value() {
     );
     assert_eq!(
         items[0].text_edit,
-        Some(CompletionTextEdit::Edit(TextEdit {
+        Some(CompletionItemTextEdit::TextEdit(TextEdit {
             range: Range::new(
                 crate::text_position::offset_to_position(content, cursor - 2),
                 position,
@@ -926,9 +926,11 @@ fn forget_disk_array_completion_filters_and_edits_the_current_value() {
 
 #[test]
 fn completion_response_item_helper_accepts_list_responses() {
-    let items = completion_response_items(CompletionResponse::List(CompletionList {
+    let items = completion_response_items(CompletionResponse::CompletionList(CompletionList {
         is_incomplete: false,
         items: vec![CompletionItem::default()],
+        apply_kind: None,
+        item_defaults: None,
     }));
     assert_eq!(items.len(), 1);
 }
@@ -1214,7 +1216,7 @@ fn route_completion_end_to_end() {
         response.is_some(),
         "try_laravel_string_key_completion should return Some for route('')"
     );
-    if let Some(CompletionResponse::Array(items)) = response {
+    if let Some(CompletionResponse::CompletionItemList(items)) = response {
         let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
         assert!(
             labels.contains(&"home"),

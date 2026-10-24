@@ -1,6 +1,7 @@
+use crate::common::message_text;
 use crate::common::{collect_diagnostics_with, create_test_backend};
 use phpantom_lsp::Backend;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -11,15 +12,18 @@ fn collect(php: &str) -> Vec<Diagnostic> {
         Backend::collect_slow_diagnostics,
     );
     out.retain(|d| {
-        d.code.as_ref().is_some_and(
-            |c| matches!(c, NumberOrString::String(s) if s == "invalid_readonly_write"),
-        )
+        d.code
+            .as_ref()
+            .is_some_and(|c| matches!(c, Code::String(s) if s == "invalid_readonly_write"))
     });
     out
 }
 
 fn messages(php: &str) -> Vec<String> {
-    collect(php).into_iter().map(|d| d.message).collect()
+    collect(php)
+        .into_iter()
+        .map(|d| message_text(&d.message).to_string())
+        .collect()
 }
 
 // ─── Writes from outside the declaring class ────────────────────────────────

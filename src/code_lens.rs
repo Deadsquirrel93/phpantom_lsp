@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::atom::Atom;
@@ -184,7 +184,7 @@ impl Backend {
                     let icon = if proto.is_interface { "◆" } else { "↑" };
                     let title = format!("{} {}::{}", icon, proto.ancestor_name, method.name);
 
-                    let target_uri: Url = match proto.file_uri.parse() {
+                    let target_uri: Uri = match proto.file_uri.parse() {
                         Ok(u) => u,
                         Err(_) => continue,
                     };
@@ -390,6 +390,7 @@ impl Backend {
                     // No handler: the placeholder is text, not an action.
                     command: String::new(),
                     arguments: None,
+                    tooltip: None,
                 }),
                 data: None,
             });
@@ -411,7 +412,7 @@ impl Backend {
     }
 
     fn reference_lens_command(
-        origin_uri: Url,
+        origin_uri: Uri,
         origin_position: Position,
         locations: Vec<Location>,
     ) -> Command {
@@ -425,7 +426,7 @@ impl Backend {
     }
 
     fn implementation_lens_command(
-        origin_uri: Url,
+        origin_uri: Uri,
         origin_position: Position,
         locations: Vec<Location>,
     ) -> Command {
@@ -441,7 +442,7 @@ impl Backend {
     /// A lens command titled with the number of `locations`, which opens
     /// them as a list when clicked.
     fn locations_lens_command(
-        origin_uri: Url,
+        origin_uri: Uri,
         origin_position: Position,
         locations: Vec<Location>,
         singular: &str,
@@ -456,6 +457,7 @@ impl Backend {
                 serde_json::json!(origin_position),
                 serde_json::json!(locations),
             ]),
+            tooltip: None,
         }
     }
 
@@ -783,7 +785,7 @@ impl Backend {
             self.build_code_lens_command(title, location.uri.clone(), location.range.start)
         } else {
             let title = format!("Tests: {} tests", locations.len());
-            let current_uri: Url = match uri.parse() {
+            let current_uri: Uri = match uri.parse() {
                 Ok(u) => u,
                 Err(_) => return None,
             };
@@ -795,6 +797,7 @@ impl Backend {
                     serde_json::json!(range.start),
                     serde_json::json!(locations.iter().map(|(_, l)| l.clone()).collect::<Vec<_>>()),
                 ]),
+                tooltip: None,
             }
         };
 
@@ -827,7 +830,7 @@ impl Backend {
         } else {
             offset_to_position(&self.get_file_content(test_uri)?, offset)
         };
-        let uri: Url = test_uri.parse().ok()?;
+        let uri: Uri = test_uri.parse().ok()?;
 
         Some(Location {
             uri,
@@ -884,7 +887,7 @@ impl Backend {
     pub(crate) fn build_code_lens_command(
         &self,
         title: String,
-        uri: Url,
+        uri: Uri,
         position: Position,
     ) -> Command {
         if self.caps().show_document {
@@ -892,6 +895,7 @@ impl Backend {
                 title,
                 command: "phpantom.navigateToPrototype".to_string(),
                 arguments: Some(vec![serde_json::json!(uri), serde_json::json!(position)]),
+                tooltip: None,
             };
         }
 
@@ -910,6 +914,7 @@ impl Backend {
                 serde_json::json!(position),
                 serde_json::json!([location]),
             ]),
+            tooltip: None,
         }
     }
 

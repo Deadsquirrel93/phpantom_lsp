@@ -1,7 +1,7 @@
 //! Running the diagnostic collectors over one file: the fast pass, and the
 //! slow pass over the whole file or the regions an edit touched.
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::type_engine::resolver::LendsLoaders;

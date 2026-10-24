@@ -5,7 +5,7 @@
 //! parameters and scalar types.  Union types are shown as separate code
 //! blocks divided by a horizontal rule.
 
-use tower_lsp::lsp_types::Hover;
+use tower_lsp_server::gen_lsp_types::Hover;
 
 use crate::Backend;
 use crate::class_lookup::{Fqn, ResolvedClassLoader};

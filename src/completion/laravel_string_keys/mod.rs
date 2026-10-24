@@ -11,7 +11,7 @@
 
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::symbol_map::{LaravelConfigResource, StringKeyKind};
@@ -29,24 +29,24 @@ pub(crate) use context::{ArgumentSlot, attribute_class_start, callable_before_sc
 /// names is what it should look like.
 pub(crate) fn string_key_item_kind(kind: &StringKeyKind) -> CompletionItemKind {
     match kind {
-        StringKeyKind::Config | StringKeyKind::ConfigResource(_) => CompletionItemKind::PROPERTY,
-        StringKeyKind::View | StringKeyKind::TwigTemplate => CompletionItemKind::FILE,
-        StringKeyKind::Trans | StringKeyKind::SymfonyTranslation => CompletionItemKind::TEXT,
-        StringKeyKind::TranslationDomain => CompletionItemKind::MODULE,
-        StringKeyKind::MorphAlias => CompletionItemKind::ENUM_MEMBER,
-        StringKeyKind::GateAbility => CompletionItemKind::METHOD,
-        StringKeyKind::Env => CompletionItemKind::CONSTANT,
-        StringKeyKind::ServiceId => CompletionItemKind::REFERENCE,
-        StringKeyKind::ContainerParameter => CompletionItemKind::PROPERTY,
-        StringKeyKind::SymfonyConfigKey => CompletionItemKind::FIELD,
-        StringKeyKind::SymfonyEvent => CompletionItemKind::EVENT,
-        StringKeyKind::MessengerBus => CompletionItemKind::REFERENCE,
+        StringKeyKind::Config | StringKeyKind::ConfigResource(_) => CompletionItemKind::Property,
+        StringKeyKind::View | StringKeyKind::TwigTemplate => CompletionItemKind::File,
+        StringKeyKind::Trans | StringKeyKind::SymfonyTranslation => CompletionItemKind::Text,
+        StringKeyKind::TranslationDomain => CompletionItemKind::Module,
+        StringKeyKind::MorphAlias => CompletionItemKind::EnumMember,
+        StringKeyKind::GateAbility => CompletionItemKind::Method,
+        StringKeyKind::Env => CompletionItemKind::Constant,
+        StringKeyKind::ServiceId => CompletionItemKind::Reference,
+        StringKeyKind::ContainerParameter => CompletionItemKind::Property,
+        StringKeyKind::SymfonyConfigKey => CompletionItemKind::Field,
+        StringKeyKind::SymfonyEvent => CompletionItemKind::Event,
+        StringKeyKind::MessengerBus => CompletionItemKind::Reference,
         StringKeyKind::Route
         | StringKeyKind::SymfonyRoute
         | StringKeyKind::Command
         | StringKeyKind::Section
         | StringKeyKind::Stack
-        | StringKeyKind::ContainerBinding => CompletionItemKind::VALUE,
+        | StringKeyKind::ContainerBinding => CompletionItemKind::Value,
     }
 }
 
@@ -84,15 +84,15 @@ impl Backend {
             .filter(|alias| alias.starts_with(prefix))
             .map(|alias| CompletionItem {
                 label: alias.clone(),
-                kind: Some(CompletionItemKind::ENUM_MEMBER),
-                text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                kind: Some(CompletionItemKind::EnumMember),
+                text_edit: Some(CompletionItemTextEdit::TextEdit(TextEdit {
                     range,
                     new_text: alias.clone(),
                 })),
                 ..Default::default()
             })
             .collect();
-        Some(CompletionResponse::Array(items))
+        Some(CompletionResponse::CompletionItemList(items))
     }
 
     /// Every name a string key of `kind` could be, unfiltered.
@@ -281,7 +281,7 @@ impl Backend {
 
         string_key_response(
             names,
-            CompletionItemKind::FILE,
+            CompletionItemKind::File,
             content,
             sc.string_content_start,
             position,
@@ -317,12 +317,12 @@ pub(crate) fn string_key_response(
             kind: Some(kind),
             sort_text: Some(format!("{:05}", i)),
             filter_text: Some(name.clone()),
-            text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+            text_edit: Some(CompletionItemTextEdit::TextEdit(TextEdit {
                 range: edit_range,
                 new_text: name,
             })),
             ..Default::default()
         })
         .collect();
-    Some(CompletionResponse::Array(items))
+    Some(CompletionResponse::CompletionItemList(items))
 }

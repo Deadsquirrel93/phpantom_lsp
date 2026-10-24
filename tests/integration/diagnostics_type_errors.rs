@@ -1,9 +1,10 @@
+use crate::common::message_text;
 use crate::common::{
     collect_diagnostics_with, create_test_backend, create_test_backend_with_full_stubs,
     create_test_backend_with_function_stubs, messages_with_code,
 };
 use phpantom_lsp::Backend;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -55,9 +56,9 @@ fn collect_slow_with_full_stubs(php: &str) -> Vec<Diagnostic> {
 
 fn has_type_error(diags: &[Diagnostic]) -> bool {
     diags.iter().any(|d| {
-        d.code.as_ref().is_some_and(
-            |c| matches!(c, NumberOrString::String(s) if s == "type_mismatch_argument"),
-        )
+        d.code
+            .as_ref()
+            .is_some_and(|c| matches!(c, Code::String(s) if s == "type_mismatch_argument"))
     })
 }
 
@@ -439,7 +440,9 @@ function test(): void {
 "#;
     let diags = collect(php);
     assert!(
-        diags.iter().any(|d| d.message.contains("got Customer")),
+        diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("got Customer")),
         "($factory)() should return what $factory() does, got: {diags:?}"
     );
 }
@@ -466,7 +469,8 @@ function test(bool $flag): void {
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("Apple") && d.message.contains("Pear")),
+            .any(|d| message_text(&d.message).contains("Apple")
+                && message_text(&d.message).contains("Pear")),
         "Pear::make() goes through __callStatic, so the call returns Apple|Pear, got: {diags:?}"
     );
 }
@@ -802,9 +806,9 @@ function test(): void {
     let type_diags: Vec<_> = diags
         .iter()
         .filter(|d| {
-            d.code.as_ref().is_some_and(
-                |c| matches!(c, NumberOrString::String(s) if s == "type_mismatch_argument"),
-            )
+            d.code
+                .as_ref()
+                .is_some_and(|c| matches!(c, Code::String(s) if s == "type_mismatch_argument"))
         })
         .collect();
     assert!(
@@ -813,7 +817,7 @@ function test(): void {
     );
     assert_eq!(
         type_diags[0].severity,
-        Some(DiagnosticSeverity::ERROR),
+        Some(DiagnosticSeverity::Error),
         "Type error should be ERROR severity"
     );
     assert_eq!(
@@ -1740,9 +1744,9 @@ namespace B {
     let lines: Vec<u32> = diags
         .iter()
         .filter(|d| {
-            d.code.as_ref().is_some_and(
-                |c| matches!(c, NumberOrString::String(s) if s == "type_mismatch_argument"),
-            )
+            d.code
+                .as_ref()
+                .is_some_and(|c| matches!(c, Code::String(s) if s == "type_mismatch_argument"))
         })
         .map(|d| d.range.start.line)
         .collect();
@@ -1954,9 +1958,7 @@ function probe(string $u, ?string $v, string $ne): void {
     let diags = collect(php);
     let type_errors = diags
         .iter()
-        .filter(
-            |d| matches!(&d.code, Some(NumberOrString::String(c)) if c == "type_mismatch_argument"),
-        )
+        .filter(|d| matches!(&d.code, Some(Code::String(c)) if c == "type_mismatch_argument"))
         .count();
     assert_eq!(type_errors, 3, "got: {diags:?}");
 }
@@ -2096,7 +2098,7 @@ function probe(\BcMath\Number $number, string $plain): void {
 }
 "#;
     let diags = collect_with_full_stubs(php);
-    let messages: Vec<&str> = diags.iter().map(|d| d.message.as_str()).collect();
+    let messages: Vec<&str> = diags.iter().map(|d| message_text(&d.message)).collect();
     assert_eq!(
         messages,
         ["Argument 1 ($value) expects numeric-string, got string"],
@@ -2735,7 +2737,7 @@ function test(array $open, array $ints): void {
 }
 "#;
     let diags = collect(php);
-    let messages: Vec<&str> = diags.iter().map(|d| d.message.as_str()).collect();
+    let messages: Vec<&str> = diags.iter().map(|d| message_text(&d.message)).collect();
     assert_eq!(
         messages,
         [
@@ -4722,7 +4724,7 @@ function test(mixed $password): void {
         .unwrap();
     assert_eq!(
         type_error.severity,
-        Some(DiagnosticSeverity::ERROR),
+        Some(DiagnosticSeverity::Error),
         "default severity must stay ERROR so existing projects see no change"
     );
 }
@@ -4754,7 +4756,7 @@ function test(mixed $password): void {
         .filter(|d| has_type_error(std::slice::from_ref(d)))
         .collect();
     assert_eq!(type_errors.len(), 1, "got {diags:?}");
-    assert_eq!(type_errors[0].severity, Some(DiagnosticSeverity::WARNING));
+    assert_eq!(type_errors[0].severity, Some(DiagnosticSeverity::Warning));
 }
 
 #[test]
@@ -4786,10 +4788,10 @@ function test(?string $a, string|null $b, ?array $c): void {
     assert_eq!(
         severities,
         vec![
-            Some(DiagnosticSeverity::WARNING),
-            Some(DiagnosticSeverity::WARNING),
+            Some(DiagnosticSeverity::Warning),
+            Some(DiagnosticSeverity::Warning),
             // `?array` fails on more than its nullability.
-            Some(DiagnosticSeverity::ERROR),
+            Some(DiagnosticSeverity::Error),
         ],
         "got {diags:?}"
     );
@@ -4810,7 +4812,7 @@ function test(?string $a): void {
         .filter(|d| has_type_error(std::slice::from_ref(d)))
         .collect();
     assert_eq!(type_errors.len(), 1, "got {diags:?}");
-    assert_eq!(type_errors[0].severity, Some(DiagnosticSeverity::ERROR));
+    assert_eq!(type_errors[0].severity, Some(DiagnosticSeverity::Error));
 }
 
 #[test]
@@ -4837,7 +4839,7 @@ function test(array|string $val): void {
         .filter(|d| has_type_error(std::slice::from_ref(d)))
         .collect();
     assert_eq!(type_errors.len(), 1, "got {diags:?}");
-    assert_eq!(type_errors[0].severity, Some(DiagnosticSeverity::ERROR));
+    assert_eq!(type_errors[0].severity, Some(DiagnosticSeverity::Error));
 }
 
 #[test]
@@ -5268,7 +5270,7 @@ function test(): void {
         .iter()
         .filter(|d| {
             d.code
-                == Some(tower_lsp::lsp_types::NumberOrString::String(
+                == Some(tower_lsp_server::gen_lsp_types::Code::String(
                     "type_mismatch_argument".to_string(),
                 ))
         })
@@ -9405,7 +9407,7 @@ fn builtin_enum_case_prefers_stub_over_polyfill_classmap_entry() {
         let mut idx = backend.fqn_uri_index().write();
         idx.insert(
             "RoundingMode".to_string(),
-            Url::from_file_path(&polyfill).unwrap().to_string(),
+            Uri::from_file_path(&polyfill).unwrap().to_string(),
         );
     }
 
@@ -12303,7 +12305,10 @@ function test(DOMDocument $dom): void {
     let mut out = Vec::new();
     backend.collect_argument_type_diagnostics(uri, php, &mut out);
     backend.collect_property_type_diagnostics(uri, php, &mut out);
-    let messages: Vec<String> = out.iter().map(|d| d.message.clone()).collect();
+    let messages: Vec<String> = out
+        .iter()
+        .map(|d| message_text(&d.message).to_string())
+        .collect();
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
@@ -14097,9 +14102,9 @@ function f(Repo $r): void {
     let flagged: Vec<u32> = diags
         .iter()
         .filter(|d| {
-            d.code.as_ref().is_some_and(
-                |c| matches!(c, NumberOrString::String(s) if s == "type_mismatch_argument"),
-            )
+            d.code
+                .as_ref()
+                .is_some_and(|c| matches!(c, Code::String(s) if s == "type_mismatch_argument"))
         })
         .map(|d| d.range.start.line)
         .collect();
@@ -14822,7 +14827,9 @@ final class Holder
 "#;
     let diags = collect_slow_with_full_stubs(php);
     assert!(
-        !diags.iter().any(|d| d.message.contains("'bar' not found")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("'bar' not found")),
         "property_exists() should prove $this->obj->bar exists: {diags:?}"
     );
 }
@@ -14926,7 +14933,8 @@ function run(P $p): void {{
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("got Resp|Prom") || d.message.contains("got Prom|Resp")),
+            .any(|d| message_text(&d.message).contains("got Resp|Prom")
+                || message_text(&d.message).contains("got Prom|Resp")),
         "`bool is false` may go either way: {diags:?}"
     );
 }
@@ -15008,7 +15016,9 @@ function test(string $s): void
 "#;
     let diags = collect_slow(php);
     assert!(
-        !diags.iter().any(|d| d.message.contains("'children'")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("'children'")),
         "`'array'` binds `T` to the literal, so `root()` is an `ArrNode`: {diags:?}"
     );
     let messages = messages_with_code(&diags, "type_mismatch_argument");
@@ -15467,11 +15477,15 @@ namespace App {
 "#;
     let diags = collect(php);
     assert!(
-        diags.iter().any(|d| d.message.contains("got 5")),
+        diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("got 5")),
         "`id(self::NUM)` must bind `T` to the constant's value, got: {diags:?}",
     );
     assert!(
-        !diags.iter().any(|d| d.message.contains("Clash")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("Clash")),
         "`self` is `App\\Clash`, not the class itself as a value, got: {diags:?}",
     );
 }

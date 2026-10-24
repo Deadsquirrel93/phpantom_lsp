@@ -17,7 +17,7 @@
 use std::sync::Arc;
 
 use crate::symbol_map::VarDefKind;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use super::member::{MemberAccessHint, MemberDefinitionCtx, MemberKind};
 use super::{class_keyword_location, point_location};

@@ -53,7 +53,7 @@ use mago_syntax::cst::sequence::TokenSeparatedSequence;
 use mago_syntax::cst::unary::UnaryPrefixOperator;
 use mago_syntax::cst::unset::Unset;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::atom::Atom;
@@ -487,7 +487,7 @@ impl Backend {
 
             out.push(make_diagnostic(
                 range,
-                DiagnosticSeverity::ERROR,
+                DiagnosticSeverity::Error,
                 INVALID_READONLY_WRITE_CODE,
                 message,
             ));

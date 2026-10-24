@@ -12,7 +12,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::diagnostics::checked_byte_range_to_lsp_range;
@@ -38,7 +38,7 @@ impl Backend {
         uri: &str,
         content: &str,
         params: &CodeActionParams,
-        out: &mut Vec<CodeActionOrCommand>,
+        out: &mut Vec<CodeActionResponse>,
     ) {
         // The fix creates a file, which only a client that accepts the
         // `create` resource operation can apply.
@@ -97,14 +97,14 @@ impl Backend {
 
             let diagnostic = make_diagnostic(
                 range,
-                DiagnosticSeverity::WARNING,
+                DiagnosticSeverity::Warning,
                 code,
                 format!("Unknown {}: '{}'", label, key),
             );
 
-            out.push(CodeActionOrCommand::CodeAction(CodeAction {
+            out.push(CodeActionResponse::CodeAction(CodeAction {
                 title: format!("Create missing {} '{}'", label, key),
-                kind: Some(CodeActionKind::QUICKFIX),
+                kind: Some(CodeActionKind::QuickFix),
                 diagnostics: Some(vec![diagnostic]),
                 edit: Some(super::create_file_edit(
                     new_file_uri.clone(),
@@ -119,6 +119,7 @@ impl Backend {
                 is_preferred: Some(true),
                 disabled: None,
                 data: None,
+                tags: None,
             }));
         }
     }

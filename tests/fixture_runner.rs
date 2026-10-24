@@ -10,8 +10,8 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use phpantom_lsp::Backend;
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Embedded stubs ─────────────────────────────────────────────────────────
 // Minimal PHP stubs so that fixture tests mirror real LSP behaviour.
@@ -388,14 +388,14 @@ fn run_fixture(path: &Path, content: String) -> datatest_stable::Result<()> {
 }
 
 /// Build a URI for a fixture file path.
-fn file_uri(path: &str) -> Url {
-    Url::parse(&format!("file:///{path}"))
-        .unwrap_or_else(|_| Url::parse("file:///test.php").unwrap())
+fn file_uri(path: &str) -> Uri {
+    Uri::parse(&format!("file:///{path}"))
+        .unwrap_or_else(|_| Uri::parse("file:///test.php").unwrap())
 }
 
 /// Open all fixture files on the backend via the public `did_open` LSP method.
 /// Returns the URI of the cursor file.
-async fn open_files(backend: &Backend, fixture: &ParsedFixture) -> Url {
+async fn open_files(backend: &Backend, fixture: &ParsedFixture) -> Uri {
     let mut cursor_uri = None;
 
     for (i, file) in fixture.files.iter().enumerate() {
@@ -404,7 +404,7 @@ async fn open_files(backend: &Backend, fixture: &ParsedFixture) -> Url {
         let open_params = DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: uri.clone(),
-                language_id: "php".to_string(),
+                language_id: "php".to_string().into(),
                 version: 0,
                 text: file.content.clone(),
             },
@@ -431,7 +431,7 @@ async fn run_completion(fixture: &ParsedFixture) -> Result<(), String> {
     };
 
     let params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
+        text_document_position_params: TextDocumentPositionParams {
             text_document: TextDocumentIdentifier { uri },
             position,
         },
@@ -446,8 +446,8 @@ async fn run_completion(fixture: &ParsedFixture) -> Result<(), String> {
         .map_err(|e| format!("Completion request failed: {e}"))?;
 
     let items = match response {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => Vec::new(),
     };
 
@@ -487,17 +487,8 @@ async fn run_completion(fixture: &ParsedFixture) -> Result<(), String> {
 /// Extract the text content from a Hover response.
 fn extract_hover_text(hover: &Hover) -> String {
     match &hover.contents {
-        HoverContents::Markup(mc) => mc.value.clone(),
-        HoverContents::Scalar(MarkedString::String(s)) => s.clone(),
-        HoverContents::Scalar(MarkedString::LanguageString(ls)) => ls.value.clone(),
-        HoverContents::Array(items) => items
-            .iter()
-            .map(|ms| match ms {
-                MarkedString::String(s) => s.clone(),
-                MarkedString::LanguageString(ls) => ls.value.clone(),
-            })
-            .collect::<Vec<_>>()
-            .join("\n"),
+        Contents::MarkupContent(mc) => mc.value.clone(),
+        other => panic!("expected a markup hover, got {other:?}"),
     }
 }
 
@@ -615,7 +606,7 @@ async fn run_definition(fixture: &ParsedFixture) -> Result<(), String> {
         character: fixture.cursor_char,
     };
 
-    let params = GotoDefinitionParams {
+    let params = DefinitionParams {
         text_document_position_params: TextDocumentPositionParams {
             text_document: TextDocumentIdentifier { uri: uri.clone() },
             position,
@@ -634,9 +625,9 @@ async fn run_definition(fixture: &ParsedFixture) -> Result<(), String> {
     }
 
     let locations = match result {
-        Some(GotoDefinitionResponse::Scalar(loc)) => vec![loc],
-        Some(GotoDefinitionResponse::Array(locs)) => locs,
-        Some(GotoDefinitionResponse::Link(links)) => links
+        Some(DefinitionResponse::Definition(Definition::Location(loc))) => vec![loc],
+        Some(DefinitionResponse::Definition(Definition::LocationList(locs))) => locs,
+        Some(DefinitionResponse::DefinitionLinkList(links)) => links
             .into_iter()
             .map(|link| Location {
                 uri: link.target_uri,
@@ -746,7 +737,10 @@ async fn run_signature_help(fixture: &ParsedFixture) -> Result<(), String> {
     }
 
     if let Some(expected_active) = fixture.meta.expect_sig_active {
-        let actual_active = sh.active_parameter.unwrap_or(0);
+        let actual_active = match sh.active_parameter {
+            Some(ActiveParameter::Int(n)) => n,
+            Some(ActiveParameter::Null) | None => 0,
+        };
         if actual_active != expected_active {
             return Err(format!(
                 "Expected active parameter {expected_active}, got {actual_active}"
@@ -762,10 +756,10 @@ async fn run_signature_help(fixture: &ParsedFixture) -> Result<(), String> {
                 params
                     .iter()
                     .map(|p| match &p.label {
-                        ParameterLabel::LabelOffsets([start, end]) => {
+                        ParameterInformationLabel::Tuple((start, end)) => {
                             sig.label[*start as usize..*end as usize].to_string()
                         }
-                        ParameterLabel::Simple(s) => s.clone(),
+                        ParameterInformationLabel::String(s) => s.clone(),
                     })
                     .collect()
             })

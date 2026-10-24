@@ -20,7 +20,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::class_lookup::{ResolvedClassLoader, find_class_at_offset};
@@ -361,10 +361,10 @@ fn deprecated_diagnostic(
 
     make_tagged_diagnostic(
         range,
-        DiagnosticSeverity::HINT,
+        DiagnosticSeverity::Hint,
         "deprecated_usage",
         message,
-        Some(DiagnosticTag::DEPRECATED),
+        Some(DiagnosticTag::Deprecated),
     )
 }
 

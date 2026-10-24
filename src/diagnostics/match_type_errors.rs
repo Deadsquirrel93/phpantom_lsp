@@ -15,7 +15,7 @@ use mago_syntax::cst::literal::Literal;
 use mago_syntax::cst::unary::UnaryPrefixOperator;
 use mago_syntax::walker::Walker;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::parser::{with_parse_cache, with_parsed_program};
@@ -120,7 +120,7 @@ impl Backend {
             };
             out.push(make_diagnostic(
                 range,
-                DiagnosticSeverity::WARNING,
+                DiagnosticSeverity::Warning,
                 "unreachable_match_arm",
                 format!(
                     "Match arm of type '{}' will never match subject of type '{}' (match uses ===)",

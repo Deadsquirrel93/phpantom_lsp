@@ -26,7 +26,7 @@ mod see_refs;
 mod templates;
 mod variable;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::class_lookup::find_class_at_offset;

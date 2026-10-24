@@ -4,7 +4,7 @@
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 
@@ -200,7 +200,7 @@ impl Backend {
     /// value to skip the refresh.  Always `false` in push mode: the set
     /// is delivered inline, so there is nothing to re-pull.
     pub(crate) async fn assemble_and_push(&self, uri_str: &str) -> bool {
-        let uri = match uri_str.parse::<Url>() {
+        let uri = match uri_str.parse::<Uri>() {
             Ok(u) => u,
             Err(_) => return false,
         };
@@ -763,7 +763,7 @@ impl Backend {
             None => return,
         };
 
-        let uri = match uri_str.parse::<Url>() {
+        let uri = match uri_str.parse::<Uri>() {
             Ok(u) => u,
             Err(_) => return,
         };

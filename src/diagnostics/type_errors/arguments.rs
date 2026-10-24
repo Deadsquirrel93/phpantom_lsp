@@ -11,7 +11,7 @@ use mago_syntax::cst::argument::Argument;
 use mago_syntax::cst::expression::Expression;
 use mago_syntax::cst::literal::Literal;
 use mago_syntax::walker::Walker;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
@@ -781,7 +781,7 @@ impl ArgumentCheck<'_> {
         {
             out.push(make_diagnostic(
                 range,
-                DiagnosticSeverity::WARNING,
+                DiagnosticSeverity::Warning,
                 "invalid_laravel_view",
                 format!("Unknown view: '{view}'"),
             ));
@@ -817,7 +817,7 @@ impl ArgumentCheck<'_> {
             if !found && let Some(range) = self.range(*lit_start, *lit_end) {
                 out.push(make_diagnostic(
                     range,
-                    DiagnosticSeverity::ERROR,
+                    DiagnosticSeverity::Error,
                     TYPE_MISMATCH_ARGUMENT_CODE,
                     format!(
                         "'{}' is not a known property of {}",
@@ -986,9 +986,9 @@ impl ArgumentCheck<'_> {
         // than a type gap. Projects can opt into treating that
         // narrower case as a warning.
         let severity = if only_null_unsatisfied && self.downgrade_nullable_mismatch {
-            DiagnosticSeverity::WARNING
+            DiagnosticSeverity::Warning
         } else {
-            DiagnosticSeverity::ERROR
+            DiagnosticSeverity::Error
         };
         (message, severity)
     }

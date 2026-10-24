@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use parking_lot::{Mutex, RwLock};
-use tower_lsp::Client;
+use tower_lsp_server::Client;
 
 use crate::backend::external_tool_worker::ExternalToolWorker;
 use crate::backend::requests::WholeFileCoalesce;

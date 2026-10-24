@@ -5,13 +5,14 @@
 //!
 //! Each type case hovers the variable at the `$x; // here` line and
 //! compares the type the hover reports.
+use crate::common::message_text;
 
 use crate::common::{
     collect_diagnostics_with, create_test_backend, create_test_backend_with_full_stubs, hover_at,
     hover_text,
 };
 use phpantom_lsp::Backend;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 /// The type hover reports for the variable on the line marked `// here`.
 fn type_at_marker(php: &str) -> String {
@@ -39,11 +40,11 @@ fn argument_type_errors(php: &str) -> Vec<String> {
     )
     .into_iter()
     .filter(|d| {
-        d.code.as_ref().is_some_and(
-            |c| matches!(c, NumberOrString::String(s) if s == "type_mismatch_argument"),
-        )
+        d.code
+            .as_ref()
+            .is_some_and(|c| matches!(c, Code::String(s) if s == "type_mismatch_argument"))
     })
-    .map(|d| d.message)
+    .map(|d| message_text(&d.message).to_string())
     .collect()
 }
 

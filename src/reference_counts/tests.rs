@@ -1,6 +1,6 @@
 use super::cache::*;
 use super::*;
-use tower_lsp::lsp_types::{CodeLens, Position, Range, Url};
+use tower_lsp_server::gen_lsp_types::{CodeLens, Position, Range, Uri};
 
 const URI: &str = "file:///test.php";
 
@@ -46,7 +46,7 @@ fn count_on_line(lenses: &[CodeLens], line: u32) -> Option<String> {
 fn exact_location_cache_is_bounded_and_interns_uris() {
     let cache = MemberRefCounts::default();
     let location = Location {
-        uri: Url::parse("file:///uses.php").unwrap(),
+        uri: Uri::parse("file:///uses.php").unwrap(),
         range: Range::new(Position::new(1, 2), Position::new(1, 6)),
     };
 
@@ -104,7 +104,7 @@ fn invalidate_member_of_a_cached_name_bumps_the_epoch() {
 fn invalidate_locations_in_an_unrelated_file_does_not_bump_the_epoch() {
     let cache = MemberRefCounts::default();
     let location = Location {
-        uri: Url::parse("file:///uses.php").unwrap(),
+        uri: Uri::parse("file:///uses.php").unwrap(),
         range: Range::new(Position::new(1, 2), Position::new(1, 6)),
     };
     cache.store(
@@ -125,7 +125,7 @@ fn invalidate_locations_in_an_unrelated_file_does_not_bump_the_epoch() {
 fn invalidate_locations_in_a_cached_file_bumps_the_epoch() {
     let cache = MemberRefCounts::default();
     let location = Location {
-        uri: Url::parse("file:///uses.php").unwrap(),
+        uri: Uri::parse("file:///uses.php").unwrap(),
         range: Range::new(Position::new(1, 2), Position::new(1, 6)),
     };
     cache.store(

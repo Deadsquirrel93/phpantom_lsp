@@ -1,7 +1,8 @@
 #[cfg(test)]
 mod tests {
     use crate::common::collect_diagnostics_with;
-    use tower_lsp::lsp_types::*;
+    use crate::common::message_text;
+    use tower_lsp_server::gen_lsp_types::*;
 
     use phpantom_lsp::Backend;
 
@@ -35,8 +36,8 @@ $x = new Foo();
 "#,
         );
         assert_eq!(diags.len(), 1);
-        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::ERROR));
-        assert!(diags[0].message.contains("abstract"));
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Error));
+        assert!(message_text(&diags[0].message).contains("abstract"));
     }
 
     #[test]
@@ -48,8 +49,8 @@ $x = new Foo();
 "#,
         );
         assert_eq!(diags.len(), 1);
-        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::ERROR));
-        assert!(diags[0].message.contains("interface"));
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Error));
+        assert!(message_text(&diags[0].message).contains("interface"));
     }
 
     #[test]
@@ -61,8 +62,8 @@ $x = new Foo();
 "#,
         );
         assert_eq!(diags.len(), 1);
-        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::ERROR));
-        assert!(diags[0].message.contains("trait"));
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Error));
+        assert!(message_text(&diags[0].message).contains("trait"));
     }
 
     #[test]
@@ -74,8 +75,8 @@ $x = new Color();
 "#,
         );
         assert_eq!(diags.len(), 1);
-        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::ERROR));
-        assert!(diags[0].message.contains("enum"));
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Error));
+        assert!(message_text(&diags[0].message).contains("enum"));
     }
 
     #[test]
@@ -96,11 +97,8 @@ function slashed(): void {
         );
         assert_eq!(diags.len(), 2, "got: {diags:?}");
         for d in &diags {
-            assert_eq!(d.severity, Some(DiagnosticSeverity::ERROR));
-            assert!(
-                d.message
-                    .contains("Cannot instantiate interface 'App\\Shape'")
-            );
+            assert_eq!(d.severity, Some(DiagnosticSeverity::Error));
+            assert!(message_text(&d.message).contains("Cannot instantiate interface 'App\\Shape'"));
         }
         assert_eq!(diags[0].range.start, Position::new(5, 8));
         assert_eq!(diags[0].range.end, Position::new(5, 10));
@@ -118,7 +116,7 @@ function f(): void {
 "#,
         );
         assert_eq!(diags.len(), 1, "got: {diags:?}");
-        assert!(diags[0].message.contains("abstract"));
+        assert!(message_text(&diags[0].message).contains("abstract"));
     }
 
     #[test]
@@ -188,8 +186,8 @@ class Child extends Base {}
 "#,
         );
         assert_eq!(diags.len(), 1);
-        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::ERROR));
-        assert!(diags[0].message.contains("final"));
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Error));
+        assert!(message_text(&diags[0].message).contains("final"));
     }
 
     #[test]
@@ -201,8 +199,8 @@ class Child extends Iface {}
 "#,
         );
         assert_eq!(diags.len(), 1);
-        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::ERROR));
-        assert!(diags[0].message.contains("interface"));
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Error));
+        assert!(message_text(&diags[0].message).contains("interface"));
     }
 
     #[test]
@@ -214,8 +212,8 @@ class Child extends MyTrait {}
 "#,
         );
         assert_eq!(diags.len(), 1);
-        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::ERROR));
-        assert!(diags[0].message.contains("trait"));
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Error));
+        assert!(message_text(&diags[0].message).contains("trait"));
     }
 
     #[test]
@@ -227,8 +225,8 @@ class Child extends Color {}
 "#,
         );
         assert_eq!(diags.len(), 1);
-        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::ERROR));
-        assert!(diags[0].message.contains("enum"));
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Error));
+        assert!(message_text(&diags[0].message).contains("enum"));
     }
 
     // ── extends (interface) ─────────────────────────────────────────
@@ -253,8 +251,8 @@ interface Child extends Foo {}
 "#,
         );
         assert_eq!(diags.len(), 1);
-        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::ERROR));
-        assert!(diags[0].message.contains("class"));
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Error));
+        assert!(message_text(&diags[0].message).contains("class"));
     }
 
     #[test]
@@ -266,8 +264,8 @@ interface Child extends MyTrait {}
 "#,
         );
         assert_eq!(diags.len(), 1);
-        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::ERROR));
-        assert!(diags[0].message.contains("trait"));
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Error));
+        assert!(message_text(&diags[0].message).contains("trait"));
     }
 
     // ── implements ──────────────────────────────────────────────────
@@ -292,8 +290,8 @@ class Foo implements Base {}
 "#,
         );
         assert_eq!(diags.len(), 1);
-        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::ERROR));
-        assert!(diags[0].message.contains("class"));
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Error));
+        assert!(message_text(&diags[0].message).contains("class"));
     }
 
     #[test]
@@ -305,8 +303,8 @@ class Foo implements MyTrait {}
 "#,
         );
         assert_eq!(diags.len(), 1);
-        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::ERROR));
-        assert!(diags[0].message.contains("trait"));
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Error));
+        assert!(message_text(&diags[0].message).contains("trait"));
     }
 
     #[test]
@@ -342,8 +340,8 @@ class Foo { use Base; }
 "#,
         );
         assert_eq!(diags.len(), 1);
-        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::ERROR));
-        assert!(diags[0].message.contains("class"));
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Error));
+        assert!(message_text(&diags[0].message).contains("class"));
     }
 
     #[test]
@@ -355,8 +353,8 @@ class Foo { use Iface; }
 "#,
         );
         assert_eq!(diags.len(), 1);
-        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::ERROR));
-        assert!(diags[0].message.contains("interface"));
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Error));
+        assert!(message_text(&diags[0].message).contains("interface"));
     }
 
     #[test]
@@ -368,8 +366,8 @@ class Foo { use Color; }
 "#,
         );
         assert_eq!(diags.len(), 1);
-        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::ERROR));
-        assert!(diags[0].message.contains("enum"));
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Error));
+        assert!(message_text(&diags[0].message).contains("enum"));
     }
 
     // ── instanceof ──────────────────────────────────────────────────
@@ -405,8 +403,8 @@ function test($x) { return $x instanceof MyTrait; }
 "#,
         );
         assert_eq!(diags.len(), 1);
-        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::WARNING));
-        assert!(diags[0].message.contains("false"));
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Warning));
+        assert!(message_text(&diags[0].message).contains("false"));
     }
 
     // ── catch ───────────────────────────────────────────────────────
@@ -435,8 +433,8 @@ function test() {
 "#,
         );
         assert_eq!(diags.len(), 1);
-        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::WARNING));
-        assert!(diags[0].message.contains("Trait"));
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Warning));
+        assert!(message_text(&diags[0].message).contains("Trait"));
     }
 
     #[test]
@@ -450,8 +448,8 @@ function test() {
 "#,
         );
         assert_eq!(diags.len(), 1);
-        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::ERROR));
-        assert!(diags[0].message.contains("Enum"));
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Error));
+        assert!(message_text(&diags[0].message).contains("Enum"));
     }
 
     #[test]
@@ -465,8 +463,8 @@ function test() {
 "#,
         );
         assert_eq!(diags.len(), 1);
-        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::ERROR));
-        assert!(diags[0].message.contains("Throwable"));
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Error));
+        assert!(message_text(&diags[0].message).contains("Throwable"));
     }
 
     // ── type hints ──────────────────────────────────────────────────
@@ -504,8 +502,11 @@ function test(MyTrait $x): MyTrait { return $x; }
         // One for parameter type, one for return type.
         assert_eq!(diags.len(), 2);
         for d in &diags {
-            assert_eq!(d.severity, Some(DiagnosticSeverity::WARNING));
-            assert!(d.message.contains("trait") || d.message.contains("Trait"));
+            assert_eq!(d.severity, Some(DiagnosticSeverity::Warning));
+            assert!(
+                message_text(&d.message).contains("trait")
+                    || message_text(&d.message).contains("Trait")
+            );
         }
     }
 
@@ -520,7 +521,7 @@ class Foo {
 "#,
         );
         assert_eq!(diags.len(), 1);
-        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::WARNING));
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Warning));
     }
 
     // ── diagnostic metadata ─────────────────────────────────────────
@@ -536,7 +537,7 @@ class Foo extends Iface {}
         assert_eq!(diags.len(), 1);
         assert_eq!(
             diags[0].code,
-            Some(NumberOrString::String("invalid_class_kind".to_string()))
+            Some(Code::String("invalid_class_kind".to_string()))
         );
         assert_eq!(diags[0].source, Some("phpantom".to_string()));
     }
@@ -631,7 +632,7 @@ function test(?MyTrait $x) {}
 "#,
         );
         assert_eq!(diags.len(), 1);
-        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::WARNING));
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Warning));
     }
 
     #[test]
@@ -644,8 +645,8 @@ function test(Foo|MyTrait $x) {}
 "#,
         );
         assert_eq!(diags.len(), 1);
-        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::WARNING));
-        assert!(diags[0].message.contains("MyTrait"));
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Warning));
+        assert!(message_text(&diags[0].message).contains("MyTrait"));
     }
 
     /// A stored ancestor is the class it names, not whatever the checking

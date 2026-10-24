@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::class_lookup::ResolvedClassLoader;
@@ -93,7 +93,7 @@ pub(crate) fn collect_type_check<S>(
             let range = backend.offset_range_to_lsp_range(uri, content, start, end)?;
             Some(make_diagnostic(
                 range,
-                DiagnosticSeverity::ERROR,
+                DiagnosticSeverity::Error,
                 code,
                 message,
             ))
@@ -417,8 +417,8 @@ pub(crate) fn make_diagnostic(
 /// [`make_diagnostic`], carrying a `DiagnosticTag`.
 ///
 /// The tag is what makes an editor render the range as dimmed
-/// ([`DiagnosticTag::UNNECESSARY`]) or struck through
-/// ([`DiagnosticTag::DEPRECATED`]) rather than underlining it.
+/// ([`DiagnosticTag::Unnecessary`]) or struck through
+/// ([`DiagnosticTag::Deprecated`]) rather than underlining it.
 pub(crate) fn make_tagged_diagnostic(
     range: Range,
     severity: DiagnosticSeverity,
@@ -429,10 +429,10 @@ pub(crate) fn make_tagged_diagnostic(
     Diagnostic {
         range,
         severity: Some(severity),
-        code: Some(NumberOrString::String(code.to_string())),
+        code: Some(Code::String(code.to_string())),
         code_description: None,
         source: Some("phpantom".to_string()),
-        message,
+        message: message.into(),
         related_information: None,
         tags: tag.map(|t| vec![t]),
         data: None,

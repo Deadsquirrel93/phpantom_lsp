@@ -13,8 +13,8 @@
 //! callable to obtain parameter metadata, and emits [`InlayHint`]
 //! entries for arguments that would benefit from a label.
 
-use tower_lsp::jsonrpc;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
+use tower_lsp_server::jsonrpc;
 
 use crate::Backend;
 use crate::symbol_map::{CallSite, CallSites, UntypedClosureSite};
@@ -24,8 +24,7 @@ use crate::types::FileContext;
 impl Backend {
     /// Entry point for the `textDocument/inlayHint` request.
     ///
-    /// Called by the native [`LanguageServer::inlay_hint`] trait method
-    /// (available since `tower-lsp` 0.19).
+    /// Called by the native [`LanguageServer::inlay_hint`] trait method.
     pub async fn inlay_hint_request(
         &self,
         params: InlayHintParams,
@@ -260,13 +259,13 @@ impl Backend {
 
             hints.push(InlayHint {
                 position: hint_position,
-                label: InlayHintLabel::String(label_text),
-                kind: Some(InlayHintKind::PARAMETER),
+                label: Label::String(label_text),
+                kind: Some(InlayHintKind::Parameter),
                 text_edits: None,
                 tooltip: param
                     .type_hint
                     .as_ref()
-                    .map(|t| InlayHintTooltip::String(format!("{} {}", t, param.name))),
+                    .map(|t| Tooltip::String(format!("{} {}", t, param.name))),
                 padding_left: None,
                 padding_right: Some(true),
                 data: None,
@@ -366,8 +365,8 @@ impl Backend {
 
                         hints.push(InlayHint {
                             position: hint_position,
-                            label: InlayHintLabel::String(format!("{} ", type_str)),
-                            kind: Some(InlayHintKind::TYPE),
+                            label: Label::String(format!("{} ", type_str)),
+                            kind: Some(InlayHintKind::Type),
                             text_edits: None,
                             tooltip: None,
                             padding_left: None,
@@ -389,8 +388,8 @@ impl Backend {
 
                     hints.push(InlayHint {
                         position: hint_position,
-                        label: InlayHintLabel::String(format!(": {}", type_str)),
-                        kind: Some(InlayHintKind::TYPE),
+                        label: Label::String(format!(": {}", type_str)),
+                        kind: Some(InlayHintKind::Type),
                         text_edits: None,
                         tooltip: None,
                         padding_left: None,

@@ -18,7 +18,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use mago_syntax::cst::*;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::class_lookup::{Fqn, ResolvedClassLoader};
@@ -279,19 +279,19 @@ fn check_kind_in_context(
             // Cannot instantiate abstract classes, interfaces, traits, or enums.
             match kind {
                 ClassLikeKind::Interface => Some((
-                    DiagnosticSeverity::ERROR,
+                    DiagnosticSeverity::Error,
                     format!("Cannot instantiate interface '{}'", fqn),
                 )),
                 ClassLikeKind::Trait => Some((
-                    DiagnosticSeverity::ERROR,
+                    DiagnosticSeverity::Error,
                     format!("Cannot instantiate trait '{}'", fqn),
                 )),
                 ClassLikeKind::Enum => Some((
-                    DiagnosticSeverity::ERROR,
+                    DiagnosticSeverity::Error,
                     format!("Cannot instantiate enum '{}'", fqn),
                 )),
                 ClassLikeKind::Class if class.is_abstract => Some((
-                    DiagnosticSeverity::ERROR,
+                    DiagnosticSeverity::Error,
                     format!("Cannot instantiate abstract class '{}'", fqn),
                 )),
                 _ => None,
@@ -301,25 +301,25 @@ fn check_kind_in_context(
             // `class A extends X` — X must be a non-final class.
             match kind {
                 ClassLikeKind::Interface => Some((
-                    DiagnosticSeverity::ERROR,
+                    DiagnosticSeverity::Error,
                     format!(
                         "'{}' is an interface and cannot be used in 'extends' for a class (use 'implements' instead)",
                         fqn
                     ),
                 )),
                 ClassLikeKind::Trait => Some((
-                    DiagnosticSeverity::ERROR,
+                    DiagnosticSeverity::Error,
                     format!(
                         "'{}' is a trait and cannot be used in 'extends' (use 'use' inside the class body instead)",
                         fqn
                     ),
                 )),
                 ClassLikeKind::Enum => Some((
-                    DiagnosticSeverity::ERROR,
+                    DiagnosticSeverity::Error,
                     format!("'{}' is an enum and cannot be extended", fqn),
                 )),
                 ClassLikeKind::Class if class.is_final => Some((
-                    DiagnosticSeverity::ERROR,
+                    DiagnosticSeverity::Error,
                     format!("Cannot extend final class '{}'", fqn),
                 )),
                 _ => None,
@@ -329,21 +329,21 @@ fn check_kind_in_context(
             // `interface A extends X` — X must be an interface.
             match kind {
                 ClassLikeKind::Class => Some((
-                    DiagnosticSeverity::ERROR,
+                    DiagnosticSeverity::Error,
                     format!(
                         "'{}' is a class, but interfaces can only extend other interfaces",
                         fqn
                     ),
                 )),
                 ClassLikeKind::Trait => Some((
-                    DiagnosticSeverity::ERROR,
+                    DiagnosticSeverity::Error,
                     format!(
                         "'{}' is a trait, but interfaces can only extend other interfaces",
                         fqn
                     ),
                 )),
                 ClassLikeKind::Enum => Some((
-                    DiagnosticSeverity::ERROR,
+                    DiagnosticSeverity::Error,
                     format!(
                         "'{}' is an enum, but interfaces can only extend other interfaces",
                         fqn
@@ -356,21 +356,21 @@ fn check_kind_in_context(
             // `class A implements X` / `enum A implements X` — X must be an interface.
             match kind {
                 ClassLikeKind::Class => Some((
-                    DiagnosticSeverity::ERROR,
+                    DiagnosticSeverity::Error,
                     format!(
                         "'{}' is a class, not an interface (use 'extends' to inherit from a class)",
                         fqn
                     ),
                 )),
                 ClassLikeKind::Trait => Some((
-                    DiagnosticSeverity::ERROR,
+                    DiagnosticSeverity::Error,
                     format!(
                         "'{}' is a trait, not an interface (use 'use' inside the class body for traits)",
                         fqn
                     ),
                 )),
                 ClassLikeKind::Enum => Some((
-                    DiagnosticSeverity::ERROR,
+                    DiagnosticSeverity::Error,
                     format!("'{}' is an enum, not an interface", fqn),
                 )),
                 _ => None,
@@ -380,21 +380,21 @@ fn check_kind_in_context(
             // `class A { use X; }` — X must be a trait.
             match kind {
                 ClassLikeKind::Class => Some((
-                    DiagnosticSeverity::ERROR,
+                    DiagnosticSeverity::Error,
                     format!(
                         "'{}' is a class, not a trait (use 'extends' to inherit from a class)",
                         fqn
                     ),
                 )),
                 ClassLikeKind::Interface => Some((
-                    DiagnosticSeverity::ERROR,
+                    DiagnosticSeverity::Error,
                     format!(
                         "'{}' is an interface, not a trait (use 'implements' for interfaces)",
                         fqn
                     ),
                 )),
                 ClassLikeKind::Enum => Some((
-                    DiagnosticSeverity::ERROR,
+                    DiagnosticSeverity::Error,
                     format!("'{}' is an enum, not a trait", fqn),
                 )),
                 _ => None,
@@ -404,7 +404,7 @@ fn check_kind_in_context(
             // `$x instanceof X` — traits always evaluate to false.
             if kind == ClassLikeKind::Trait {
                 Some((
-                    DiagnosticSeverity::WARNING,
+                    DiagnosticSeverity::Warning,
                     format!(
                         "'instanceof' with trait '{}' always evaluates to false",
                         fqn
@@ -418,11 +418,11 @@ fn check_kind_in_context(
             // `catch (X $e)` — traits can never catch, non-Throwable is an error.
             match kind {
                 ClassLikeKind::Trait => Some((
-                    DiagnosticSeverity::WARNING,
+                    DiagnosticSeverity::Warning,
                     format!("Trait '{}' in catch block will never catch anything", fqn),
                 )),
                 ClassLikeKind::Enum => Some((
-                    DiagnosticSeverity::ERROR,
+                    DiagnosticSeverity::Error,
                     format!(
                         "Enum '{}' cannot be caught (only classes and interfaces that implement Throwable can be caught)",
                         fqn
@@ -431,7 +431,7 @@ fn check_kind_in_context(
                 ClassLikeKind::Class | ClassLikeKind::Interface => {
                     if !is_throwable(class, class_loader) {
                         Some((
-                            DiagnosticSeverity::ERROR,
+                            DiagnosticSeverity::Error,
                             format!(
                                 "'{}' does not implement Throwable and cannot be caught",
                                 fqn
@@ -447,7 +447,7 @@ fn check_kind_in_context(
             // Traits in type-hint positions — type check always fails.
             if kind == ClassLikeKind::Trait {
                 Some((
-                    DiagnosticSeverity::WARNING,
+                    DiagnosticSeverity::Warning,
                     format!(
                         "Trait '{}' used as a type hint will always fail type checking",
                         fqn

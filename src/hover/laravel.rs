@@ -4,7 +4,7 @@
 //! Artisan command's own arguments and options, and the column a
 //! `model-property<Model>` string names.
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::class_lookup::Fqn;
@@ -25,7 +25,7 @@ impl Backend {
         key: &str,
         uri: &str,
         dir: &str,
-    ) -> Option<(Url, String)> {
+    ) -> Option<(Uri, String)> {
         let location =
             crate::virtual_members::laravel::resolve_laravel_string_key(self, kind, key, uri)
                 .into_iter()

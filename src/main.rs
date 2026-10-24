@@ -14,7 +14,7 @@ use phpantom_lsp::config;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::net::TcpListener;
 #[cfg(not(target_arch = "wasm32"))]
-use tower_lsp::{LspService, Server};
+use tower_lsp_server::{LspService, Server};
 
 const STYLES: Styles = Styles::styled()
     .header(AnsiColor::Yellow.on_default().bold())

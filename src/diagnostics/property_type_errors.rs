@@ -21,7 +21,7 @@ use mago_syntax::cst::expression::Expression;
 use mago_syntax::cst::statement::Statement;
 use mago_syntax::cst::variable::Variable;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::class_lookup::{Fqn, ResolvedClassLoader};

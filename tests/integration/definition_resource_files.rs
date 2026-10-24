@@ -2,8 +2,8 @@ use crate::common::{
     create_psr4_workspace, goto_definition_at, open_document, references_response,
 };
 use phpantom_lsp::Backend;
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 const COMPOSER: &str = r#"{
     "autoload": { "psr-4": { "App\\": "src/" } }
@@ -22,11 +22,11 @@ fn position_in(content: &str, needle: &str, inside: usize) -> Position {
 
 async fn definition_at(
     backend: &Backend,
-    uri: Url,
+    uri: Uri,
     content: &str,
     needle: &str,
     inside: usize,
-) -> Option<GotoDefinitionResponse> {
+) -> Option<DefinitionResponse> {
     let position = position_in(content, needle, inside);
     goto_definition_at(backend, &uri, position.line, position.character).await
 }
@@ -46,7 +46,7 @@ async fn navigates_php_classes_from_arbitrary_yaml_keys_and_values() {
             ("schema/paths/playlists.yaml", yaml),
         ],
     );
-    let yaml_uri = Url::from_file_path(dir.path().join("schema/paths/playlists.yaml")).unwrap();
+    let yaml_uri = Uri::from_file_path(dir.path().join("schema/paths/playlists.yaml")).unwrap();
     open_document(&backend, &yaml_uri, "yaml", yaml).await;
 
     for (needle, inside) in [
@@ -57,7 +57,7 @@ async fn navigates_php_classes_from_arbitrary_yaml_keys_and_values() {
         let result = definition_at(&backend, yaml_uri.clone(), yaml, needle, inside)
             .await
             .expect("class should resolve from YAML");
-        let GotoDefinitionResponse::Scalar(location) = result else {
+        let DefinitionResponse::Definition(Definition::Location(location)) = result else {
             panic!("expected one class definition");
         };
         assert!(
@@ -78,14 +78,14 @@ async fn navigates_php_classes_from_xml_attributes_and_text() {
         COMPOSER,
         &[("src/Handler/Run.php", php), ("config/arbitrary.xml", xml)],
     );
-    let xml_uri = Url::from_file_path(dir.path().join("config/arbitrary.xml")).unwrap();
+    let xml_uri = Uri::from_file_path(dir.path().join("config/arbitrary.xml")).unwrap();
     open_document(&backend, &xml_uri, "xml", xml).await;
 
     for needle in ["handler=\"App\\Handler\\Run", ">App\\Handler\\Run"] {
         let result = definition_at(&backend, xml_uri.clone(), xml, needle, needle.len() - 2)
             .await
             .expect("class should resolve from XML");
-        let GotoDefinitionResponse::Scalar(location) = result else {
+        let DefinitionResponse::Definition(Definition::Location(location)) = result else {
             panic!("expected one class definition");
         };
         assert!(location.uri.path().ends_with("/src/Handler/Run.php"));
@@ -106,13 +106,13 @@ async fn navigates_class_members_and_yaml_escaped_class_names() {
         COMPOSER,
         &[("src/Handler/Run.php", php), ("config/callbacks.yml", yaml)],
     );
-    let yaml_uri = Url::from_file_path(dir.path().join("config/callbacks.yml")).unwrap();
+    let yaml_uri = Uri::from_file_path(dir.path().join("config/callbacks.yml")).unwrap();
     open_document(&backend, &yaml_uri, "yaml", yaml).await;
 
     let class_result = definition_at(&backend, yaml_uri.clone(), yaml, "App", 1)
         .await
         .expect("escaped class should resolve");
-    let GotoDefinitionResponse::Scalar(class_location) = class_result else {
+    let DefinitionResponse::Definition(Definition::Location(class_location)) = class_result else {
         panic!("expected one class definition");
     };
     assert_eq!(class_location.range.start.line, 2);
@@ -120,7 +120,8 @@ async fn navigates_class_members_and_yaml_escaped_class_names() {
     let member_result = definition_at(&backend, yaml_uri, yaml, "handle", 2)
         .await
         .expect("class member should resolve");
-    let GotoDefinitionResponse::Scalar(member_location) = member_result else {
+    let DefinitionResponse::Definition(Definition::Location(member_location)) = member_result
+    else {
         panic!("expected one member definition");
     };
     assert_eq!(member_location.range.start.line, 3);
@@ -142,7 +143,7 @@ async fn resource_classes_feed_find_references_and_code_lens() {
             ("config/widgets.xml", xml),
         ],
     );
-    let php_uri = Url::from_file_path(dir.path().join("src/Domain/Widget.php")).unwrap();
+    let php_uri = Uri::from_file_path(dir.path().join("src/Domain/Widget.php")).unwrap();
     open_document(&backend, &php_uri, "php", php).await;
 
     let references = references_response(&backend, &php_uri, Position::new(2, 8), false)
@@ -207,7 +208,7 @@ async fn resource_class_members_feed_find_references_and_code_lens() {
             ("config/callbacks.yaml", yaml),
         ],
     );
-    let php_uri = Url::from_file_path(dir.path().join("src/Handler/Run.php")).unwrap();
+    let php_uri = Uri::from_file_path(dir.path().join("src/Handler/Run.php")).unwrap();
     open_document(&backend, &php_uri, "php", php).await;
 
     let references = references_response(&backend, &php_uri, Position::new(3, 22), false)
@@ -252,7 +253,7 @@ async fn resource_class_members_feed_find_references_and_code_lens() {
 async fn unknown_and_unqualified_names_do_not_navigate() {
     let yaml = "short: DeletePlaylist\nunknown: App\\Missing\\DeletePlaylist\n";
     let (backend, dir) = create_psr4_workspace(COMPOSER, &[("config/classes.yaml", yaml)]);
-    let yaml_uri = Url::from_file_path(dir.path().join("config/classes.yaml")).unwrap();
+    let yaml_uri = Uri::from_file_path(dir.path().join("config/classes.yaml")).unwrap();
     open_document(&backend, &yaml_uri, "yaml", yaml).await;
 
     assert!(
@@ -281,13 +282,13 @@ async fn navigates_class_constants_from_yaml() {
         COMPOSER,
         &[("src/Handler/Run.php", php), ("config/modes.yaml", yaml)],
     );
-    let yaml_uri = Url::from_file_path(dir.path().join("config/modes.yaml")).unwrap();
+    let yaml_uri = Uri::from_file_path(dir.path().join("config/modes.yaml")).unwrap();
     open_document(&backend, &yaml_uri, "yaml", yaml).await;
 
     let result = definition_at(&backend, yaml_uri, yaml, "MODE", 2)
         .await
         .expect("class constant should resolve from YAML");
-    let GotoDefinitionResponse::Scalar(location) = result else {
+    let DefinitionResponse::Definition(Definition::Location(location)) = result else {
         panic!("expected one constant definition");
     };
     assert_eq!(location.range.start.line, 3);
@@ -299,7 +300,7 @@ async fn navigates_class_constants_from_yaml() {
 #[tokio::test]
 async fn rename_rewrites_resource_occurrences_in_their_own_spelling() {
     let backend = Backend::new_test();
-    let php_uri = Url::parse("file:///test.php").unwrap();
+    let php_uri = Uri::parse("file:///test.php").unwrap();
     let php = concat!(
         "<?php\n",
         "namespace App;\n",
@@ -308,11 +309,11 @@ async fn rename_rewrites_resource_occurrences_in_their_own_spelling() {
     );
     open_document(&backend, &php_uri, "php", php).await;
 
-    let yaml_uri = Url::parse("file:///config/widgets.yaml").unwrap();
+    let yaml_uri = Uri::parse("file:///config/widgets.yaml").unwrap();
     let yaml = "plain: App\\Widget\nescaped: \"App\\\\Widget\"\n";
     open_document(&backend, &yaml_uri, "yaml", yaml).await;
 
-    let dist_uri = Url::parse("file:///config/widgets.yaml.dist").unwrap();
+    let dist_uri = Uri::parse("file:///config/widgets.yaml.dist").unwrap();
     open_document(&backend, &dist_uri, "yaml", "plain: App\\Widget\n").await;
 
     // Both spellings are found by Find References.
@@ -329,7 +330,7 @@ async fn rename_rewrites_resource_occurrences_in_their_own_spelling() {
 
     let edit = backend
         .rename(RenameParams {
-            text_document_position: TextDocumentPositionParams {
+            text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier {
                     uri: php_uri.clone(),
                 },
@@ -363,11 +364,11 @@ async fn rename_rewrites_resource_occurrences_in_their_own_spelling() {
 #[tokio::test]
 async fn rename_from_inside_a_resource_file_renames_the_php_class() {
     let backend = Backend::new_test();
-    let php_uri = Url::parse("file:///test.php").unwrap();
+    let php_uri = Uri::parse("file:///test.php").unwrap();
     let php = "<?php\nnamespace App;\nclass Widget {}\n";
     open_document(&backend, &php_uri, "php", php).await;
 
-    let yaml_uri = Url::parse("file:///config/widgets.yaml").unwrap();
+    let yaml_uri = Uri::parse("file:///config/widgets.yaml").unwrap();
     let yaml = "primary: App\\Widget\n";
     open_document(&backend, &yaml_uri, "yaml", yaml).await;
 
@@ -380,7 +381,11 @@ async fn rename_from_inside_a_resource_file_renames_the_php_class() {
         })
         .await
         .expect("prepare rename should succeed");
-    let Some(PrepareRenameResponse::RangeWithPlaceholder { range, placeholder }) = prepared else {
+    let Some(PrepareRenameResult::PrepareRenamePlaceholder(PrepareRenamePlaceholder {
+        range,
+        placeholder,
+    })) = prepared
+    else {
         panic!("expected a rename range, got {prepared:?}");
     };
     assert_eq!(placeholder, "Widget");
@@ -389,12 +394,12 @@ async fn rename_from_inside_a_resource_file_renames_the_php_class() {
         Range::new(Position::new(0, 13), Position::new(0, 19))
     );
 
-    let rename_from = |uri: Url, position: Position| {
+    let rename_from = |uri: Uri, position: Position| {
         let backend = &backend;
         async move {
             backend
                 .rename(RenameParams {
-                    text_document_position: TextDocumentPositionParams {
+                    text_document_position_params: TextDocumentPositionParams {
                         text_document: TextDocumentIdentifier { uri },
                         position,
                     },

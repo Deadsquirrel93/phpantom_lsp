@@ -39,7 +39,7 @@ use std::collections::HashSet;
 use std::sync::atomic::Ordering;
 
 use parking_lot::RwLock;
-use tower_lsp::lsp_types::{Location, Range};
+use tower_lsp_server::gen_lsp_types::{Location, Range};
 
 use crate::Backend;
 use crate::symbol_map::{StringKeyKind, SymbolKind, SymbolMap, SymbolSpan};

@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::server::{run_blocking_cancel_safe, spawn_blocking_detached};
@@ -18,7 +18,7 @@ impl Backend {
 
         // Track files opened with languageId "blade" so they get
         // Blade preprocessing even without a .blade.php extension.
-        if doc.language_id == "blade" && !crate::blade::is_blade_file(&uri) {
+        if doc.language_id.as_str() == "blade" && !crate::blade::is_blade_file(&uri) {
             self.blade.uris.write().insert(uri.clone());
         }
 
@@ -35,7 +35,7 @@ impl Backend {
         // all consume the same indexed occurrences.
         if self.is_resource_uri(&uri) {
             self.update_resource_symbol_index(&uri, &text);
-            self.log(MessageType::INFO, format!("Opened resource file: {}", uri))
+            self.log(MessageType::Info, format!("Opened resource file: {}", uri))
                 .await;
             return;
         }
@@ -79,12 +79,16 @@ impl Backend {
         // `did_save`.)
         self.schedule_external_diagnostics(uri.clone());
 
-        self.log(MessageType::INFO, format!("Opened file: {}", uri))
+        self.log(MessageType::Info, format!("Opened file: {}", uri))
             .await;
     }
 
     pub(crate) async fn on_did_change(&self, params: DidChangeTextDocumentParams) {
-        let uri = params.text_document.uri.to_string();
+        let uri = params
+            .text_document
+            .text_document_identifier
+            .uri
+            .to_string();
 
         if params.content_changes.is_empty() {
             return;
@@ -102,18 +106,25 @@ impl Backend {
             drop(open_files);
 
             for change in &params.content_changes {
-                if let Some(range) = change.range {
-                    let start =
-                        crate::text_position::position_to_byte_offset(&current, range.start);
-                    let end = crate::text_position::position_to_byte_offset(&current, range.end);
-                    // A range whose start lies after its end would panic
-                    // `replace_range`, and this runs on the service loop
-                    // where a panic takes the whole server down.
-                    let (start, end) = (start.min(end), start.max(end));
-                    current.replace_range(start..end, &change.text);
-                } else {
-                    // Full content replacement (fallback)
-                    current = change.text.clone();
+                match change {
+                    TextDocumentContentChangeEvent::TextDocumentContentChangePartial(partial) => {
+                        let range = partial.range;
+                        let start =
+                            crate::text_position::position_to_byte_offset(&current, range.start);
+                        let end =
+                            crate::text_position::position_to_byte_offset(&current, range.end);
+                        // A range whose start lies after its end would panic
+                        // `replace_range`, and this runs on the service loop
+                        // where a panic takes the whole server down.
+                        let (start, end) = (start.min(end), start.max(end));
+                        current.replace_range(start..end, &partial.text);
+                    }
+                    TextDocumentContentChangeEvent::TextDocumentContentChangeWholeDocument(
+                        whole,
+                    ) => {
+                        // Full content replacement (fallback)
+                        current = whole.text.clone();
+                    }
                 }
             }
             Arc::new(current)
@@ -277,7 +288,7 @@ impl Backend {
         // Clear diagnostics so stale warnings don't linger after the file is closed
         self.clear_diagnostics_for_file(&uri).await;
 
-        self.log(MessageType::INFO, format!("Closed file: {}", uri))
+        self.log(MessageType::Info, format!("Closed file: {}", uri))
             .await;
     }
 

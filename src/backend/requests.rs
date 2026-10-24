@@ -6,8 +6,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 
-use tower_lsp::jsonrpc::Result;
-use tower_lsp::lsp_types::Position;
+use tower_lsp_server::gen_lsp_types::Position;
+use tower_lsp_server::jsonrpc::Result;
 
 use parking_lot::Mutex;
 

@@ -15,7 +15,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::{Location, Position};
+use tower_lsp_server::gen_lsp_types::{Location, Position};
 
 use crate::Backend;
 use crate::atom::{AtomMap, atom};

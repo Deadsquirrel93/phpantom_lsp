@@ -74,7 +74,7 @@ mod member_check;
 
 use std::collections::HashMap;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::class_lookup::ResolvedClassLoader;
@@ -278,7 +278,7 @@ impl UnknownMemberPass<'_> {
             }
             SubjectOutcome::Scalar(scalar) => self.push_chain_break(
                 access,
-                DiagnosticSeverity::ERROR,
+                DiagnosticSeverity::Error,
                 SCALAR_MEMBER_ACCESS_CODE,
                 format!(
                     "Cannot access {} '{}' on type '{}'",
@@ -298,7 +298,7 @@ impl UnknownMemberPass<'_> {
                 }
                 self.push_chain_break(
                     access,
-                    DiagnosticSeverity::WARNING,
+                    DiagnosticSeverity::Warning,
                     UNKNOWN_MEMBER_CODE,
                     format!(
                         "Cannot verify {} '{}' — subject type '{}' could not be resolved",
@@ -341,7 +341,7 @@ impl UnknownMemberPass<'_> {
                 };
                 self.push_chain_break(
                     access,
-                    DiagnosticSeverity::HINT,
+                    DiagnosticSeverity::Hint,
                     UNRESOLVED_MEMBER_ACCESS_CODE,
                     message,
                     out,
