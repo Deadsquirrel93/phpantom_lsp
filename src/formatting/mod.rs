@@ -327,6 +327,39 @@ impl Backend {
             cancelled,
         )
     }
+
+    /// Format the part of `content` that `range` selects with `strategy`
+    /// and return the whole text with that part formatted, or `None` when
+    /// formatting is disabled or nothing changed.
+    ///
+    /// The built-in formatter formats only the smallest construct
+    /// enclosing the range, so changes elsewhere in the file (an import
+    /// sorted, a distant method reindented) never come along.  External
+    /// tools only format whole files, so they format the whole document.
+    /// Either way the caller still narrows the result to the selected
+    /// lines with [`compute_range_edits`], since the enclosing construct
+    /// can be larger than the selection.
+    pub(crate) fn format_range_content(
+        &self,
+        strategy: &FormattingStrategy,
+        file_path: &Path,
+        content: &str,
+        range: Range,
+        cancelled: &AtomicBool,
+    ) -> Result<Option<String>, String> {
+        let FormattingStrategy::BuiltIn(config_path) = strategy else {
+            return self.format_content(strategy, file_path, content, cancelled);
+        };
+        let start = crate::text_position::position_to_offset(content, range.start);
+        let end = crate::text_position::position_to_offset(content, range.end);
+        let formatted = mago::format_range_with_mago(
+            content,
+            start..end,
+            mago::to_mago_php_version(self.php_version()),
+            builtin_settings(config_path.as_deref())?,
+        )?;
+        Ok(formatted.filter(|formatted| formatted != content))
+    }
 }
 
 // ── Execution ───────────────────────────────────────────────────────
@@ -355,16 +388,24 @@ pub fn format_content(
             config,
             cancelled,
         )?,
-        FormattingStrategy::BuiltIn(config_path) => {
-            let mago_version = mago::to_mago_php_version(php_version);
-            let settings = match config_path {
-                Some(config_path) => mago::load_mago_format_settings(config_path)?,
-                None => mago_formatter::settings::FormatSettings::default(),
-            };
-            mago::format_with_mago(content, mago_version, settings)?
-        }
+        FormattingStrategy::BuiltIn(config_path) => mago::format_with_mago(
+            content,
+            mago::to_mago_php_version(php_version),
+            builtin_settings(config_path.as_deref())?,
+        )?,
     };
     Ok((formatted != content).then_some(formatted))
+}
+
+/// The built-in formatter's settings: the `[formatter]` table of
+/// `mago.toml` when the workspace has one, PER-CS defaults otherwise.
+fn builtin_settings(
+    config_path: Option<&Path>,
+) -> Result<mago_formatter::settings::FormatSettings, String> {
+    match config_path {
+        Some(config_path) => mago::load_mago_format_settings(config_path),
+        None => Ok(mago_formatter::settings::FormatSettings::default()),
+    }
 }
 
 /// Run `strategy` on `content` and return the `TextEdit`s that turn it

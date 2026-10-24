@@ -63,6 +63,29 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_range_formatting_leaves_the_adjacent_statement_alone() {
+        let text = concat!(
+            "<?php\n",
+            "function a( $x ){ return $x; }\n",
+            "function b( $y ){ return $y; }\n",
+        );
+
+        let result = format_range("file:///range.php", text, 2, 2).await;
+
+        assert_eq!(
+            result,
+            concat!(
+                "<?php\n",
+                "function a( $x ){ return $x; }\n",
+                "function b($y)\n",
+                "{\n",
+                "    return $y;\n",
+                "}\n",
+            )
+        );
+    }
+
+    #[tokio::test]
     async fn test_range_formatting_reindents_one_line_of_a_block() {
         let text = concat!(
             "<?php\n",

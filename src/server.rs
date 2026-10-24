@@ -175,8 +175,9 @@ impl Backend {
 
     /// Format a document, or with `range` only the lines it selects.
     ///
-    /// Every formatter works on a whole file, so a range request formats
-    /// the whole document and keeps the edits that touch the range.
+    /// The built-in formatter formats the construct enclosing the range;
+    /// the other formatters work on a whole file.  Either way only the
+    /// edits that touch the range are kept.
     async fn format_document(
         &self,
         uri: &Url,
@@ -214,7 +215,12 @@ impl Backend {
                 )
             } else {
                 let strategy = backend.resolve_formatting_strategy();
-                backend.format_content(&strategy, &file_path, &content, &backend.shutdown_flag)
+                let cancelled = &backend.shutdown_flag;
+                match range {
+                    Some(range) => backend
+                        .format_range_content(&strategy, &file_path, &content, range, cancelled),
+                    None => backend.format_content(&strategy, &file_path, &content, cancelled),
+                }
             };
             formatted.map(|formatted| {
                 formatted.map(|text| match range {
