@@ -215,6 +215,13 @@ impl Backend {
             return Some(response);
         }
 
+        if crate::resource_navigation::is_resource_document(uri)
+            && let Some(content) = self.get_file_content_arc(uri)
+            && let Some(response) = self.try_symfony_resource_completion(uri, &content, position)
+        {
+            return Some(response);
+        }
+
         // A template is analysed as the virtual PHP it lowers to, with the
         // cursor moved into it, so variable resolution walks the
         // preprocessed AST.

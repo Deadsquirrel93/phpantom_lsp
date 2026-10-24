@@ -347,11 +347,11 @@ impl Backend {
             // here, in the refresh pass, rather than in the diagnostic pass
             // that has a warm scope cache.
             let has_candidate = symbol_map
-                .view_receiver_sites
+                .typed_receiver_sites
                 .iter()
-                .any(|site| view_names.contains(&site.key));
+                .any(|site| site.receiver.names_views() && view_names.contains(&site.key));
             let extra = if has_candidate {
-                self.typed_receiver_view_spans_for(file_uri, &symbol_map)
+                self.typed_receiver_spans_for(file_uri, &symbol_map)
             } else {
                 Arc::new(Vec::new())
             };
@@ -519,7 +519,10 @@ impl Backend {
             .filter(|(uri, map)| {
                 !crate::stubs::is_stub_uri(uri)
                     && !vendor_prefixes.iter().any(|p| uri.starts_with(p.as_str()))
-                    && (!map.view_receiver_sites.is_empty()
+                    && (map
+                        .typed_receiver_sites
+                        .iter()
+                        .any(|site| site.receiver.names_views())
                         || map.spans.iter().any(|span| {
                             matches!(
                                 &span.kind,
@@ -551,7 +554,12 @@ impl Backend {
                         } => Some(key.as_str()),
                         _ => None,
                     })
-                    .chain(map.view_receiver_sites.iter().map(|site| site.key.as_str()))
+                    .chain(
+                        map.typed_receiver_sites
+                            .iter()
+                            .filter(|site| site.receiver.names_views())
+                            .map(|site| site.key.as_str()),
+                    )
                     .collect();
                 names.sort_unstable();
                 names.dedup();

@@ -1,4 +1,4 @@
-//! Hover for Laravel and Blade: the string keys a call names (routes,
+//! Hover for Laravel, Blade, and Symfony: the string keys a call names (routes,
 //! config, views, translations, Artisan commands, gate abilities, container
 //! bindings, morph aliases, `.env` names), Blade sections and stacks, an
 //! Artisan command's own arguments and options, and the column a
@@ -195,6 +195,22 @@ impl Backend {
                     None => "Not declared in `.env`".to_string(),
                 };
                 ("Env", detail)
+            }
+            StringKeyKind::ServiceId | StringKeyKind::ContainerParameter => {
+                let label = if *kind == StringKeyKind::ServiceId {
+                    "Service"
+                } else {
+                    "Parameter"
+                };
+                let declared = self.symfony_declaration_locations(*kind, key);
+                let detail = match declared
+                    .first()
+                    .and_then(|location| self.workspace_relative_path(location.uri.as_str()))
+                {
+                    Some(path) => format!("Declared in `{}`", path),
+                    None => "Not declared in the project's configuration".to_string(),
+                };
+                (label, detail)
             }
         };
 

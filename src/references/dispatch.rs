@@ -405,7 +405,7 @@ impl Backend {
             SymbolKind::NamespaceDeclaration { .. } => Vec::new(),
 
             SymbolKind::StringKey { kind, key, .. } => {
-                if !self.resolved_class_cache.read().laravel().is_enabled() {
+                if !self.string_key_kind_enabled(*kind) {
                     return Vec::new();
                 }
                 // Config resources and their generic config spelling share a

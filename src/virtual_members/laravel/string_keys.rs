@@ -1,8 +1,9 @@
-//! Go-to-definition and find-references for Laravel string-key spans.
+//! Go-to-definition and find-references for string-key spans.
 //!
 //! Laravel encodes several kinds of navigable references as plain string
 //! literals: `config('app.name')`, `view('emails.welcome')`,
-//! `route('users.index')`, `__('messages.saved')`.  The symbol map records
+//! `route('users.index')`, `__('messages.saved')`, and so does Symfony's
+//! container (`$container->get('app.mailer')`).  The symbol map records
 //! these as [`crate::symbol_map::StringKey`] spans; this module turns
 //! a span (kind + key) into concrete definition/reference [`Location`]s.
 
@@ -66,6 +67,9 @@ pub(crate) fn resolve_laravel_string_key(
         StringKeyKind::GateAbility => resolve_gate_ability_definitions(backend, key),
         StringKeyKind::ContainerBinding => resolve_container_binding_definitions(backend, key),
         StringKeyKind::Env => super::env_vars::resolve_env_definitions(backend, key),
+        StringKeyKind::ServiceId | StringKeyKind::ContainerParameter => {
+            backend.symfony_declaration_locations(*kind, key)
+        }
     }
 }
 
@@ -247,7 +251,12 @@ pub(crate) fn find_laravel_string_key_references(
         | StringKeyKind::MorphAlias
         | StringKeyKind::GateAbility
         | StringKeyKind::ContainerBinding
-        | StringKeyKind::Env => find_string_key_usages(kind, key, backend, snapshot),
+        | StringKeyKind::Env => find_string_key_usages(kind, key, backend, snapshot, true),
+        // A Symfony declaration is a span in a configuration file's map like
+        // any use, so the usages already hold it.
+        StringKeyKind::ServiceId | StringKeyKind::ContainerParameter => {
+            return find_string_key_usages(kind, key, backend, snapshot, include_declaration);
+        }
     };
 
     if include_declaration && !kind.is_config_backed() {
@@ -271,11 +280,14 @@ pub(crate) fn find_laravel_string_key_references(
 
 /// Scan pre-built [`crate::symbol_map::SymbolMap`] spans for all call sites
 /// matching `kind` + `key` — zero file re-parses, O(total spans) memory walk.
+///
+/// `include_writes` set to `false` leaves out the spans that declare the key.
 fn find_string_key_usages(
     kind: &crate::symbol_map::StringKeyKind,
     key: &str,
     backend: &crate::Backend,
     snapshot: &[(String, std::sync::Arc<crate::symbol_map::SymbolMap>)],
+    include_writes: bool,
 ) -> Vec<Location> {
     use crate::references::push_location;
     use crate::symbol_map::SymbolKind;
@@ -283,16 +295,16 @@ fn find_string_key_usages(
 
     let mut locations = Vec::new();
     for (file_uri, symbol_map) in snapshot {
-        // A render site whose receiver only a type settles is not in the
-        // map, so ask for the file's confirmed extras — but only when a
-        // candidate names this very key, so the type resolution is paid
-        // for the handful of files that could contribute a hit.
+        // A call whose receiver only a type settles is not in the map, so
+        // ask for the file's confirmed extras — but only when a candidate
+        // names this very key, so the type resolution is paid for the
+        // handful of files that could contribute a hit.
         let has_candidate = symbol_map
-            .view_receiver_sites
+            .typed_receiver_sites
             .iter()
-            .any(|site| *kind == crate::symbol_map::StringKeyKind::View && site.key == key);
+            .any(|site| site.may_name(*kind, key));
         let extra = if has_candidate {
-            backend.typed_receiver_view_spans_for(file_uri, symbol_map)
+            backend.typed_receiver_spans_for(file_uri, symbol_map)
         } else {
             std::sync::Arc::new(Vec::new())
         };
@@ -312,18 +324,18 @@ fn find_string_key_usages(
                 .chain(extra.iter())
                 .chain(morph_columns.iter().flat_map(|spans| spans.iter()))
         };
-        let has_match = spans().any(|span| {
-            if let SymbolKind::StringKey {
-                kind: span_kind,
-                key: span_key,
-                ..
-            } = &span.kind
-            {
-                span_kind == kind && span_key == key
-            } else {
-                false
-            }
-        });
+        let matches = |span: &crate::symbol_map::SymbolSpan| {
+            matches!(
+                &span.kind,
+                SymbolKind::StringKey {
+                    kind: span_kind,
+                    key: span_key,
+                    is_write,
+                    ..
+                } if span_kind == kind && span_key == key && (include_writes || !is_write)
+            )
+        };
+        let has_match = spans().any(matches);
 
         if !has_match {
             continue;
@@ -338,19 +350,10 @@ fn find_string_key_usages(
             continue;
         };
         let lines = LineIndex::new(&content);
-        for span in spans() {
-            if let SymbolKind::StringKey {
-                kind: span_kind,
-                key: span_key,
-                ..
-            } = &span.kind
-                && span_kind == kind
-                && span_key == key
-            {
-                let start = lines.position(span.start as usize);
-                let end = lines.position(span.end as usize);
-                push_location(&mut locations, &parsed_uri, start, end);
-            }
+        for span in spans().filter(|span| matches(span)) {
+            let start = lines.position(span.start as usize);
+            let end = lines.position(span.end as usize);
+            push_location(&mut locations, &parsed_uri, start, end);
         }
     }
     locations

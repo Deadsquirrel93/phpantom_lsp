@@ -353,16 +353,25 @@ impl LanguageServer for Backend {
                 // fully-qualified class and Class::member tokens before entering
                 // the PHP-only symbol-map path below.
                 if crate::resource_navigation::is_resource_document(uri) {
-                    let location = backend.get_file_content(uri).and_then(|content| {
-                        crate::util::catch_panic_unwind_safe(
-                            "goto_definition",
-                            uri,
-                            Some(position),
-                            || backend.resolve_resource_definition(&content, position),
-                        )
-                        .flatten()
+                    let locations = backend
+                        .get_file_content(uri)
+                        .and_then(|content| {
+                            crate::util::catch_panic_unwind_safe(
+                                "goto_definition",
+                                uri,
+                                Some(position),
+                                || backend.resolve_resource_definition(uri, &content, position),
+                            )
+                        })
+                        .unwrap_or_default();
+                    return Ok(match locations.len() {
+                        0 => None,
+                        1 => locations
+                            .into_iter()
+                            .next()
+                            .map(GotoDefinitionResponse::Scalar),
+                        _ => Some(GotoDefinitionResponse::Array(locations)),
                     });
-                    return Ok(location.map(GotoDefinitionResponse::Scalar));
                 }
 
                 // A component tag is HTML, so it has no position in the virtual

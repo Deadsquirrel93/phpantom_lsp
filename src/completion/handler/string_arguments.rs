@@ -1,6 +1,7 @@
 //! Completion inside a string argument: array shape keys, the Laravel
 //! string keys (routes, config, views, translations, morph aliases, paths,
-//! route and command parameters, request input), Eloquent relation and
+//! route and command parameters, request input), Symfony service IDs and
+//! container parameters, Eloquent relation and
 //! column names, the strings a parameter's declared type asks for, and
 //! method names in route-controller groups and array callables.
 
@@ -80,6 +81,17 @@ impl Backend {
             )
             && let Some(response) =
                 self.try_laravel_string_key_completion_in_file(content, position, ctx)
+        {
+            return Some(response);
+        }
+
+        // ── Symfony service IDs and container parameters ────────
+        // `$container->get('|')`, `service('|')`, `#[Autowire(param: '|')]`.
+        if matches!(string_ctx, StringContext::InStringLiteral)
+            && self.is_symfony_project()
+            && let Some(code) = code_ctx.as_ref()
+            && let Some(response) =
+                self.try_symfony_string_key_completion(content, position, code, ctx)
         {
             return Some(response);
         }

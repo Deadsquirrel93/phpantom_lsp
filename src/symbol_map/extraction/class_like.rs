@@ -319,6 +319,13 @@ pub(super) fn extract_from_attribute_lists<'a>(
                     }
                 }
 
+                // `#[Autowire(service: 'app.mailer')]` and
+                // `#[Autowire(param: 'app.sender')]` inject a service or a
+                // parameter by name.
+                if is_autowire_attribute(semantic_class_name) {
+                    emit_autowire_attribute_spans(arg_list, ctx);
+                }
+
                 // `#[RedirectToRoute('login')]` on a form request names the
                 // route a failed validation bounces back to.
                 if is_laravel_redirect_route_attr(

@@ -15,6 +15,12 @@ catalogues together, the way a real Symfony project does.
 - Rename `legacy` in `config/routes.yaml`, or rename `UserRepository` from
   `config/doctrine/User.orm.xml`. The PHP declaration and every configuration
   file that names it are renamed together.
+- Service IDs and container parameters navigate between the YAML and PHP
+  configuration and the code that reads them. In
+  `src/Controller/DemoController.php`, go to the definition of
+  `app.welcome_mailer` or `app.sender_name`, find their references, or
+  complete a name inside `$container->has('')` or
+  `#[Autowire(param: '')]`.
 - Open `src/Entity/User.php` and `src/Repository/UserRepository.php`. The
   CodeLens above each class links the entity and its repository.
 

@@ -503,7 +503,12 @@ impl Backend {
 
             // Build the precomputed symbol map while the AST is still alive.
             // This must happen before the `Program` (and its arena) are dropped.
-            let mut symbol_map = extract_symbol_map_for_index(program, content, &owned_resolved);
+            let mut symbol_map = extract_symbol_map_for_index(
+                program,
+                content,
+                &owned_resolved,
+                self.is_symfony_project(),
+            );
             // An open file's slow diagnostics are built on the previous
             // pass's, which is only sound if that pass read an index built
             // from exactly the text it diagnosed.

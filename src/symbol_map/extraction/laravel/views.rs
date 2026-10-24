@@ -216,7 +216,7 @@ fn names_a_render_each_template(
 /// lowercasing each one would be a real cost.
 pub(in crate::symbol_map::extraction) fn view_receiver_method(
     member_name: &str,
-) -> Option<(ViewReceiverClass, &'static [usize])> {
+) -> Option<(ReceiverClass, &'static [usize])> {
     const FIRST: &[usize] = &[0];
     const SECOND: &[usize] = &[1];
     // Every name below starts with one of these, so a method call that
@@ -231,37 +231,37 @@ pub(in crate::symbol_map::extraction) fn view_receiver_method(
         || member_name.eq_ignore_ascii_case("first")
         || member_name.eq_ignore_ascii_case("exists")
     {
-        return Some((ViewReceiverClass::Factory, FIRST));
+        return Some((ReceiverClass::ViewFactory, FIRST));
     }
     if member_name.eq_ignore_ascii_case("view") || member_name.eq_ignore_ascii_case("markdown") {
-        return Some((ViewReceiverClass::MailTemplate, FIRST));
+        return Some((ReceiverClass::MailTemplate, FIRST));
     }
     if member_name.eq_ignore_ascii_case("text") {
-        return Some((ViewReceiverClass::Mailable, FIRST));
+        return Some((ReceiverClass::Mailable, FIRST));
     }
     if member_name.eq_ignore_ascii_case("renderWhen")
         || member_name.eq_ignore_ascii_case("renderUnless")
     {
-        return Some((ViewReceiverClass::Factory, SECOND));
+        return Some((ReceiverClass::ViewFactory, SECOND));
     }
     if is_render_each_method(member_name) {
-        return Some((ViewReceiverClass::Factory, &RENDER_EACH_VIEW_ARGS));
+        return Some((ReceiverClass::ViewFactory, &RENDER_EACH_VIEW_ARGS));
     }
     None
 }
 
 /// Record every template a method call names, for the lazy pass that
-/// settles what its receiver is (see [`ViewReceiverSite`]).
+/// settles what its receiver is (see [`TypedReceiverSite`]).
 ///
 /// The names are read exactly as the confirmed spellings read them, so a
 /// site that turns out to be a render contributes the same spans a
 /// syntactically recognised one would.
 pub(in crate::symbol_map::extraction) fn record_view_receiver_sites(
-    receiver: ViewReceiverClass,
+    receiver: ReceiverClass,
     name_indices: &[usize],
     argument_list: &ArgumentList<'_>,
     content: &str,
-    sites: &mut Vec<ViewReceiverSite>,
+    sites: &mut Vec<TypedReceiverSite>,
 ) {
     let mut spans = Vec::new();
     for index in name_indices {
@@ -276,10 +276,11 @@ pub(in crate::symbol_map::extraction) fn record_view_receiver_sites(
         else {
             continue;
         };
-        sites.push(ViewReceiverSite {
+        sites.push(TypedReceiverSite {
             start: span.start,
             end: span.end,
             key,
+            is_write: false,
             is_optional,
             receiver,
         });

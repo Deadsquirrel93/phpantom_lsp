@@ -252,12 +252,20 @@ impl Backend {
             .cloned()
             .collect();
 
+        // A class inside a phar (`phar:///…/vendor/phpstan/phpstan/phpstan.phar/…`)
+        // is packaged library code whatever directory the archive sits in,
+        // and its URI carries no `file://` prefix for the vendor check to
+        // match.  A file declaring several classes is listed once per
+        // class, and is parsed once.
+        let mut queued: HashSet<&str> = HashSet::new();
         let phase1_uris: Vec<&String> = index_uris
             .iter()
             .filter(|uri| {
                 !existing_uris.contains(*uri)
                     && !vendor_prefixes.iter().any(|p| uri.starts_with(p.as_str()))
+                    && !uri.starts_with("phar://")
                     && !crate::stubs::is_stub_uri(uri)
+                    && queued.insert(uri.as_str())
             })
             .collect();
 

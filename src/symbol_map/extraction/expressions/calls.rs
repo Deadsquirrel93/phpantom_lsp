@@ -357,6 +357,11 @@ fn extract_function_call<'a>(
                 }
                 None => {}
             }
+            emit_symfony_function_call_span(
+                ident.span().start.offset,
+                &func_call.argument_list,
+                ctx,
+            );
             if let Some(trigger) = crate::symbol_map::laravel_resources::auth_helper_trigger(
                 ctx.content,
                 name_clean,
@@ -421,6 +426,7 @@ fn extract_method_call<'a>(
     if let ClassLikeMemberSelector::Identifier(ident) = method {
         let member_name = crate::atom::atom_bytes(ident.value);
         emit_laravel_method_call_spans(object, &member_name, argument_list, ctx);
+        record_symfony_receiver_sites(&member_name, argument_list, ctx);
         // Recorded with `->` for both spellings so callable resolution
         // treats them alike.
         emit_call_site(
@@ -613,7 +619,8 @@ mod tests {
         let resolver = mago_names::resolver::NameResolver::new(&arena);
         let names = OwnedResolvedNames::from_resolved(&resolver.resolve(program));
 
-        let map = crate::symbol_map::extraction::extract_symbol_map_for_index(program, php, &names);
+        let map =
+            crate::symbol_map::extraction::extract_symbol_map_for_index(program, php, &names, true);
 
         assert_eq!(map.conditional_string_key_spans.len(), 1);
         assert_eq!(

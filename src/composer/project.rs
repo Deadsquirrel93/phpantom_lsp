@@ -150,6 +150,28 @@ pub(crate) fn is_doctrine_project(package: &ComposerPackage) -> bool {
         })
 }
 
+/// Detect whether the project builds a Symfony service container: the full
+/// framework, its bundle, or the dependency-injection component on its own.
+///
+/// Service IDs and container parameters are only read in projects where this
+/// holds.  The other Symfony components (console, HTTP foundation, …) are
+/// shared with Laravel and say nothing about a container.
+pub(crate) fn is_symfony_project(package: &ComposerPackage) -> bool {
+    package
+        .require
+        .keys()
+        .chain(package.require_dev.keys())
+        .any(|name| {
+            [
+                "symfony/symfony",
+                "symfony/framework-bundle",
+                "symfony/dependency-injection",
+            ]
+            .iter()
+            .any(|package| name.eq_ignore_ascii_case(package))
+        })
+}
+
 /// Detect whether the project is a Laravel *application* rather than a
 /// library that uses an Illuminate component.
 ///
@@ -324,6 +346,25 @@ mod tests {
     fn dbal_alone_is_not_doctrine_repositories() {
         assert!(!is_doctrine_project(&pkg(
             r#"{"require": {"doctrine/dbal": "^4.0", "laravel/framework": "^11.0"}}"#
+        )));
+    }
+
+    // ── is_symfony_project ──────────────────────────────────────────
+
+    #[test]
+    fn detects_symfony_through_the_bundle_or_the_container_component() {
+        assert!(is_symfony_project(&pkg(
+            r#"{"require": {"symfony/framework-bundle": "^7.3"}}"#
+        )));
+        assert!(is_symfony_project(&pkg(
+            r#"{"require": {"symfony/dependency-injection": "^7.3"}}"#
+        )));
+    }
+
+    #[test]
+    fn laravel_and_its_symfony_components_are_not_symfony() {
+        assert!(!is_symfony_project(&pkg(
+            r#"{"require": {"laravel/framework": "^11.0", "symfony/console": "^7.0"}}"#
         )));
     }
 

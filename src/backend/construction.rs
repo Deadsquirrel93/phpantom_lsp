@@ -101,6 +101,8 @@ impl BackendState {
             blade: blade::state::BladeState::default(),
             is_application: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             is_doctrine: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            is_symfony: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            symfony: crate::symfony::SymfonyState::default(),
             pest_configs: Arc::new(RwLock::new(None)),
             member_completion_cache: Arc::new(Mutex::new(HashMap::new())),
             diag: crate::diagnostics::state::DiagnosticState::new(),

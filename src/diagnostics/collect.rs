@@ -17,15 +17,24 @@ struct SlowCollector {
     /// The name the `analyse` CLI attributes the collector's time to.
     name: &'static str,
     collect: SlowCollectFn,
-    /// Run only in Laravel projects.
-    laravel_only: bool,
+    /// The projects the collector runs in.
+    runs_in: Framework,
+}
+
+/// The projects a collector has anything to report in.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Framework {
+    Any,
+    Laravel,
+    /// Laravel or Symfony, whose string keys share one check.
+    LaravelOrSymfony,
 }
 
 const fn always(name: &'static str, collect: SlowCollectFn) -> SlowCollector {
     SlowCollector {
         name,
         collect,
-        laravel_only: false,
+        runs_in: Framework::Any,
     }
 }
 
@@ -33,7 +42,7 @@ const fn laravel(name: &'static str, collect: SlowCollectFn) -> SlowCollector {
     SlowCollector {
         name,
         collect,
-        laravel_only: true,
+        runs_in: Framework::Laravel,
     }
 }
 
@@ -114,10 +123,11 @@ static SLOW_COLLECTORS: &[SlowCollector] = &[
         "incompatible_override",
         Backend::collect_incompatible_override_diagnostics_with_context,
     ),
-    laravel(
-        "invalid_laravel_string_key",
-        Backend::collect_invalid_laravel_string_key_diagnostics,
-    ),
+    SlowCollector {
+        name: "invalid_string_key",
+        collect: Backend::collect_invalid_laravel_string_key_diagnostics,
+        runs_in: Framework::LaravelOrSymfony,
+    },
     laravel(
         "invalid_command_parameter",
         Backend::collect_invalid_command_param_diagnostics,
@@ -371,8 +381,14 @@ impl Backend {
         }
 
         let is_laravel = self.resolved_class_cache.read().laravel().is_enabled();
+        let is_symfony = self.is_symfony_project();
         for collector in SLOW_COLLECTORS {
-            if collector.laravel_only && !is_laravel {
+            let runs = match collector.runs_in {
+                Framework::Any => true,
+                Framework::Laravel => is_laravel,
+                Framework::LaravelOrSymfony => is_laravel || is_symfony,
+            };
+            if !runs {
                 continue;
             }
             match observe.as_mut() {

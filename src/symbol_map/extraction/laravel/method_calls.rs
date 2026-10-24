@@ -304,7 +304,7 @@ pub(in crate::symbol_map::extraction) fn emit_laravel_method_call_spans<'a>(
             name_indices,
             argument_list,
             ctx.content,
-            &mut ctx.view_receiver_sites,
+            &mut ctx.typed_receiver_sites,
         );
     }
     if names_command(member_name, &receiver) {

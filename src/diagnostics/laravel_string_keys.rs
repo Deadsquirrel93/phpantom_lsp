@@ -1,10 +1,11 @@
-//! The Laravel checks that judge a string key, and the command-signature
-//! check that shares their shape.
+//! The checks that judge a string key, and the command-signature check that
+//! shares their shape.
 //!
 //! Both read the spans the symbol map recorded for a file, resolve each name
 //! against what the project actually registers (routes, config keys,
 //! views, translation keys, console commands, morph aliases, gate
-//! abilities), and report the ones nothing declares.
+//! abilities, Symfony service IDs and container parameters), and report the
+//! ones nothing declares.
 
 use std::sync::Arc;
 
@@ -33,6 +34,8 @@ enum CheckedStringKind {
     Command,
     MorphAlias,
     GateAbility,
+    ServiceId,
+    ContainerParameter,
 }
 
 impl CheckedStringKind {
@@ -50,6 +53,8 @@ impl CheckedStringKind {
             StringKeyKind::Command => Self::Command,
             StringKeyKind::MorphAlias => Self::MorphAlias,
             StringKeyKind::GateAbility => Self::GateAbility,
+            StringKeyKind::ServiceId => Self::ServiceId,
+            StringKeyKind::ContainerParameter => Self::ContainerParameter,
             // A section or stack name is judged against the templates that
             // render the one it is written in, which the Blade pass has and
             // this one does not.  And anything at all can be bound at
@@ -95,6 +100,11 @@ struct DeclaredKeys<'a> {
     commands_indexed: bool,
     morph_map_enforced: bool,
     gate_abilities: Arc<[String]>,
+    /// The service IDs the project's configuration declares, sorted.
+    services: Vec<String>,
+    /// The container parameters the project's configuration declares,
+    /// sorted.
+    parameters: Vec<String>,
 }
 
 impl<'a> DeclaredKeys<'a> {
@@ -115,6 +125,8 @@ impl<'a> DeclaredKeys<'a> {
         let has_command = names(|kind| kind == CheckedStringKind::Command);
         let has_morph_alias = names(|kind| kind == CheckedStringKind::MorphAlias);
         let has_gate_ability = names(|kind| kind == CheckedStringKind::GateAbility);
+        let has_service = names(|kind| kind == CheckedStringKind::ServiceId);
+        let has_parameter = names(|kind| kind == CheckedStringKind::ContainerParameter);
 
         // A package with no routes of its own, whose names are registered
         // by the host application, cannot be judged: the valid set is
@@ -219,6 +231,17 @@ impl<'a> DeclaredKeys<'a> {
                 Arc::default()
             };
 
+        let services = if has_service {
+            backend.symfony_declared_names(crate::symbol_map::StringKeyKind::ServiceId)
+        } else {
+            Vec::new()
+        };
+        let parameters = if has_parameter {
+            backend.symfony_declared_names(crate::symbol_map::StringKeyKind::ContainerParameter)
+        } else {
+            Vec::new()
+        };
+
         Self {
             backend,
             routes,
@@ -231,6 +254,8 @@ impl<'a> DeclaredKeys<'a> {
             commands_indexed,
             morph_map_enforced,
             gate_abilities,
+            services,
+            parameters,
         }
     }
 
@@ -279,7 +304,46 @@ impl<'a> DeclaredKeys<'a> {
             // An ability is reported with its own message, see
             // `Backend::gate_ability_problem`.
             CheckedStringKind::GateAbility => None,
+            CheckedStringKind::ServiceId => self.judge_service(key),
+            CheckedStringKind::ContainerParameter => {
+                Self::judge_application_key(&self.parameters, key)
+                    .map(|valid| (valid, "container parameter", "invalid_symfony_parameter"))
+            }
         }
+    }
+
+    /// A service ID spelled as a class name is that class, which an
+    /// autowired service needs no declaration to be: it is wrong only when
+    /// no such class exists.
+    fn judge_service(&self, key: &str) -> Verdict {
+        let valid = if key.contains('\\') {
+            self.services
+                .binary_search_by(|name| name.as_str().cmp(key))
+                .is_ok()
+                || self.backend.find_or_load_class(key).is_some()
+        } else {
+            Self::judge_application_key(&self.services, key)?
+        };
+        Some((valid, "service", "invalid_symfony_service"))
+    }
+
+    /// Whether `key`, a service ID or parameter name, is among the
+    /// `declared` ones, when that can be told at all.
+    ///
+    /// The configuration read is the project's own: the services and
+    /// parameters the bundles it installs register are not, and neither are
+    /// the ones a compiler pass adds.  Symfony names an application's own
+    /// under the `app.` prefix, which no bundle uses, so only those can be
+    /// judged.  A project that declares none was not read at all.
+    fn judge_application_key(declared: &[String], key: &str) -> Option<bool> {
+        if !key.starts_with("app.") || declared.is_empty() {
+            return None;
+        }
+        Some(
+            declared
+                .binary_search_by(|name| name.as_str().cmp(key))
+                .is_ok(),
+        )
     }
 
     fn judge_route(&self, key: &str) -> Verdict {
@@ -462,7 +526,7 @@ impl Backend {
         // lock, so enumerating declarations below can take the write lock
         // (see `DeclaredKeys::enumerate`) without deadlocking.
         let symbol_map = &ctx.symbol_map;
-        let extra = self.typed_receiver_view_spans_for(uri, symbol_map);
+        let extra = self.typed_receiver_spans_for(uri, symbol_map);
         let morph_columns = self.morph_column_spans_for(uri, symbol_map);
         let key_spans: Vec<CheckedKeySpan> = symbol_map
             .spans
@@ -485,7 +549,7 @@ impl Backend {
                 // is written to do without: an `@includeFirst` candidate
                 // that names nothing is why the directive takes a list at
                 // all.
-                if *is_write || *is_optional {
+                if *is_write || *is_optional || !self.string_key_kind_enabled(*kind) {
                     return None;
                 }
                 Some((

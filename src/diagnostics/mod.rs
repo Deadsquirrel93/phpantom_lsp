@@ -490,7 +490,7 @@ mod tests {
             "unknown_member",
             "argument_count_mismatch",
             "invalid_class_kind",
-            "invalid_laravel_string_key",
+            "invalid_string_key",
             "invalid_command_parameter",
         ] {
             assert!(

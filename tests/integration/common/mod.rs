@@ -1258,7 +1258,8 @@ pub fn position_of_last(content: &str, needle: &str) -> Position {
     offset_position(content, offset)
 }
 
-fn offset_position(content: &str, offset: usize) -> Position {
+/// The LSP position of the byte `offset` in `content`.
+pub fn offset_position(content: &str, offset: usize) -> Position {
     let before = &content[..offset];
     let line = before.matches('\n').count() as u32;
     let character = before

@@ -59,7 +59,7 @@ impl Backend {
         // The view name each recorded key sits at, so a call site found by
         // offset can be traced back to the template it names.
         let symbol_map = &ctx.symbol_map;
-        let extra = self.typed_receiver_view_spans_for(uri, symbol_map);
+        let extra = self.typed_receiver_spans_for(uri, symbol_map);
         let keys: HashMap<u32, String> = symbol_map
             .spans
             .iter()

@@ -1371,10 +1371,10 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
                     * size_of::<crate::symbol_map::UntypedClosureSite>(),
             );
             sym.add(
-                sm.view_receiver_sites.capacity()
-                    * size_of::<crate::symbol_map::ViewReceiverSite>(),
+                sm.typed_receiver_sites.capacity()
+                    * size_of::<crate::symbol_map::TypedReceiverSite>(),
             );
-            for site in &sm.view_receiver_sites {
+            for site in &sm.typed_receiver_sites {
                 sym.add(site.key.capacity());
             }
         }

@@ -149,7 +149,9 @@ pub(super) fn index_project(
     // diagnosing them.  Settling it here does that refresh once, after
     // the resource files are indexed, the way the editor does.  On a
     // full run the files are already parsed, so this only adds the walk.
-    if backend.resolved_class_cache.read().laravel().is_enabled() {
+    // A Symfony project's service IDs and parameters are declared in its
+    // YAML and XML configuration, which only that walk reads.
+    if backend.resolved_class_cache.read().laravel().is_enabled() || backend.is_symfony_project() {
         backend.ensure_workspace_index_ready_with_progress(None);
     } else {
         backend.refresh_blade_injected_vars();

@@ -23,10 +23,11 @@ mod enumerate;
 mod tests;
 
 use context::*;
+pub(crate) use context::{ArgumentSlot, attribute_class_start, callable_before_scalar_argument};
 
 /// The icon an editor shows beside a completed string key: whatever the key
 /// names is what it should look like.
-fn string_key_item_kind(kind: &StringKeyKind) -> CompletionItemKind {
+pub(crate) fn string_key_item_kind(kind: &StringKeyKind) -> CompletionItemKind {
     match kind {
         StringKeyKind::Config | StringKeyKind::ConfigResource(_) => CompletionItemKind::PROPERTY,
         StringKeyKind::View => CompletionItemKind::FILE,
@@ -34,6 +35,8 @@ fn string_key_item_kind(kind: &StringKeyKind) -> CompletionItemKind {
         StringKeyKind::MorphAlias => CompletionItemKind::ENUM_MEMBER,
         StringKeyKind::GateAbility => CompletionItemKind::METHOD,
         StringKeyKind::Env => CompletionItemKind::CONSTANT,
+        StringKeyKind::ServiceId => CompletionItemKind::REFERENCE,
+        StringKeyKind::ContainerParameter => CompletionItemKind::PROPERTY,
         StringKeyKind::Route
         | StringKeyKind::Command
         | StringKeyKind::Section
@@ -155,6 +158,9 @@ impl Backend {
             }
             StringKeyKind::GateAbility => self.cached_gate_abilities(),
             StringKeyKind::Env => crate::virtual_members::laravel::enumerate_env_keys(self).into(),
+            StringKeyKind::ServiceId | StringKeyKind::ContainerParameter => {
+                self.symfony_declared_names(*kind).into()
+            }
             StringKeyKind::Section | StringKeyKind::Stack | StringKeyKind::ContainerBinding => {
                 Arc::new([])
             }
@@ -275,7 +281,7 @@ impl Backend {
 /// rather than inserting at it, so a dotted name is not mangled by the
 /// editor's word-based filtering (which treats `.` as a boundary and would
 /// otherwise leave `users.users.profile` behind).
-fn string_key_response(
+pub(crate) fn string_key_response(
     names: Vec<String>,
     kind: CompletionItemKind,
     content: &str,

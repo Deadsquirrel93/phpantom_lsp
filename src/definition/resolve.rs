@@ -96,17 +96,17 @@ impl Backend {
         {
             return Some(span.clone());
         }
-        // A view name behind a typed receiver is a gap in the map — the
-        // indexer could not tell it was one — so the cursor lands in what
-        // reads as a plain string literal until the receiver is typed.
+        // A key behind a typed receiver is a gap in the map — the indexer
+        // could not tell it was one — so the cursor lands in what reads as
+        // a plain string literal until the receiver is typed.
         if !map
-            .view_receiver_sites
+            .typed_receiver_sites
             .iter()
             .any(|site| offset >= site.start && offset < site.end)
         {
             return None;
         }
-        self.typed_receiver_view_spans_for(uri, &map)
+        self.typed_receiver_spans_for(uri, &map)
             .iter()
             .find(|span| offset >= span.start && offset < span.end)
             .cloned()
@@ -404,7 +404,7 @@ impl Backend {
             }
 
             SymbolKind::StringKey { kind, key, .. } => {
-                if !self.resolved_class_cache.read().laravel().is_enabled() {
+                if !self.string_key_kind_enabled(*kind) {
                     return None;
                 }
                 let locs = laravel::resolve_laravel_string_key(self, kind, key, uri);

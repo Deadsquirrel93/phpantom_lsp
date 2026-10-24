@@ -706,23 +706,42 @@ impl Backend {
             }
         }
 
-        // A render site behind a typed receiver is only settled lazily, and
-        // whoever wants the answer has to find the file before it can be
-        // asked for. The candidate joins the index unconfirmed: this index
-        // narrows a workspace scan to the files that *might* hold a key,
-        // and every consumer of it re-checks what it found. Outside Laravel
-        // no candidate can ever be confirmed, and morph sites are recorded
-        // for every plain `$x->prop === 'literal'`, so skip them there.
-        if self.resolved_class_cache.read().laravel().is_enabled() {
-            for site in &symbol_map.view_receiver_sites {
+        // A key behind a typed receiver is only settled lazily, and whoever
+        // wants the answer has to find the file before it can be asked for.
+        // The candidate joins the index unconfirmed, under every kind it
+        // could turn out to be: this index narrows a workspace scan to the
+        // files that *might* hold a key, and every consumer of it re-checks
+        // what it found. Outside the framework a candidate belongs to it can
+        // never be confirmed, and morph sites are recorded for every plain
+        // `$x->prop === 'literal'`, so skip them there.
+        let is_laravel = self.resolved_class_cache.read().laravel().is_enabled();
+        let is_symfony = self.is_symfony_project();
+        for site in &symbol_map.typed_receiver_sites {
+            let enabled = if site.receiver.is_symfony() {
+                is_symfony
+            } else {
+                is_laravel
+            };
+            if !enabled {
+                continue;
+            }
+            let mut kinds: Vec<StringKeyKind> = Vec::with_capacity(2);
+            for (_, kind) in site.receiver.targets() {
+                if !kinds.contains(kind) {
+                    kinds.push(*kind);
+                }
+            }
+            for kind in kinds {
                 entries.push((
                     ReferenceIndexKey::StringKey {
-                        kind: crate::symbol_map::StringKeyKind::View,
+                        kind,
                         key: site.key.clone(),
                     },
                     false,
                 ));
             }
+        }
+        if is_laravel {
             for site in &symbol_map.morph_column_sites {
                 entries.push((
                     ReferenceIndexKey::StringKey {

@@ -741,7 +741,11 @@ fn yaml_repository_class_value(line: &str, line_start: usize) -> Option<(String,
     }
 }
 
-fn xml_attr_value(tag: &str, tag_start: usize, names: &[&str]) -> Option<(String, usize, usize)> {
+pub(crate) fn xml_attr_value(
+    tag: &str,
+    tag_start: usize,
+    names: &[&str],
+) -> Option<(String, usize, usize)> {
     let bytes = tag.as_bytes();
     let mut i = 0usize;
     while i < bytes.len() {
@@ -793,7 +797,7 @@ fn xml_attr_value(tag: &str, tag_start: usize, names: &[&str]) -> Option<(String
     None
 }
 
-fn strip_yaml_quotes(raw: &str) -> (&str, (usize, usize)) {
+pub(crate) fn strip_yaml_quotes(raw: &str) -> (&str, (usize, usize)) {
     let bytes = raw.as_bytes();
     if bytes.len() >= 2
         && ((bytes[0] == b'\'' && bytes[bytes.len() - 1] == b'\'')
@@ -805,7 +809,7 @@ fn strip_yaml_quotes(raw: &str) -> (&str, (usize, usize)) {
     }
 }
 
-fn leading_spaces(line: &str) -> usize {
+pub(crate) fn leading_spaces(line: &str) -> usize {
     line.bytes().take_while(|b| *b == b' ').count()
 }
 
@@ -926,12 +930,16 @@ fn scan_path_scalars(uri: &str, content: &str, refs: &mut Vec<FrameworkReference
     }
 }
 
-fn line_offsets(content: &str) -> Vec<(usize, &str)> {
+/// Each line of `content` without its line terminator, with the offset it
+/// starts at.  A `\r\n` terminator is two bytes, so offsets are counted
+/// from what each line actually spans.
+pub(crate) fn line_offsets(content: &str) -> Vec<(usize, &str)> {
     let mut out = Vec::new();
     let mut offset = 0usize;
-    for line in content.lines() {
-        out.push((offset, line));
-        offset += line.len() + 1;
+    for raw in content.split_inclusive('\n') {
+        let line = raw.strip_suffix('\n').unwrap_or(raw);
+        out.push((offset, line.strip_suffix('\r').unwrap_or(line)));
+        offset += raw.len();
     }
     out
 }

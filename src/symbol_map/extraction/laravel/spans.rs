@@ -183,7 +183,7 @@ pub(super) fn emit_laravel_string_span(
 /// The key compared against declared config/route/view/translation names is
 /// the literal's unescaped runtime `value` (`'it\'s'` names `it's`), not the
 /// raw source between the quotes; the span still covers the source text.
-pub(super) fn push_laravel_string_span(
+pub(in crate::symbol_map::extraction) fn push_laravel_string_span(
     kind: crate::symbol_map::StringKeyKind,
     is_write: bool,
     is_optional: bool,

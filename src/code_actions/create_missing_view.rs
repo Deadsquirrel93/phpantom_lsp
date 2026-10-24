@@ -38,7 +38,7 @@ impl Backend {
             Some(sm) => sm,
             None => return,
         };
-        let extra = self.typed_receiver_view_spans_for(uri, &symbol_map);
+        let extra = self.typed_receiver_spans_for(uri, &symbol_map);
 
         let mut view_names: Option<std::sync::Arc<[String]>> = None;
 

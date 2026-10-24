@@ -9,7 +9,8 @@ use super::{LaravelConfigResource, SymbolKind, SymbolMap, SymbolSpan};
 ///
 /// One flat list for every framework: each variant names what its key
 /// resolves against, so a framework's kinds sit beside the others rather
-/// than behind a per-framework wrapper. The variants below are all Laravel's.
+/// than behind a per-framework wrapper. [`Self::is_symfony`] says which
+/// framework a variant belongs to.
 ///
 /// Adding a new string-key navigation feature only requires adding a variant
 /// here and updating the extraction and dispatch paths — the exhaustive
@@ -59,12 +60,27 @@ pub(crate) enum StringKeyKind {
     /// `Env::get('APP_NAME')` reads, resolving to the line that declares it
     /// in the project's `.env`.
     Env,
+    /// A Symfony service ID: the key a service is declared under in
+    /// `services.yaml`, `services.xml`, or a PHP configurator's `->set()`,
+    /// and the string `$container->get()`, `service()`, or
+    /// `#[Autowire(service: …)]` asks for.
+    ServiceId,
+    /// A Symfony container parameter: declared under `parameters:` or with a
+    /// PHP configurator's `$parameters->set()`, read by `getParameter()`,
+    /// `param()`, `#[Autowire(param: …)]`, and `%name%` placeholders.
+    ContainerParameter,
 }
 
 impl StringKeyKind {
     /// Whether this key resolves through Laravel's config index.
     pub(crate) const fn is_config_backed(self) -> bool {
         matches!(self, Self::Config | Self::ConfigResource(_))
+    }
+
+    /// Whether this key belongs to a Symfony service container rather than
+    /// to Laravel.
+    pub(crate) const fn is_symfony(self) -> bool {
+        matches!(self, Self::ServiceId | Self::ContainerParameter)
     }
 }
 
@@ -237,5 +253,178 @@ impl SymbolMap {
             }
         }
         changed
+    }
+}
+
+// ─── String keys behind a typed receiver ────────────────────────────────────
+
+const PSR_CONTAINER: &str = "Psr\\Container\\ContainerInterface";
+const SYMFONY_CONTAINER: &str = "Symfony\\Component\\DependencyInjection\\ContainerInterface";
+const SYMFONY_CONTAINER_BAG: &str =
+    "Symfony\\Component\\DependencyInjection\\ParameterBag\\ContainerBagInterface";
+const SYMFONY_PARAMETER_BAG: &str =
+    "Symfony\\Component\\DependencyInjection\\ParameterBag\\ParameterBagInterface";
+const SYMFONY_ABSTRACT_CONTROLLER: &str =
+    "Symfony\\Bundle\\FrameworkBundle\\Controller\\AbstractController";
+const SYMFONY_SERVICES_CONFIGURATOR: &str =
+    "Symfony\\Component\\DependencyInjection\\Loader\\Configurator\\ServicesConfigurator";
+const SYMFONY_ABSTRACT_SERVICE_CONFIGURATOR: &str =
+    "Symfony\\Component\\DependencyInjection\\Loader\\Configurator\\AbstractServiceConfigurator";
+const SYMFONY_SERVICE_CONFIGURATOR: &str =
+    "Symfony\\Component\\DependencyInjection\\Loader\\Configurator\\ServiceConfigurator";
+const SYMFONY_PARAMETERS_CONFIGURATOR: &str =
+    "Symfony\\Component\\DependencyInjection\\Loader\\Configurator\\ParametersConfigurator";
+
+/// The classes a receiver has to be an instance of for the call it receives
+/// to name a string key, and which kind of key each one makes it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ReceiverClass {
+    /// Laravel's view factory, whose `make()` / `first()` / `exists()` /
+    /// `renderWhen()` / `renderUnless()` / `renderEach()` all name a
+    /// template.
+    ViewFactory,
+    /// A mailable, whose `text()` names the plain-text template the message
+    /// is built from.
+    Mailable,
+    /// Anything a mail template is set on: a mailable, or the mail message a
+    /// notification's `toMail()` returns.  The two share no base class, but
+    /// `view()` and `markdown()` mean the same thing on both.
+    MailTemplate,
+    /// What `get()` and `has()` look a name up in: a service container, or
+    /// one of Symfony's parameter bags, whose same two methods take a
+    /// parameter name instead.
+    ContainerLookup,
+    /// What `getParameter()`, `hasParameter()`, and `setParameter()` take a
+    /// container parameter name in: the container itself, and the
+    /// `getParameter()` shortcut a Symfony controller inherits.
+    ParameterHolder,
+    /// A PHP configurator's `set()`, which declares a service on the
+    /// services configurator and a parameter on the parameters one.
+    ConfiguratorSet,
+    /// The services configurator, whose `alias()` declares a service ID
+    /// for another one.
+    ServicesConfigurator,
+    /// One service's configurator, whose `decorate()` names the service it
+    /// replaces.
+    ServiceConfigurator,
+}
+
+impl ReceiverClass {
+    /// Each class the receiver's type can be a subtype of, most specific
+    /// first, with the kind of key the call names when it is.
+    pub(crate) fn targets(self) -> &'static [(&'static str, StringKeyKind)] {
+        use StringKeyKind::{ContainerParameter, ServiceId, View};
+        match self {
+            // The concrete `Illuminate\View\Factory` implements the
+            // contract, so the contract covers both spellings.
+            Self::ViewFactory => &[("Illuminate\\Contracts\\View\\Factory", View)],
+            Self::Mailable => &[("Illuminate\\Mail\\Mailable", View)],
+            Self::MailTemplate => &[
+                ("Illuminate\\Mail\\Mailable", View),
+                ("Illuminate\\Notifications\\Messages\\MailMessage", View),
+            ],
+            // A container bag is a PSR container too, so it has to be asked
+            // about first.
+            Self::ContainerLookup => &[
+                (SYMFONY_CONTAINER_BAG, ContainerParameter),
+                (SYMFONY_PARAMETER_BAG, ContainerParameter),
+                (PSR_CONTAINER, ServiceId),
+            ],
+            Self::ParameterHolder => &[
+                (SYMFONY_CONTAINER, ContainerParameter),
+                (SYMFONY_ABSTRACT_CONTROLLER, ContainerParameter),
+            ],
+            Self::ConfiguratorSet => &[
+                (SYMFONY_PARAMETERS_CONFIGURATOR, ContainerParameter),
+                (SYMFONY_SERVICES_CONFIGURATOR, ServiceId),
+                (SYMFONY_ABSTRACT_SERVICE_CONFIGURATOR, ServiceId),
+            ],
+            Self::ServicesConfigurator => &[
+                (SYMFONY_SERVICES_CONFIGURATOR, ServiceId),
+                (SYMFONY_ABSTRACT_SERVICE_CONFIGURATOR, ServiceId),
+            ],
+            Self::ServiceConfigurator => &[(SYMFONY_SERVICE_CONFIGURATOR, ServiceId)],
+        }
+    }
+
+    /// Whether the receiver is one of the configurators a PHP service
+    /// configuration file builds the container with.
+    pub(crate) fn is_configurator(self) -> bool {
+        matches!(
+            self,
+            Self::ConfiguratorSet | Self::ServicesConfigurator | Self::ServiceConfigurator
+        )
+    }
+
+    /// Whether the call names a template.
+    pub(crate) fn names_views(self) -> bool {
+        matches!(
+            self,
+            Self::ViewFactory | Self::Mailable | Self::MailTemplate
+        )
+    }
+
+    /// Whether this receiver names one of Symfony's string keys rather than
+    /// one of Laravel's.
+    pub(crate) fn is_symfony(self) -> bool {
+        self.targets()
+            .first()
+            .is_some_and(|(_, kind)| kind.is_symfony())
+    }
+}
+
+/// A method call that names a string key, but whose meaning lives in its
+/// receiver's *type* rather than its spelling: a constructor-injected
+/// `Factory $views` behind `$this->views->make('page')`, a mailable held in
+/// a local behind `$mail->view('emails.shipped')`, a `ContainerInterface
+/// $container` behind `$container->get('app.mailer')`.
+///
+/// [`extract_symbol_map`](super::extraction) runs during `update_ast`,
+/// before the file's classes are resolved, and cannot ask the forward walker
+/// what the receiver is.  It records the site instead, and
+/// `Backend::typed_receiver_spans_for` settles it lazily.
+#[derive(Debug, Clone)]
+pub(crate) struct TypedReceiverSite {
+    /// Byte offset of the first character of the string's contents,
+    /// matching what a [`SymbolKind::StringKey`] span records.
+    pub start: u32,
+    /// Byte offset one past the last character of those contents.
+    pub end: u32,
+    /// The key, in the spelling its kind stores (a view name dotted).
+    pub key: String,
+    /// Whether the call declares the key rather than reading it.
+    pub is_write: bool,
+    /// Whether the call does without the key naming anything, as a
+    /// `first()` render of several candidate templates does.
+    pub is_optional: bool,
+    /// What the receiver has to be for this to name a key at all.
+    pub receiver: ReceiverClass,
+}
+
+impl TypedReceiverSite {
+    /// Whether this site, once confirmed, could name `key` as a `kind`.
+    /// The reference index files a site under each kind it could become.
+    pub(crate) fn may_name(&self, kind: StringKeyKind, key: &str) -> bool {
+        self.key == key
+            && self
+                .receiver
+                .targets()
+                .iter()
+                .any(|(_, target)| *target == kind)
+    }
+
+    /// The span this site contributes once its receiver is confirmed to
+    /// name a `kind`.
+    pub(crate) fn to_span(&self, kind: StringKeyKind) -> SymbolSpan {
+        SymbolSpan {
+            start: self.start,
+            end: self.end,
+            kind: SymbolKind::StringKey {
+                key: self.key.clone(),
+                kind,
+                is_write: self.is_write,
+                is_optional: self.is_optional,
+            },
+        }
     }
 }

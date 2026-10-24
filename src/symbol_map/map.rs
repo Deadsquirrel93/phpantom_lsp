@@ -273,12 +273,12 @@ pub(crate) struct SymbolMap {
     /// parameters.  Used by inlay hints to show inferred parameter types
     /// and return types from the enclosing callable signature.
     pub untyped_closure_sites: Vec<UntypedClosureSite>,
-    /// Render sites whose receiver only a type settles, sorted by `start`.
+    /// String keys whose receiver only a type settles, sorted by `start`.
     ///
-    /// Empty for all but the handful of files that call a view factory or
-    /// a mailable through something other than the spellings
+    /// Empty for all but the files that call a view factory, a mailable,
+    /// or a Symfony container through something other than the spellings
     /// [`SymbolKind::StringKey`] is emitted for.
-    pub view_receiver_sites: Vec<ViewReceiverSite>,
+    pub typed_receiver_sites: Vec<TypedReceiverSite>,
     /// Literal comparisons whose receivers and columns must be confirmed
     /// as Eloquent morph type columns, sorted by `start`.
     pub morph_column_sites: Vec<MorphColumnSite>,

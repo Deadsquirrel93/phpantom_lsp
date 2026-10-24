@@ -15,9 +15,8 @@ use super::docblock::{
 use super::morph_columns::{record_morph_column_call, record_morph_column_comparison};
 use super::{
     CallArg, CallArgKind, CallSites, ClassRefContext, DocblockMemberRef, MorphColumnSite,
-    NestedRanges, SelfStaticParentKind, SubjectText, SymbolKind, SymbolMap, SymbolSpan,
-    TemplateParamDef, UntypedClosureSite, VarDefKind, VarDefSite, ViewReceiverClass,
-    ViewReceiverSite,
+    NestedRanges, ReceiverClass, SelfStaticParentKind, SubjectText, SymbolKind, SymbolMap,
+    SymbolSpan, TemplateParamDef, TypedReceiverSite, UntypedClosureSite, VarDefKind, VarDefSite,
 };
 use crate::atom::{bytes_to_str, literal_bytes_to_str};
 use crate::names::OwnedResolvedNames;
@@ -84,9 +83,9 @@ struct ExtractionCtx<'a> {
     /// Closures and arrow functions passed as arguments to callable-typed
     /// parameters, used by inlay hints.
     untyped_closure_sites: Vec<UntypedClosureSite>,
-    /// Render sites whose receiver only a type settles, left for
-    /// `Backend::typed_receiver_view_spans` to confirm.
-    view_receiver_sites: Vec<ViewReceiverSite>,
+    /// String keys whose receiver only a type settles, left for
+    /// `Backend::typed_receiver_spans_for` to confirm.
+    typed_receiver_sites: Vec<TypedReceiverSite>,
     /// Possible morph aliases whose model and type column are resolved lazily.
     morph_column_sites: Vec<MorphColumnSite>,
     /// The model argument of each authorization check that named one.
@@ -121,6 +120,14 @@ struct ExtractionCtx<'a> {
     /// being extracted.  It is what gives `@covers ::name` on a test method
     /// a subject; without one that shape names a global function.
     covers_default_class: Option<crate::atom::Atom>,
+    /// Whether the project builds a Symfony service container.  Gates the
+    /// container calls recorded for the type engine to confirm, which
+    /// `get()` and `set()` would otherwise record all over any other
+    /// project.
+    symfony: bool,
+    /// Whether the file names anything from Symfony's configurator
+    /// namespace, checked once lazily.
+    uses_symfony_configurators: Option<bool>,
 }
 
 /// A variable token's name without its `$`.
@@ -227,6 +234,7 @@ pub(crate) mod laravel;
 mod phpunit;
 mod statements;
 mod subject_text;
+mod symfony;
 
 use class_like::*;
 use expressions::*;
@@ -235,6 +243,11 @@ use laravel::*;
 use phpunit::*;
 use statements::*;
 use subject_text::*;
+use symfony::*;
+
+pub(crate) use symfony::{
+    configurator_function_kind, is_autowire_attribute, symfony_receiver_method,
+};
 
 /// Descend generically through a node the typed dispatchers have no arm for,
 /// re-entering the typed extractors at the next expression or statement
@@ -261,7 +274,7 @@ fn descend_unhandled<'a>(node: Node<'a, 'a>, ctx: &mut ExtractionCtx<'a>, scope_
 /// every navigable symbol occurrence.
 #[cfg(test)]
 pub(crate) fn extract_symbol_map(program: &Program<'_>, content: &str) -> SymbolMap {
-    extract_symbol_map_inner(program, content, None)
+    extract_symbol_map_inner(program, content, None, true)
 }
 
 /// Build a [`SymbolMap`] using the semantic names produced by `mago-names`.
@@ -271,25 +284,29 @@ pub(crate) fn extract_symbol_map_with_resolved_names(
     content: &str,
     resolved_names: &OwnedResolvedNames,
 ) -> SymbolMap {
-    let mut map = extract_symbol_map_inner(program, content, Some(resolved_names));
+    let mut map = extract_symbol_map_inner(program, content, Some(resolved_names), true);
     map.refresh_conditional_string_key_spans(None, |_| false);
     map
 }
 
 /// Build a semantic map while retaining workspace-dependent Laravel spans as
 /// dormant candidates for the publication lifecycle to settle.
+///
+/// `symfony` says whether the project builds a Symfony service container.
 pub(crate) fn extract_symbol_map_for_index(
     program: &Program<'_>,
     content: &str,
     resolved_names: &OwnedResolvedNames,
+    symfony: bool,
 ) -> SymbolMap {
-    extract_symbol_map_inner(program, content, Some(resolved_names))
+    extract_symbol_map_inner(program, content, Some(resolved_names), symfony)
 }
 
 fn extract_symbol_map_inner(
     program: &Program<'_>,
     content: &str,
     resolved_names: Option<&OwnedResolvedNames>,
+    symfony: bool,
 ) -> SymbolMap {
     let mut ctx = ExtractionCtx {
         spans: Vec::new(),
@@ -311,7 +328,7 @@ fn extract_symbol_map_inner(
         resolved_names,
         conditional_string_key_spans: Vec::new(),
         untyped_closure_sites: Vec::new(),
-        view_receiver_sites: Vec::new(),
+        typed_receiver_sites: Vec::new(),
         morph_column_sites: Vec::new(),
         gate_subjects: Vec::new(),
         cond_nesting_depth: 0,
@@ -322,6 +339,8 @@ fn extract_symbol_map_inner(
         in_console_command: false,
         in_mailable: false,
         covers_default_class: None,
+        symfony,
+        uses_symfony_configurators: None,
     };
 
     for stmt in program.statements.iter() {
@@ -418,7 +437,7 @@ fn extract_symbol_map_inner(
     ctx.loop_scopes.sort_by_key(|s| s.0);
     ctx.switch_scopes.sort_by_key(|s| s.0);
     ctx.static_method_scopes.sort_by_key(|s| s.0);
-    ctx.view_receiver_sites.sort_by_key(|s| s.start);
+    ctx.typed_receiver_sites.sort_by_key(|s| s.start);
     ctx.morph_column_sites.sort_by_key(|s| s.start);
 
     let mut member_access_indices: crate::atom::AtomMap<Vec<usize>> =
@@ -451,7 +470,7 @@ fn extract_symbol_map_inner(
         static_method_scopes: ctx.static_method_scopes,
         instance_method_scopes: ctx.instance_method_scopes,
         untyped_closure_sites: ctx.untyped_closure_sites,
-        view_receiver_sites: ctx.view_receiver_sites,
+        typed_receiver_sites: ctx.typed_receiver_sites,
         morph_column_sites: ctx.morph_column_sites,
         gate_subjects: ctx.gate_subjects,
         source_len: u32::try_from(content.len()).unwrap_or(u32::MAX),

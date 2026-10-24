@@ -534,7 +534,7 @@ impl Backend {
         position: Position,
     ) -> Option<(String, String, Position)> {
         let target = self
-            .resolve_resource_definition(content, position)
+            .resolve_resource_symbol_definition(content, position)
             .or_else(|| {
                 let mut definitions = self.resolve_definition(uri, content, position);
                 (definitions.len() == 1).then(|| definitions.remove(0))

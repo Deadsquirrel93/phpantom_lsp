@@ -251,7 +251,7 @@ impl Backend {
         let Some(map) = self.symbol_map_for(caller_uri) else {
             return;
         };
-        let extra = self.typed_receiver_view_spans_for(caller_uri, &map);
+        let extra = self.typed_receiver_spans_for(caller_uri, &map);
         let mut names: Vec<&str> = map
             .spans
             .iter()

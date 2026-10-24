@@ -27,10 +27,11 @@
 //!   `extract_from_*` helpers)
 //! - [`call_sites`] — the call sites signature help reads, stored in
 //!   shared arenas
-//! - [`string_keys`] — the framework string keys spans record, and the
-//!   spans that depend on a workspace symbol being absent
-//! - [`laravel_spans`] — Laravel config resources and the side tables for
-//!   gate subjects and typed render receivers
+//! - [`string_keys`] — the framework string keys spans record, the spans
+//!   that depend on a workspace symbol being absent, and the ones whose
+//!   receiver only a type settles
+//! - [`laravel_spans`] — Laravel config resources and the side table for
+//!   gate subjects
 //! - [`span`] — the symbol spans and their kinds
 //! - [`map`] — [`SymbolMap`] itself and its lookups
 

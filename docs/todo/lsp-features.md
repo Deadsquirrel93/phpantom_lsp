@@ -445,3 +445,60 @@ its `ServiceEntityRepository`/`EntityRepository` ancestor in
 (`doctrine_repository_fqns_for_entity`,
 `doctrine_entity_fqns_for_repository`), `src/parser/classes/class_likes.rs`
 (`extract_class`), `src/parser/attributes.rs`.
+
+---
+
+## F25. Names a PHP configurator spells as strings
+
+**Impact: Medium · Complexity: Medium**
+
+```php
+return static function (ContainerConfigurator $container): void {
+    $container->services()->load('App\\Service\\', '../src/Service/');
+};
+
+return static function (RoutingConfigurator $routes): void {
+    $routes->add('legacy', '/legacy')
+        ->controller('App\\Controller\\DemoController::legacy');
+};
+```
+
+The same names in `services.yaml` and `routes.yaml` take part in rename and
+navigation: a namespace-prefix key follows a namespace rename, a
+`resource:` path follows its directory, and a `Class::method` controller
+string navigates and renames with the method. Written in a PHP
+configurator they are plain strings. `load()`'s namespace prefix and
+resource path, and a controller given as one `Class::method` string, need
+reading from the AST where the receiver is confirmed as a configurator
+(`TypedReceiverSite`), the way the container's service IDs are, and
+feeding to the framework index the YAML occurrences are kept in. Sidux's
+#398 did this by scanning the PHP text.
+
+**Where to look:** `src/framework.rs` (`FrameworkReference`,
+`collect_framework_name_edits`), `src/symbol_map/extraction/symfony.rs`,
+`src/blade/typed_receiver.rs`.
+
+---
+
+## F26. Symfony service IDs a bundle or a definition API declares
+
+**Impact: Low-Medium · Complexity: Medium**
+
+Service IDs and container parameters are read from the application's YAML,
+XML, and PHP configurators. A bundle's own declarations, and the ones a
+kernel or an extension makes through the `ContainerBuilder` API
+(`register('app.mailer', …)`, `setAlias()`, `setParameter()` on a builder,
+`setDefinition()`), are not, so those names neither complete nor navigate,
+and only names under the application's own `app.` prefix can be reported
+as undeclared. Two reading shapes are missing too: a configurator's
+`->parent('app.base')`, and the `%name%` placeholders in a string a
+configurator passes as an argument (`->args(['%app.sender%'])`).
+
+Reading the installed bundles' `Resources/config/` would also let the
+unknown-ID check judge names outside `app.`; it has to stay cheap enough
+for a project with dozens of bundles.
+
+**Where to look:** `src/symbol_map/extraction/symfony.rs`
+(`symfony_receiver_method`), `src/symbol_map/string_keys.rs`
+(`ReceiverClass`), `src/symfony/`.
+

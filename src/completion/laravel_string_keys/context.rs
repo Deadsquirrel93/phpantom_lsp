@@ -37,7 +37,7 @@ pub(super) enum StringArgumentShape {
 /// Where a string literal sits among the arguments of the call it is
 /// passed to.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(super) enum ArgumentSlot<'a> {
+pub(crate) enum ArgumentSlot<'a> {
     /// The positional argument at this index.
     Positional(usize),
     /// The argument passed by this name.
@@ -81,7 +81,7 @@ pub(super) fn enclosing_call_open_paren(content: &str) -> Option<usize> {
 
 /// Return the callable a scalar argument is passed to, and where among its
 /// arguments the scalar sits.
-pub(super) fn callable_before_scalar_argument(
+pub(crate) fn callable_before_scalar_argument(
     before_value: &str,
 ) -> Option<(&str, ArgumentSlot<'_>)> {
     let before_value = before_value.trim_end();
@@ -429,7 +429,7 @@ pub(super) fn last_attribute_open_before(content: &str, end: usize) -> Option<us
 /// Attribute groups may contain earlier attributes and arbitrary balanced
 /// argument expressions. Only a class that starts a top-level group element
 /// is accepted; a lookalike call nested inside another attribute is not.
-pub(super) fn attribute_class_start(before_paren: &str, name_start: usize) -> Option<usize> {
+pub(crate) fn attribute_class_start(before_paren: &str, name_start: usize) -> Option<usize> {
     let bytes = before_paren.as_bytes();
     let mut class_start = name_start;
     while class_start > 0

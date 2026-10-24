@@ -314,6 +314,7 @@ pub mod stub_patches;
 pub mod stubs;
 mod symbol_index;
 pub(crate) mod symbol_map;
+mod symfony;
 pub(crate) mod text_position;
 pub(crate) mod text_scan;
 pub(crate) mod toposort;
@@ -494,6 +495,13 @@ pub struct BackendState {
     /// [`crate::composer::is_doctrine_project`].  Starts `true` so a
     /// workspace with no `composer.json` to classify behaves as before.
     pub(crate) is_doctrine: Arc<std::sync::atomic::AtomicBool>,
+    /// Whether the project builds a Symfony service container, which
+    /// service IDs and container parameters are read in.  See
+    /// [`crate::composer::is_symfony_project`].  Starts `true` so a
+    /// workspace with no `composer.json` to classify behaves as before.
+    pub(crate) is_symfony: Arc<std::sync::atomic::AtomicBool>,
+    /// The files that declare Symfony service IDs or container parameters.
+    pub(crate) symfony: symfony::SymfonyState,
     /// The `Pest.php` files of the project's test directories, read on
     /// first use and dropped when one is saved.  `None` until then.
     pub(crate) pest_configs: Arc<RwLock<Option<pest::PestConfigs>>>,

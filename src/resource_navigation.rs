@@ -61,7 +61,7 @@ pub(crate) fn is_resource_path(path: &Path) -> bool {
 impl Backend {
     /// Resolve the fully-qualified PHP class or `Class::member` under the
     /// cursor in a YAML/XML document.
-    pub(crate) fn resolve_resource_definition(
+    pub(crate) fn resolve_resource_symbol_definition(
         &self,
         content: &str,
         position: Position,
@@ -75,10 +75,33 @@ impl Backend {
         }
     }
 
+    /// Go-to-definition in a YAML/XML document: the PHP class or member
+    /// under the cursor, or else the declarations of the string key there
+    /// (a Symfony service ID or container parameter).
+    pub(crate) fn resolve_resource_definition(
+        &self,
+        uri: &str,
+        content: &str,
+        position: Position,
+    ) -> Vec<Location> {
+        if let Some(location) = self.resolve_resource_symbol_definition(content, position) {
+            return vec![location];
+        }
+        match self.lookup_symbol_at_position(uri, content, position) {
+            Some(SymbolSpan {
+                kind: SymbolKind::StringKey { kind, key, .. },
+                ..
+            }) if self.string_key_kind_enabled(kind) => {
+                crate::virtual_members::laravel::resolve_laravel_string_key(self, &kind, &key, uri)
+            }
+            _ => Vec::new(),
+        }
+    }
+
     /// Replace one resource document's synthetic symbol map and reference
     /// contributions.
     pub(crate) fn update_resource_symbol_index(&self, uri: &str, content: &str) {
-        let symbol_map = Arc::new(self.resource_symbol_map(content));
+        let symbol_map = Arc::new(self.resource_symbol_map(uri, content));
         self.publish_symbol_maps([(uri.to_string(), Arc::clone(&symbol_map))]);
         self.reindex_references_for_symbol_maps_batch(vec![(uri.to_string(), symbol_map)]);
         self.index_framework_uri_content(uri, content);
@@ -91,7 +114,10 @@ impl Backend {
             .filter_map(|(uri, path)| {
                 let content = std::fs::read_to_string(path).ok()?;
                 self.index_framework_uri_content(uri, &content);
-                Some((uri.clone(), Arc::new(self.resource_symbol_map(&content))))
+                Some((
+                    uri.clone(),
+                    Arc::new(self.resource_symbol_map(uri, &content)),
+                ))
             })
             .collect();
         if maps.is_empty() {
@@ -102,8 +128,11 @@ impl Backend {
         self.reindex_references_for_symbol_maps_batch(maps);
     }
 
-    fn resource_symbol_map(&self, content: &str) -> SymbolMap {
+    fn resource_symbol_map(&self, uri: &str, content: &str) -> SymbolMap {
         let mut spans = Vec::new();
+        if self.is_symfony_project() && crate::symfony::resources::is_container_config_uri(uri) {
+            spans = crate::symfony::resources::container_key_spans(uri, content);
+        }
         for symbol in scan_symbols(content) {
             spans.push(SymbolSpan {
                 start: symbol.class_start as u32,

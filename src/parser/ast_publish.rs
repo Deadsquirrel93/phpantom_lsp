@@ -481,7 +481,7 @@ impl Backend {
             self.invalidate_signature_dependents(&changed_names);
         } else {
             for update in &prepared {
-                self.evict_typed_receiver_view_spans(&update.uri);
+                self.evict_typed_receiver_spans(&update.uri);
                 self.evict_morph_column_spans(&update.uri);
             }
         }
@@ -521,6 +521,7 @@ impl Backend {
                 }),
                 None => files.get(&update.uri).and_then(|old| old.blade.clone()),
             };
+            self.note_symfony_declarations(&update.uri, &update.symbol_map);
             let state = crate::file_state::FileState {
                 symbol_map: Some(Arc::clone(&update.symbol_map)),
                 parse_errors: std::mem::take(&mut update.parse_errors),
@@ -543,6 +544,7 @@ impl Backend {
     ) {
         let mut files = self.files.write();
         for (uri, map) in maps {
+            self.note_symfony_declarations(&uri, &map);
             let state = match files.get(&uri) {
                 Some(state) => state.with_symbol_map(map),
                 None => crate::file_state::FileState {
@@ -903,7 +905,7 @@ impl Backend {
         // A receiver's type is settled against the classes of the whole
         // workspace, so a signature change anywhere can turn a call that
         // was not a render into one, or the other way round.
-        self.blade.typed_receiver_view_spans_cache.write().clear();
+        self.blade.typed_receiver_spans_cache.write().clear();
         self.laravel.morph_column_spans_cache.write().clear();
     }
 
