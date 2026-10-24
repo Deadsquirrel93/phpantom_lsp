@@ -467,3 +467,129 @@ resources already knows those pairs; the attribute form needs the
 mapping pairs, and method-call return resolution under
 `src/type_engine/variable/rhs_resolution/` for where the hook goes.
 
+
+---
+
+## T50. Port the PHPStan Symfony and Doctrine extensions' type fixtures
+
+**Impact: Medium · Complexity: Medium**
+
+PHPStan's framework extensions, `phpstan/phpstan-symfony` and
+`phpstan/phpstan-doctrine`, are the reference for what a Symfony or
+Doctrine project expects its types to be. Their `tests/Type/**/data/*.php`
+files are `assertType()` fixtures, the format `tests/assert_type_runner.rs`
+already runs for PHPStan's and Psalm's own corpora. Porting them is the
+measuring stick for T51 to T53, F42 to F44, and D30 to D31: each item there
+lands when its fixtures pass, and the ones that cannot yet carry a `// SKIP`
+naming the item.
+
+Two things have to be settled first:
+
+- **Where the framework classes come from.** The runner's backend has the
+  embedded stubs only, and these fixtures call into `symfony/*` and
+  `doctrine/*` classes. Either the fixtures get a project of their own with
+  a committed `composer.lock`, installed in CI the way `examples/symfony/`
+  is, or each fixture gets the slice of the framework it touches as stubs.
+- **What stands in for a booted application.** The extensions read the
+  compiled container XML (`containerXmlPath`), an object manager
+  (`objectManagerLoader`), and a console application
+  (`consoleApplicationLoader`). PHPantom reads the same facts statically,
+  from the service declarations, the entity mappings, and each command's
+  `configure()`, so a fixture that depends on the loader gets that setup
+  written as source next to it rather than being dropped.
+
+The extensions' rule tests (`tests/Rules/**`, expected messages per line)
+port the same way onto the diagnostic fixtures `tests/fixture_runner.rs`
+runs. Keep the upstream expectation and mark a gap `// SKIP` rather than
+loosening the comparison, as for the other corpora.
+
+**Where to look:** `tests/assert_type_runner.rs` (the `datatest_stable`
+roots), `tests/fixture_runner.rs`, and the extensions' `tests/Type/` and
+`tests/Rules/`.
+
+---
+
+## T51. Symfony return types the service container decides
+
+**Impact: Medium · Complexity: Medium-High**
+
+```php
+$mailer = $container->get('app.mailer');      // mixed, should be App\Service\Mailer
+$sender = $this->getParameter('app.sender');  // mixed, should be string
+$result = $this->handle(new GetOrder($id));   // mixed, should be the handler's return type
+```
+
+A container lookup by class name is typed already. One by service ID is
+not, though the service declaration says what it builds: a `class:` key or
+`class` attribute, an ID spelled as the class, or a PHP configurator's
+`set('app.mailer', Mailer::class)`. A parameter's type is its declared
+value's. A query bus's `HandleTrait::handle()` returns what the message's
+handler returns, the handler being the `#[AsMessageHandler]` class (or
+`messenger.message_handler` service) whose `__invoke()` takes that message.
+PHPStan's Symfony extension answers all three from the compiled container;
+the static service and parameter declarations PHPantom already indexes
+carry the same facts for the project's own services.
+
+This is a return-type hook in the type engine, so completion, hover,
+diagnostics, and references all see it, fed by `symfony_declaration_locations`
+and its index rather than a second reading of the configuration. Services
+installed bundles declare stay `mixed` until F26.
+
+**Where to look:** `src/symfony/mod.rs`, `src/symfony/resources.rs`,
+method-call return resolution under `src/type_engine/variable/rhs_resolution/`,
+and PHPStan's Symfony extension (`ServiceDynamicReturnTypeExtension`,
+`ParameterDynamicReturnTypeExtension`, `MessengerHandleTraitReturnTypeExtension`).
+
+---
+
+## T52. Symfony return types an argument decides
+
+**Impact: Low-Medium · Complexity: Medium**
+
+PHPStan's Symfony extension narrows a list of framework methods by their
+arguments. Each is checked against T50's fixtures, since a recent Symfony
+may already declare some of them with a conditional return type:
+
+- `Request::getContent($asResource)`, `HeaderBag::get($key, $default)`,
+  `InputBag::get($key, $default)` and `InputBag::all($key)`,
+  `ResponseHeaderBag::getCookies($format)`;
+- `Envelope::all($stampFqcn)`, `SerializerInterface::deserialize()` and
+  `DenormalizerInterface::denormalize()` by their `$type`;
+- `FormInterface::getErrors($deep, $flatten)`, `CacheInterface::get()` by
+  the callback's return type, `KernelInterface::locateResource()`,
+  `Extension::getConfiguration()`, `Command::getHelper()`, and
+  BrowserKit's `getClient()`;
+- `TreeBuilder::getRootNode()` and the node definitions' `end()` returning
+  their parent, for the Symfony versions before 8 that do not declare them
+  as generics.
+
+Where a rule fits a conditional return type, write it as a declarative
+patch on the vendor class (the way `virtual_members/laravel/patches.rs`
+patches Laravel's) rather than as code. The extension's `stubs/` directory
+shows which declarations it overrides wholesale.
+
+**Where to look:** `src/virtual_members/laravel/patches.rs`, and PHPStan's
+Symfony extension (`src/Type/Symfony/`, `stubs/`).
+
+---
+
+## T53. Doctrine collections narrowed by `isEmpty()`
+
+**Impact: Low · Complexity: Medium**
+
+```php
+if (!$order->lines->isEmpty()) {
+    $first = $order->lines->first(); // OrderLine|false, should be OrderLine
+}
+```
+
+`Collection::first()` and `last()` return `T|false`; once `isEmpty()` has
+been ruled out they cannot return `false`. This is a narrowing of the
+receiver's state rather than of a variable's type, which the narrowing
+pass does not model for method calls yet. PHPStan's Doctrine extension
+also adds `matching()` to every `Collection`, which only `Selectable` ones
+declare.
+
+**Where to look:** the narrowing under `src/type_engine/`, and PHPStan's
+Doctrine extension (`Type/Doctrine/Collection/IsEmptyTypeSpecifyingExtension`,
+`DoctrineSelectableClassReflectionExtension`).

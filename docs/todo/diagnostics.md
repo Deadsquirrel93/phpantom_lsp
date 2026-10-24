@@ -407,6 +407,10 @@ Keep it conservative. Frameworks and ORMs hydrate properties by reflection
 all of them is a false positive on correct code. Consider exempting classes
 whose properties carry an attribute or an ORM mapping docblock, and put the
 check behind a `[diagnostics]` toggle if a safe default can't be found.
+Symfony writes a property or calls a setter marked `#[Required]` (or
+`@required`) while autowiring, and Doctrine writes a generated identifier
+and a version field, so those count as initialised (PHPStan's Symfony and
+Doctrine extensions model both).
 
 Found running the php-typing-conformance suite
 (`properties_uninitialized_read.php`). Psalm and Qodana report it.
@@ -467,3 +471,56 @@ dimmed, but the state on either side of it has to carry through.
 
 **Fix:** Thread the reachable/unreachable state through both wrappers
 instead of restarting the scan inside them.
+
+---
+
+## D30. Getting a private Symfony service from the container is not reported
+
+**Impact: Low-Medium · Complexity: Medium**
+
+```php
+$container->get('app.mailer'); // throws: the service is private
+```
+
+Services are private by default since Symfony 3.4: a service is public only
+when its declaration says `public: true` (or `->public()`, or
+`public="true"` in XML), directly or through `_defaults`, or when an alias
+to it is public. Getting a private one from the container throws at
+runtime. PHPStan's Symfony extension reports it from the compiled
+container; the service declarations PHPantom already reads say the same
+for the project's own services. Only judge a service the project declares,
+leave the test container (which exposes private services) alone, and treat
+a service locator or a `ServiceSubscriberInterface` subscriber's own
+`get()` as reading its locator rather than the container.
+
+**Where to look:** `src/symfony/resources.rs` (the declarations),
+`src/diagnostics/laravel_string_keys.rs` (where unknown service IDs are
+judged), and PHPStan's Symfony extension (`ContainerInterfacePrivateServiceRule`).
+
+---
+
+## D31. Doctrine mappings that disagree with the entity are not reported
+
+**Impact: Low-Medium · Complexity: Medium-High**
+
+```php
+#[ORM\Column(type: 'string', nullable: true)]
+private string $name; // the column can be null, the property cannot
+```
+
+PHPStan's Doctrine extension checks an entity's mapping against its PHP:
+
+- a column's type and nullability against the property's type, both ways
+  (what the database hands the property, and what the property writes);
+- a relation against the property's type (a to-one is the target entity,
+  a to-many a `Collection` of it);
+- a `final` entity or constructor, which Doctrine cannot proxy unless
+  native lazy objects are enabled;
+- a Doctrine proxy class named directly.
+
+The column types map to PHP types through a table of Doctrine's built-in
+types, which custom types have to extend. Read the mapping from attributes
+and from XML, the same mapping the entity and repository CodeLens reads.
+
+**Where to look:** `src/framework.rs` (the Doctrine mapping index), and
+PHPStan's Doctrine extension (`Rules/Doctrine/ORM/`, `Type/Doctrine/Descriptors/`).

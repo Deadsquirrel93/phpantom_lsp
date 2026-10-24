@@ -892,7 +892,9 @@ These are missed:
   keys neither complete nor navigate;
 - configuration written in PHP (`config/packages/*.php`) or XML.
 
-**Where to look:** `src/symfony/config_tree.rs`.
+**Where to look:** `src/symfony/config_tree.rs`, and PHPStan's Symfony
+extension (`Type/Symfony/Config/`), which tracks the same parent each
+builder's `end()` returns.
 
 ---
 
@@ -917,3 +919,100 @@ class's properties. These are missed:
   alias.
 
 **Where to look:** `src/symfony/forms.rs`, `src/symfony/validation.rs`.
+
+---
+
+## F42. Symfony console arguments and options
+
+**Impact: Medium · Complexity: Medium**
+
+```php
+protected function configure(): void
+{
+    $this->addArgument('name', InputArgument::REQUIRED)
+        ->addOption('dry-run', null, InputOption::VALUE_NONE);
+}
+
+protected function execute(InputInterface $input, OutputInterface $output): int
+{
+    $input->getArgument('nmae');   // a typo, not reported
+    $input->getOption('dry-run');  // mixed, should be bool
+}
+```
+
+A command declares its arguments and options in `configure()`, or as the
+`#[Argument]` and `#[Option]` parameters of an invokable command's
+`__invoke()`. The names `getArgument()`, `getOption()`, `hasArgument()`,
+and `hasOption()` take neither complete nor navigate, an undefined one is
+not reported, and the value is `mixed` where the declaration settles it:
+`bool` for `VALUE_NONE`, an array for `IS_ARRAY`, and nullable unless the
+argument is required or the option has a default. PHPStan's Symfony
+extension does all of this from a booted console application; the command's
+own source carries it. It also checks a default value against its mode.
+
+This is Laravel's Artisan signature support over again (`CommandOwnParam`
+spans), so share the span kinds and the completion with it rather than
+building a second set.
+
+**Where to look:** `src/symbol_map/` (`CommandOwnParam`),
+`src/virtual_members/laravel/` (the Artisan signature parsing), and
+PHPStan's Symfony extension (`Rules/Symfony/Undefined*Rule`,
+`Rules/Symfony/Invalid*DefaultValueRule`,
+`Type/Symfony/InputInterface*Extension`).
+
+---
+
+## F43. Doctrine entity fields in repository calls
+
+**Impact: Medium · Complexity: Medium-High**
+
+```php
+$users->findByEmail($email);                    // unknown method
+$users->findBy(['emial' => $email], ['name' => 'ASC']); // a typo, not reported
+```
+
+An entity's repository answers `findBy<Field>()`, `findOneBy<Field>()`, and
+`countBy<Field>()` for each of the entity's fields, and its `findBy()`,
+`findOneBy()`, `count()`, and `findBy()`'s `$orderBy` take field names as
+array keys. None of the magic methods resolve, and the keys neither
+complete, navigate, nor get checked. The magic methods are virtual members
+of the repository, the way Eloquent's are, which needs the repository's
+entity (T45). The keys are member references to the entity's mapped
+properties, the same member spans a form field and a validation mapping
+record.
+
+The fields come from the entity's mapping: `#[ORM\Column]`,
+`#[ORM\Id]`, and the relation attributes, or the XML mapping the CodeLens
+already reads.
+
+**Where to look:** `src/virtual_members/`, `src/framework.rs` (the
+Doctrine mapping index), and PHPStan's Doctrine extension
+(`Reflection/Doctrine/EntityRepositoryClassReflectionExtension`,
+`Rules/Doctrine/ORM/RepositoryMethodCallRule`).
+
+---
+
+## F44. Doctrine DQL and query builder strings
+
+**Impact: Medium · Complexity: High**
+
+```php
+$em->createQuery('SELECT u FROM App\Entity\User u WHERE u.emial = :e');
+$qb->select('u')->from(User::class, 'u')->where('u.email = :e')->getQuery()->getResult();
+```
+
+DQL names entity classes and their fields in strings, directly or through
+a query builder's `select()`, `from()`, `join()`, and `where()`. Nothing in
+them completes or navigates, an unknown entity or field is not reported,
+and `getResult()` is `mixed` where the query settles it (`list<User>`, or
+an array shape for a scalar select). PHPStan's Doctrine extension parses the
+DQL with Doctrine's own parser and the booted metadata; PHPantom would need
+a DQL reader of its own over the static mapping, with the query builder's
+chain followed the way T45's repository is.
+
+Navigation and completion of the entity and field names are the cheaper
+half and the one an editor user notices; result types follow.
+
+**Where to look:** `src/framework.rs` (the Doctrine mapping index), and
+PHPStan's Doctrine extension (`Rules/Doctrine/ORM/DqlRule`,
+`QueryBuilderDqlRule`, `Type/Doctrine/Query/`, `Type/Doctrine/QueryBuilder/`).
