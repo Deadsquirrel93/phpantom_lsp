@@ -231,6 +231,7 @@ fn variant_name(t: &PhpType) -> &'static str {
         TypeKind::TemplateParam(..) => "TemplateParam",
         TypeKind::UnsealedShape(_) => "UnsealedShape",
         TypeKind::ClassNameLiteral(_) => "ClassNameLiteral",
+        TypeKind::EnumCase(..) => "EnumCase",
     }
 }
 
@@ -269,7 +270,8 @@ fn ty(t: &PhpType) -> Sz {
         | TypeKind::Benevolent(b)
         | TypeKind::ListShape(b)
         | TypeKind::TemplateParam(_, b)
-        | TypeKind::ClassNameLiteral(b) => {
+        | TypeKind::ClassNameLiteral(b)
+        | TypeKind::EnumCase(b, _) => {
             z.slot(1);
             z += ty(b);
         }

@@ -237,6 +237,7 @@ mod lsp_registration_resilience;
 mod move_cli;
 mod narrowing_branch_values;
 mod narrowing_condition_proofs;
+mod narrowing_enum_cases;
 mod narrowing_flow_tracking;
 mod narrowing_nested_short_circuit;
 mod param_out;

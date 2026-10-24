@@ -377,9 +377,9 @@ stay quiet there if a comparison on a backed enum's `->value` narrows the
 enum itself, so `$s->value === 'H'` has to remove `Suit::Hearts` from `$s`
 on the fall-through path. Without that narrowing the check would be a new
 false positive. PHPStan and Psalm report the second function too, and the
-suite counts that against them. Removing a case from an enum-typed
-variable needs a type for the single case, which is
-[T44](type-inference.md#t44-a-single-enum-case-has-no-type).
+suite counts that against them. Each case already has a type of its own,
+and `$s === Suit::Hearts` already removes it from `$s`; what is missing is
+reading the `->value` comparison as the case whose value it names.
 
 Found running the php-typing-conformance suite
 (`regressions_backed_enum_value_narrowing.php`). A quick fix to add the

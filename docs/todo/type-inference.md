@@ -138,7 +138,9 @@ upstream's `nsrt/class-constant-types.php` were dropped when
 `tests/phpstan_nsrt/class-constant-types.php` was ported (only the
 `self::` cases survive); port them back. The `static::`/`$this::`
 assertions in `tests/phpstan_nsrt/class-constant-native-type.php` are
-`// SKIP` against this item.
+`// SKIP` against this item, and so is the `$hw::C` read of a typed
+constant initialised to an enum case in
+`tests/phpstan_data/Rules/Constants/bug-10212.php`.
 
 ---
 
@@ -193,69 +195,6 @@ key) the fallback can never be assigned, so `$string ??= 1` is still
 **References:**
 - Psalm: `Context::$vars_in_scope` and `Context::$vars_possibly_in_scope`
   (`Psalm\Context`)
-
----
-
-## T44. A single enum case has no type
-**Impact: Medium · Complexity: High**
-
-```php
-enum Suit { case Hearts; case Spades; case Clubs; }
-function f(Suit $s) {
-    if ($s === Suit::Hearts) {
-    } elseif ($s === Suit::Spades) {
-    } else {
-        $s; // PHPStan: Suit::Clubs; PHPantom: Suit
-    }
-}
-```
-
-`Suit::Hearts` resolves to the enum class, so narrowing by comparing
-against cases can only ever say "some `Suit`". PHPStan and Psalm give each
-case its own type, a subtype of the enum: comparing narrows to the cases
-left, a `match` over the rest is known exhaustive, a `readonly` property
-assigned one case keeps it, and `->value`/`->name` on it are the case's
-literal values. Today `->value` and `->name` on any `Suit` read as the
-union of every case's backing value and name, since nothing narrower than
-the enum is known.
-
-The type model needs an enum-case variant (or a literal kind for it) that
-is a subtype of its enum in `is_subtype_of`, prints as `Enum::CASE`, and
-joins back into the enum when every case is present. Narrowing by `===`
-and `instanceof` then subtracts cases the way it subtracts union members,
-and a branch that has compared away every case holds `never`.
-
-[D24](diagnostics.md#d24-a-match-that-does-not-cover-every-enum-case-is-not-reported)
-depends on this: its second example only stays quiet if `$s->value === 'H'`
-removes `Suit::Hearts` from `$s`, which is exactly this case subtraction.
-
-Since `value-of<…>` over an enum is evaluated, the gap also produces false
-positives. A case passed to a template binds the template to the whole
-enum, so the operator gives every case's value:
-
-```php
-/**
- * @template T of Suit
- * @param T $case
- * @return value-of<T>
- */
-function backingValue(Suit $case) { return $case->value; }
-
-/** @param 'hearts' $value */
-function acceptsHearts(string $value): void {}
-
-acceptsHearts(backingValue(Suit::Hearts)); // reported: 'spades' does not satisfy 'hearts'
-```
-
-A case held in a variable loses its value the same way: after `$case =
-Suit::Hearts;`, `acceptsHearts($case->value)` is reported too. Found
-running the php-typing-conformance suite
-(`phpdoc_advanced_fallback_value_of_template_enum.php`).
-
-The ported copies of PHPStan's `Rules/Comparison/data/bug-8485.php`,
-`Rules/Comparison/data/bug-9499.php` and
-`Rules/Methods/data/return-type-class-constant.php` under
-`tests/phpstan_data/` carry `// SKIP` assertions against this item.
 
 ---
 

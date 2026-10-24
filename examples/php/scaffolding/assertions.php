@@ -955,6 +955,17 @@ function runDemoAssertions(): void
     assert($typedArrow instanceof \Closure, 'Arrow function must be Closure');
 
     // ── Enum methods and properties ─────────────────────────────────────
+    foreach (Scaffolding\Status::cases() as $case) {
+        if ($case === Scaffolding\Status::Active) {
+            continue;
+        }
+        assert(in_array($case, [Scaffolding\Status::Inactive, Scaffolding\Status::Pending], true), 'A Scaffolding\Status that is not Active must be Inactive or Pending');
+        assert(in_array($case->value, ['inactive', 'pending'], true), 'A Scaffolding\Status that is not Active must have the value "inactive" or "pending"');
+        if ($case !== Scaffolding\Status::Inactive) {
+            assert($case->name === 'Pending', 'A Scaffolding\Status that is neither Active nor Inactive must be Pending');
+        }
+    }
+
     $activeStatus = Scaffolding\Status::Active;
     assert($activeStatus instanceof Scaffolding\Status, 'Scaffolding\Status::Active must be Scaffolding\Status');
     assert($activeStatus->name === 'Active', 'Scaffolding\Status::Active->name must be "Active"');

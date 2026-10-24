@@ -4415,10 +4415,10 @@ class StaticEnumDemo
         Scaffolding\Mode::Manual;                // unit enum
         Scaffolding\Mode::Manual->name;          // "Manual" (from UnitEnum)
 
-        // Enum case assigned to variable
+        // Enum case assigned to variable: the variable holds that one case
         $status = Scaffolding\Status::Active;
-        $status->name;               // resolves through variable
-        $status->value;
+        $status->name;               // 'Active', resolved through the variable
+        $status->value;              // 'active', the case's own value
 
         // self::/static:: inside enum methods resolve to the enum type
         Scaffolding\Status::defaultValue();      // self::Active->value inside enum
@@ -4427,6 +4427,22 @@ class StaticEnumDemo
         // it inline resolves the element back to the enum.
         Scaffolding\Status::cases()[0]->value;   // "active" — cases()[0] is a Scaffolding\Status
         Scaffolding\Priority::cases()[0]->name;  // "Low" — cases()[0] is a Scaffolding\Priority
+    }
+
+    public function caseNarrowing(Scaffolding\Status $status): void
+    {
+        // Each case is a type of its own, so comparing narrows to the cases left.
+        if ($status === Scaffolding\Status::Active) {
+            $status;                 // Scaffolding\Status::Active
+            return;
+        }
+        $status;                     // Scaffolding\Status::Inactive|Scaffolding\Status::Pending
+        $status->value;              // 'inactive'|'pending'
+
+        $label = match ($status) {
+            Scaffolding\Status::Inactive => 'off',
+            default => $status->name,  // 'Pending': the only case no arm above took
+        };
     }
 }
 
