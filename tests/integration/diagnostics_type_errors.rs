@@ -2713,6 +2713,39 @@ function test(Named $named): void {
 }
 
 #[test]
+fn key_write_keeps_open_key_domain_of_value_only_array() {
+    // `string[]` names no key type, so a string-keyed write leaves the keys
+    // as open as they were rather than pinning them to `int|string`.
+    let php = r#"<?php
+/** @param array<string, string|int> $arguments */
+function exec_map(array $arguments): void {}
+
+/** @param array<int, string> $arguments */
+function exec_ints(array $arguments): void {}
+
+/**
+ * @param string[] $open
+ * @param array<int, string> $ints
+ */
+function test(array $open, array $ints): void {
+    $open['--admin'] = 1;
+    exec_map($open);
+    $ints['x'] = 'y';
+    exec_ints($ints);
+}
+"#;
+    let diags = collect(php);
+    let messages: Vec<&str> = diags.iter().map(|d| d.message.as_str()).collect();
+    assert_eq!(
+        messages,
+        [
+            "Argument 1 ($arguments) expects array<int, string>, got non-empty-array<int|string, string>"
+        ],
+        "only the write that widens a declared key domain should be reported"
+    );
+}
+
+#[test]
 fn type_error_for_class_without_to_string_to_stringable_param() {
     let php = r#"<?php
 class Plain {}
