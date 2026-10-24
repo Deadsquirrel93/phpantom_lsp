@@ -12,6 +12,11 @@ catalogues together, the way a real Symfony project does.
   `controller`.
 - Use find references on a class or method mentioned there, such as
   `DemoController::legacy()`. The YAML and XML occurrences are included.
+- Rename `legacy` in `config/routes.yaml`, or rename `UserRepository` from
+  `config/doctrine/User.orm.xml`. The PHP declaration and every configuration
+  file that names it are renamed together.
+- Open `src/Entity/User.php` and `src/Repository/UserRepository.php`. The
+  CodeLens above each class links the entity and its repository.
 
 ## Getting started
 

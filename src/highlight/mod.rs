@@ -36,7 +36,9 @@ impl Backend {
     ) -> Option<Vec<DocumentHighlight>> {
         // Look up the symbol span at the cursor (retries one byte
         // earlier for end-of-token edge cases).
-        let span = self.lookup_symbol_at_position(uri, content, position)?;
+        let Some(span) = self.lookup_symbol_at_position(uri, content, position) else {
+            return self.framework_highlights(uri, content, position);
+        };
 
         let symbol_map = self.symbol_map_for(uri)?;
         let symbol_map = &*symbol_map;

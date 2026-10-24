@@ -1,4 +1,6 @@
-use crate::common::{create_psr4_workspace, create_test_backend, open_php, references_response};
+use crate::common::{
+    create_psr4_workspace, create_test_backend, open_document, open_php, references_response,
+};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -2053,5 +2055,133 @@ function list_author(\App\Author $author): void {
     assert_eq!(
         unresolved_title_on_line(&lenses, 8).as_deref(),
         Some("2 references")
+    );
+}
+
+// ─── Doctrine entity and repository lenses ─────────────────────────────────
+
+const DOCTRINE_COMPOSER: &str = r#"{
+    "require": { "doctrine/doctrine-bundle": "^2.10" },
+    "autoload": { "psr-4": {
+        "App\\": "src/",
+        "Doctrine\\Bundle\\DoctrineBundle\\Repository\\": "vendor-stubs/"
+    } }
+}"#;
+
+const SERVICE_ENTITY_REPOSITORY: &str = "<?php\nnamespace Doctrine\\Bundle\\DoctrineBundle\\Repository;\nclass ServiceEntityRepository {}\n";
+
+fn uri_for(dir: &tempfile::TempDir, rel: &str) -> Url {
+    Url::from_file_path(dir.path().join(rel)).unwrap()
+}
+
+/// The lenses of the classes in `rel`, after opening every file in `files`.
+async fn doctrine_lens_titles(files: &[(&str, &str)], rel: &str) -> Vec<String> {
+    let (backend, dir) = create_psr4_workspace(DOCTRINE_COMPOSER, files);
+    for (path, content) in files {
+        let language = if path.ends_with(".php") {
+            "php"
+        } else if path.ends_with(".xml") {
+            "xml"
+        } else {
+            "yaml"
+        };
+        open_document(&backend, &uri_for(&dir, path), language, content).await;
+    }
+    let content = files.iter().find(|(path, _)| *path == rel).unwrap().1;
+    let lenses = backend
+        .handle_code_lens(uri_for(&dir, rel).as_ref(), content)
+        .unwrap_or_default();
+    lens_titles(&lenses)
+        .into_iter()
+        .filter(|title| title.starts_with("Doctrine"))
+        .map(str::to_string)
+        .collect()
+}
+
+#[tokio::test]
+async fn doctrine_mapping_lenses_link_entity_and_configured_repository() {
+    let entity_php = "<?php\nnamespace App\\Entity;\nclass User {}\n";
+    let repo_php = "<?php\nnamespace App\\Storage;\nclass SpecialUserStore {}\n";
+    let doctrine_xml = r#"<doctrine-mapping>
+  <entity name="App\Entity\User" repository-class="App\Storage\SpecialUserStore" />
+</doctrine-mapping>
+"#;
+    let files = [
+        ("src/Entity/User.php", entity_php),
+        ("src/Storage/SpecialUserStore.php", repo_php),
+        ("config/doctrine/User.orm.xml", doctrine_xml),
+    ];
+
+    assert_eq!(
+        doctrine_lens_titles(&files, "src/Entity/User.php").await,
+        vec!["Doctrine repository: SpecialUserStore"]
+    );
+    assert_eq!(
+        doctrine_lens_titles(&files, "src/Storage/SpecialUserStore.php").await,
+        vec!["Doctrine entity: User"]
+    );
+}
+
+#[tokio::test]
+async fn doctrine_yaml_mapping_names_the_repository() {
+    let entity_php = "<?php\nnamespace App\\Entity;\nclass User {}\n";
+    let repo_php = "<?php\nnamespace App\\Storage;\nclass SpecialUserStore {}\n";
+    let doctrine_yaml =
+        "App\\Entity\\User:\n  type: entity\n  repositoryClass: App\\Storage\\SpecialUserStore\n";
+    let files = [
+        ("src/Entity/User.php", entity_php),
+        ("src/Storage/SpecialUserStore.php", repo_php),
+        ("config/doctrine/User.orm.yaml", doctrine_yaml),
+    ];
+
+    assert_eq!(
+        doctrine_lens_titles(&files, "src/Entity/User.php").await,
+        vec!["Doctrine repository: SpecialUserStore"]
+    );
+}
+
+#[tokio::test]
+async fn doctrine_repository_convention_links_entity_and_repository() {
+    let entity_php = "<?php\nnamespace App\\Entity;\nclass User {}\n";
+    let repo_php = "<?php\nnamespace App\\Repository;\nuse Doctrine\\Bundle\\DoctrineBundle\\Repository\\ServiceEntityRepository;\nclass UserRepository extends ServiceEntityRepository {}\n";
+    let files = [
+        ("src/Entity/User.php", entity_php),
+        ("src/Repository/UserRepository.php", repo_php),
+        (
+            "vendor-stubs/ServiceEntityRepository.php",
+            SERVICE_ENTITY_REPOSITORY,
+        ),
+    ];
+
+    assert_eq!(
+        doctrine_lens_titles(&files, "src/Repository/UserRepository.php").await,
+        vec!["Doctrine entity: User"]
+    );
+    assert_eq!(
+        doctrine_lens_titles(&files, "src/Entity/User.php").await,
+        vec!["Doctrine repository: UserRepository"]
+    );
+}
+
+/// A class that only shares Doctrine's naming convention is not a Doctrine
+/// repository, so neither it nor the class it is named after gets a lens.
+#[tokio::test]
+async fn a_repository_by_name_alone_gets_no_doctrine_lenses() {
+    let model_php = "<?php\nnamespace App\\Models;\nclass User {}\n";
+    let repo_php = "<?php\nnamespace App\\Repositories;\nclass UserRepository {}\n";
+    let files = [
+        ("src/Models/User.php", model_php),
+        ("src/Repositories/UserRepository.php", repo_php),
+    ];
+
+    assert!(
+        doctrine_lens_titles(&files, "src/Models/User.php")
+            .await
+            .is_empty()
+    );
+    assert!(
+        doctrine_lens_titles(&files, "src/Repositories/UserRepository.php")
+            .await
+            .is_empty()
     );
 }

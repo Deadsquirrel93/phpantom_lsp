@@ -389,35 +389,59 @@ that could.
 
 ---
 
-## F23. Rename a class through its YAML/XML occurrences
+## F23. Rename a class through its XML entity-escaped occurrences
+
+**Impact: Low · Complexity: Medium**
+
+Rename rewrites a class, controller action, or namespace in YAML and XML
+files in the spelling each occurrence uses, doubled YAML backslashes
+included (`collect_framework_name_edits` in `src/framework.rs`). An XML
+attribute can also spell the separator as a character reference,
+`App&#92;Handler&#92;Run`, and neither the resource scanner nor the
+framework index decodes those, so such an occurrence is not found by
+Find References and is left behind by a rename.
+
+The scanners would need to decode `&#92;`/`&#x5C;` while tokenising,
+record where each decoded character came from, and re-encode the
+replacement the same way when the rename writes it back.
+
+**Where to look:** `src/resource_navigation.rs` (`scan_symbols`,
+`normalize_fqn`), `src/framework.rs` (`scan_class_like_tokens`,
+`rewrite_framework_fqn_literal`).
+
+---
+
+## F24. Doctrine lenses miss attribute mappings and generic repositories
 
 **Impact: Medium · Complexity: Medium**
 
-A fully-qualified class name in a YAML or XML file is found by Find
-References and counted by the declaration CodeLens, but rename leaves
-it alone: `find_references_inner` drops resource locations in
-`ReferenceSearchMode::Rename`. Renaming the class therefore leaves the
-config pointing at a name that no longer exists, and `move` reports the
-leftover through its residual scan rather than fixing it.
+```php
+#[ORM\Entity(repositoryClass: AccountStore::class)]
+class Account {}
 
-The blocker is that the text at such an occurrence is not always the
-PHP spelling of the name. A YAML double-quoted scalar writes
-`"App\\Handler\\Run"`, so the span covers doubled separators; an XML
-attribute may carry entity references. Rename plans a single
-replacement string per location and verifies each range spells a whole
-PHP name token before emitting anything, so an escaped occurrence both
-fails verification (dropping the *entire* rename, including its PHP
-edits, which is what the current exclusion prevents) and would be
-rewritten with single separators, corrupting the document's quoting.
+/** @extends ServiceEntityRepository<Account> */
+class AccountStore extends ServiceEntityRepository {}
+```
 
-What is needed is a per-occurrence replacement: the scanner already
-knows the raw text it normalised, so it can record how the name was
-escaped and let the rename re-escape the replacement the same way,
-with verification asking for "a name token in this document's
-escaping" rather than a bare PHP one.
+The CodeLens that links a Doctrine entity and its repository finds the
+pair through a YAML/XML mapping or the naming convention
+(`App\Entity\User` and `App\Repository\UserRepository`). The modern
+form above is not read in either direction. Doctrine ORM 3 dropped YAML
+mappings, so `#[ORM\Entity(repositoryClass: ...)]` is how most projects
+name a repository, and the repository's own
+`@extends ServiceEntityRepository<Account>` (or the class it passes to
+`parent::__construct()`) names its entity. A pair that breaks the naming
+convention gets no lens.
 
-**Where to look:** `src/resource_navigation.rs` (`scan_symbols`,
-`normalize_fqn`), `src/references/dispatch.rs`
-(`find_references_inner`), `src/rename/validate.rs`
-(`Expected`, `is_name_token`), `src/rename/class/mod.rs`
-(`build_class_move_edit`).
+The attribute needs reading at parse time, with its class name resolved
+the way the parser resolves `extends`, into `ClassInfo` (a field every
+class pays for, or a slot in an optional per-class box). The
+entity-to-repository direction can then read the entity's `ClassInfo`,
+and the repository-to-entity direction the first generic argument of
+its `ServiceEntityRepository`/`EntityRepository` ancestor in
+`extends_generics`. T45 needs the same attribute.
+
+**Where to look:** `src/framework.rs`
+(`doctrine_repository_fqns_for_entity`,
+`doctrine_entity_fqns_for_repository`), `src/parser/classes/class_likes.rs`
+(`extract_class`), `src/parser/attributes.rs`.

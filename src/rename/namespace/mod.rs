@@ -130,6 +130,13 @@ impl Backend {
             {
                 continue;
             }
+            // A YAML/XML occurrence may be spelled the escaped `App\\Foo`
+            // way its quoting requires, which no PHP-shaped edit fits.  The
+            // framework resource edits below rewrite those in their own
+            // spelling.
+            if crate::resource_navigation::is_resource_document(file_uri) {
+                continue;
+            }
 
             // A template is planned against the virtual PHP it lowers to,
             // because that is what its symbol map describes and what the
@@ -202,16 +209,26 @@ impl Backend {
             }
         }
 
+        self.collect_framework_namespace_edits(old_prefix, new_prefix, &mut changes);
+
+        // The directory only moves when the client can rename files, so the
+        // resource paths that point into it are rewritten only then.
+        let psr4_rename_ops = self
+            .caps()
+            .file_rename
+            .then(|| self.build_namespace_psr4_rename_ops(old_prefix, new_prefix))
+            .flatten()
+            .unwrap_or_default();
+        self.collect_framework_path_edits_for_directory_renames(&psr4_rename_ops, &mut changes);
+
         if changes.is_empty() {
             return Ok(None);
         }
 
         // PSR-4 directory rename: if a mapping exists, emit RenameFile
         // operations to move the directory.
-        if let Some(ops) = self.build_namespace_psr4_rename_ops(old_prefix, new_prefix)
-            && !ops.is_empty()
-            && self.caps().file_rename
-        {
+        if !psr4_rename_ops.is_empty() {
+            let ops = psr4_rename_ops;
             let renames = ops.iter().map(|(old_uri, new_uri)| {
                 ResourceOp::Rename(RenameFile {
                     old_uri: old_uri.clone(),

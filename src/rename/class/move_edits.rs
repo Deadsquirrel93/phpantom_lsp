@@ -129,6 +129,8 @@ impl Backend {
             }
         }
 
+        self.collect_framework_class_edits(old_fqn, new_fqn, &mut changes);
+
         if changes.is_empty() {
             return Ok(None);
         }

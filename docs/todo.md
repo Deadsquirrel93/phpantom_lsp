@@ -75,6 +75,7 @@ unlikely to move the needle for most users.
 | T29 | [Definite vs possible variable existence tracking](todo/type-inference.md#t29-definite-vs-possible-variable-existence-tracking)                                             | Medium      | High        |
 | T46 | [Template arguments are not inferred from how the object is used later](todo/type-inference.md#t46-template-arguments-are-not-inferred-from-how-the-object-is-used-later) | Medium      | High        |
 | T47 | [A closure assigned to a variable gets no parameter types from where it is used](todo/type-inference.md#t47-a-closure-assigned-to-a-variable-gets-no-parameter-types-from-where-it-is-used) | Medium      | High        |
+| T45 | [Doctrine `getRepository(Entity::class)` is typed as the generic repository](todo/type-inference.md#t45-doctrine-getrepositoryentityclass-is-typed-as-the-generic-repository) | Low-Medium  | Medium      |
 | T41 | [A reading of the callee's body overrides a declared `@param-out`](todo/type-inference.md#t41-a-reading-of-the-callees-body-overrides-a-declared-param-out)            | Low-Medium  | Low         |
 | T43 | [`self::TypeAlias` inside `@extends`'s generic argument is not resolved](todo/type-inference.md#t43-selftypealias-inside-extendss-generic-argument-is-not-resolved) | Low         | Medium      |
 |     | **[Diagnostics](todo/diagnostics.md)**                                                                                                                                      |             |             |
@@ -122,11 +123,12 @@ unlikely to move the needle for most users.
 | F12 | [IntelliJ / PHPStorm plugin](todo/lsp-features.md#f12-intellij-phpstorm-plugin)                                                                                            | High        | Medium-High |
 | F11 | [Windows code signing](todo/lsp-features.md#f11-windows-code-signing)                                                                                                        | Medium      | Medium      |
 | F17 | [Wire class move to `workspace/willRenameFiles`](todo/lsp-features.md#f17-wire-class-move-to-workspacewillrenamefiles)                                                       | Medium      | Medium      |
-| F23 | [Rename a class through its YAML/XML occurrences](todo/lsp-features.md#f23-rename-a-class-through-its-yamlxml-occurrences)                                                  | Medium      | Medium      |
+| F24 | [Doctrine lenses miss attribute mappings and generic repositories](todo/lsp-features.md#f24-doctrine-lenses-miss-attribute-mappings-and-generic-repositories) | Medium      | Medium      |
 | F7  | [Evaluatable expression support (DAP integration)](todo/lsp-features.md#f7-evaluatable-expression-support-dap-integration)                                                  | Low-Medium  | Low         |
 | F15 | [Go-to-declaration](todo/lsp-features.md#f15-go-to-declaration)                                                                                                              | Low-Medium  | Low         |
 | F14 | [Helix upstream PR](todo/lsp-features.md#f14-helix-upstream-pr)                                                                                                             | Low-Medium  | Low         |
 | F22 | [Merge a namespace onto one that shares a class name](todo/lsp-features.md#f22-merge-a-namespace-onto-one-that-shares-a-class-name)                                        | Low-Medium  | Medium-High |
+| F23 | [Rename a class through its XML entity-escaped occurrences](todo/lsp-features.md#f23-rename-a-class-through-its-xml-entity-escaped-occurrences) | Low         | Medium      |
 | F16 | [On-type `}` brace de-indent](todo/lsp-features.md#f16-on-type-brace-de-indent)                                                                                            | Low         | Low         |
 |     | **[Signature Help](todo/signature-help.md)**                                                                                                                                |             |             |
 | S2  | [Closure / arrow function parameter signature help](todo/signature-help.md#s2-closure-arrow-function-parameter-signature-help)                                             | Medium      | Medium      |

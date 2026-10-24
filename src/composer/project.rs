@@ -125,6 +125,31 @@ pub(crate) fn is_laravel_project(package: &ComposerPackage) -> bool {
         })
 }
 
+/// Detect whether the project uses Doctrine's entity repositories, through
+/// the ORM, the MongoDB ODM, or the Symfony bundle or pack that installs
+/// them.
+///
+/// The Doctrine entity and repository lenses are only computed when this
+/// holds, so other projects do not pay for the per-class repository lookups.
+pub(crate) fn is_doctrine_project(package: &ComposerPackage) -> bool {
+    package
+        .require
+        .keys()
+        .chain(package.require_dev.keys())
+        .any(|name| {
+            [
+                "doctrine/orm",
+                "doctrine/mongodb-odm",
+                "doctrine/persistence",
+                "doctrine/doctrine-bundle",
+                "doctrine/mongodb-odm-bundle",
+                "symfony/orm-pack",
+            ]
+            .iter()
+            .any(|package| name.eq_ignore_ascii_case(package))
+        })
+}
+
 /// Detect whether the project is a Laravel *application* rather than a
 /// library that uses an Illuminate component.
 ///
@@ -281,6 +306,25 @@ mod tests {
     /// Helper: parse a JSON string into a [`ComposerPackage`].
     fn pkg(json: &str) -> ComposerPackage {
         json.parse::<ComposerPackage>().unwrap()
+    }
+
+    // ── is_doctrine_project ─────────────────────────────────────────
+
+    #[test]
+    fn detects_doctrine_through_the_orm_or_the_symfony_bundle() {
+        assert!(is_doctrine_project(&pkg(
+            r#"{"require": {"doctrine/orm": "^3.0"}}"#
+        )));
+        assert!(is_doctrine_project(&pkg(
+            r#"{"require": {"doctrine/doctrine-bundle": "^2.10"}}"#
+        )));
+    }
+
+    #[test]
+    fn dbal_alone_is_not_doctrine_repositories() {
+        assert!(!is_doctrine_project(&pkg(
+            r#"{"require": {"doctrine/dbal": "^4.0", "laravel/framework": "^11.0"}}"#
+        )));
     }
 
     // ── is_laravel_project ──────────────────────────────────────────

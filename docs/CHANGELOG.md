@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Refinement types are enforced against their base type.** A plain `string` passed where a `non-empty-string` is declared, an `int` where a `positive-int` or `int<1, 100>` is, or a `bool` where `false` is, is now reported, the way PHPStan reports it.
 - **Each enum case is a type of its own.** Comparing an enum with one of its cases narrows it to that case, or to the cases left, in `if`/`elseif` chains, guard clauses and `match` arms, and a value known to be one case reads that case's own `name` and `value`. A case passed to a `value-of<T>` template no longer reports every other case's value as a mismatch.
 - **Array shapes are sealed.** An array with a key that a shape like `array{foo: int}` does not declare no longer satisfies it, whether the key is written at the call site or comes from the value's own declared shape. Write `array{foo: int, ...}` to accept other keys.
+- **Rename reaches YAML and XML configuration.** Renaming a class, a controller action, or a namespace rewrites its occurrences in Symfony and Doctrine configuration in the spelling each file uses, escaped backslashes included, and the rename can be started from the configuration file itself. When a namespace's directory moves with it, the `resource:` and `exclude:` paths that point into it follow. Contributed by @sidux.
+- **Doctrine entities and repositories link to each other.** In a Doctrine project, a CodeLens on an entity opens its repository, and one on a repository opens its entity, found through the YAML or XML mapping or the usual naming convention. Contributed by @sidux.
 
 ### Changed
 

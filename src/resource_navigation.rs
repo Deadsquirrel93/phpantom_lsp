@@ -81,6 +81,7 @@ impl Backend {
         let symbol_map = Arc::new(self.resource_symbol_map(content));
         self.publish_symbol_maps([(uri.to_string(), Arc::clone(&symbol_map))]);
         self.reindex_references_for_symbol_maps_batch(vec![(uri.to_string(), symbol_map)]);
+        self.index_framework_uri_content(uri, content);
     }
 
     /// Index resource files discovered during the workspace walk.
@@ -89,6 +90,7 @@ impl Backend {
             .iter()
             .filter_map(|(uri, path)| {
                 let content = std::fs::read_to_string(path).ok()?;
+                self.index_framework_uri_content(uri, &content);
                 Some((uri.clone(), Arc::new(self.resource_symbol_map(&content))))
             })
             .collect();

@@ -103,6 +103,12 @@ impl Backend {
                 || root.join("artisan").is_file(),
         );
 
+        self.set_is_doctrine(
+            composer_json
+                .as_ref()
+                .is_some_and(composer::is_doctrine_project),
+        );
+
         // A permission package answers authorization checks from the database,
         // so the abilities this project uses are not written in its source and
         // the unknown-ability diagnostic has nothing to judge them against.
@@ -363,6 +369,8 @@ impl Backend {
         // files the whole configuration; a workspace of libraries alone reads
         // keys that only the installing application declares.
         let mut any_application = false;
+        // Doctrine in any subproject turns its lenses on workspace-wide.
+        let mut any_doctrine = false;
 
         for (sub_idx, (sub_root, _)) in subprojects.iter().enumerate() {
             // Each subproject owns an equal slice of the 10..80 range;
@@ -389,6 +397,7 @@ impl Backend {
             if let Some(pkg) = &composer_json {
                 any_laravel |= composer::is_laravel_project(pkg);
                 any_runtime_permissions |= composer::has_runtime_permission_package(pkg);
+                any_doctrine |= composer::is_doctrine_project(pkg);
                 any_application |=
                     composer::is_application_project(pkg) || sub_root.join("artisan").is_file();
             }
@@ -407,6 +416,7 @@ impl Backend {
             .laravel_mut()
             .set_enabled(any_laravel);
         self.set_is_application(any_application);
+        self.set_is_doctrine(any_doctrine);
         self.laravel
             .gates
             .write()

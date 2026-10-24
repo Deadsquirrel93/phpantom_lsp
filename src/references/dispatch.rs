@@ -99,16 +99,20 @@ impl Backend {
                 include_declaration,
                 mode,
             );
-            // A YAML/XML occurrence is a reference the user can be shown,
-            // but not one an edit can be planned against: its text may be
-            // the escaped `App\\Handler` form the document's own quoting
-            // requires, which is neither the PHP spelling of the name nor
-            // something a PHP-shaped replacement can be written over.
-            // Rename verifies every location before emitting any edit and
-            // drops the whole rename when one fails, so leaving these in
-            // makes a single escaped name in any config file silently turn
-            // the class rename into a no-op.
-            if mode == ReferenceSearchMode::Rename {
+            // A YAML/XML occurrence of a class or namespace is a reference
+            // the user can be shown, but not one a PHP-shaped edit can be
+            // written over: its text may be the escaped `App\\Handler` form
+            // the document's own quoting requires.  Rename rewrites those
+            // through the framework resource index, which keeps each
+            // occurrence's spelling, so they are left out here.  A member
+            // occurrence (`Controller::action`) covers the bare member name,
+            // which the PHP edit replaces as written.
+            if mode == ReferenceSearchMode::Rename
+                && !matches!(
+                    sym.kind,
+                    SymbolKind::MemberAccess { .. } | SymbolKind::MemberDeclaration { .. }
+                )
+            {
                 locations.retain(|location| {
                     !crate::resource_navigation::is_resource_document(location.uri.as_str())
                 });

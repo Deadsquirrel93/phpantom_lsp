@@ -184,6 +184,7 @@ mod folding_blade;
 mod folding_ranges;
 mod formatting_blade;
 mod formatting_range;
+mod framework_resources;
 mod hover;
 mod implementation;
 mod indexing_include;

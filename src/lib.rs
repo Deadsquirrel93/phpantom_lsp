@@ -263,6 +263,7 @@ pub mod fix;
 mod folding;
 pub mod format_cli;
 pub mod formatting;
+mod framework;
 mod highlight;
 mod hover;
 mod indexing;
@@ -391,6 +392,14 @@ pub struct BackendState {
     /// errors, imports, namespaces, resolved names and template lowering,
     /// published and removed as one record (see [`file_state`]).
     pub(crate) files: Arc<RwLock<file_state::FileStates>>,
+    /// Per-file Symfony/Doctrine YAML/XML references: the namespace-prefix
+    /// service keys and resource paths the resource symbol maps do not
+    /// record, and the class and member names in the spelling each file
+    /// writes them, which rename has to keep.
+    pub(crate) framework_references: framework::FrameworkReferenceIndex,
+    /// Doctrine entity-to-repository pairs from YAML/XML mappings, keyed by
+    /// source URI so a watched change replaces one file's entries.
+    pub(crate) framework_doctrine_repositories: framework::DoctrineRepositoryIndex,
     /// Cross-file candidate index for find-references.
     ///
     /// Maintained from each file's symbol map (see [`files`](Self::files)) during parsing.
@@ -480,6 +489,11 @@ pub struct BackendState {
     /// [`crate::composer::is_application_project`].  Starts `true` so a
     /// workspace with no `composer.json` to classify behaves as before.
     pub(crate) is_application: Arc<std::sync::atomic::AtomicBool>,
+    /// Whether the project uses Doctrine, which the Doctrine entity and
+    /// repository lenses are gated on.  See
+    /// [`crate::composer::is_doctrine_project`].  Starts `true` so a
+    /// workspace with no `composer.json` to classify behaves as before.
+    pub(crate) is_doctrine: Arc<std::sync::atomic::AtomicBool>,
     /// The `Pest.php` files of the project's test directories, read on
     /// first use and dropped when one is saved.  `None` until then.
     pub(crate) pest_configs: Arc<RwLock<Option<pest::PestConfigs>>>,

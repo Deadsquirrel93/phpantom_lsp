@@ -457,6 +457,7 @@ impl Backend {
         // entry goes stale here.
         self.evict_morph_column_spans(uri);
         self.evict_reference_index_uri(uri);
+        self.remove_framework_uri(uri);
         // Likewise a template's injected variables.
         self.blade.uris.write().remove(uri);
         self.blade.injected_vars.write().remove(uri);

@@ -185,6 +185,8 @@ impl Backend {
             }
         }
 
+        self.collect_framework_class_edits(old_fqn_normalized, &new_fqn, &mut changes);
+
         if changes.is_empty() {
             return None;
         }

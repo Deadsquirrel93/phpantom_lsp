@@ -14,8 +14,8 @@ use crate::ci_map::CiMap;
 use crate::symbol_index::SymbolIndex;
 use crate::workspace_env::WorkspaceEnv;
 use crate::{
-    Backend, BackendState, blade, composer, reference_counts, reference_index, resolution, stubs,
-    virtual_members,
+    Backend, BackendState, blade, composer, framework, reference_counts, reference_index,
+    resolution, stubs, virtual_members,
 };
 
 /// The Laravel alias slot and the resolved-class cache that reads it.
@@ -81,6 +81,8 @@ impl BackendState {
             client_name: Mutex::new(String::new()),
             open_files: Arc::new(RwLock::new(HashMap::new())),
             files: Arc::new(RwLock::new(HashMap::new())),
+            framework_references: framework::new_framework_reference_index(),
+            framework_doctrine_repositories: framework::new_doctrine_repository_index(),
             reference_index: reference_index::new_reference_index(),
             skip_reference_index: false,
             symbols: SymbolIndex::new(),
@@ -98,6 +100,7 @@ impl BackendState {
             laravel: crate::backend::laravel::LaravelState::new(laravel_aliases),
             blade: blade::state::BladeState::default(),
             is_application: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            is_doctrine: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             pest_configs: Arc::new(RwLock::new(None)),
             member_completion_cache: Arc::new(Mutex::new(HashMap::new())),
             diag: crate::diagnostics::state::DiagnosticState::new(),

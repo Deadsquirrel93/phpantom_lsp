@@ -436,3 +436,34 @@ the *declaring* class's own `type_aliases` and resolve it through
 `resolve_type_alias_typed` with that class as `owning_class_name`, before
 substituting it into the parent's template. Mago's `issue_870.php` can be
 ported once this lands.
+
+---
+
+## T45. Doctrine `getRepository(Entity::class)` is typed as the generic repository
+
+**Impact: Low-Medium · Complexity: Medium**
+
+```php
+$repo = $entityManager->getRepository(User::class);
+$repo->findActive(); // PHPantom: EntityRepository<User>, so findActive() is unknown
+```
+
+Doctrine's stubs type `getRepository()` as `EntityRepository<T>` (or
+`ObjectRepository<T>`), but the object it returns is the entity's own
+repository: the class named by `#[ORM\Entity(repositoryClass: ...)]` or by
+the `repositoryClass`/`repository-class` key of a YAML/XML mapping.
+PHPStan's Doctrine extension answers this with a dynamic return type
+extension. Completion, hover, diagnostics, and Find References on the
+repository's own methods all miss it today.
+
+The return type belongs in the type engine, as a return-type hook for
+`getRepository()` with a class-string argument, so every consumer sees
+the concrete repository. The Doctrine mapping index built from YAML/XML
+resources already knows those pairs; the attribute form needs the
+`ClassInfo` support F24 describes.
+
+**Where to look:** `src/framework.rs`
+(`framework_doctrine_repository_fqns_for_entity`) for the YAML/XML
+mapping pairs, and method-call return resolution under
+`src/type_engine/variable/rhs_resolution/` for where the hook goes.
+

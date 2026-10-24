@@ -57,13 +57,13 @@ impl Backend {
         }
 
         crate::parallel::map_indexed("autoload-preload", file_count, |_, i| {
-            if let Some(p) = progress {
-                p.add_done(1);
-            }
             let path = pending[i];
             if let Some(content) = crate::util::read_php_source(path) {
                 let uri = crate::util::path_to_uri(path);
                 self.update_ast(&uri, &content);
+            }
+            if let Some(p) = progress {
+                p.add_done(1);
             }
             None::<()>
         });

@@ -1,7 +1,8 @@
 //! Code Lens (`textDocument/codeLens`) support.
 //!
-//! Shows reference and implementation counts plus override/implement
-//! annotations.
+//! Shows reference and implementation counts, override/implement
+//! annotations, and the links between a Doctrine entity and its
+//! repository.
 
 use std::sync::Arc;
 
@@ -67,9 +68,10 @@ impl Backend {
     /// Handle a `textDocument/codeLens` request.
     ///
     /// Returns reference lenses for PHP declarations, implementation
-    /// lenses for interfaces and abstract classes and their methods, and
+    /// lenses for interfaces and abstract classes and their methods,
     /// navigation lenses for methods that override or implement an
-    /// ancestor declaration.
+    /// ancestor declaration, and in a Doctrine project the lenses that link
+    /// an entity and its repository.
     pub fn handle_code_lens(&self, uri: &str, content: &str) -> Option<Vec<CodeLens>> {
         let classes = {
             let map = self.symbols.uri_classes_index.read();
@@ -84,6 +86,7 @@ impl Backend {
 
         let mut lenses = Vec::new();
         let class_loader = |name: Fqn<'_>| self.find_or_load_class(&name);
+        let is_doctrine = self.is_doctrine_project();
 
         for class in &classes {
             let class_fqn = class.fqn();
@@ -113,6 +116,10 @@ impl Backend {
 
             if let Some(lens) = self.build_covers_lens(class, uri, &index) {
                 lenses.push(lens);
+            }
+
+            if is_doctrine && class.kind == ClassLikeKind::Class {
+                self.push_doctrine_lenses(class, &index, &mut lenses);
             }
 
             for method in &class.methods {
@@ -610,6 +617,55 @@ impl Backend {
             Self::reference_lens_command(origin_uri, position, locations)
         });
         lens
+    }
+
+    /// The lenses linking a Doctrine entity to its repository, or a
+    /// repository back to its entity, on the class declaration line.
+    fn push_doctrine_lenses(
+        &self,
+        class: &ClassInfo,
+        index: &LineIndex,
+        lenses: &mut Vec<CodeLens>,
+    ) {
+        if class.keyword_offset == 0 {
+            return;
+        }
+        let entities = self.doctrine_entity_fqns_for_repository(class);
+        let (label, targets) = if entities.is_empty() {
+            (
+                "Doctrine repository",
+                self.doctrine_repository_fqns_for_entity(&class.fqn()),
+            )
+        } else {
+            ("Doctrine entity", entities)
+        };
+        if targets.is_empty() {
+            return;
+        }
+
+        let line = index.line_of(class.keyword_offset as usize);
+        let position = Position {
+            line: line as u32,
+            character: line_indent(index, line),
+        };
+        for target in targets {
+            let Some(location) = self.class_declaration_location(&target) else {
+                continue;
+            };
+            let title = format!("{label}: {}", crate::util::short_name(&target));
+            lenses.push(CodeLens {
+                range: Range {
+                    start: position,
+                    end: position,
+                },
+                command: Some(self.build_code_lens_command(
+                    title,
+                    location.uri,
+                    location.range.start,
+                )),
+                data: None,
+            });
+        }
     }
 
     /// Build the "which tests cover this class" lens for a class
