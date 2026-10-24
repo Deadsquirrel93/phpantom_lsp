@@ -172,6 +172,34 @@ pub(crate) fn is_symfony_project(package: &ComposerPackage) -> bool {
         })
 }
 
+/// The packages that bring Twig into a project: Twig itself, its Symfony
+/// bundle and bridge, and the frameworks whose templates are Twig.
+const TWIG_PACKAGES: [&str; 7] = [
+    "twig/twig",
+    "symfony/twig-bundle",
+    "symfony/twig-bridge",
+    "slim/twig-view",
+    "drupal/core",
+    "drupal/core-recommended",
+    "craftcms/cms",
+];
+
+/// Detect whether the project uses Twig, which template names are read in:
+/// it requires Twig or a package whose templates are Twig, or is a Symfony
+/// project.
+pub(crate) fn is_twig_project(package: &ComposerPackage) -> bool {
+    is_symfony_project(package)
+        || package
+            .require
+            .keys()
+            .chain(package.require_dev.keys())
+            .any(|name| {
+                TWIG_PACKAGES
+                    .iter()
+                    .any(|package| name.eq_ignore_ascii_case(package))
+            })
+}
+
 /// Detect whether the project is a Laravel *application* rather than a
 /// library that uses an Illuminate component.
 ///
@@ -364,6 +392,24 @@ mod tests {
     #[test]
     fn laravel_and_its_symfony_components_are_not_symfony() {
         assert!(!is_symfony_project(&pkg(
+            r#"{"require": {"laravel/framework": "^11.0", "symfony/console": "^7.0"}}"#
+        )));
+    }
+
+    // ── is_twig_project ─────────────────────────────────────────────
+
+    #[test]
+    fn detects_twig_on_its_own_and_in_symfony() {
+        assert!(is_twig_project(&pkg(
+            r#"{"require": {"twig/twig": "^3.4"}}"#
+        )));
+        assert!(is_twig_project(&pkg(
+            r#"{"require": {"symfony/framework-bundle": "^7.3"}}"#
+        )));
+        assert!(is_twig_project(&pkg(
+            r#"{"require": {"drupal/core-recommended": "^11.0"}}"#
+        )));
+        assert!(!is_twig_project(&pkg(
             r#"{"require": {"laravel/framework": "^11.0", "symfony/console": "^7.0"}}"#
         )));
     }

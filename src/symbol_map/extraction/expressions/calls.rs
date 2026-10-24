@@ -620,8 +620,9 @@ mod tests {
         let resolver = mago_names::resolver::NameResolver::new(&arena);
         let names = OwnedResolvedNames::from_resolved(&resolver.resolve(program));
 
-        let map =
-            crate::symbol_map::extraction::extract_symbol_map_for_index(program, php, &names, true);
+        let map = crate::symbol_map::extraction::extract_symbol_map_for_index(
+            program, php, &names, true, true,
+        );
 
         assert_eq!(map.conditional_string_key_spans.len(), 1);
         assert_eq!(

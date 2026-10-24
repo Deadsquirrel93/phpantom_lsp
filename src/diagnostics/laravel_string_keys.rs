@@ -381,8 +381,15 @@ impl<'a> DeclaredKeys<'a> {
     /// A template under a Twig namespace (`@Acme/…`) is a bundle's, whose
     /// own templates are not read, so only the project's own templates are
     /// judged.  A project with none was not read at all.
+    /// A name under a Twig namespace is registered at runtime, and a name
+    /// can only be told unknown once some root is known, and when it ends
+    /// in an extension the project's templates use.
     fn judge_twig_template(&self, key: &str) -> Verdict {
         if key.starts_with('@') || self.twig_templates.is_empty() {
+            return None;
+        }
+        let roots = self.backend.twig_roots();
+        if roots.is_empty() || !roots.is_template_name(key) {
             return None;
         }
         let valid = self

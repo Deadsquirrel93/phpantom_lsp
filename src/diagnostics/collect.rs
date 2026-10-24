@@ -26,8 +26,8 @@ struct SlowCollector {
 enum Framework {
     Any,
     Laravel,
-    /// Laravel or Symfony, whose string keys share one check.
-    LaravelOrSymfony,
+    /// Laravel, Symfony, or Twig, whose string keys share one check.
+    LaravelSymfonyOrTwig,
 }
 
 const fn always(name: &'static str, collect: SlowCollectFn) -> SlowCollector {
@@ -126,7 +126,7 @@ static SLOW_COLLECTORS: &[SlowCollector] = &[
     SlowCollector {
         name: "invalid_string_key",
         collect: Backend::collect_invalid_laravel_string_key_diagnostics,
-        runs_in: Framework::LaravelOrSymfony,
+        runs_in: Framework::LaravelSymfonyOrTwig,
     },
     laravel(
         "invalid_command_parameter",
@@ -381,12 +381,12 @@ impl Backend {
         }
 
         let is_laravel = self.resolved_class_cache.read().laravel().is_enabled();
-        let is_symfony = self.is_symfony_project();
+        let has_string_keys = is_laravel || self.is_symfony_project() || self.is_twig_project();
         for collector in SLOW_COLLECTORS {
             let runs = match collector.runs_in {
                 Framework::Any => true,
                 Framework::Laravel => is_laravel,
-                Framework::LaravelOrSymfony => is_laravel || is_symfony,
+                Framework::LaravelSymfonyOrTwig => has_string_keys,
             };
             if !runs {
                 continue;

@@ -643,8 +643,57 @@ A name under a namespace is never reported as unknown, but one in an
 extra directory `paths:` adds without a namespace is, so reading
 `twig.yaml` matters most.
 
-**Where to look:** `src/symfony/templates.rs` (`template_names`),
-`src/symfony/mod.rs` (`symfony_template_names`).
+**Where to look:** `src/twig/roots.rs` (`TwigRoots::discover`,
+`TwigRoots::template_names`).
+
+---
+
+## F59. Send Twig, YAML, and XML documents to the server
+
+**Impact: Medium-High · Complexity: Medium**
+
+Neither editor extension sends the server anything but PHP and Blade, so
+everything PHPantom reads inside a Twig template or a YAML or XML file
+(template names, route names, translation keys, service IDs, parameters,
+configuration keys) never reaches a VS Code or Zed user. Those files are
+still indexed from disk, so the PHP side of each name works, but
+completion, go-to-definition, references, and rename started from the
+file itself do not.
+
+Joining those languages has to add to what the user already has, never
+replace it: the file keeps its language, and the Twig, YAML, and XML
+extensions keep serving it. Taking a file over (mapping `.html` to Twig
+with Zed's `file_types`, say) trades the HTML, CSS, and JS support it had
+for the one syntax PHPantom answers, and is not an option. `.html` stays
+out for the same reason; a project whose templates are `.html` renames
+them to `.html.twig`.
+
+What is needed:
+
+- **Answer only what the server owns in those documents.** The
+  `formatting`, `range_formatting`, and `semantic_tokens_full` handlers
+  in `src/server.rs` do not check the document's kind, so a client that
+  sends a template would be offered PHPantom as its formatter and its
+  highlighter. Semantic tokens are single-winner in VS Code, so they
+  could displace the Twig extension's highlighting. For a resource
+  document, every request but completion, hover, definition, references,
+  rename, and the code actions that name a string key answers nothing:
+  formatting, semantic tokens, folding, document symbols, inlay hints,
+  code lenses, signature help, and highlights included.
+- **The VS Code extension.** Add `twig`, `yaml`, and `xml` to the
+  document selector in `src/client.ts` (both the folder-scoped and the
+  on-disk selectors), with an `onLanguage:` activation event each in
+  `package.json`. Its hover and document-symbol middleware must leave
+  those documents alone.
+- **A pull request to `zed-extensions/php`.** Add `Twig`, `YAML`, and
+  `XML` to `languages` under `[language_servers.phpantom]` in
+  `extension.toml`, with `language_ids` (`twig`, `yaml`, `xml`). Those
+  languages come from other extensions, so confirm that Zed starts the
+  server for a language another extension defines before opening it.
+
+**Where to look:** `src/server.rs`, `Backend::is_resource_uri`
+(`src/twig/mod.rs`), the VS Code extension's `src/client.ts` and
+`package.json`, and the Zed PHP extension's `extension.toml`.
 
 ---
 
@@ -672,65 +721,30 @@ for resource documents), `src/diagnostics/laravel_string_keys.rs`,
 
 ---
 
-## F33. Twig templates outside Symfony
+## F58. Configured Twig roots and namespaces
 
-**Impact: Medium-High · Complexity: Medium-High**
+**Impact: Low-Medium · Complexity: Medium**
 
-Twig is used well beyond Symfony (Drupal, Craft, OpenCart, Slim, and
-plenty of hand-rolled applications that build a `Twig\Environment`
-themselves), but template names only navigate, complete, and get checked
-in a Symfony project, and only for `.twig` files under `templates/`. A
-project like this one gets nothing:
+Twig roots are discovered from the names templates reference
+(`src/twig/roots.rs`), which cannot find everything:
 
-```php
-$loader = new FilesystemLoader('default/', $app->basePath('/theme'));
-$loader->prependPath($theme . '/');
-```
+- **Namespaced names.** `{% include '@admin/menu.html' %}` names a root
+  through a namespace the loader registers at runtime
+  (`$loader->addPath($dir, 'admin')`), and the namespace says nothing
+  about which directory it maps to.
+- **Roots no template references into.** A directory whose templates
+  are only ever rendered from PHP, and never extended or included by
+  another template, is not discovered, so its names neither navigate nor
+  count as known.
 
-```twig
-{% extends "index.html" %}
-{% include 'menu.html' with {'menu': item.children} %}
-```
+Where the loader's arguments are literals (`new FilesystemLoader(__DIR__
+. '/views')`, `addPath('templates/admin', 'admin')`), read them
+statically first. For the rest, add a `[twig]` section to
+`.phpantom.toml`: `paths` (highest precedence first) and `namespaces`
+(`admin = "templates/admin"`), merged with the discovered roots.
 
-What is needed:
-
-- **Detect Twig on its own.** Template names switch on when the project
-  requires `twig/twig` or `symfony/twig-bundle`, or is a Symfony project.
-  Route names and translation keys in a template stay Symfony-only:
-  `path()` and the `trans` filter come from Symfony's Twig extensions,
-  not from Twig.
-- **Know where the templates are.** `templates/` when it exists, as
-  now, plus a `[twig]` section in `.phpantom.toml` for the loader roots
-  a project builds at runtime or from constants, which cannot be read
-  statically: `paths` (highest precedence first), `namespaces`
-  (`@admin/…`), and `extensions` (default `["twig"]`). A name several
-  roots hold (a theme overriding a default one) resolves to all of
-  them, since which root wins is decided at runtime.
-- **Recognise template files by more than their extension.** Whether a
-  file is a resource document is decided from its URI alone today
-  (`is_resource_document`, `is_resource_path`). A `.html` file under a
-  configured root has to be a Twig template while every other `.html`
-  file is left alone, so the check needs the backend, at every call
-  site: opening and editing, the workspace walk, the watcher,
-  definition, references, and rename.
-- **Validate names by the configured extensions** instead of the
-  hard-coded `.twig` suffix (`is_template_name`). Unknown names are only
-  reported when the roots are known: `templates/` exists or `[twig]` is
-  configured.
-
-PHP wrappers that build the name (an application's
-`RenderService::render('product')` appending `.html`, OpenCart's
-`$this->load->view('common/header')`) are F34.
-
-**Where to look:** `src/symfony/templates.rs`, `src/resource_navigation.rs`
-(`is_resource_document`, `resource_symbol_map`), `src/composer/project.rs`
-(`is_symfony_project`), `src/config.rs`, `src/indexing/watch.rs`.
-TwigStan (a PHPStan-based Twig analyser) is the reference for Twig outside
-Symfony: it takes the template directories as configuration
-(`twigPaths`) rather than discovering them, which supports the `[twig]`
-section here. It also asks for a script that builds the project's
-`Twig\Environment`, which PHPantom does not do: roots are read
-statically or configured.
+**Where to look:** `src/config.rs`, `src/twig/roots.rs`
+(`TwigRoots::discover`), `src/twig/mod.rs` (`TwigState`).
 
 ---
 
@@ -754,7 +768,7 @@ nothing says so. The wrapper's parameter needs marking as a template
 name, together with how the wrapper completes it (the suffix it appends,
 the directory it prepends). That could be a docblock type in the spirit
 of Laravel's `view-string`, or a `.phpantom.toml` entry for wrappers a
-project does not own (OpenCart's `Loader::view()`). Depends on F33.
+project does not own (OpenCart's `Loader::view()`).
 
 **Where to look:** `src/symbol_map/extraction/symfony.rs`
 (`symfony_receiver_method`), how `view-string` parameters are read for
@@ -803,7 +817,7 @@ the blocks each template declares and a resolver that walks up the
 chain: go to the overridden block, find the overrides of a parent's
 block, and complete the block names a child can override.
 
-**Where to look:** `src/symfony/templates.rs`, `src/blade/blocks.rs`,
+**Where to look:** `src/twig/templates.rs`, `src/blade/blocks.rs`,
 `src/blade/block_index.rs`.
 
 ---
@@ -853,7 +867,7 @@ components, so check what `blade/component_tags/` and `blade/discovery.rs`
 can share before writing a second implementation.
 
 **Where to look:** `src/blade/component_tags/`, `src/blade/discovery.rs`,
-`src/symfony/templates.rs`.
+`src/twig/templates.rs`.
 
 ---
 
@@ -1181,9 +1195,9 @@ them, nor show its signature on hover, and an unknown one is not
 reported. Twig's own filters and functions come from its core extension,
 which is read the same way.
 
-This applies to Twig outside Symfony too (F33).
+This applies to Twig outside Symfony too.
 
-**Where to look:** `src/symfony/templates.rs` (the Twig scan), and
+**Where to look:** `src/twig/templates.rs` (the Twig scan), and
 `references/symfony-language-tools` (`docs/features/twig-callables.rst`)
 and `references/twigstan`.
 
@@ -1203,7 +1217,7 @@ The class, constant, and enum case Twig's `constant()`, `enum()`, and
 ordinary class and member references once read, the same spans the
 resource maps record for a `Class::member` in YAML.
 
-**Where to look:** `src/symfony/templates.rs`, `src/resource_navigation.rs`
+**Where to look:** `src/twig/templates.rs`, `src/resource_navigation.rs`
 (`scan_symbols`), and `references/symfony-language-tools`
 (`docs/features/twig-constants-enums.rst`).
 
@@ -1219,7 +1233,7 @@ The path a Twig `asset('images/logo.png')` names, and the entrypoint an
 reported. Laravel's `asset()` has the same gap (see `laravel.md`), so the
 two should share the path completion.
 
-**Where to look:** `src/symfony/templates.rs`, and
+**Where to look:** `src/twig/templates.rs`, and
 `references/symfony-language-tools` (`docs/features/assets.rst`).
 
 ---
@@ -1325,7 +1339,7 @@ also sees the component's public properties and methods as `this.…` and
 bare variables, which F37's template variables would type. Builds on F38's
 link between a component class and its template.
 
-**Where to look:** `src/symfony/templates.rs`, `src/blade/component_tags/`
+**Where to look:** `src/twig/templates.rs`, `src/blade/component_tags/`
 (the Livewire `wire:model` handling is the closest counterpart).
 
 ---

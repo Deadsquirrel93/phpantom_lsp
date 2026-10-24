@@ -1,23 +1,18 @@
-//! Twig template names: the templates a project holds, and the places in
-//! other templates that name one.
+//! Twig template names: the places in templates that name another one.
 //!
-//! A template is loaded by its path under the project's `templates/`
-//! directory (`demo/index.html.twig`), and a bundle's template overridden
-//! under `templates/bundles/AcmeBundle/` by the bundle's Twig namespace as
-//! well (`@Acme/…`).  A template declares those names itself, with empty
-//! [`StringKey`](SymbolKind::StringKey) spans at its start, so a name
-//! resolves to the file and the files are found among the declarations
-//! like any other key's.
+//! A template declares the names it is loaded by (see [`super::roots`])
+//! itself, with empty [`StringKey`](SymbolKind::StringKey) spans at its
+//! start, so a name resolves to the file and the files are found among the
+//! declarations like any other key's.
 //!
 //! A template names others in its `extends`, `include`, `embed`, `use`,
 //! `import`, `from`, and `form_theme` tags and its `include()` and
 //! `source()` calls, read as text like its route names (see
-//! [`super::routes`]).  PHP names one through symbol-map extraction.
+//! [`crate::symfony::routes`]).  PHP names one through symbol-map
+//! extraction.
 
-use std::path::{Component, Path, PathBuf};
-
-use super::translations::{for_each_twig_block, skip_whitespace, string_end};
 use crate::symbol_map::{StringKeyKind, SymbolKind, SymbolSpan};
+use crate::symfony::translations::{for_each_twig_block, skip_whitespace, string_end};
 
 /// The tags whose expression is a template name.
 const TEMPLATE_TAGS: [&str; 7] = [
@@ -30,68 +25,39 @@ const TEMPLATE_TAGS: [&str; 7] = [
     "form_theme",
 ];
 
-/// Whether `name` can be a template name.  Twig takes any name its loader
-/// finds, but a Symfony template is a `.twig` file, and a string that is
-/// not one is far more often something else.
-pub(crate) fn is_template_name(name: &str) -> bool {
-    name.len() > ".twig".len()
-        && name
-            .get(name.len() - ".twig".len()..)
-            .is_some_and(|extension| extension.eq_ignore_ascii_case(".twig"))
+/// Whether `name` looks like a file a loader could find: a path ending in
+/// an extension, with nothing in it a template name never holds.  Which
+/// extensions count is the project's (see
+/// [`TwigRoots::is_template_name`](super::roots::TwigRoots::is_template_name)).
+pub(crate) fn looks_like_template_name(name: &str) -> bool {
+    name.rsplit('/')
+        .next()
+        .and_then(|file| file.rsplit_once('.'))
+        .is_some_and(|(stem, extension)| {
+            !stem.is_empty()
+                && !extension.is_empty()
+                && extension.bytes().all(|byte| byte.is_ascii_alphanumeric())
+        })
         && !name
             .bytes()
             .any(|byte| byte.is_ascii_whitespace() || matches!(byte, b'\\' | b'{' | b'}'))
 }
 
-/// The names the template at `path` is loaded by, when it lies under the
-/// `templates/` directory of the project at `root`.
-pub(crate) fn template_names(root: &Path, path: &Path) -> Vec<String> {
-    let Some(name) = path
-        .strip_prefix(root.join("templates"))
-        .ok()
-        .and_then(slash_path)
-        .filter(|name| is_template_name(name))
-    else {
-        return Vec::new();
-    };
-    let mut names = Vec::with_capacity(2);
-    if let Some((bundle, rest)) = name
-        .strip_prefix("bundles/")
-        .and_then(|rest| rest.split_once('/'))
-        && let Some(namespace) = bundle.strip_suffix("Bundle").filter(|ns| !ns.is_empty())
-    {
-        names.push(format!("@{namespace}/{rest}"));
-    }
-    names.push(name);
+/// The plain names (see [`super::roots::plain_relative`]) a template's
+/// tags and calls reference, which say where the template lives.
+pub(crate) fn template_references(content: &str) -> Vec<String> {
+    let mut names: Vec<String> = twig_template_spans(content, |name| {
+        looks_like_template_name(name) && super::roots::plain_relative(name).is_some()
+    })
+    .into_iter()
+    .filter_map(|span| match span.kind {
+        SymbolKind::StringKey { key, .. } => Some(key),
+        _ => None,
+    })
+    .collect();
+    names.sort_unstable();
+    names.dedup();
     names
-}
-
-/// Where a template named `name` is created in the project at `root`: under
-/// its `templates/` directory, for a name with no Twig namespace and no
-/// way out of that directory.
-pub(crate) fn template_file(root: &Path, name: &str) -> Option<PathBuf> {
-    let relative = Path::new(name);
-    (is_template_name(name)
-        && !name.starts_with('@')
-        && relative
-            .components()
-            .all(|component| matches!(component, Component::Normal(_))))
-    .then(|| root.join("templates").join(relative))
-}
-
-/// `path` with its components joined by `/`, when they are all plain names.
-fn slash_path(path: &Path) -> Option<String> {
-    let mut joined = String::new();
-    for component in path.components() {
-        let Component::Normal(part) = component else {
-            return None;
-        };
-        if !joined.is_empty() {
-            joined.push('/');
-        }
-        joined.push_str(part.to_str()?);
-    }
-    (!joined.is_empty()).then_some(joined)
 }
 
 /// The spans a template declares its `names` with.
@@ -122,8 +88,12 @@ fn template_span(
 }
 
 /// The template names a template's tags and `include()` and `source()`
-/// calls read, sorted by offset.
-pub(crate) fn twig_template_spans(content: &str) -> Vec<SymbolSpan> {
+/// calls read, sorted by offset, keeping the strings `is_name` takes for a
+/// template name.
+pub(crate) fn twig_template_spans(
+    content: &str,
+    is_name: impl Fn(&str) -> bool,
+) -> Vec<SymbolSpan> {
     let bytes = content.as_bytes();
     let mut spans = Vec::new();
     for_each_twig_block(content, |body, end| {
@@ -133,14 +103,14 @@ pub(crate) fn twig_template_spans(content: &str) -> Vec<SymbolSpan> {
             if tag == "form_theme" {
                 // Every theme the tag lists is applied, after the form it
                 // themes.
-                push_every_literal(content, after, end, &mut spans);
+                push_every_literal(content, after, end, &is_name, &mut spans);
             } else {
                 // A name that may be missing, or a list of candidates of
                 // which the first that exists is used, does without any
                 // one of them existing.
                 let optional = matches!(tag, "include" | "embed")
                     && content[after..end].contains("ignore missing");
-                push_expression_literals(content, after, end, optional, &mut spans);
+                push_expression_literals(content, after, end, optional, &is_name, &mut spans);
             }
             return;
         }
@@ -150,7 +120,7 @@ pub(crate) fn twig_template_spans(content: &str) -> Vec<SymbolSpan> {
             cursor = open + 1;
             if template_function_before(&content[body..open]).is_some()
                 && let Some(after) =
-                    push_expression_literals(content, open + 1, end, false, &mut spans)
+                    push_expression_literals(content, open + 1, end, false, &is_name, &mut spans)
             {
                 cursor = after;
             }
@@ -205,6 +175,7 @@ fn push_expression_literals(
     start: usize,
     end: usize,
     optional: bool,
+    is_name: &impl Fn(&str) -> bool,
     spans: &mut Vec<SymbolSpan>,
 ) -> Option<usize> {
     let bytes = content.as_bytes();
@@ -219,7 +190,7 @@ fn push_expression_literals(
     match bytes[cursor] {
         quote @ (b'\'' | b'"') => {
             let close = string_end(bytes, cursor + 1, quote).filter(|close| *close <= end)?;
-            push_literal(content, cursor + 1, close, optional, spans);
+            push_literal(content, cursor + 1, close, optional, is_name, spans);
             Some(close + 1)
         }
         b'[' => {
@@ -230,7 +201,7 @@ fn push_expression_literals(
                     break;
                 };
                 let close = string_end(bytes, cursor + 1, quote).filter(|close| *close <= end)?;
-                push_literal(content, cursor + 1, close, true, spans);
+                push_literal(content, cursor + 1, close, true, is_name, spans);
                 cursor = skip_whitespace(bytes, close + 1, end);
                 if bytes.get(cursor) != Some(&b',') {
                     break;
@@ -244,7 +215,13 @@ fn push_expression_literals(
 }
 
 /// Push every template name a string between `start` and `end` holds.
-fn push_every_literal(content: &str, start: usize, end: usize, spans: &mut Vec<SymbolSpan>) {
+fn push_every_literal(
+    content: &str,
+    start: usize,
+    end: usize,
+    is_name: &impl Fn(&str) -> bool,
+    spans: &mut Vec<SymbolSpan>,
+) {
     let bytes = content.as_bytes();
     let mut cursor = start;
     while cursor < end {
@@ -256,7 +233,7 @@ fn push_every_literal(content: &str, start: usize, end: usize, spans: &mut Vec<S
         let Some(close) = string_end(bytes, cursor + 1, quote).filter(|close| *close <= end) else {
             return;
         };
-        push_literal(content, cursor + 1, close, false, spans);
+        push_literal(content, cursor + 1, close, false, is_name, spans);
         cursor = close + 1;
     }
 }
@@ -266,10 +243,11 @@ fn push_literal(
     start: usize,
     end: usize,
     optional: bool,
+    is_name: &impl Fn(&str) -> bool,
     spans: &mut Vec<SymbolSpan>,
 ) {
     let name = &content[start..end];
-    if is_template_name(name) {
+    if is_name(name) {
         spans.push(template_span(name.to_string(), start, end, false, optional));
     }
 }
@@ -331,11 +309,15 @@ mod tests {
             .collect()
     }
 
+    fn twig_name(name: &str) -> bool {
+        looks_like_template_name(name) && name.ends_with(".twig")
+    }
+
     #[test]
     fn tags_and_functions_name_templates() {
         let twig = "{# {% include 'commented.html.twig' %} #}\n{% extends 'base.html.twig' %}\n{%- include \"partials/card.html.twig\" with {title: 'x.html.twig'} only -%}\n{% embed ['a.html.twig', 'b.html.twig'] %}{% endembed %}\n{% include 'maybe.html.twig' ignore missing %}\n{% use 'blocks.html.twig' %}{% import 'macros.html.twig' as m %}{% from '@Acme/forms.html.twig' import field %}\n{% form_theme form 'theme_a.html.twig' 'theme_b.html.twig' %}\n{{ include('inc.html.twig', {x: 1}) }}{{ source(\"raw.html.twig\") }}{{ block.include('no.html.twig') }}\n{% include template_name %}{% set title = 'plain.html.twig' %}<a href='html.twig'>\n";
         assert_eq!(
-            names(&twig_template_spans(twig), twig),
+            names(&twig_template_spans(twig, twig_name), twig),
             vec![
                 ("base.html.twig".to_string(), false),
                 ("partials/card.html.twig".to_string(), false),
@@ -354,37 +336,25 @@ mod tests {
     }
 
     #[test]
-    fn templates_are_named_by_their_path_under_templates() {
-        let root = Path::new("/p");
+    fn text_outside_ascii_inside_a_block_is_stepped_over() {
+        let twig = "{{ přehled|upper }}{% include 'a.html.twig' %}";
         assert_eq!(
-            template_names(root, Path::new("/p/templates/demo/index.html.twig")),
-            vec!["demo/index.html.twig".to_string()]
+            names(&twig_template_spans(twig, twig_name), twig),
+            vec![("a.html.twig".to_string(), false)]
         );
-        assert_eq!(
-            template_names(
-                root,
-                Path::new("/p/templates/bundles/AcmeBundle/widget.html.twig")
-            ),
-            vec![
-                "@Acme/widget.html.twig".to_string(),
-                "bundles/AcmeBundle/widget.html.twig".to_string(),
-            ]
-        );
-        assert!(template_names(root, Path::new("/p/src/view.html.twig")).is_empty());
-        assert!(template_names(root, Path::new("/p/templates/readme.md")).is_empty());
     }
 
     #[test]
-    fn only_a_plain_name_is_created_under_templates() {
-        let root = Path::new("/p");
+    fn references_are_the_plain_names_a_template_loads() {
+        let twig = "{% extends \"index.html\" %}{% include 'menu.html' with {'menu': x} %}{% include '@admin/x.html' %}{% include '../up.html' %}{% include 'menu.html' %}{% set y = 'z.html' %}{{ include('partials/a.html.twig') }}";
         assert_eq!(
-            template_file(root, "demo/new.html.twig"),
-            Some(PathBuf::from("/p/templates/demo/new.html.twig"))
+            template_references(twig),
+            vec![
+                "index.html".to_string(),
+                "menu.html".to_string(),
+                "partials/a.html.twig".to_string(),
+            ]
         );
-        assert_eq!(template_file(root, "@Acme/new.html.twig"), None);
-        assert_eq!(template_file(root, "../escape.html.twig"), None);
-        assert_eq!(template_file(root, "/abs.html.twig"), None);
-        assert_eq!(template_file(root, "demo/new.txt"), None);
     }
 
     #[test]

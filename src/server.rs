@@ -358,7 +358,7 @@ impl LanguageServer for Backend {
                 // YAML and XML may name PHP classes under any schema. Resolve
                 // fully-qualified class and Class::member tokens before entering
                 // the PHP-only symbol-map path below.
-                if crate::resource_navigation::is_resource_document(uri) {
+                if backend.is_resource_uri(uri) {
                     let locations = backend
                         .get_file_content(uri)
                         .and_then(|content| {

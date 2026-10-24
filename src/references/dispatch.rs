@@ -117,9 +117,7 @@ impl Backend {
                         | SymbolKind::Variable { .. }
                 )
             {
-                locations.retain(|location| {
-                    !crate::resource_navigation::is_resource_document(location.uri.as_str())
-                });
+                locations.retain(|location| !self.is_resource_uri(location.uri.as_str()));
             }
             sort_locations_for_references(&mut locations);
             tracing::info!(

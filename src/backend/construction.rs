@@ -103,6 +103,8 @@ impl BackendState {
             is_doctrine: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             is_symfony: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             symfony: crate::symfony::SymfonyState::default(),
+            is_twig: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            twig: crate::twig::TwigState::default(),
             pest_configs: Arc::new(RwLock::new(None)),
             member_completion_cache: Arc::new(Mutex::new(HashMap::new())),
             diag: crate::diagnostics::state::DiagnosticState::new(),

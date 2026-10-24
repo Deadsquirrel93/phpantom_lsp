@@ -16,7 +16,7 @@ fn backend_with(files: &[(&str, &str)]) -> (crate::Backend, tempfile::TempDir) {
             .open_files
             .write()
             .insert(uri.clone(), Arc::new(content.to_string()));
-        if crate::resource_navigation::is_resource_document(&uri) {
+        if backend.is_resource_uri(&uri) {
             backend.update_resource_symbol_index(&uri, content);
         } else {
             backend.update_ast(&uri, content);

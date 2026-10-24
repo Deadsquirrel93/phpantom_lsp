@@ -6,8 +6,9 @@
 //! [`StringKey`](crate::symbol_map::SymbolKind::StringKey) span in some
 //! file's symbol map: YAML and XML configuration, translation catalogues,
 //! and Twig templates through the resource symbol maps (see [`resources`],
-//! [`routes`], [`translations`], [`templates`], and [`config_tree`]), and
-//! PHP through symbol-map extraction.
+//! [`routes`], [`translations`], [`crate::twig`], and [`config_tree`]), and
+//! PHP through symbol-map extraction.  Template names are Twig's, so they
+//! are read in any project that uses Twig, Symfony or not.
 //!
 //! Event names and Messenger bus names are string keys too (see [`tags`]
 //! and [`messenger`]).  Form fields, validation mappings, and the listener
@@ -31,7 +32,6 @@ pub(crate) mod messenger;
 pub(crate) mod resources;
 pub(crate) mod routes;
 pub(crate) mod tags;
-pub(crate) mod templates;
 pub(crate) mod translations;
 pub(crate) mod validation;
 
@@ -110,8 +110,12 @@ pub(crate) struct SymfonyState {
 /// translation key, a template, a configuration key, an event listener, or
 /// a Messenger bus, outright or through a configurator call still to be
 /// confirmed, or registers a Messenger handler.
-fn declares_symfony_keys(map: &SymbolMap) -> bool {
-    !map.messenger_handlers.is_empty()
+///
+/// Only the kinds `enabled` takes count: outside Symfony, a project that
+/// uses Twig declares its templates and nothing else.
+fn declares_symfony_keys(map: &SymbolMap, enabled: impl Fn(StringKeyKind) -> bool) -> bool {
+    let counts = |kind: StringKeyKind| kind.is_symfony() && enabled(kind);
+    (!map.messenger_handlers.is_empty() && enabled(StringKeyKind::MessengerBus))
         || map.spans.iter().any(|span| {
             matches!(
                 &span.kind,
@@ -119,13 +123,13 @@ fn declares_symfony_keys(map: &SymbolMap) -> bool {
                     kind,
                     is_write: true,
                     ..
-                } if kind.is_symfony()
+                } if counts(*kind)
             )
         })
         || map
             .typed_receiver_sites
             .iter()
-            .any(|site| site.is_write && site.receiver.is_symfony())
+            .any(|site| site.is_write && counts(site.receiver.key_kind()))
 }
 
 impl Backend {
@@ -144,7 +148,9 @@ impl Backend {
     /// Whether the framework a string key of `kind` belongs to is the one
     /// this project uses.
     pub(crate) fn string_key_kind_enabled(&self, kind: StringKeyKind) -> bool {
-        if kind.is_symfony() {
+        if kind == StringKeyKind::TwigTemplate {
+            self.is_twig_project()
+        } else if kind.is_symfony() {
             self.is_symfony_project()
         } else {
             self.resolved_class_cache.read().laravel().is_enabled()
@@ -156,10 +162,10 @@ impl Backend {
     /// Dependencies are never part of the project's own configuration, so a
     /// vendor file that happens to be parsed is left out.
     pub(crate) fn note_symfony_declarations(&self, uri: &str, map: &SymbolMap) {
-        if !self.is_symfony_project() {
+        if !self.is_symfony_project() && !self.is_twig_project() {
             return;
         }
-        let declares = declares_symfony_keys(map)
+        let declares = declares_symfony_keys(map, |kind| self.string_key_kind_enabled(kind))
             && !self
                 .workspace
                 .vendor_uri_prefixes
@@ -176,24 +182,6 @@ impl Backend {
         } else {
             uris.remove(uri);
         }
-    }
-
-    /// The names the Twig template at `uri` is loaded by, when it is one of
-    /// the project's templates.
-    pub(crate) fn symfony_template_names(&self, uri: &str) -> Vec<String> {
-        let Some(root) = self.workspace.workspace_root.read().clone() else {
-            return Vec::new();
-        };
-        crate::util::uri_to_path(uri)
-            .map(|path| templates::template_names(&root, &path))
-            .unwrap_or_default()
-    }
-
-    /// Where the Twig template named `name` is created, when it is a name
-    /// of the project's own templates.
-    pub(crate) fn symfony_template_file(&self, name: &str) -> Option<std::path::PathBuf> {
-        let root = self.workspace.workspace_root.read().clone()?;
-        templates::template_file(&root, name)
     }
 
     /// Forget a file that no longer exists.

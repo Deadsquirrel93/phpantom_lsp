@@ -65,8 +65,9 @@ impl Backend {
         let literal_start = quote + 1;
         let literal = content.get(literal_start..cursor)?;
 
-        if let Some(response) =
-            self.symfony_form_field_completion(content, literal_start, cursor, position, ctx)
+        if self.is_symfony_project()
+            && let Some(response) =
+                self.symfony_form_field_completion(content, literal_start, cursor, position, ctx)
         {
             return Some(response);
         }
@@ -74,7 +75,8 @@ impl Backend {
         let (kind, prefix_start) = self
             .symfony_call_key(content, cursor, code, ctx)
             .map(|kind| (kind, literal_start))
-            .or_else(|| attribute_key(content, quote, literal, literal_start, ctx))?;
+            .or_else(|| attribute_key(content, quote, literal, literal_start, ctx))
+            .filter(|(kind, _)| self.string_key_kind_enabled(*kind))?;
         if kind == StringKeyKind::SymfonyTranslation {
             let domain = self.translation_domain_at(uri, content, literal_start);
             let messages = self.symfony_translation_messages(&domain);
@@ -288,13 +290,17 @@ impl Backend {
         content: &str,
         position: Position,
     ) -> Option<CompletionResponse> {
-        if !self.is_symfony_project() {
-            return None;
-        }
+        let is_symfony = self.is_symfony_project();
         let cursor = position_to_offset(content, position) as usize;
-        let (kind, prefix_start) = if crate::symfony::routes::is_twig_uri(uri) {
-            if let Some((start, domain)) =
-                crate::symfony::translations::twig_translation_completion(content, cursor)
+        let (kind, prefix_start) = if self.is_twig_template_uri(uri) {
+            // Template names are Twig's, and route names and translation
+            // keys Symfony's.
+            if !self.is_twig_project() {
+                return None;
+            }
+            if is_symfony
+                && let Some((start, domain)) =
+                    crate::symfony::translations::twig_translation_completion(content, cursor)
             {
                 let messages = self.symfony_translation_messages(&domain);
                 return self.symfony_names_response(
@@ -306,14 +312,16 @@ impl Backend {
                     position,
                 );
             }
-            if let Some(start) =
-                crate::symfony::templates::twig_template_name_start(content, cursor)
-            {
+            if let Some(start) = crate::twig::templates::twig_template_name_start(content, cursor) {
                 (StringKeyKind::TwigTemplate, start)
-            } else {
+            } else if is_symfony {
                 let start = crate::symfony::routes::twig_route_name_start(content, cursor)?;
                 (StringKeyKind::SymfonyRoute, start)
+            } else {
+                return None;
             }
+        } else if !is_symfony {
+            return None;
         } else if crate::symfony::resources::is_container_config_uri(uri) {
             match config_slot_at(uri, content, cursor).or_else(|| resource_key_at(content, cursor))
             {

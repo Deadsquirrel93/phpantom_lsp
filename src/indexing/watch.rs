@@ -153,6 +153,7 @@ impl Backend {
         // The index guards are taken per check, not across the loop:
         // migration discovery walks directories.
         let is_open = |uri: &str| self.open_files.read().contains_key(uri);
+        let is_twig = self.is_twig_project();
         let laravel_config = self.config().laravel;
         let filters = self.index_filters();
         let translations = self.laravel.string_key_cache.read().translations.clone();
@@ -247,7 +248,10 @@ impl Backend {
             {
                 batch.translations_changed = true;
             }
-            if crate::resource_navigation::is_resource_document(path_str) {
+            // A file that can be a template is followed even while it is
+            // none, since what it references may make it one.
+            let is_twig_candidate = is_twig && crate::twig::roots::is_candidate_uri(path_str);
+            if is_twig_candidate || self.is_resource_uri(&uri_str) {
                 if is_open(&uri_str) {
                     continue;
                 }
@@ -259,7 +263,7 @@ impl Backend {
                 if filters.is_excluded_path(&file_path, false) {
                     continue;
                 }
-                if change.typ == FileChangeType::CHANGED {
+                if change.typ == FileChangeType::CHANGED && !is_twig_candidate {
                     let canonical_uri = crate::util::path_to_uri(&file_path);
                     if self.symbol_map_for(&uri_str).is_none()
                         && self.symbol_map_for(&canonical_uri).is_none()
@@ -363,6 +367,7 @@ impl Backend {
         for (uri, path, change_type) in resource_changes {
             if *change_type == FileChangeType::DELETED {
                 self.clear_file_maps(uri);
+                self.forget_twig_source(uri);
             } else if let Ok(content) = std::fs::read_to_string(path) {
                 self.update_resource_symbol_index(uri, &content);
             }
@@ -476,6 +481,7 @@ impl Backend {
         let extra_extensions = index_filters.extra_extensions().to_vec();
         let is_laravel = self.resolved_class_cache.read().laravel().is_enabled();
         let is_symfony = self.is_symfony_project();
+        let is_twig = self.is_twig_project();
 
         // Create, change, and delete: what every watcher but the two
         // Composer ones asks for.
@@ -497,8 +503,10 @@ impl Backend {
             ("**/.phpantom.toml".to_string(), watch_all),
         ]);
         if is_symfony {
-            patterns.push(("**/*.twig".to_string(), watch_all));
             patterns.push(("**/*.{xlf,xliff}".to_string(), watch_all));
+        }
+        if is_twig {
+            patterns.push(("**/*.{twig,html,htm}".to_string(), watch_all));
         }
         if is_laravel {
             patterns.extend([
@@ -550,6 +558,7 @@ impl Backend {
                 extra_extensions,
                 is_laravel,
                 is_symfony,
+                is_twig,
                 followed_links,
             },
         )

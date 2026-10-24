@@ -141,9 +141,11 @@ pub(crate) struct WatchedFileInputs {
     /// Whether the project was classified as Laravel, which adds the
     /// schema watchers.
     pub(crate) is_laravel: bool,
-    /// Whether the project was classified as Symfony, which adds the Twig
-    /// template and XLIFF catalogue watchers.
+    /// Whether the project was classified as Symfony, which adds the
+    /// XLIFF catalogue watchers.
     pub(crate) is_symfony: bool,
+    /// Whether the project uses Twig, which adds the template watchers.
+    pub(crate) is_twig: bool,
     /// Directory symlinks the index reached through, one relative-pattern
     /// watcher each. Empty when the client cannot match a relative
     /// pattern, since then there is nothing to ask it for.
@@ -321,6 +323,7 @@ mod symfony;
 pub(crate) mod text_position;
 pub(crate) mod text_scan;
 pub(crate) mod toposort;
+mod twig;
 pub mod type_engine;
 mod type_hierarchy;
 pub mod types;
@@ -505,6 +508,12 @@ pub struct BackendState {
     pub(crate) is_symfony: Arc<std::sync::atomic::AtomicBool>,
     /// The files that declare Symfony service IDs or container parameters.
     pub(crate) symfony: symfony::SymfonyState,
+    /// Whether the project uses Twig, which template names are read in.
+    /// See [`crate::composer::is_twig_project`].  Starts `true` so a
+    /// workspace with no `composer.json` to classify behaves as before.
+    pub(crate) is_twig: Arc<std::sync::atomic::AtomicBool>,
+    /// The project's Twig template files and the roots they live under.
+    pub(crate) twig: twig::TwigState,
     /// The `Pest.php` files of the project's test directories, read on
     /// first use and dropped when one is saved.  `None` until then.
     pub(crate) pest_configs: Arc<RwLock<Option<pest::PestConfigs>>>,

@@ -85,7 +85,7 @@ pub(crate) enum StringKeyKind {
     /// catalogues named after it declare it.
     TranslationDomain,
     /// A Twig template name: declared by the template file itself (see
-    /// `symfony::templates`), and read by a controller's `render()` family,
+    /// `twig::templates`), and read by a controller's `render()` family,
     /// Twig's `render()`, a templated email's `htmlTemplate()` and
     /// `textTemplate()`, `#[Template]`, and a template's `extends`,
     /// `include`, and the other tags and functions that load one.
@@ -546,12 +546,10 @@ impl ReceiverClass {
         matches!(self, Self::TemplateRenderer | Self::TemplatedEmail)
     }
 
-    /// Whether this receiver names one of Symfony's string keys rather than
-    /// one of Laravel's.
-    pub(crate) fn is_symfony(self) -> bool {
-        self.targets()
-            .first()
-            .is_some_and(|(_, kind)| kind.is_symfony())
+    /// The kind of key the call names on its first target, which says
+    /// which framework the receiver belongs to.
+    pub(crate) fn key_kind(self) -> StringKeyKind {
+        self.targets()[0].1
     }
 }
 

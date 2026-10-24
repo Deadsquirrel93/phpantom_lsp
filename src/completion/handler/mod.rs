@@ -215,14 +215,15 @@ impl Backend {
             return Some(response);
         }
 
-        if crate::resource_navigation::is_resource_document(uri)
+        let is_template = self.is_twig_template_uri(uri);
+        if (is_template || self.is_resource_uri(uri))
             && let Some(content) = self.get_file_content_arc(uri)
             && let Some(response) = self.try_symfony_resource_completion(uri, &content, position)
         {
             return Some(response);
         }
         // A template is not PHP, so nothing below applies to it.
-        if crate::symfony::routes::is_twig_uri(uri) {
+        if is_template {
             return None;
         }
 

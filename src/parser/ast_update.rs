@@ -508,6 +508,7 @@ impl Backend {
                 content,
                 &owned_resolved,
                 self.is_symfony_project(),
+                self.is_twig_project(),
             );
             // An open file's slow diagnostics are built on the previous
             // pass's, which is only sound if that pass read an index built

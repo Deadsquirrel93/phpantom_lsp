@@ -93,7 +93,7 @@ impl Backend {
         // the document's quoting requires rather than the PHP spelling, so
         // nothing here can plan the edit that replaces it, and the PHP
         // occurrences are reached from the declaration instead.
-        if crate::resource_navigation::is_resource_document(uri) {
+        if self.is_resource_uri(uri) {
             return self.handle_framework_prepare_rename(uri, content, position);
         }
 
@@ -196,7 +196,7 @@ impl Backend {
         // the document's quoting requires rather than the PHP spelling, so
         // nothing here can plan the edit that replaces it, and the PHP
         // occurrences are reached from the declaration instead.
-        if crate::resource_navigation::is_resource_document(uri) {
+        if self.is_resource_uri(uri) {
             return self.handle_framework_rename(uri, content, position, new_name);
         }
 
@@ -283,10 +283,9 @@ impl Backend {
         // location has to be checked against *that* file's text, not the
         // buffer this request arrived on.
         let magic_use = magic_rename.as_ref().map(|(old_use, _)| old_use.as_str());
-        let (resource_locations, mut locations): (Vec<Location>, Vec<Location>) =
-            locations.into_iter().partition(|location| {
-                crate::resource_navigation::is_resource_document(location.uri.as_str())
-            });
+        let (resource_locations, mut locations): (Vec<Location>, Vec<Location>) = locations
+            .into_iter()
+            .partition(|location| self.is_resource_uri(location.uri.as_str()));
         if !self.rename_locations_verified(&span.kind, magic_use, &locations) {
             return Ok(None);
         }
@@ -588,7 +587,7 @@ impl Backend {
                 (definitions.len() == 1).then(|| definitions.remove(0))
             })?;
         let target_uri = target.uri.to_string();
-        if crate::resource_navigation::is_resource_document(&target_uri) {
+        if self.is_resource_uri(&target_uri) {
             return None;
         }
         let target_content = self.get_file_content(&target_uri)?;

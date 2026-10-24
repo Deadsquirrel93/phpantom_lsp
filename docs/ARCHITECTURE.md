@@ -99,7 +99,8 @@ src/
 ├── hover/                  # Hover: symbol-map dispatch, type/signature/docblock formatting
 ├── definition/             # Go-to-definition (resolve, member, variable/, implementation, type_definition)
 ├── resource_navigation.rs  # Schema-free PHP class/member indexing and navigation in YAML/XML
-├── symfony/                # Symfony service IDs, container parameters, routes, translations, Twig templates, bundle configuration keys, form fields, validation mappings, event names, and Messenger buses and handlers: YAML/XML/XLIFF/Twig scanners, declaring files
+├── symfony/                # Symfony service IDs, container parameters, routes, translations, bundle configuration keys, form fields, validation mappings, event names, and Messenger buses and handlers: YAML/XML/XLIFF/Twig scanners, declaring files
+├── twig/                   # Twig template names in any project that uses Twig: template roots discovered from the names templates reference, the template-name scanner
 ├── references/, rename/, highlight/
 ├── signature_help.rs, semantic_tokens.rs, inlay_hints.rs, folding.rs, code_lens.rs
 ├── document_symbols.rs, document_links.rs, workspace_symbols.rs, formatting/
@@ -288,9 +289,13 @@ The spans come from two places, and nowhere else:
   typed-receiver site (see above) and settled by the shared type engine,
   never by guessing from the receiver's spelling.
 - **YAML, XML, XLIFF, and Twig** are read as text by the scanners in
-  `symfony/`, which build each resource file's symbol map
+  `symfony/` and `twig/`, which build each resource file's symbol map
   (`resource_navigation.rs`). These files have no AST we share, and their
   shapes are small enough that a line-oriented scan reads them reliably.
+  Whether a file is a resource document is mostly its extension, but an
+  `.html` file is a Twig template only under a root discovered from the
+  names other templates reference (`twig/roots.rs`), so the check is
+  `Backend::is_resource_uri`, not the URI alone.
 
 Completion asks the same questions: it judges the call under the cursor
 with the predicates extraction uses (`symfony_receiver_method`, the
@@ -1037,7 +1042,7 @@ When the user invokes "Find All References", PHPantom scans all user files for o
 Before scanning, `ensure_workspace_indexed` ensures all user files have symbol maps:
 
 1. **Phase 1: fqn_uri_index files (user only)** — files already known from `update_ast` calls. Vendor and stub URIs are skipped.
-2. **Phase 2: `.gitignore`-aware workspace walk** — uses the `ignore` crate's `WalkBuilder` to recursively discover PHP plus YAML/XML resource files (and, in a Symfony project, Twig templates and XLIFF catalogues) under the workspace root, respecting `.gitignore` rules (including nested and global gitignore files). This automatically skips generated/cached directories like `storage/framework/views/` (Laravel blade cache), `var/cache/` (Symfony), and `node_modules/`. The vendor directory is always skipped regardless of `.gitignore` content. Hidden directories are skipped by default.
+2. **Phase 2: `.gitignore`-aware workspace walk** — uses the `ignore` crate's `WalkBuilder` to recursively discover PHP plus YAML/XML resource files (and, in a Symfony project, XLIFF catalogues, and in a project that uses Twig, its `.twig`, `.html`, and `.htm` files, which root discovery reads before any template is indexed) under the workspace root, respecting `.gitignore` rules (including nested and global gitignore files). This automatically skips generated/cached directories like `storage/framework/views/` (Laravel blade cache), `var/cache/` (Symfony), and `node_modules/`. The vendor directory is always skipped regardless of `.gitignore` content. Hidden directories are skipped by default.
 
 PHP files are parsed in parallel using `std::thread::scope`. The work is split into chunks (one per CPU core) and each thread reads a file from disk and calls `update_ast`, which acquires write locks briefly to store results while the expensive parsing step runs without any locks held. Batches of 2 or fewer files skip threading overhead. YAML/XML files take the lightweight schema-free scanner and publish synthetic class/member symbol maps into the same reference index.
 

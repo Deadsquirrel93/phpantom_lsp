@@ -87,9 +87,10 @@ impl Backend {
 
         // ── Symfony names ───────────────────────────────────────
         // `$container->get('|')`, `service('|')`, `#[Autowire(param: '|')]`,
-        // `$translator->trans('|')`.
+        // `$translator->trans('|')`, and in any project that uses Twig,
+        // `$twig->render('|')`.
         if matches!(string_ctx, StringContext::InStringLiteral)
-            && self.is_symfony_project()
+            && (self.is_symfony_project() || self.is_twig_project())
             && let Some(code) = code_ctx.as_ref()
             && let Some(response) =
                 self.try_symfony_string_key_completion(uri, content, position, code, ctx)

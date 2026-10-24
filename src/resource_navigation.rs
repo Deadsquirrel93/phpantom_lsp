@@ -6,8 +6,11 @@
 //! declaration lookup to the normal PHP class loader.
 //!
 //! Twig templates and XLIFF catalogues are resource documents too, read
-//! only for the Symfony names they hold (see [`crate::symfony::routes`],
-//! [`crate::symfony::translations`], and [`crate::symfony::templates`]).
+//! only for the template names, and in a Symfony project the route names
+//! and translation keys, they hold (see [`crate::twig`],
+//! [`crate::symfony::routes`], and [`crate::symfony::translations`]).  A
+//! template whose extension does not say so (`.html`) is one only under a
+//! discovered root, so [`Backend::is_resource_uri`] has the last word.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -59,8 +62,8 @@ pub(crate) fn is_resource_document(uri: &str) -> bool {
     .any(|suffix| path.ends_with(suffix))
 }
 
-/// Whether `uri` is a resource document only a Symfony project reads: a
-/// Twig template or an XLIFF catalogue, which hold no PHP class names.
+/// Whether `uri` is a resource document that holds no PHP class names: a
+/// Twig template or an XLIFF catalogue.
 pub(crate) fn is_symfony_only_document(uri: &str) -> bool {
     crate::symfony::routes::is_twig_uri(uri) || crate::symfony::translations::is_xliff_uri(uri)
 }
@@ -127,8 +130,26 @@ impl Backend {
     }
 
     /// Replace one resource document's synthetic symbol map and reference
-    /// contributions.
+    /// contributions.  A file that can be a Twig template is remembered for
+    /// root discovery first, which may make it a template or stop it being
+    /// one.
     pub(crate) fn update_resource_symbol_index(&self, uri: &str, content: &str) {
+        self.note_twig_source(uri, content);
+        if self.is_resource_uri(uri) {
+            self.publish_resource_symbol_index(uri, content);
+        } else if self.symbol_map_for(uri).is_some() {
+            // It stopped being a template.
+            if self.open_files.read().contains_key(uri) {
+                self.update_ast(uri, content);
+            } else {
+                self.clear_file_maps(uri);
+            }
+        }
+    }
+
+    /// Replace one resource document's synthetic symbol map and reference
+    /// contributions, leaving root discovery alone.
+    pub(crate) fn publish_resource_symbol_index(&self, uri: &str, content: &str) {
         let symbol_map = Arc::new(self.resource_symbol_map(uri, content));
         self.publish_symbol_maps([(uri.to_string(), Arc::clone(&symbol_map))]);
         self.reindex_references_for_symbol_maps_batch(vec![(uri.to_string(), symbol_map)]);
@@ -136,22 +157,62 @@ impl Backend {
     }
 
     /// Index resource files discovered during the workspace walk.
+    ///
+    /// The files that can be Twig templates are read first, all of them, so
+    /// that the roots are discovered before any template is named.
     pub(crate) fn index_resource_paths_batch(&self, files: &[(String, PathBuf)]) {
-        // A template or an XLIFF catalogue holds nothing but Symfony names,
-        // so it is not even read in another project.
+        // An XLIFF catalogue holds nothing but Symfony names, and a template
+        // nothing but Twig's, so neither is even read in another project.
         let is_symfony = self.is_symfony_project();
-        let maps: Vec<(String, Arc<SymbolMap>)> = files
+        let is_twig = self.is_twig_project();
+        let (candidates, others): (Vec<_>, Vec<_>) = files
             .iter()
-            .filter(|(uri, _)| is_symfony || !is_symfony_only_document(uri))
-            .filter_map(|(uri, path)| {
-                let content = std::fs::read_to_string(path).ok()?;
-                self.index_framework_uri_content(uri, &content);
-                Some((
-                    uri.clone(),
-                    Arc::new(self.resource_symbol_map(uri, &content)),
-                ))
+            .filter(|(uri, _)| {
+                (is_symfony || !crate::symfony::translations::is_xliff_uri(uri))
+                    && (is_twig || !crate::symfony::routes::is_twig_uri(uri))
             })
-            .collect();
+            .partition(|(uri, _)| crate::twig::roots::is_candidate_uri(uri));
+        // An open file is read from its buffer.
+        let candidates: Vec<(&String, Arc<String>)> = if is_twig {
+            candidates
+                .into_iter()
+                .filter_map(|(uri, path)| {
+                    let open = self.open_files.read().get(uri).cloned();
+                    let content = match open {
+                        Some(content) => content,
+                        None => Arc::new(std::fs::read_to_string(path).ok()?),
+                    };
+                    Some((uri, content))
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        self.note_twig_sources(
+            candidates
+                .iter()
+                .map(|(uri, content)| (uri.as_str(), content.as_str())),
+        );
+
+        let candidate_maps = candidates
+            .iter()
+            .filter(|(uri, _)| self.is_resource_uri(uri))
+            .map(|(uri, content)| {
+                self.index_framework_uri_content(uri, content);
+                (
+                    (*uri).clone(),
+                    Arc::new(self.resource_symbol_map(uri, content)),
+                )
+            });
+        let other_maps = others.into_iter().filter_map(|(uri, path)| {
+            let content = std::fs::read_to_string(path).ok()?;
+            self.index_framework_uri_content(uri, &content);
+            Some((
+                uri.clone(),
+                Arc::new(self.resource_symbol_map(uri, &content)),
+            ))
+        });
+        let maps: Vec<(String, Arc<SymbolMap>)> = candidate_maps.chain(other_maps).collect();
         if maps.is_empty() {
             return;
         }
@@ -162,22 +223,18 @@ impl Backend {
 
     fn resource_symbol_map(&self, uri: &str, content: &str) -> SymbolMap {
         let is_symfony = self.is_symfony_project();
-        if is_symfony_only_document(uri) {
-            let spans = if !is_symfony {
-                Vec::new()
-            } else if crate::symfony::routes::is_twig_uri(uri) {
-                let mut spans = crate::symfony::templates::template_declaration_spans(
-                    self.symfony_template_names(uri),
-                );
-                spans.extend(crate::symfony::routes::twig_route_spans(content));
-                spans.extend(crate::symfony::translations::twig_translation_spans(
-                    content,
-                ));
-                spans.extend(crate::symfony::templates::twig_template_spans(content));
-                spans.sort_by_key(|span| span.start);
-                spans
-            } else {
+        let is_template = self.is_twig_template_uri(uri);
+        if is_template || crate::symfony::translations::is_xliff_uri(uri) {
+            let spans = if is_template {
+                if self.is_twig_project() {
+                    self.twig_template_spans(uri, content, is_symfony)
+                } else {
+                    Vec::new()
+                }
+            } else if is_symfony {
                 crate::symfony::translations::catalogue_spans(uri, content)
+            } else {
+                Vec::new()
             };
             return SymbolMap {
                 spans,
@@ -260,6 +317,31 @@ impl Backend {
             source_len: u32::try_from(content.len()).unwrap_or(u32::MAX),
             ..SymbolMap::default()
         }
+    }
+}
+
+impl Backend {
+    /// The spans of a Twig template: the names it is loaded by, the
+    /// templates it names, and in a Symfony project the route names and
+    /// translation keys it reads.
+    fn twig_template_spans(&self, uri: &str, content: &str, is_symfony: bool) -> Vec<SymbolSpan> {
+        let roots = self.twig_roots();
+        let names = crate::util::uri_to_path(uri)
+            .map(|path| roots.template_names(&path))
+            .unwrap_or_default();
+        let mut spans = crate::twig::templates::template_declaration_spans(names);
+        if is_symfony {
+            spans.extend(crate::symfony::routes::twig_route_spans(content));
+            spans.extend(crate::symfony::translations::twig_translation_spans(
+                content,
+            ));
+        }
+        spans.extend(crate::twig::templates::twig_template_spans(
+            content,
+            |name| roots.is_template_name(name),
+        ));
+        spans.sort_by_key(|span| span.start);
+        spans
     }
 }
 

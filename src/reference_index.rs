@@ -716,8 +716,12 @@ impl Backend {
         // `$x->prop === 'literal'`, so skip them there.
         let is_laravel = self.resolved_class_cache.read().laravel().is_enabled();
         let is_symfony = self.is_symfony_project();
+        let is_twig = self.is_twig_project();
         for site in &symbol_map.typed_receiver_sites {
-            let enabled = if site.receiver.is_symfony() {
+            let kind = site.receiver.key_kind();
+            let enabled = if kind == StringKeyKind::TwigTemplate {
+                is_twig
+            } else if kind.is_symfony() {
                 is_symfony
             } else {
                 is_laravel
@@ -794,7 +798,7 @@ impl Backend {
                 // FQN can never apply.  Skipping it keeps a large generated
                 // XML from adding one index entry per distinct class it
                 // names on top of the one that answers lookups.
-                if *is_fqn && crate::resource_navigation::is_resource_document(uri) {
+                if *is_fqn && self.is_resource_uri(uri) {
                     return vec![(
                         ReferenceIndexKey::class_owned(normalize_symbol_name(name)),
                         true,

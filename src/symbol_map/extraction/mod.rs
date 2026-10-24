@@ -131,6 +131,10 @@ struct ExtractionCtx<'a> {
     /// `get()` and `set()` would otherwise record all over any other
     /// project.
     symfony: bool,
+    /// Whether the project uses Twig, outside Symfony too.  Gates the
+    /// `render()` calls recorded for the type engine to confirm as naming
+    /// a template.
+    twig: bool,
     /// Whether the file names anything from Symfony's container
     /// configurator namespace, checked once lazily.
     uses_symfony_configurators: Option<bool>,
@@ -284,7 +288,7 @@ fn descend_unhandled<'a>(node: Node<'a, 'a>, ctx: &mut ExtractionCtx<'a>, scope_
 /// every navigable symbol occurrence.
 #[cfg(test)]
 pub(crate) fn extract_symbol_map(program: &Program<'_>, content: &str) -> SymbolMap {
-    extract_symbol_map_inner(program, content, None, true)
+    extract_symbol_map_inner(program, content, None, true, true)
 }
 
 /// Build a [`SymbolMap`] using the semantic names produced by `mago-names`.
@@ -294,7 +298,7 @@ pub(crate) fn extract_symbol_map_with_resolved_names(
     content: &str,
     resolved_names: &OwnedResolvedNames,
 ) -> SymbolMap {
-    let mut map = extract_symbol_map_inner(program, content, Some(resolved_names), true);
+    let mut map = extract_symbol_map_inner(program, content, Some(resolved_names), true, true);
     map.refresh_conditional_string_key_spans(None, |_| false);
     map
 }
@@ -302,14 +306,16 @@ pub(crate) fn extract_symbol_map_with_resolved_names(
 /// Build a semantic map while retaining workspace-dependent Laravel spans as
 /// dormant candidates for the publication lifecycle to settle.
 ///
-/// `symfony` says whether the project builds a Symfony service container.
+/// `symfony` says whether the project builds a Symfony service container,
+/// and `twig` whether it uses Twig.
 pub(crate) fn extract_symbol_map_for_index(
     program: &Program<'_>,
     content: &str,
     resolved_names: &OwnedResolvedNames,
     symfony: bool,
+    twig: bool,
 ) -> SymbolMap {
-    extract_symbol_map_inner(program, content, Some(resolved_names), symfony)
+    extract_symbol_map_inner(program, content, Some(resolved_names), symfony, twig)
 }
 
 fn extract_symbol_map_inner(
@@ -317,6 +323,7 @@ fn extract_symbol_map_inner(
     content: &str,
     resolved_names: Option<&OwnedResolvedNames>,
     symfony: bool,
+    twig: bool,
 ) -> SymbolMap {
     let mut ctx = ExtractionCtx {
         spans: Vec::new(),
@@ -352,6 +359,7 @@ fn extract_symbol_map_inner(
         in_mailable: false,
         covers_default_class: None,
         symfony,
+        twig,
         uses_symfony_configurators: None,
         uses_symfony_routing_configurators: None,
     };

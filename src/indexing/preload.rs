@@ -325,11 +325,15 @@ impl Backend {
                     }
                 })
                 .collect();
+            // A file that can be a Twig template is read for root discovery
+            // even when it is indexed already (an open one), unless discovery
+            // has seen it.
             let resource_work = resource_files
                 .into_iter()
                 .filter_map(|path| {
                     let uri = crate::util::path_to_uri(&path);
-                    (!existing_uris.contains(&uri)).then_some((uri, path))
+                    (!existing_uris.contains(&uri) || !self.twig_has_seen(&path))
+                        .then_some((uri, path))
                 })
                 .collect();
             (php_work, resource_work)

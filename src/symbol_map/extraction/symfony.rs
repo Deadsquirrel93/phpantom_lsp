@@ -123,14 +123,14 @@ pub(in crate::symbol_map::extraction) fn record_symfony_receiver_sites(
     argument_list: &ArgumentList<'_>,
     ctx: &mut ExtractionCtx<'_>,
 ) {
-    if !ctx.symfony {
+    if !ctx.symfony && !ctx.twig {
         return;
     }
-    if member_name.eq_ignore_ascii_case("trans") {
+    if ctx.symfony && member_name.eq_ignore_ascii_case("trans") {
         record_translator_sites(argument_list, ctx);
         return;
     }
-    if member_name.eq_ignore_ascii_case("class") {
+    if ctx.symfony && member_name.eq_ignore_ascii_case("class") {
         record_configured_class(object, argument_list, ctx);
         return;
     }
@@ -141,6 +141,10 @@ pub(in crate::symbol_map::extraction) fn record_symfony_receiver_sites(
         let Some((receiver, is_write)) = symfony_receiver_method(member_name, index) else {
             continue;
         };
+        // Outside Symfony, Twig's own `render()` is the only call left.
+        if !ctx.symfony && receiver != ReceiverClass::TemplateRenderer {
+            continue;
+        }
         if let Some(namespace) = receiver.configurator_namespace()
             && !uses_configurators(namespace, ctx)
         {
@@ -153,7 +157,7 @@ pub(in crate::symbol_map::extraction) fn record_symfony_receiver_sites(
         // looks like a template is worth asking the type engine about.
         if key.is_empty()
             || (receiver.names_twig_templates()
-                && !crate::symfony::templates::is_template_name(key))
+                && !crate::twig::templates::looks_like_template_name(key))
         {
             continue;
         }
@@ -1303,7 +1307,9 @@ mod tests {
         let program = mago_syntax::parser::parse_file_content(&arena, file_id, php.as_bytes());
         let resolver = mago_names::resolver::NameResolver::new(&arena);
         let names = OwnedResolvedNames::from_resolved(&resolver.resolve(program));
-        crate::symbol_map::extraction::extract_symbol_map_for_index(program, php, &names, true)
+        crate::symbol_map::extraction::extract_symbol_map_for_index(
+            program, php, &names, true, true,
+        )
     }
 
     fn receivers(map: &SymbolMap) -> Vec<(&str, ReceiverClass, bool)> {
@@ -1628,8 +1634,25 @@ mod tests {
         let resolver = mago_names::resolver::NameResolver::new(&arena);
         let names = OwnedResolvedNames::from_resolved(&resolver.resolve(program));
         let map = crate::symbol_map::extraction::extract_symbol_map_for_index(
-            program, php, &names, false,
+            program, php, &names, false, false,
         );
         assert!(map.typed_receiver_sites.is_empty());
+    }
+
+    #[test]
+    fn only_renders_are_recorded_in_a_twig_project() {
+        let php = "<?php\nfunction f($container, $twig) {\n    $container->get('app.mailer');\n    $twig->render('index.html');\n}\n";
+        let arena = mago_allocator::LocalArena::new();
+        let file_id = mago_database::file::FileId::new(b"test.php");
+        let program = mago_syntax::parser::parse_file_content(&arena, file_id, php.as_bytes());
+        let resolver = mago_names::resolver::NameResolver::new(&arena);
+        let names = OwnedResolvedNames::from_resolved(&resolver.resolve(program));
+        let map = crate::symbol_map::extraction::extract_symbol_map_for_index(
+            program, php, &names, false, true,
+        );
+        assert_eq!(
+            receivers(&map),
+            vec![("index.html", ReceiverClass::TemplateRenderer, false)]
+        );
     }
 }

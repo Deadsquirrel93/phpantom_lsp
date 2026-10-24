@@ -149,7 +149,7 @@ impl Backend {
         name: &str,
         known: &mut KnownTemplates,
     ) -> Option<PathBuf> {
-        if !self.is_symfony_project() {
+        if !self.is_twig_project() {
             return None;
         }
         let templates = known
@@ -161,7 +161,7 @@ impl Backend {
         {
             return None;
         }
-        self.symfony_template_file(name)
+        self.twig_template_file(name)
     }
 
     /// Where a missing view named `view_key` should be created.

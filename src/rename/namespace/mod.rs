@@ -134,7 +134,7 @@ impl Backend {
             // way its quoting requires, which no PHP-shaped edit fits.  The
             // framework resource edits below rewrite those in their own
             // spelling.
-            if crate::resource_navigation::is_resource_document(file_uri) {
+            if self.is_resource_uri(file_uri) {
                 continue;
             }
 
