@@ -5,8 +5,8 @@
  *
  * The diagnostics PHPantom reports: unknown classes and members, member
  * access on a scalar, argument counts, writes to readonly properties,
- * docblocks that contradict their type hint, an invalid class-like kind,
- * and deprecation. These files deliberately contain a fixed set of errors,
+ * the properties clone() writes, docblocks that contradict their type hint,
+ * an invalid class-like kind, and deprecation. These files deliberately contain a fixed set of errors,
  * so the squiggles you see here are the demo, not a mistake.
  *
  * One of the demo files listed in README.md. Supporting fixtures live in
@@ -441,6 +441,35 @@ class ReadonlyWriteDemo
 
         // No diagnostic — `$label` is writable:
         $coordinate->label = 'origin';
+    }
+}
+
+
+// ── Diagnostic: Properties clone() Writes ───────────────────────────────────
+// PHP 8.5's `clone($object, [...])` sets each listed property on the copy,
+// with the same rules as an assignment from the calling code.  PHPantom
+// checks every literal key like `$copy->key = value`.
+//
+// Try: rename `label` from its key below; the property follows.
+
+class CloneWithDemo
+{
+    public function demo(): void
+    {
+        $coordinate = new Scaffolding\ScaffoldingCoordinate(1, 2);
+
+        // No diagnostic — `$label` is a writable string property:
+        $copy = clone($coordinate, ['label' => 'copy']);
+        echo $copy->label;
+
+        // Error — the class has no `$z` property:
+        $copy = clone($coordinate, ['z' => 3]);
+
+        // Error — `$x` is readonly, and this is not its declaring class:
+        $copy = clone($coordinate, ['x' => 10]);
+
+        // Error — `$label` expects a string:
+        $copy = clone($coordinate, ['label' => []]);
     }
 }
 

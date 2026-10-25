@@ -146,6 +146,7 @@ mod diagnostics_assertion_variables;
 mod diagnostics_blade;
 mod diagnostics_blade_call_site;
 mod diagnostics_blade_signature;
+mod diagnostics_clone_with;
 mod diagnostics_compound_narrowing;
 mod diagnostics_deprecated;
 mod diagnostics_destructuring_offsets;

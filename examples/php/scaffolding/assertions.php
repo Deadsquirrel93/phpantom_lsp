@@ -2135,6 +2135,16 @@ function runDemoAssertions(): void
     $label = new Scaffolding\ScaffoldingFieldLabel();
     assert($named->{$label} === 'demo', 'a Stringable label names the $title property');
 
+    $coordinate = new Scaffolding\ScaffoldingCoordinate(1, 2);
+    $copy = clone($coordinate, ['label' => 'copy']);
+    assert($copy instanceof Scaffolding\ScaffoldingCoordinate && $copy->label === 'copy', 'clone() writes $label on the copy');
+    assert($coordinate->label === '', 'clone() leaves the original alone');
+    try {
+        clone($coordinate, ['x' => 10]);
+        assert(false, 'clone() cannot write a readonly property from outside its class');
+    } catch (\Error) {
+    }
+
     echo "All assertions passed.\n";
 }
 

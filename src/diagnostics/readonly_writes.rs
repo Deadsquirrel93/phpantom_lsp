@@ -31,6 +31,10 @@
 //! leave uninitialized: initializing a readonly property lazily from
 //! another method of the declaring class is legal PHP.
 //!
+//! A key of `clone($obj, ['prop' => …])` writes that property on the copy
+//! and, like a write in `__clone`, is legal anywhere in the declaring
+//! class; outside it, it is reported like any other write.
+//!
 //! An *indirect* write — an array offset (`$box->items[] = 1`) or a
 //! reference (`&$box->value`) — is the exception: PHP rejects those in
 //! every scope, including a constructor that has not initialized the
@@ -43,6 +47,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use mago_syntax::cst::FunctionCall;
 use mago_syntax::cst::access::Access;
 use mago_syntax::cst::array::ArrayElement;
 use mago_syntax::cst::class_like::member::ClassLikeMemberSelector;
@@ -59,7 +64,7 @@ use crate::Backend;
 use crate::atom::Atom;
 use crate::class_lookup::{Fqn, ResolvedClassLoader, find_class_at_offset};
 use crate::hover::{MemberKindForOrigin, find_declaring_class};
-use crate::parser::{with_parse_cache, with_parsed_program};
+use crate::parser::{clone_with_writes, with_parse_cache, with_parsed_program};
 use crate::php_type::{PhpType, TypeKind, is_array_like_name};
 use crate::symbol_map::SymbolKind;
 use crate::type_engine::resolver::{ResolutionCtx, SubjectOutcome, resolve_subject_outcome};
@@ -94,6 +99,10 @@ enum WriteForm {
     /// `&$obj->prop`.  Acquiring a reference is rejected in every scope,
     /// whatever the property holds.
     Reference,
+    /// A key of `clone($obj, ['prop' => …])`.  The copy is being cloned,
+    /// so like a write in `__clone` it is legal anywhere in the declaring
+    /// class, however the constructor left the property.
+    CloneWith,
 }
 
 impl WriteForm {
@@ -128,9 +137,11 @@ struct FileWrites {
 
 // ── AST walk ────────────────────────────────────────────────────────────────
 
-struct WriteWalker;
+struct WriteWalker<'c> {
+    content: &'c str,
+}
 
-impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, FileWrites> for WriteWalker {
+impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, FileWrites> for WriteWalker<'_> {
     fn walk_in_expression(&self, node: &'ast Expression<'arena>, ctx: &mut FileWrites) {
         match node {
             Expression::Assignment(assign) => record_target(assign.lhs, WriteForm::Modify, ctx),
@@ -148,6 +159,16 @@ impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, FileWrites> for Wri
             // The only postfix operators are `++` and `--`.
             Expression::UnaryPostfix(unary) => record_target(unary.operand, WriteForm::Modify, ctx),
             _ => {}
+        }
+    }
+
+    fn walk_in_function_call(&self, node: &'ast FunctionCall<'arena>, ctx: &mut FileWrites) {
+        if let Some((_, writes)) = clone_with_writes(node, self.content) {
+            for write in writes {
+                ctx.targets
+                    .entry(write.start)
+                    .or_insert(WriteForm::CloneWith);
+            }
         }
     }
 
@@ -359,9 +380,9 @@ impl Backend {
     ) {
         let _parse_guard = with_parse_cache(content);
 
-        let writes = with_parsed_program(content, "readonly_writes", |program, _content| {
+        let writes = with_parsed_program(content, "readonly_writes", |program, content| {
             let mut writes = FileWrites::default();
-            let walker = WriteWalker;
+            let walker = WriteWalker { content };
             for statement in program.statements.iter() {
                 mago_syntax::walker::Walker::walk_statement(&walker, statement, &mut writes);
             }
@@ -567,6 +588,9 @@ impl Backend {
             return Verdict::OutsideDeclaringClass(owner);
         }
 
+        if site.form == WriteForm::CloneWith {
+            return Verdict::Ok;
+        }
         let Some(facts) = writes.classes.get(&current.start_offset) else {
             return Verdict::Ok;
         };

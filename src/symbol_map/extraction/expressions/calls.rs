@@ -261,6 +261,44 @@ fn extract_call<'a>(
     }
 }
 
+/// `clone($object, ['prop' => …])` writes each listed property on the
+/// copy just as `$copy->prop = …` would, so each literal key gets the
+/// property-access span that assignment would: navigation, references
+/// and rename reach it, and the member diagnostics check it.
+fn emit_clone_with_spans(func_call: &FunctionCall<'_>, ctx: &mut ExtractionCtx<'_>) {
+    let Some((object, writes)) = crate::parser::clone_with_writes(func_call, ctx.content) else {
+        return;
+    };
+    if writes.is_empty() {
+        return;
+    }
+    let subject_text = expr_to_subject_text(object);
+    if subject_text.is_empty() {
+        return;
+    }
+    let object_span = object.span();
+    for write in writes {
+        ctx.spans.push(SymbolSpan {
+            start: write.start,
+            end: write.end,
+            kind: SymbolKind::MemberAccess {
+                subject_text: SubjectText::new(
+                    subject_text.clone(),
+                    object_span.start.offset,
+                    object_span.end.offset,
+                    ctx.content,
+                ),
+                member_name: crate::atom::atom(write.name),
+                is_static: false,
+                is_method_call: false,
+                docblock_ref: DocblockMemberRef::No,
+                is_array_callable: false,
+                is_nullsafe: false,
+            },
+        });
+    }
+}
+
 fn extract_function_call<'a>(
     func_call: &'a FunctionCall<'a>,
     ctx: &mut ExtractionCtx<'a>,
@@ -294,6 +332,7 @@ fn extract_function_call<'a>(
                     &mut ctx.spans,
                 );
             }
+            emit_clone_with_spans(func_call, ctx);
             ctx.spans.push(SymbolSpan {
                 start: ident.span().start.offset,
                 end: ident.span().end.offset,

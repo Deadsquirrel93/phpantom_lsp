@@ -35,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Discarded `#[\NoDiscard]` results.** Calling a function or method marked `#[\NoDiscard]` as a statement of its own, without using its result or casting it to `(void)`, is now reported, the same warning PHP 8.5 raises.
 - **`match` expressions that miss a value.** A `match` without a `default` arm whose arms leave an enum case, `true`, `false`, `null`, or one of a set of literal values unhandled is now reported, since that value throws `UnhandledMatchError`. Cases an earlier check has already ruled out need no arm.
 - **Dynamic member names that cannot name a member.** A property name written as an expression that holds an array or an object without `__toString()`, and a method name that is not a string, are now reported, since PHP throws an `Error` for them. A `Stringable` object still names a property, but never a method.
+- **Properties `clone()` writes are checked.** The properties PHP 8.5's `clone($object, [...])` sets on the copy are checked like an assignment: a property the class does not have, one the calling code cannot write, or a value of the wrong type is reported. The keys also jump to their property and follow it through find-references and rename.
 
 ### Changed
 

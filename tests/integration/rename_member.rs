@@ -127,6 +127,41 @@ async fn rename_property_from_access() {
 }
 
 #[tokio::test]
+async fn rename_property_from_a_clone_with_key() {
+    let backend = create_test_backend();
+    let uri = Uri::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "final class Point {\n",
+        "    public function __construct(public int $x) {}\n",
+        "}\n",
+        "$p = new Point(1);\n",
+        "$copy = clone($p, ['x' => 2]);\n",
+        "echo $p->x;\n",
+    );
+
+    open_php(&backend, &uri, text).await;
+
+    let (line, character) = line_char_of(text, "'x'");
+    let edit = rename(&backend, &uri, line, character + 1, "left")
+        .await
+        .expect("Expected a workspace edit for property rename");
+    let updated = apply_edits(text, &edits_for_uri(&edit, &uri));
+    assert_eq!(
+        updated,
+        concat!(
+            "<?php\n",
+            "final class Point {\n",
+            "    public function __construct(public int $left) {}\n",
+            "}\n",
+            "$p = new Point(1);\n",
+            "$copy = clone($p, ['left' => 2]);\n",
+            "echo $p->left;\n",
+        ),
+    );
+}
+
+#[tokio::test]
 async fn rename_promoted_property_from_parameter() {
     let backend = create_test_backend();
     let uri = Uri::parse("file:///test.php").unwrap();

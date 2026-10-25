@@ -302,24 +302,37 @@ Filtering the three where they merge into the index makes one rule out
 of two and removes the asymmetry; the cost is one already-compiled glob
 match per entry, skipped outright when no exclude is configured.
 
-## X14. Ask Zed to expose `file_scan_exclusions` and `file_types` to extensions
+## X14. Forward Zed's `file_scan_exclusions` and `file_types`
 
 **Impact: Low · Complexity: Low**
 
-An upstream request, not a code change here. Zed's extension API serves
-extensions only the `language`, `lsp`, and `context_servers` settings
-categories (the `category` match in `get_settings`, `extension_host`
-crate), so the PHP extension cannot read the editor's own
-`file_scan_exclusions` or `file_types` and forward them the way the VS
-Code extension forwards `files.exclude` and `files.associations`. Zed
-users therefore have to restate those two lists under
-`lsp.phpantom.initialization_options`, which
-[`editor-setup.md`](../editor-setup.md) documents as the workaround.
+Waiting on upstream review. Zed's extension API serves extensions only
+the `language`, `lsp`, and `context_servers` settings categories, so the
+PHP extension cannot read the editor's own `file_scan_exclusions` or
+`file_types` and forward them the way the VS Code extension forwards
+`files.exclude` and `files.associations`. Zed users therefore have to
+restate those two lists under `lsp.phpantom.initialization_options`,
+which [`editor-setup.md`](../editor-setup.md) documents as the
+workaround.
 
-File the request against `zed-industries/zed` for read access to those
-two settings, then link the issue from that section so users can track
-it. When it lands, the forwarding itself is a small change in Zed's
-official PHP extension, and the manual step in the docs goes away.
+[zed-industries/zed#66121](https://github.com/zed-industries/zed/pull/66121)
+adds `WorktreeSettings::for_worktree` (`file_scan_exclusions` and
+`file_scan_inclusions` as their source globs) and
+`FileTypeSettings::for_worktree` (the effective `file_types` map) to
+extension API 0.8.0, and the Zed section of `editor-setup.md` links it.
+Zed is slow to review, so nothing here is scheduled until it merges.
+What follows it:
+
+- **A pull request to `zed-extensions/php`**, once a Zed release ships
+  the API. Bump `zed_extension_api`, read both settings in
+  `language_server_initialization_options`, and merge them into
+  `indexing.exclude` and `indexing.extensions` without overwriting what
+  the user set there. An exclusion that an inclusion overrides must not
+  be forwarded. A `file_types` entry for `PHP` contributes only when it
+  is a bare `*.ext` glob, the same rule the VS Code extension applies to
+  `files.associations`.
+- **Drop the manual step** from the Zed section of `editor-setup.md`
+  once that extension release is out.
 
 ## X18. Watch `[indexing] include` paths outside the workspace
 

@@ -526,30 +526,3 @@ and `gedmo_property_assign*.fixture` in `tests/fixtures/phpstan_doctrine/`.
 for the read/write bookkeeping, the Doctrine mapping index in
 `src/framework.rs`, and PHPStan's `UnusedPrivatePropertyRule` with the
 Doctrine extension's `PropertiesExtension`s.
-
----
-
-## D35. `clone($object, [...])` does not check the properties it writes
-
-**Impact: Low · Complexity: Low-Medium**
-
-```php
-final class Point { public function __construct(public int $x) {} }
-
-$p = new Point(1);
-$copy = clone($p, ['x' => 2]);        // fine
-clone($p, ['nope' => 1]);             // Error: Point has no $nope
-clone($p, ['x' => 'str']);            // TypeError: $x is int
-```
-
-PHP 8.5's two-argument `clone` writes each entry of the array onto the
-copy, with the same rules as a property assignment: the property has to
-exist and be writable from the calling scope, and the value has to match
-its type. The result type is already right. Treat each literal key of the
-second argument as a write to that property of the cloned class, and run
-it through the checks an `$copy->x = ...` assignment gets (unknown member,
-visibility, readonly, property type).
-
-Found running the php-typing-conformance suite
-(`objects_clone_with_properties.php`). PHPStan and Psalm report it.
-
