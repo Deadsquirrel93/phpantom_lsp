@@ -22,7 +22,8 @@
 //! readonly one wherever only its declaring class may initialize it.  A
 //! public property is routinely filled by whoever creates the object
 //! (`$options = new Options(); $options->host = …`), which a look at the
-//! class body cannot rule out.
+//! class body cannot rule out; its reads are checked instead, by
+//! [`super::uninitialized_reads`].
 //!
 //! Frameworks and ORMs hydrate properties by reflection, which this check
 //! cannot see, so it stays quiet wherever that may be happening:
@@ -77,7 +78,9 @@ use super::helpers::{FileDiagnosticContext, make_diagnostic};
 /// Diagnostic code used for a typed property nothing initializes.
 pub(crate) const UNINITIALIZED_PROPERTY_CODE: &str = "uninitialized_property";
 
-/// A property declaration the check may report.
+/// A typed property declaration that starts uninitialized and that no
+/// framework fills.
+#[derive(Clone)]
 struct Candidate {
     /// The name without the `$`.
     name: String,
@@ -85,13 +88,22 @@ struct Candidate {
     start: u32,
     end: u32,
     is_readonly: bool,
+    /// Whether only the class itself may write the property, so that the
+    /// declaration is reported when the class never does.
+    only_this_class_writes: bool,
+    /// Whether code outside the class may read the property.
+    is_public: bool,
 }
 
 /// What one class body declares and writes.
-struct ClassBody {
+#[derive(Clone)]
+pub(super) struct ClassBody {
     /// Left-brace offset, matching [`ClassInfo::start_offset`].
     start_offset: u32,
     candidates: Vec<Candidate>,
+    /// Names of every property the body declares, promoted constructor
+    /// parameters included.
+    declared: HashSet<String>,
     /// Names of properties written through any receiver in the body.
     written: HashSet<String>,
     /// Whether the body declares its own `__construct`.
@@ -134,6 +146,7 @@ impl FileBodies<'_> {
         let mut body = ClassBody {
             start_offset: left_brace,
             candidates: Vec::new(),
+            declared: HashSet::new(),
             written: HashSet::new(),
             has_constructor: false,
             calls_parent_constructor: false,
@@ -147,6 +160,16 @@ impl FileBodies<'_> {
                     if bytes_to_str(method.name.value).eq_ignore_ascii_case("__construct") =>
                 {
                     body.has_constructor = true;
+                    for param in method.parameter_list.parameters.iter() {
+                        if param.is_promoted_property() {
+                            body.declared.insert(property_name(param.variable.name));
+                        }
+                    }
+                }
+                ClassLikeMember::Property(property) => {
+                    for variable in property.variables() {
+                        body.declared.insert(property_name(variable.name));
+                    }
                 }
                 _ => {}
             }
@@ -179,9 +202,10 @@ impl FileBodies<'_> {
                 WriteScope::Protected => is_final,
                 WriteScope::Public => false,
             };
-            if !only_this_class_writes {
-                continue;
-            }
+            let is_public = matches!(
+                property.modifiers.get_first_read_visibility(),
+                None | Some(Modifier::Public(_))
+            );
             let tags = get_docblock_text_for_node(self.trivia, self.content, property)
                 .map(DocTags::read)
                 .unwrap_or_default();
@@ -194,12 +218,13 @@ impl FileBodies<'_> {
                     continue;
                 };
                 let span = item.variable.span();
-                let raw = bytes_to_str(item.variable.name);
                 body.candidates.push(Candidate {
-                    name: raw.strip_prefix('$').unwrap_or(raw).to_string(),
+                    name: property_name(item.variable.name),
                     start: span.start.offset,
                     end: span.end.offset,
                     is_readonly,
+                    only_this_class_writes,
+                    is_public,
                 });
             }
         }
@@ -225,6 +250,12 @@ impl FileBodies<'_> {
             body.may_write_anything = true;
         }
     }
+}
+
+/// A property name without the `$` of its variable.
+fn property_name(variable: &[u8]) -> String {
+    let raw = bytes_to_str(variable);
+    raw.strip_prefix('$').unwrap_or(raw).to_string()
 }
 
 /// Which scopes may write a property.
@@ -575,10 +606,69 @@ fn inherits_constructor(class: &ClassInfo, class_loader: &ResolvedClassLoader<'_
     false
 }
 
+/// What every class body in a parsed file declares and writes.
+pub(super) fn class_bodies<'a>(
+    program: &mago_syntax::cst::Program<'_>,
+    content: &'a str,
+    names: Option<&'a OwnedResolvedNames>,
+    readonly_is_protected_set: bool,
+) -> Vec<ClassBody> {
+    let mut bodies = FileBodies {
+        trivia: program.trivia.as_slice(),
+        content,
+        readonly_is_protected_set,
+        names,
+        ..FileBodies::default()
+    };
+    let walker = BodyWalker;
+    for statement in program.statements.iter() {
+        mago_syntax::walker::Walker::walk_statement(&walker, statement, &mut bodies);
+    }
+    bodies.done
+}
+
+impl ClassBody {
+    /// Whether the body may write properties in ways this check cannot
+    /// follow.
+    pub(super) fn is_opaque(&self) -> bool {
+        self.may_write_anything || self.uses_traits
+    }
+
+    pub(super) fn start_offset(&self) -> u32 {
+        self.start_offset
+    }
+
+    pub(super) fn declares(&self, name: &str) -> bool {
+        self.declared.contains(name)
+    }
+
+    pub(super) fn writes(&self, name: &str) -> bool {
+        self.written.contains(name)
+    }
+
+    /// Whether `name` is a public property the body declares typed,
+    /// without a default, and that no framework fills.
+    pub(super) fn starts_uninitialized_in_public(&self, name: &str) -> bool {
+        self.candidates
+            .iter()
+            .any(|candidate| candidate.is_public && candidate.name == name)
+    }
+
+    /// The candidates reported on the declaration: the ones only the
+    /// class may write and that it never does.
+    fn never_initialized(&self) -> impl Iterator<Item = &Candidate> {
+        self.candidates.iter().filter(|candidate| {
+            candidate.only_this_class_writes && !self.written.contains(&candidate.name)
+        })
+    }
+}
+
 // ── Main diagnostic collection ──────────────────────────────────────────────
 
 impl Backend {
-    /// Collect uninitialized-property diagnostics for a single file.
+    /// Collect uninitialized-property diagnostics for a single file: the
+    /// declarations nothing initializes, and the reads of a fresh
+    /// object's property before anything writes it.
     pub(crate) fn collect_uninitialized_property_diagnostics_with_context(
         &self,
         ctx: &FileDiagnosticContext,
@@ -588,37 +678,39 @@ impl Backend {
     ) {
         let _parse_guard = with_parse_cache(content);
         let readonly_is_protected_set = self.php_version() >= PhpVersion::new(8, 4);
+        let names = ctx.file.resolved_names.as_deref();
 
-        let bodies =
+        let (bodies, reads) =
             with_parsed_program(content, "uninitialized_properties", |program, content| {
-                let mut bodies = FileBodies {
-                    trivia: program.trivia.as_slice(),
-                    content,
-                    readonly_is_protected_set,
-                    names: ctx.file.resolved_names.as_deref(),
-                    ..FileBodies::default()
-                };
-                let walker = BodyWalker;
-                for statement in program.statements.iter() {
-                    mago_syntax::walker::Walker::walk_statement(&walker, statement, &mut bodies);
-                }
-                bodies
-                    .done
-                    .into_iter()
-                    .filter(|body| !body.may_write_anything && !body.uses_traits)
-                    .filter(|body| {
-                        body.candidates
-                            .iter()
-                            .any(|candidate| !body.written.contains(&candidate.name))
-                    })
-                    .collect::<Vec<_>>()
+                let bodies = class_bodies(program, content, names, readonly_is_protected_set);
+                let reads = super::uninitialized_reads::fresh_object_reads(program, content, names);
+                (bodies, reads)
             });
-        if bodies.is_empty() {
+
+        self.report_never_initialized(ctx, uri, content, &bodies, out);
+        if !reads.is_empty() {
+            self.report_uninitialized_reads(ctx, uri, content, &bodies, reads, out);
+        }
+    }
+
+    fn report_never_initialized(
+        &self,
+        ctx: &FileDiagnosticContext,
+        uri: &str,
+        content: &str,
+        bodies: &[ClassBody],
+        out: &mut Vec<Diagnostic>,
+    ) {
+        let mut reported = bodies
+            .iter()
+            .filter(|body| !body.is_opaque() && body.never_initialized().next().is_some())
+            .peekable();
+        if reported.peek().is_none() {
             return;
         }
 
         let class_loaders = self.resolved_class_loaders(&ctx.file);
-        for body in bodies {
+        for body in reported {
             let Some(class) = ctx
                 .file
                 .classes
@@ -629,11 +721,7 @@ impl Backend {
             };
             // An entity mapped in XML or YAML has its generated fields
             // written by Doctrine, and nothing in the class says which.
-            if self.is_doctrine_project()
-                && !self
-                    .framework_doctrine_repository_fqns_for_entity(&class.fqn())
-                    .is_empty()
-            {
+            if self.is_mapped_outside_the_class(class) {
                 continue;
             }
             let runs_parent_constructor = !body.has_constructor || body.calls_parent_constructor;
@@ -643,10 +731,8 @@ impl Backend {
                 continue;
             }
 
-            for candidate in &body.candidates {
-                if body.written.contains(&candidate.name)
-                    || !super::incremental::reports_site(candidate.start)
-                {
+            for candidate in body.never_initialized() {
+                if !super::incremental::reports_site(candidate.start) {
                     continue;
                 }
                 let owner = if class.name.starts_with("__anonymous@") {
@@ -681,5 +767,14 @@ impl Backend {
                 ));
             }
         }
+    }
+
+    /// Whether Doctrine maps `class` in XML or YAML, where nothing in the
+    /// class says which of its fields the ORM generates.
+    pub(super) fn is_mapped_outside_the_class(&self, class: &ClassInfo) -> bool {
+        self.is_doctrine_project()
+            && !self
+                .framework_doctrine_repository_fqns_for_entity(&class.fqn())
+                .is_empty()
     }
 }

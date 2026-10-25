@@ -343,33 +343,6 @@ it, and let it replace the enclosing class rather than joining it.
 Inferring a binding from the spelling of the subject is guessing at
 something the type engine has already decided.
 
-## D38. Reading a typed property before anything writes it is not reported
-
-**Impact: Low-Medium · Complexity: Medium-High**
-
-```php
-final class Options { public string $host; }
-
-$options = new Options();
-echo $options->host; // Error: must not be accessed before initialization
-```
-
-`uninitialized_property` reports a property nothing in its class ever
-writes, but only when no code outside the class can write it either. A
-public property is left alone, because whoever creates the object
-routinely fills it (`$options->host = 'localhost'`), so the class body
-alone cannot tell a bug from a struct. The read is where the bug shows:
-an object created with `new` in the same function, whose property is read
-before anything writes it and before the object escapes (passed to a call,
-returned, stored). Qodana reports it this way
-(`PhpTypedPropertyMightBeUninitializedInspection`), and it is what the
-php-typing-conformance suite's `properties_uninitialized_read.php` checks.
-
-The facts about which properties the class itself never initializes are
-already collected in `src/diagnostics/uninitialized_properties.rs`; the
-read side needs the forward walker to follow the fresh object from the
-`new` to the read.
-
 ## D28. "Remove unreachable code" is wired to PHPStan only
 
 **Impact: Low-Medium · Complexity: Medium**

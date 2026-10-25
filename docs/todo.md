@@ -32,7 +32,6 @@ contributor even though it's short.
 
 | #   | Item                                                                                                                                                            | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
-| D38 | [Reading a typed property before anything writes it is not reported](todo/diagnostics.md#d38-reading-a-typed-property-before-anything-writes-it-is-not-reported) | Low-Medium | Medium-High |
 | E3  | [IDE-provided and `.phpantom.toml` stub paths](todo/external-stubs.md#e3-ide-provided-and-phpantomtoml-stub-paths) (depends on E2)                              | Low-Medium  | Low         |
 | P84 | [Class lookups re-apply the Laravel patches on every call](todo/performance.md#p84-class-lookups-re-apply-the-laravel-patches-on-every-call) | Medium-High | Medium |
 | F59 | [Send Twig, YAML, and XML documents to the server](todo/lsp-features.md#f59-send-twig-yaml-and-xml-documents-to-the-server) (server, VS Code extension, Zed PR) | Medium-High | Medium |

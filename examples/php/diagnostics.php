@@ -481,7 +481,9 @@ class CloneWithDemo
 // class itself may write (private, protected in a final class, or readonly)
 // when nothing in the class ever writes it.  A write from any method counts,
 // and so does a framework that fills the property: an attribute, or a
-// Doctrine generated identifier.
+// Doctrine generated identifier.  A public property is left to whoever
+// creates the object, so it is flagged where an object fresh from `new` is
+// read before anything writes it.
 
 final class UninitializedPropertyDemo
 {
@@ -495,6 +497,9 @@ final class UninitializedPropertyDemo
     private string $note;
 
     public readonly int $id;
+
+    // No diagnostic here — whoever creates the object may write `$label`:
+    public string $label;
 
     public function __construct(string $name, int $id)
     {
@@ -513,6 +518,22 @@ final class UninitializedPropertyDemo
     public function describe(): string
     {
         return $this->name . ': ' . $this->note . ' ' . $this->createdAt->format('Y');
+    }
+}
+
+final class UninitializedReadDemo
+{
+    public function labelled(): string
+    {
+        $demo = new UninitializedPropertyDemo('demo', 1);
+
+        // Warning — nothing wrote `$label` before this read:
+        $label = $demo->label;
+
+        $demo->label = 'Demo';
+
+        // No diagnostic — `$label` is written now:
+        return $label . $demo->label;
     }
 }
 

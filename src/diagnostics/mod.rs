@@ -122,7 +122,8 @@
 //!   property.
 //! - **Uninitialized property diagnostics** — report a typed property
 //!   with no default that only its own class may write and that nothing
-//!   in the class ever writes, so reading it throws.
+//!   in the class ever writes, so reading it throws, and a read of a
+//!   fresh object's property before anything writes it.
 //! - **Invalid class kind diagnostics** — report a class-like name used
 //!   in a syntactic position (`new`, `implements`, `instanceof`, …) that
 //!   its kind (class/interface/trait/enum) cannot satisfy.
@@ -288,6 +289,7 @@ mod trait_property_conflicts;
 mod type_errors;
 pub(crate) mod undefined_variables;
 mod uninitialized_properties;
+mod uninitialized_reads;
 pub(crate) mod unknown_classes;
 pub(crate) mod unknown_functions;
 pub(crate) mod unknown_members;
