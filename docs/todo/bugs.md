@@ -167,28 +167,3 @@ corpus, `Psy\Util\Docblock::$vectors`). That table counts code references
 only, so it scores the `@see` tag we do return as an extra. Docblock
 references are deliberate (rename has to update them), so the fix here is
 to find the inline ones too, not to drop the tag.
-
-### B680. A `@param-out` wider than the argument keeps the argument's type
-
-**Impact: Low-Medium · Complexity: Low**
-
-```php
-/** @param-out array $x */
-function fill(array &$x): void {}
-
-$values = [1 => 'a'];
-fill($values);
-$values; // array{1: 'a'}, should be array
-```
-
-After a by-reference call, the argument holds whatever the callee wrote,
-which `@param-out` declares. The by-reference seeding in
-`type_engine/variable/forward_walk/by_ref_builtins.rs` keeps the argument's
-type from before the call when the parameter's type covers it, which is
-right for a native hint that says nothing about what the callee writes
-(`array_shift(array &$array)` keeps a `Node[]` a `Node[]`). It does the
-same for an explicit `@param-out`, the author's statement of what is
-written, so the argument keeps its old shape, literals included. Symfony's
-`PropertyAccessor::setValue()` declares `@param-out` this way
-(`tests/phpstan_symfony/data/property_accessor.php`). An explicit
-`@param-out` should replace the argument's type.

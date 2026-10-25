@@ -6,7 +6,7 @@ $propertyAccessor = new \Symfony\Component\PropertyAccess\PropertyAccessor();
 
 $array = [1 => 'ea'];
 $propertyAccessor->setValue($array, 'foo', 'bar');
-assertType('array<mixed>', $array); // SKIP: a @param-out wider than the argument keeps the argument's type
+assertType('array<mixed>', $array);
 
 $object = new \stdClass();
 $propertyAccessor->setValue($object, 'foo', 'bar');

@@ -93,6 +93,58 @@ function f(): void {{
     );
 }
 
+/// A `@param-out` wider than the argument replaces the argument's type
+/// rather than keeping its shape, since it says what the callee writes.
+#[test]
+fn wider_param_out_replaces_argument_shape() {
+    let content = r#"<?php
+/** @param-out array $x */
+function fill(array &$x): void {}
+
+function f(): void {
+    $values = [1 => 'a'];
+    fill($values);
+    $values;
+}
+"#;
+    let text = hover_last(&create_test_backend(), content, "$values;");
+    assert!(
+        text.contains("array") && !text.contains("array{"),
+        "expected $values to read as array after fill(), got: {text}"
+    );
+}
+
+/// A `@param-out` naming the class's template, declared on an interface,
+/// reads back as the type the implementing class binds it to.
+#[test]
+fn inherited_param_out_substitutes_class_template() {
+    let content = r#"<?php
+class Apple {}
+
+/** @template T */
+interface Filler {
+    /** @param-out T $x */
+    public function fill(mixed &$x): void;
+}
+
+/** @implements Filler<Apple> */
+class AppleFiller implements Filler {
+    public function fill(mixed &$x): void {}
+}
+
+function f(AppleFiller $filler): void {
+    $value = 'x';
+    $filler->fill($value);
+    $value;
+}
+"#;
+    let text = hover_last(&create_test_backend(), content, "$value;");
+    assert!(
+        text.contains("Apple") && !text.contains("string"),
+        "expected $value to read as Apple after fill(), got: {text}"
+    );
+}
+
 /// Each `return` leaves the parameter holding what it held there, so a
 /// body whose every path returns reads back as the join of those, and the
 /// closing brace no path reaches adds nothing.
