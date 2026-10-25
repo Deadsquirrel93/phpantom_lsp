@@ -169,11 +169,14 @@ fn check_expression_for_property_assignment(expr: &Expression<'_>, ctx: &mut Pro
         is_in_static_method: ctx.symbol_map.is_in_static_method(member_offset),
         ..loaders.resolution_ctx_at(ctx.content, member_offset)
     };
-    let SubjectOutcome::Resolved(receivers) = resolve_subject_outcome(
+    let SubjectOutcome::Resolved {
+        classes: receivers, ..
+    } = resolve_subject_outcome(
         subject_text.as_str(source),
         AccessKind::of_member_access(is_static),
         &rctx,
-    ) else {
+    )
+    else {
         return;
     };
 

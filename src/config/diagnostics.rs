@@ -40,6 +40,19 @@ pub struct DiagnosticsConfig {
     #[serde(rename = "report-magic-properties")]
     pub report_magic_properties: Option<bool>,
 
+    /// Report a member that only some classes of a union declare.
+    ///
+    /// Off by default. The unknown-member check stays silent as long as
+    /// any class the subject may hold declares the member. When enabled,
+    /// PHPantom also reports the access when some of those classes do
+    /// not, since the access fails whenever one of them arrives. This
+    /// matches PHPStan's `checkUnionTypes` (level 7), and is only as
+    /// precise as the inferred union: a variable whose classes are
+    /// correlated with something the type engine does not track will
+    /// be reported too.
+    #[serde(rename = "partial-union-members")]
+    pub partial_union_members: Option<bool>,
+
     /// Compute diagnostics for the whole workspace in the background.
     ///
     /// Off by default. When enabled (which requires the default `full`
@@ -133,6 +146,13 @@ impl DiagnosticsConfig {
     /// Defaults to `false` (off) when not explicitly set.
     pub fn report_magic_properties_enabled(&self) -> bool {
         self.report_magic_properties.unwrap_or(false)
+    }
+
+    /// Whether the partial-union-members diagnostic is enabled.
+    ///
+    /// Defaults to `false` (off) when not explicitly set.
+    pub fn partial_union_members_enabled(&self) -> bool {
+        self.partial_union_members.unwrap_or(false)
     }
 
     /// Whether background workspace diagnostics are enabled.

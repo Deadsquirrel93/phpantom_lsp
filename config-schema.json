@@ -35,6 +35,11 @@
           "description": "Report unknown property access on classes with __get when virtual properties are defined (via @property docblock tags, Laravel Eloquent column inference, or other providers). Matches PHPStan's reportMagicProperties behaviour.",
           "default": false
         },
+        "partial-union-members": {
+          "type": "boolean",
+          "description": "Report a member access on a union when only some of its classes declare the member, since the access fails whenever one of the others arrives. Matches PHPStan's checkUnionTypes (level 7).",
+          "default": false
+        },
         "downgrade-nullable-argument-mismatch": {
           "type": "boolean",
           "description": "Downgrade type_mismatch_argument to a warning when the only reason an argument's type fails to satisfy the parameter is a stray null (every non-null member of the argument's type is already compatible).",

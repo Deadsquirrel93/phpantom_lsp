@@ -68,7 +68,9 @@ impl SpineKeys {
                 _ => (true, true),
             };
             reaches_base[index] = descends && reaches_base[index + 1];
-            narrowable[index] = is_property || (descends && key_rooted);
+            // A call with arguments is keyed under its own text, which the
+            // forward walker records a check on just as it does a variable.
+            narrowable[index] = is_property || !descends || key_rooted;
             key_rooted = descends && key_rooted;
             path_rooted[index] = is_property && path_rooted[index + 1];
         }

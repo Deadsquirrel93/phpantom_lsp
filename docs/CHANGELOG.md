@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Members only some classes of a union declare.** With `partial-union-members = true` under `[diagnostics]`, a method or property that some classes of a union declare and others do not is reported, the way PHPStan reports it at level 7. Off by default.
 - **Format selection.** Formatting a selection reformats only the lines it covers, with whichever formatter the project uses, in PHP files and Blade templates alike.
 - **Blade templates use the project's blade-formatter.** A project that installs [blade-formatter](https://github.com/shufo/blade-formatter) and configures it with a `.bladeformatterrc.json` now gets its Blade templates formatted by it, with the project's settings and `.bladeignore`, instead of by the built-in reindenter. Set `blade-formatter` under `[formatting]` to choose the command or turn it off.
 - **`#[\Override]` with nothing to override.** A method or property marked `#[\Override]` that no parent class or interface declares is reported, the same fatal error PHP raises when it loads the class.

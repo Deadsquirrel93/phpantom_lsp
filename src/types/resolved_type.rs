@@ -349,9 +349,14 @@ impl ResolvedType {
                     let TypeKind::Intersection(inner) = member.kind() else {
                         continue;
                     };
+                    // An object shape part (`Model&object{pivot: Pivot}`)
+                    // resolves to the synthetic class every shape shares.
                     let inner_fqns: Option<Vec<String>> = inner
                         .iter()
-                        .map(|part| part.base_name().map(str::to_string))
+                        .map(|part| match part.kind() {
+                            TypeKind::ObjectShape(_) => Some("__object_shape".to_string()),
+                            _ => part.base_name().map(str::to_string),
+                        })
                         .collect();
                     let Some(inner_fqns) = inner_fqns else {
                         continue;
@@ -362,18 +367,18 @@ impl ResolvedType {
                             fqn == name || crate::util::short_name(&fqn) == name
                         })
                     };
-                    let all_present = inner_fqns
-                        .iter()
-                        .all(|name| results.iter().any(|rt| matches(rt, name)));
-                    if !all_present {
-                        continue;
-                    }
+                    // A part that could not be loaded has no entry, but the
+                    // parts that did still hold one value with it.
+                    let mut tagged = false;
                     for rt in results.iter_mut() {
                         if inner_fqns.iter().any(|name| matches(rt, name)) {
                             rt.type_string = member.clone();
+                            tagged = true;
                         }
                     }
-                    attached.push(member.clone());
+                    if tagged {
+                        attached.push(member.clone());
+                    }
                 }
             }
 

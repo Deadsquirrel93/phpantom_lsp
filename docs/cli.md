@@ -251,6 +251,7 @@ Each has a rule identifier shown below the message.
 | `syntax_error`           | Error    | PHP parse errors                                     |
 | `unknown_class`          | Warning  | Class, interface, trait, or enum not resolvable       |
 | `unknown_member`         | Warning  | Property or method not found on the resolved class    |
+| `partial_union_member`   | Warning  | Member only some classes of a union declare (opt-in)  |
 | `unknown_function`       | Error    | Function call not resolvable                          |
 | `argument_count`         | Error    | Wrong number of arguments to a function or method     |
 | `implementation_error`   | Error    | Missing required interface or abstract methods        |

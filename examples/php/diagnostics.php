@@ -208,6 +208,29 @@ class UnresolvedMemberAccessDemo
 }
 
 
+// ── Diagnostic: Partial Union Members (opt-in) ──────────────────────────────
+// A member that only some classes of a union declare fails whenever one of
+// the others arrives.  PHPantom stays silent about it by default, since the
+// member exists on at least one branch.  Enable it in .phpantom.toml:
+//
+//   [diagnostics]
+//   partial-union-members = true
+
+class PartialUnionMembersDemo
+{
+    public function demo(Scaffolding\Pen|Scaffolding\Pencil $tool): void
+    {
+        $tool->label();     // fine: both Pen and Pencil declare it
+        // With the diagnostic enabled, a warning appears on the next line:
+        $tool->write();     // Method 'write' exists on Pen but not on Pencil
+
+        if ($tool instanceof Scaffolding\Pen) {
+            $tool->write(); // fine: narrowed to Pen
+        }
+    }
+}
+
+
 // ── Diagnostic: Argument Count ──────────────────────────────────────────────
 // PHPantom flags calls that pass too few or too many arguments.  Variadic
 // parameters accept unlimited trailing args.  Argument unpacking (`...$args`)

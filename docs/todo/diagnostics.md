@@ -577,35 +577,3 @@ silent when the selector type is unresolved or `mixed`.
 Found running the php-typing-conformance suite
 (`regressions_dynamic_name_stringable.php`). PHPStan (bleeding edge) and
 mago report it.
-
----
-
-## D37. A method only some members of a union declare is not reported
-
-**Impact: Low · Complexity: Medium-High**
-
-```php
-final class User  { public function name(): string { return 'u'; } }
-final class Guest {}
-
-function f(User|Guest $v): void {
-    echo $v->name();   // Error whenever a Guest arrives
-}
-```
-
-The unknown-member check stays silent as soon as any branch of a union
-declares the member (see the module doc in
-`src/diagnostics/unknown_members/mod.rs`). That keeps it free of false
-positives while the resolver may have lost branches, but it misses a call
-that fails on every runtime path through one branch. PHPStan reports it at
-level 7 (`checkUnionTypes`).
-
-This builds on the per-branch verdicts [D21](#d21-a-union-of-an-unreachable-and-a-missing-member-is-reported-by-neither-check)
-asks for: only a union whose branches all resolved can be judged, and a
-branch with `__call`/`__get` still accepts the name. Consider a separate,
-lower-severity diagnostic so projects can turn it off without losing the
-plain unknown-member check.
-
-Found running the php-typing-conformance suite
-(`unions_partial_member_method_call.php`). PHPStan, Psalm, and mago
-report it; none of the IDE tools do.

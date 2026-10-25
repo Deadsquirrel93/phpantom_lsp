@@ -53,7 +53,43 @@ No outstanding items.
 
 ## Templates
 
-No outstanding items.
+### B682. A templated override keeps the parent's wider `@return` beside its own native type
+
+**Impact: Low-Medium · Complexity: Medium**
+
+```php
+interface View { public function name(): string; }
+interface Htmlable {}
+
+abstract class Component {
+    /** @return View|Htmlable|\Closure|string */
+    abstract public function render();
+}
+
+/** @template TModel */
+final class PerPage extends Component {
+    public function render(): View { throw new Exception(); }
+}
+
+function f(PerPage $p): void {
+    $p->render()->name();   // resolves on View|Htmlable|Closure
+}
+```
+
+`render()` declares `: View` and has no docblock, so its return type is
+`View`. It resolves to `View|Htmlable|Closure` instead: the inheritance
+merge takes the parent's `@return` and
+`without_alternatives_the_native_type_forbids` (in
+`src/php_type/normalize.rs`) only drops alternatives whose value domain
+the native type rules out, so `string` goes and every class stays. The
+same override without `@template TModel` on its class resolves to `View`,
+so a second path, taken only for a templated class, is the one that
+lets the wider type through. PHPStan discards an inherited `@return` that
+is not a subtype of the native type.
+
+Found running the opt-in `partial-union-members` diagnostic over a
+Laravel project: a Blade component's `render(): View` reported `name()`
+as missing on `Htmlable` and `Closure`.
 
 ## Name resolution
 

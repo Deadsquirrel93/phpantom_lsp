@@ -476,7 +476,7 @@ fn resolve_variable_subject(
     rctx: &ResolutionCtx<'_>,
 ) -> Option<Arc<ClassInfo>> {
     match resolve_subject_outcome(subject_text.trim(), access_kind, rctx) {
-        SubjectOutcome::Resolved(classes) => classes.into_iter().next(),
+        SubjectOutcome::Resolved { classes, .. } => classes.into_iter().next(),
         _ => None,
     }
 }

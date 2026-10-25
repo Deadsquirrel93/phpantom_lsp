@@ -434,8 +434,9 @@ impl Backend {
                 is_in_static_method: symbol_map.is_in_static_method(span.start),
                 ..loaders.resolution_ctx_at(content, span.start)
             };
-            let SubjectOutcome::Resolved(receivers) =
-                resolve_subject_outcome(subject_text, AccessKind::Arrow, &rctx)
+            let SubjectOutcome::Resolved {
+                classes: receivers, ..
+            } = resolve_subject_outcome(subject_text, AccessKind::Arrow, &rctx)
             else {
                 continue;
             };
