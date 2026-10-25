@@ -449,6 +449,36 @@ class DiscardedResultDemo
 }
 
 
+// ── Diagnostic: Unhandled Match Values ──────────────────────────────────────
+// A `match` without a `default` arm throws `UnhandledMatchError` for any value
+// none of its arms names.  When the subject is an enum, a `bool`, or a set of
+// literals, the values no arm handles are reported.
+
+class UnhandledMatchDemo
+{
+    public function badge(Scaffolding\Status $status): string
+    {
+        // Error — Status::Pending has no arm:
+        return match ($status) {
+            Scaffolding\Status::Active => 'green',
+            Scaffolding\Status::Inactive => 'grey',
+        };
+    }
+
+    public function label(Scaffolding\Status $status): string
+    {
+        // No diagnostic — the guard already ruled Status::Pending out:
+        if ($status === Scaffolding\Status::Pending) {
+            return 'waiting';
+        }
+        return match ($status) {
+            Scaffolding\Status::Active => 'on',
+            Scaffolding\Status::Inactive => 'off',
+        };
+    }
+}
+
+
 // ── Diagnostic: Member Visibility ───────────────────────────────────────────
 // A member that exists is not automatically a member you may touch.  PHP
 // resolves the access to a declaration first and enforces that declaration's

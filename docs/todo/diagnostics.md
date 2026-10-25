@@ -343,39 +343,6 @@ it, and let it replace the enclosing class rather than joining it.
 Inferring a binding from the spelling of the subject is guessing at
 something the type engine has already decided.
 
-## D24. A `match` that does not cover every enum case is not reported
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-enum Suit: string { case Hearts = 'H'; case Spades = 'S'; }
-
-function name(Suit $s): string {
-    return match ($s) {          // should be reported: Suit::Hearts throws UnhandledMatchError
-        Suit::Spades => 'spades',
-    };
-}
-```
-
-A `match` with no `default` arm throws `UnhandledMatchError` for any subject
-value no arm covers. When the subject resolves to a closed set (an enum, a
-union of enum cases, a `bool`, or a union of literals), subtract each arm's
-conditions from it and report what is left. PHPStan (`match.unhandled`),
-Psalm (`UnhandledMatchCondition`), mago and Qodana all do.
-
-Narrowing that already removes a case from the subject (`$s === Suit::Hearts`,
-`instanceof`, an early return) has to carry into the check. A comparison on
-`->value` (`$s->value === 'H'`) does not narrow the enum in any of those
-tools, and they all report the `match` after it, so doing the same is not a
-false positive by their standard.
-
-Found running the php-typing-conformance suite
-(`regressions_backed_enum_value_narrowing.php`). That file only passes the
-other tools through per-tool exemptions on the `->value`-guarded `match`;
-once this check lands, it needs the same exemption for PHPantom. A quick fix to add the
-missing arms is [H16](phpstan-actions.md#h16-matchunhandled-add-missing-match-arms) (`match.unhandled`), which could
-then attach to this diagnostic instead of only PHPStan's.
-
 ## D26. Reading a typed property that nothing initialises is not reported
 
 **Impact: Low-Medium · Complexity: Medium-High**
