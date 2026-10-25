@@ -256,6 +256,7 @@ mod deprecated;
 mod destructuring_offsets;
 mod discarded_results;
 mod docblock_native_mismatch;
+mod dynamic_member_names;
 mod enum_errors;
 pub(crate) mod existence_guards;
 mod external;

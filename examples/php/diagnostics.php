@@ -502,6 +502,33 @@ class UnhandledMatchDemo
 }
 
 
+// ── Diagnostic: Dynamic Member Names ────────────────────────────────────────
+// A member name written as an expression has to be usable as a name.  A
+// property name is converted to a string, so a `Stringable` object works and
+// any other object does not.  A method name must already be a string: PHP
+// never calls `__toString()` for it.
+
+class DynamicMemberNameDemo
+{
+    public string $title = 'demo';
+
+    public function names(Scaffolding\ScaffoldingFieldLabel $label, \stdClass $bag, string $method): void
+    {
+        // No diagnostic — the label converts to the property name 'title':
+        echo $this->{$label};
+
+        // Error — a stdClass cannot be converted to a string:
+        echo $this->{$bag};
+
+        // Error — PHP does not convert a method name, even a Stringable one:
+        $this->{$label}();
+
+        // No diagnostic — a string names the method:
+        $this->{$method}();
+    }
+}
+
+
 // ── Diagnostic: Member Visibility ───────────────────────────────────────────
 // A member that exists is not automatically a member you may touch.  PHP
 // resolves the access to a declaration first and enforces that declaration's

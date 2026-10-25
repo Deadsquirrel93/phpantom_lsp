@@ -2131,6 +2131,10 @@ function runDemoAssertions(): void
     assert($branchVault->isSubclassOf(Scaffolding\ScaffoldingVault::class), 'the branch vault descends from the vault');
     assert(!$branchVault->hasProperty('pin') || $branchVault->getProperty('pin')->getDeclaringClass()->getName() === Scaffolding\ScaffoldingVault::class, 'a private parent property is not inherited into the subclass scope');
 
+    $named = new DynamicMemberNameDemo();
+    $label = new Scaffolding\ScaffoldingFieldLabel();
+    assert($named->{$label} === 'demo', 'a Stringable label names the $title property');
+
     echo "All assertions passed.\n";
 }
 

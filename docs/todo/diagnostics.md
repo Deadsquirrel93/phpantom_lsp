@@ -553,27 +553,3 @@ visibility, readonly, property type).
 Found running the php-typing-conformance suite
 (`objects_clone_with_properties.php`). PHPStan and Psalm report it.
 
----
-
-## D36. A dynamic member name that cannot be a name is not reported
-
-**Impact: Low · Complexity: Low-Medium**
-
-```php
-function f(\Stringable $s, \stdClass $o, Target $t): void {
-    $t->{$s};      // fine: property names are string-cast
-    $t->{$o};      // Error: object of class stdClass could not be converted to string
-    $t->{$s}();    // Error: method name must be a string
-    $t->{$o}();    // Error: method name must be a string
-}
-```
-
-A dynamic property name goes through string conversion, so a `Stringable`
-object is a valid name and any other object is not. A dynamic method name
-must already be a string: PHP does not call `__toString()` for it. Report
-a selector expression whose resolved type cannot satisfy that rule. Stay
-silent when the selector type is unresolved or `mixed`.
-
-Found running the php-typing-conformance suite
-(`regressions_dynamic_name_stringable.php`). PHPStan (bleeding edge) and
-mago report it.

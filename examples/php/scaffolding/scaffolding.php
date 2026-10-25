@@ -2909,3 +2909,14 @@ class ScaffoldingBranchVault extends ScaffoldingVault
         return $this->ledger;
     }
 }
+
+
+// ── Dynamic member name scaffolding ─────────────────────────────────────────
+
+class ScaffoldingFieldLabel
+{
+    public function __toString(): string
+    {
+        return 'title';
+    }
+}
