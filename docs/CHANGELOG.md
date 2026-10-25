@@ -61,6 +61,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`self` in a scope called on a query.** A scope parameter typed `self` now accepts the model when the scope is called through a query, such as `Post::query()->relatedTo($post)`, instead of reporting that it expects a `Builder`.
 - **Builds without network access keep the PHP standard library.** A build that cannot download the PHP stubs now fails instead of producing a binary that reports every built-in function and class as unknown, which is what happened to the Homebrew package. Packagers can supply the stubs with `PHPANTOM_STUBS_DIR` (see [BUILDING.md](BUILDING.md#packaging-without-network-access)), and a binary built without stubs warns about it on startup.
 - **`static` as a type argument keeps the receiver's generics.** A method returning something like `NodeBuilder<static>` now carries the receiver's own type arguments into the rest of the chain, so a Symfony config tree's `->children()->…->end()` returns the parent node with its full type.
 - **Static members reached through a differently cased class name are references.** Find References and rename on a static property, method, or constant now include `WIDGET::$count` and `{@see widget::$count}` when the class is declared `Widget`, as PHP's case-insensitive class names allow.

@@ -15852,3 +15852,56 @@ function f(Number $n): void {
         "Number & int should not be typed as a Number, got: {diags:?}"
     );
 }
+
+/// A scope called on a query is grafted onto the builder, but `self` and
+/// `static` in its signature still name the model that declares it, not
+/// the builder the call goes through.
+#[test]
+fn scope_self_param_names_the_model_when_called_on_a_query() {
+    let php = r#"<?php
+namespace Illuminate\Database\Eloquent\Attributes {
+    #[\Attribute]
+    class Scope {}
+}
+namespace Illuminate\Database\Eloquent {
+    abstract class Model {
+        /** @return \Illuminate\Database\Eloquent\Builder<static> */
+        public static function query() {}
+        /** @return \Illuminate\Database\Eloquent\Builder<static> */
+        public function newQuery() {}
+    }
+    /** @template TModel of \Illuminate\Database\Eloquent\Model */
+    class Builder {}
+}
+namespace App\Models {
+    use Illuminate\Database\Eloquent\Attributes\Scope;
+    use Illuminate\Database\Eloquent\Builder;
+    use Illuminate\Database\Eloquent\Model;
+
+    class Post extends Model {
+        #[Scope]
+        protected function relatedTo(Builder $query, self $post): void {}
+        #[Scope]
+        protected function maybeRelatedTo(Builder $query, ?self $post): void {}
+        #[Scope]
+        protected function explicitlyRelatedTo(Builder $query, Post $post): void {}
+        public function scopeLegacyRelatedTo(Builder $query, self $post): void {}
+    }
+    class Comment extends Model {}
+
+    function usage(Post $post, Comment $comment): void {
+        Post::query()->relatedTo($post);
+        Post::query()->maybeRelatedTo($post);
+        Post::query()->maybeRelatedTo(null);
+        Post::query()->explicitlyRelatedTo($post);
+        Post::query()->legacyRelatedTo($post);
+        $post->newQuery()->relatedTo($post);
+        Post::relatedTo($post);
+        Post::query()->relatedTo($comment);
+    }
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(messages[0].contains("Comment"), "{messages:?}");
+}
