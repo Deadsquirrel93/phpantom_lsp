@@ -92,41 +92,4 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B678. An inline `{@see Class::$prop}` in a docblock's prose is not a reference
-
-**Impact: Low-Medium · Complexity: Low-Medium**
-
-```php
-class Docblock {
-    public static $vectors = [];
-
-    /**
-     * The tags defined in the docblock.
-     *
-     * The array has keys which are the tag names (excluding the @) and values
-     * that are arrays, each of which is an entry for the tag.
-     *
-     * In the case where the tag name is defined in {@see DocBlock::$vectors} the
-     * value within the tag-value array is an array in itself with keys as
-     * described by {@see DocBlock::$vectors}.
-     *
-     * @var array
-     */
-    public $tags;
-}
-```
-
-Find References on `$vectors` returns a standalone `@see DocBlock::$vectors`
-tag in another file, but neither inline `{@see DocBlock::$vectors}` above,
-so renaming the property leaves both behind. `scan_text_for_inline_see` in
-`src/symbol_map/docblock.rs` is meant to cover free text ahead of the first
-tag and the description of any tag. Not yet confirmed: the bare `@` in
-"(excluding the @)" may start a tag as far as the PHPDoc grammar is
-concerned, so the following prose would land in a tag value that is never
-scanned. A reproduction with and without that `@` will tell.
-
-Found re-measuring the php-typing-conformance LSP probes (psysh navigation
-corpus, `Psy\Util\Docblock::$vectors`). That table counts code references
-only, so it scores the `@see` tag we do return as an extra. Docblock
-references are deliberate (rename has to update them), so the fix here is
-to find the inline ones too, not to drop the tag.
+No outstanding items.

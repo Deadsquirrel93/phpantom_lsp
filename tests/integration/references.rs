@@ -613,6 +613,63 @@ fn reference_lines(results: &[Location]) -> Vec<u32> {
 }
 
 #[test]
+fn static_property_references_include_differently_cased_inline_see() {
+    let backend = create_test_backend();
+    let uri = "file:///tmp/test_refs_inline_see_cased.php";
+    let content = r#"<?php
+namespace Psy\Util;
+
+class Docblock {
+    public static $vectors = [];
+
+    /**
+     * The array has keys which are the tag names (excluding the @) and values.
+     *
+     * In the case where the tag name is defined in {@see DocBlock::$vectors} the
+     * value within the tag-value array is described by {@see DocBlock::$vectors}.
+     *
+     * @var array
+     */
+    public $tags;
+}
+"#;
+    open_file(&backend, uri, content);
+
+    let results = backend
+        .find_references(uri, content, Position::new(4, 20), true)
+        .expect("should find references");
+    assert_eq!(
+        reference_lines(&results),
+        vec![4, 9, 10],
+        "both inline `{{@see}}` tags reference the property: {results:#?}"
+    );
+}
+
+#[test]
+fn static_property_references_include_differently_cased_class_name() {
+    let backend = create_test_backend();
+    let uri = "file:///tmp/test_refs_static_prop_cased.php";
+    let content = r#"<?php
+namespace App;
+
+class Widget {
+    public static $count = 0;
+}
+
+function bump(): void {
+    WIDGET::$count++;
+    \APP\widget::$count++;
+}
+"#;
+    open_file(&backend, uri, content);
+
+    let results = backend
+        .find_references(uri, content, Position::new(4, 20), true)
+        .expect("should find references");
+    assert_eq!(reference_lines(&results), vec![4, 8, 9], "{results:#?}");
+}
+
+#[test]
 fn property_references_skip_the_method_of_the_same_name() {
     let backend = create_test_backend();
     let uri = "file:///tmp/test_refs_property_vs_method.php";
