@@ -85,7 +85,7 @@ mod lexer;
 mod vendor;
 mod walk;
 
-pub(crate) use discovery::collect_include_files;
+pub(crate) use discovery::{collect_include_files, scan_roots_full};
 pub use discovery::{
     scan_directories, scan_drupal_directories, scan_include_paths, scan_psr4_directories,
     scan_psr4_directories_with_skip, scan_workspace_fallback, scan_workspace_fallback_full,

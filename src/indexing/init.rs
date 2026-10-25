@@ -131,10 +131,30 @@ impl Backend {
             .write()
             .set_runtime_permission_package(runtime_permissions);
 
-        let source_label =
-            self.index_composer_project(root, composer_json.as_ref(), false, (15, 85), progress);
+        // The workspace folders beside this one join the walk of the
+        // project's root when the strategy walks it, and are walked on
+        // their own at the end otherwise.
+        let extra_roots = self.claim_extra_roots();
+        let walks_root = matches!(
+            self.config().indexing.strategy(),
+            IndexingStrategy::SelfScan | IndexingStrategy::Full
+        );
+        let (walked, unwalked) = if walks_root {
+            (extra_roots.as_slice(), &[][..])
+        } else {
+            (&[][..], extra_roots.as_slice())
+        };
 
-        self.finish_discovery(root, php_version, source_label, progress)
+        let source_label = self.index_composer_project(
+            root,
+            composer_json.as_ref(),
+            false,
+            walked,
+            (15, 85),
+            progress,
+        );
+
+        self.finish_discovery(root, php_version, source_label, unwalked, progress)
             .await;
     }
 
@@ -143,7 +163,8 @@ impl Backend {
     /// directories, and its autoload files.
     ///
     /// `root` is the workspace root, or with `subproject` set one
-    /// subproject of a monorepo.  The work reports progress within
+    /// subproject of a monorepo.  `library_roots` join the walk of `root`
+    /// when the strategy walks it.  The work reports progress within
     /// `percent_range`.  Returns where the classmap came from, for the
     /// discovery log.
     fn index_composer_project(
@@ -151,6 +172,7 @@ impl Backend {
         root: &Path,
         composer_json: Option<&composer::ComposerPackage>,
         subproject: bool,
+        library_roots: &[PathBuf],
         percent_range: (u32, u32),
         progress: Option<&crate::progress::ScanProgress>,
     ) -> &'static str {
@@ -206,8 +228,9 @@ impl Backend {
                     p.begin_phase(0.0, 0.3, "Scanning workspace files");
                 }
                 let filters = self.index_filters();
-                let mut scan = classmap_scanner::scan_workspace_fallback_full(
-                    root,
+                let mut scan = classmap_scanner::scan_roots_full(
+                    &[root.to_path_buf()],
+                    library_roots,
                     &skip_dirs,
                     &filters,
                     progress,
@@ -420,6 +443,7 @@ impl Backend {
                 sub_root,
                 composer_json.as_ref(),
                 true,
+                &[],
                 (sub_lo, sub_hi),
                 progress,
             );
@@ -446,8 +470,10 @@ impl Backend {
             p.set_scope(80, 85, "Scanning loose PHP files");
         }
 
-        let scan = classmap_scanner::scan_workspace_fallback_full(
-            root,
+        let extra_roots = self.claim_extra_roots();
+        let scan = classmap_scanner::scan_roots_full(
+            &[root.to_path_buf()],
+            &extra_roots,
             &skip_dirs,
             &self.index_filters(),
             progress,
@@ -459,6 +485,7 @@ impl Backend {
             root,
             php_version,
             &format!("{} subprojects", subprojects.len()),
+            &[],
             progress,
         )
         .await;
@@ -489,30 +516,47 @@ impl Backend {
             .laravel_mut()
             .set_enabled(false);
 
-        let skip_dirs = HashSet::new();
-        let scan = classmap_scanner::scan_workspace_fallback_full(
-            root,
-            &skip_dirs,
+        let extra_roots = self.claim_extra_roots();
+        let scan = classmap_scanner::scan_roots_full(
+            &[root.to_path_buf()],
+            &extra_roots,
+            &HashSet::new(),
             &self.index_filters(),
             progress,
             Some(self.followed_links()),
         );
         self.symbols.merge_scan(scan);
 
-        self.finish_discovery(root, php_version, "workspace scan", progress)
+        self.finish_discovery(root, php_version, "workspace scan", &[], progress)
             .await;
     }
 
-    /// End a discovery pass the way every pipeline does: index the
-    /// `[indexing] include` paths, then log what the pass found, with
-    /// `source` saying where it came from.
+    /// End a discovery pass the way every pipeline does: walk the
+    /// workspace folders the pipeline's own walk did not take in
+    /// (`unwalked_roots`), index the `[indexing] include` paths, then log
+    /// what the pass found, with `source` saying where it came from.
     async fn finish_discovery(
         &self,
         root: &Path,
         php_version: crate::types::PhpVersion,
         source: &str,
+        unwalked_roots: &[PathBuf],
         progress: Option<&crate::progress::ScanProgress>,
     ) {
+        // Like an `include` entry, a workspace folder is walked whatever
+        // the strategy: the editor named it, so it is not a fallback.
+        if !unwalked_roots.is_empty() {
+            let scan = classmap_scanner::scan_roots_full(
+                &[],
+                unwalked_roots,
+                &HashSet::from([root.to_path_buf()]),
+                &self.index_filters(),
+                progress,
+                Some(self.followed_links()),
+            );
+            self.symbols.merge_scan(scan);
+        }
+
         // Runs for every pipeline and strategy, including `none`: an
         // explicit `include` entry is a direct instruction, not a fallback.
         self.scan_configured_include_paths(root, progress);

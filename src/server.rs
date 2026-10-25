@@ -334,6 +334,10 @@ impl LanguageServer for Backend {
         self.on_did_change_watched_files(params).await
     }
 
+    async fn did_change_workspace_folders(&self, params: DidChangeWorkspaceFoldersParams) {
+        self.on_did_change_workspace_folders(params).await
+    }
+
     async fn goto_definition(
         &self,
         params: DefinitionParams,

@@ -146,6 +146,14 @@ that declaration, and an included file cannot override it. Adding an
 entry while the editor is running indexes it straight away; removing one
 takes effect on the next restart.
 
+The other folders of a multi-root workspace need no entry here. Every
+folder the editor lists beside the one PHPantom is rooted in is indexed
+the same way as an outside path, as a library, so a project resolves the
+classes of a shared library open in the same window. A folder that sits
+inside another one, or inside the project, is already covered and is not
+indexed twice. Adding a folder to the workspace indexes it straight away,
+and removing one drops its symbols straight away.
+
 ### `[semantic_tokens]`
 
 PHPantom defaults to `contextual` semantic tokens so editor syntax

@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use super::path_aliases;
 use crate::Backend;
 use crate::classmap_scanner;
+use crate::workspace_env::LibraryClaimant;
 
 impl Backend {
     /// Index the extra paths named by `[indexing] include`.
@@ -64,7 +65,7 @@ impl Backend {
     /// vendor prefixes end in `/`.
     fn add_library_path(&self, path: &Path) {
         if !path.is_file() {
-            self.add_vendor_dir(path);
+            self.add_library_dir(LibraryClaimant::Include, path);
             return;
         }
         let aliases = path_aliases(path);
@@ -72,6 +73,6 @@ impl Backend {
             .iter()
             .map(|alias| crate::util::path_to_uri(alias))
             .collect();
-        self.register_vendor_location(aliases, uri_prefixes);
+        self.register_vendor_location(LibraryClaimant::Include, aliases, uri_prefixes);
     }
 }

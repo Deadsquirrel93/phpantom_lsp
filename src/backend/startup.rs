@@ -19,13 +19,30 @@ impl Backend {
     pub(crate) async fn on_initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
         // `rootUri` is deprecated in favour of `workspaceFolders`, but it is
         // what every client still sends and what the workspace root has
-        // always been read from.
+        // always been read from. A client that sends only the folders gets
+        // the first one, which is what the others set `rootUri` to.
+        let folders = match &params.workspace_folders_initialize_params.workspace_folders {
+            Some(WorkspaceFolders::WorkspaceFolderList(folders)) => folders.as_slice(),
+            Some(WorkspaceFolders::Null) | None => &[],
+        };
         #[allow(deprecated)]
-        let workspace_root = params.root_uri.as_ref().and_then(crate::util::url_to_path);
+        let workspace_root = params
+            .root_uri
+            .as_ref()
+            .and_then(crate::util::url_to_path)
+            .or_else(|| {
+                folders
+                    .first()
+                    .and_then(|folder| crate::util::url_to_path(&folder.uri))
+            });
 
         if let Some(root) = workspace_root {
             *self.workspace.workspace_root.write() = Some(root);
         }
+
+        // The other folders are indexed beside the root once discovery
+        // runs in `initialized`.
+        self.set_workspace_folders(folders);
 
         // Store the client name for quirks-mode adjustments.
         if let Some(info) = &params.client_info {
@@ -168,6 +185,15 @@ impl Backend {
                 execute_command_provider: Some(ExecuteCommandOptions {
                     commands: vec!["phpantom.navigateToPrototype".to_string()],
                     ..ExecuteCommandOptions::default()
+                }),
+                // Without this a client sends the folder list at startup
+                // but never says when a folder is added or removed.
+                workspace: Some(WorkspaceOptions {
+                    workspace_folders: Some(WorkspaceFoldersServerCapabilities {
+                        supported: Some(true),
+                        change_notifications: Some(ChangeNotifications::Bool(true)),
+                    }),
+                    ..WorkspaceOptions::default()
                 }),
                 ..ServerCapabilities::default()
             },

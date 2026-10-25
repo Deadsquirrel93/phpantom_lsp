@@ -348,6 +348,39 @@ pub fn scan_workspace_fallback_full(
     progress: Option<&ScanProgress>,
     followed: Option<&FollowedLinks>,
 ) -> WorkspaceScanResult {
+    scan_roots_full(
+        &[workspace_root.to_path_buf()],
+        &[],
+        skip_dirs,
+        filters,
+        progress,
+        followed,
+    )
+}
+
+/// Full-scan `project_roots` and `library_roots` in one gitignore-aware
+/// walk, tagging what each library root declares as library code.
+///
+/// The library roots are the editor's other workspace folders. They go
+/// into the same [`walk_roots`] call as the project's own root rather
+/// than a walk of their own, so the shared ancestor `.gitignore` files are
+/// compiled once, and every root is claimed up front: a symlink in one
+/// root pointing into another loses to that root's own walk instead of
+/// indexing the tree a second time under the link's spelling. Each is
+/// walked with every filter in force, the way the project's root is.
+///
+/// Without a project root (a Composer pipeline whose classmap comes from
+/// its autoload mappings), list the workspace root in `skip_dirs` so a
+/// link pointing back into it is still left to the pipeline that covers
+/// it.
+pub(crate) fn scan_roots_full(
+    project_roots: &[PathBuf],
+    library_roots: &[PathBuf],
+    skip_dirs: &HashSet<PathBuf>,
+    filters: &std::sync::Arc<IndexFilters>,
+    progress: Option<&ScanProgress>,
+    followed: Option<&FollowedLinks>,
+) -> WorkspaceScanResult {
     // Phase 1: collect file paths
     let skip_paths = HashSet::new();
     let opts = WalkOptions::new(
@@ -356,12 +389,19 @@ pub fn scan_workspace_fallback_full(
         std::sync::Arc::clone(filters),
         followed,
     );
-    let php_files: Vec<(PathBuf, crate::ClassCompletionOrigin)> =
-        walk_roots(&[workspace_root.to_path_buf()], &opts)
-            .into_iter()
-            .flatten()
-            .map(|path| (path, crate::ClassCompletionOrigin::Project))
-            .collect();
+    let roots: Vec<PathBuf> = project_roots.iter().chain(library_roots).cloned().collect();
+    let php_files: Vec<(PathBuf, crate::ClassCompletionOrigin)> = walk_roots(&roots, &opts)
+        .into_iter()
+        .enumerate()
+        .flat_map(|(index, files)| {
+            let origin = if index < project_roots.len() {
+                crate::ClassCompletionOrigin::Project
+            } else {
+                crate::ClassCompletionOrigin::VendorExplicit
+            };
+            files.into_iter().map(move |path| (path, origin))
+        })
+        .collect();
 
     // Phase 2: scan files in parallel
     progress_add_total(progress, php_files.len());

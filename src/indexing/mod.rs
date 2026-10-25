@@ -12,6 +12,8 @@
 //!   file loads.
 //! - [`library_paths`] — the `[indexing] include` paths every pipeline
 //!   indexes last.
+//! - [`extra_roots`] — the editor's other workspace folders, indexed
+//!   beside the project as library code.
 //! - [`preload`] — autoload preloading and the `ensure_workspace_indexed*`
 //!   parallel parse pipeline.
 //! - [`watch`] — applying `didChangeWatchedFiles` batches to the indexes.
@@ -22,6 +24,7 @@
 
 use std::path::{Path, PathBuf};
 
+mod extra_roots;
 mod init;
 mod library_paths;
 mod phar;

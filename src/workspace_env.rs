@@ -30,6 +30,14 @@ pub(crate) struct WorkspaceEnv {
     pub(crate) vendor_uri_prefixes: Mutex<Vec<String>>,
     /// Absolute raw and canonical paths of all known vendor directories.
     pub(crate) vendor_dir_paths: Mutex<Vec<PathBuf>>,
+    /// Who registered each entry of `vendor_dir_paths` and
+    /// `vendor_uri_prefixes`, which are the union of these.
+    ///
+    /// One spelling can be registered for more than one reason (a folder
+    /// of the editor's workspace that is also an `[indexing] include`
+    /// path), so a source that lets go of its locations only removes the
+    /// spellings no other source still claims.
+    pub(crate) library_claims: Mutex<Vec<LibraryClaim>>,
     /// Canonical vendor package roots paired with completion provenance.
     pub(crate) vendor_package_origin_roots:
         Arc<RwLock<Vec<(PathBuf, ClassCompletionOrigin, String)>>>,
@@ -40,6 +48,15 @@ pub(crate) struct WorkspaceEnv {
     /// Kept per project so a `composer update` in one subproject replaces
     /// that subproject's share and leaves the others' alone.
     pub(crate) composer_projects: Arc<RwLock<Vec<ComposerProjectPaths>>>,
+    /// The editor's workspace folders, as `initialize` and
+    /// `workspace/didChangeWorkspaceFolders` report them.
+    ///
+    /// The one holding `workspace_root` is this server's own project;
+    /// the others are indexed as library code beside it (see
+    /// [`Backend::extra_roots`](crate::Backend::extra_roots)). Shared by
+    /// `Arc` so the clone that walks for a newly added folder reads the
+    /// list the notification handler wrote.
+    pub(crate) workspace_folders: Arc<RwLock<Vec<PathBuf>>>,
     /// The target PHP version used for version-aware stub filtering.
     pub(crate) php_version: Mutex<PhpVersion>,
     /// Per-project configuration loaded from `.phpantom.toml`.
@@ -89,6 +106,27 @@ pub(crate) struct WorkspaceEnv {
     pub(crate) filter_rediscovery_generation: Arc<AtomicU64>,
 }
 
+/// Why a location is registered as library code.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum LibraryClaimant {
+    /// A Composer project's vendor directory.
+    Composer,
+    /// An `[indexing] include` path outside the workspace.
+    Include,
+    /// Another folder of the editor's workspace, by the spelling it was
+    /// registered under.
+    ExtraRoot(PathBuf),
+}
+
+/// One registration of library locations: the path spellings that mark a
+/// file under them and the matching `file://` URI prefixes.
+#[derive(Clone)]
+pub(crate) struct LibraryClaim {
+    pub(crate) claimant: LibraryClaimant,
+    pub(crate) paths: Vec<PathBuf>,
+    pub(crate) uri_prefixes: Vec<String>,
+}
+
 /// The share of the workspace-wide autoload lists one Composer project
 /// contributed.
 #[derive(Default)]
@@ -117,8 +155,10 @@ impl WorkspaceEnv {
             psr4_mappings: Arc::new(RwLock::new(Vec::new())),
             vendor_uri_prefixes: Mutex::new(Vec::new()),
             vendor_dir_paths: Mutex::new(Vec::new()),
+            library_claims: Mutex::new(Vec::new()),
             vendor_package_origin_roots: Arc::new(RwLock::new(Vec::new())),
             composer_projects: Arc::new(RwLock::new(Vec::new())),
+            workspace_folders: Arc::new(RwLock::new(Vec::new())),
             php_version: Mutex::new(PhpVersion::default()),
             config: Arc::new(Mutex::new(config::Config::default())),
             global_config_path,
@@ -137,8 +177,10 @@ impl Clone for WorkspaceEnv {
             psr4_mappings: Arc::clone(&self.psr4_mappings),
             vendor_uri_prefixes: Mutex::new(self.vendor_uri_prefixes.lock().clone()),
             vendor_dir_paths: Mutex::new(self.vendor_dir_paths.lock().clone()),
+            library_claims: Mutex::new(self.library_claims.lock().clone()),
             vendor_package_origin_roots: Arc::clone(&self.vendor_package_origin_roots),
             composer_projects: Arc::clone(&self.composer_projects),
+            workspace_folders: Arc::clone(&self.workspace_folders),
             php_version: Mutex::new(*self.php_version.lock()),
             config: Arc::clone(&self.config),
             global_config_path: self.global_config_path.clone(),
