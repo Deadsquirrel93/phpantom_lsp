@@ -364,7 +364,11 @@ impl PhpType {
             TypeKind::Nullable(inner) => inner.is_string_subtype(),
             TypeKind::Generic(g) => matches!(
                 g.name.to_ascii_lowercase().as_str(),
-                "class-string" | "interface-string" | "model-property"
+                "class-string"
+                    | "interface-string"
+                    | "enum-string"
+                    | "trait-string"
+                    | "model-property"
             ),
             TypeKind::Union(members) => {
                 !members.is_empty() && members.iter().all(|m| m.is_string_subtype())

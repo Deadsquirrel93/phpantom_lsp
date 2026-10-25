@@ -10679,23 +10679,46 @@ fn only_an_enum_name_is_an_enum_string() {
 namespace App;
 
 interface SomeInterface {}
-final class SomeClass {}
 enum SomeEnum { case A; }
+final class SomeClass {}
 trait SomeTrait {}
+
+/** @return enum-string */
+function returnsEnumString(): string { return SomeEnum::class; }
+
+/** @return enum-string<SomeEnum> */
+function returnsBoundEnumString(): string { return SomeEnum::class; }
 
 /** @param enum-string $value */
 function acceptsEnumString($value): void {}
 
+enum OtherEnum { case B; }
+
+/** @param enum-string<SomeEnum> $value */
+function acceptsBoundEnumString(string $value): void {}
+
+/** @param class-string $name */
+function acceptsClassString(string $name): void {}
+
 acceptsEnumString(SomeEnum::class);
 acceptsEnumString('App\SomeEnum');
 acceptsEnumString('App\Unindexed');
-acceptsEnumString(SomeClass::class);
 acceptsEnumString(SomeInterface::class);
+acceptsEnumString(SomeClass::class);
 acceptsEnumString(SomeTrait::class);
 acceptsEnumString('App\SomeClass');
+acceptsClassString(returnsEnumString());
+acceptsClassString(returnsBoundEnumString());
+acceptsBoundEnumString(SomeEnum::class);
+acceptsBoundEnumString(OtherEnum::class);
 "#;
-    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
-    assert_eq!(messages.len(), 4, "got {messages:?}");
+    let diags = collect(php);
+    assert!(
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
+        "got {diags:?}"
+    );
+    let messages = messages_with_code(&diags, "type_mismatch_argument");
+    assert_eq!(messages.len(), 5, "got {messages:?}");
     assert!(
         messages.iter().all(|m| m.contains("enum-string")),
         "each message should name the expected type, got {messages:?}"
@@ -10708,26 +10731,38 @@ fn only_a_trait_name_is_a_trait_string() {
 namespace App;
 
 interface SomeInterface {}
+trait SomeTrait {}
 final class SomeClass {}
 enum SomeEnum { case A; }
-trait SomeTrait {}
+
+/** @return trait-string */
+function returnsTraitString(): string { return SomeTrait::class; }
 
 /** @param trait-string $value */
 function acceptsTraitString($value): void {}
 
+/** @param class-string $name */
+function acceptsClassString(string $name): void {}
+
 acceptsTraitString(SomeTrait::class);
 acceptsTraitString('App\SomeTrait');
 acceptsTraitString('App\Unindexed');
-acceptsTraitString(SomeClass::class);
 acceptsTraitString(SomeInterface::class);
+acceptsTraitString(SomeClass::class);
 acceptsTraitString(SomeEnum::class);
 acceptsTraitString('App\SomeClass');
+acceptsClassString(returnsTraitString());
 "#;
-    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
-    assert_eq!(messages.len(), 4, "got {messages:?}");
+    let diags = collect(php);
     assert!(
-        messages.iter().all(|m| m.contains("trait-string")),
-        "each message should name the expected type, got {messages:?}"
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
+        "got {diags:?}"
+    );
+    let messages = messages_with_code(&diags, "type_mismatch_argument");
+    assert_eq!(messages.len(), 5, "got {messages:?}");
+    assert!(
+        messages[..4].iter().all(|m| m.contains("trait-string")),
+        "got {messages:?}"
     );
 }
 
