@@ -6,7 +6,7 @@ use mago_syntax::cst::*;
 
 use crate::atom::{Atom, AtomMap, atom, atom_bytes, bytes_to_str};
 use crate::docblock;
-use crate::parser::signature::{Signature, extract_signature};
+use crate::parser::signature::{Signature, extract_signature, template_bounds_in_scope};
 use crate::parser::{DocblockCtx, extract_hint_type, extract_visibility, merge_deprecation_info};
 use crate::php_type::PhpType;
 use crate::types::*;
@@ -36,6 +36,7 @@ pub(super) fn extract_method<'a>(
         } else {
             &[]
         },
+        class_template_param_bounds,
     )?;
     if is_constructor {
         push_promoted_properties(
@@ -285,25 +286,6 @@ fn push_promoted_properties<'a>(
             source: None,
         });
     }
-}
-
-/// The `@template` bounds a method signature sees: the class's, with the
-/// method's own templates shadowing any of the same name, bounded or not.
-fn template_bounds_in_scope<'b>(
-    class_bounds: &'b AtomMap<PhpType>,
-    method_params: &[Atom],
-    method_bounds: &'b AtomMap<PhpType>,
-) -> std::borrow::Cow<'b, AtomMap<PhpType>> {
-    if class_bounds.is_empty() {
-        return std::borrow::Cow::Borrowed(method_bounds);
-    }
-    if method_params.is_empty() {
-        return std::borrow::Cow::Borrowed(class_bounds);
-    }
-    let mut merged = class_bounds.clone();
-    merged.retain(|name, _| !method_params.contains(name));
-    merged.extend(method_bounds.iter().map(|(n, b)| (*n, b.clone())));
-    std::borrow::Cow::Owned(merged)
 }
 
 /// Carry a promoted constructor parameter's inline `@var` over to the

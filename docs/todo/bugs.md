@@ -53,41 +53,44 @@ No outstanding items.
 
 ## Templates
 
-### B679. A class template in `@return` gives way to a scalar or nullable native return type
+### B681. `static` as a type argument of a return type loses the receiver's own type arguments
 
 **Impact: Medium · Complexity: Medium**
 
 ```php
-/** @template TInput of string|int|null */
-final class InputBag
+/** @template TParent */
+class NodeBuilder
 {
-    /** @return TInput */
-    public function first(): string|int|null {}
+    /** @return TParent */
+    public function end() {}
 }
 
-/** @var InputBag<string> $query */
-$query->first(); // string|int|null, should be string
+/** @template TParent */
+class ArrayNodeDefinition
+{
+    /** @return NodeBuilder<static> */
+    public function children(): NodeBuilder {}
+}
+
+/** @var ArrayNodeDefinition<TreeBuilder> $root */
+$builder = $root->children(); // NodeBuilder<ArrayNodeDefinition<TreeBuilder>>, correct
+$builder->end();              // ArrayNodeDefinition, should be ArrayNodeDefinition<TreeBuilder>
 ```
 
-A method's `@return` naming a template of its class is judged against the
-native return type as if the template were a class name: a native type
-made of scalars rejects it, so the method returns its native type whatever
-the class is instantiated with. A nullable native type lets it through but
-adds its `null`, so `@return TParent` on `end(): ?NodeParentInterface`
-returns `?TreeBuilder<'array'>` where the binding is a `TreeBuilder<'array'>`.
-A template of the method itself is compared by its bound
-(`resolve_effective_type_with_template_bounds`), but the method's return
-type is resolved in `parser/signature.rs` before any bounds are known, and
-the class's bounds never reach it. The bound comparison has its own slip:
-it strips `null` from the docblock type before substituting the bound, so a
-bound that includes `null` (`TInput of string|int|null`) is never a subtype
-of the native type stripped the same way.
+The call's type is right, but the class it carries for the next call in the
+chain is built by `resolve_method_return_types_with_args`, which hands
+`type_hint_to_classes_typed_returned` the owner's bare FQN for `static`. So
+the `NodeBuilder` the chain continues on is specialised with
+`TParent = ArrayNodeDefinition`, and its members no longer name `TParent`
+for the receiver's arguments to substitute. The receiver's full type (the
+one `self_replace` uses for the type string in `owner_method_call.rs`)
+should stand in for `static` here too.
 
-Symfony 7.4 declares `InputBag`, `Request::$query`, and the whole config
-tree builder this way, so `$request->query->get('page')` and every
-`->end()` of a tree builder come out wrong. The fixtures marked
-`// SKIP: a class template in @return gives way to a scalar or nullable
-native return type` in `tests/phpstan_symfony/data/` show each case.
+Symfony 7.4's config tree builder declares `children()` this way, so every
+`->children()->…->end()` chain loses the parent's type arguments. The
+fixtures marked ``// SKIP: `static` as a type argument of a return type
+loses the receiver's own type arguments`` in
+`tests/phpstan_symfony/data/tree_builder.php` show each case.
 
 ## Name resolution
 

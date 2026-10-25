@@ -46,6 +46,10 @@ pub(super) struct Signature<'a> {
 /// is a constructor (empty otherwise): a constructor whose docblock binds
 /// none of its own templates but binds the class's through `@param T $x`
 /// takes on the class's list and those bindings.
+///
+/// `class_template_param_bounds` are the bounds of the enclosing class's
+/// templates (empty for a standalone function), which `@return` naming one
+/// of them is judged by against the native return hint.
 pub(super) fn extract_signature<'a>(
     node: &impl HasSpan,
     attribute_lists: &Sequence<'_, attribute::AttributeList<'_>>,
@@ -53,6 +57,7 @@ pub(super) fn extract_signature<'a>(
     return_type_hint: Option<&FunctionLikeReturnTypeHint<'_>>,
     doc_ctx: Option<&DocblockCtx<'a>>,
     ctor_class_template_params: &[Atom],
+    class_template_param_bounds: &AtomMap<PhpType>,
 ) -> Option<Signature<'a>> {
     let php_version = doc_ctx.and_then(|ctx| ctx.php_version);
     if let Some(ctx) = doc_ctx
@@ -91,25 +96,8 @@ pub(super) fn extract_signature<'a>(
         .and_then(|ctx| docblock::get_docblock_text_for_node(ctx.trivias, ctx.content, node));
     let doc_info = docblock_text.and_then(docblock::parse_docblock_for_tags);
 
-    let effective = if return_from_lang_level {
-        native_return_type.clone()
-    } else {
-        let parsed_doc_return = doc_info
-            .as_ref()
-            .and_then(docblock::extract_return_type_from_info);
-        docblock::resolve_effective_type_typed(
-            native_return_type.as_ref(),
-            parsed_doc_return.as_ref(),
-        )
-    };
-    // A bare `array` (or nullable/union containing array) gives way to the
-    // more specific `#[ArrayShape]` type.
-    let return_type = match doc_ctx {
-        Some(ctx) => effective.map(|ty| apply_array_shape_override(ty, attribute_lists, ctx)),
-        None => effective,
-    };
-
     let Some(info) = doc_info.as_ref() else {
+        let return_type = finish_return_type(native_return_type.clone(), attribute_lists, doc_ctx);
         return Some(Signature {
             parameters,
             native_return_type,
@@ -142,6 +130,23 @@ pub(super) fn extract_signature<'a>(
         tpl_names.push(name);
     }
     let mut template_params: Vec<Atom> = tpl_names.iter().map(|n| atom(n)).collect();
+
+    let effective = if return_from_lang_level {
+        native_return_type.clone()
+    } else {
+        let parsed_doc_return = docblock::extract_return_type_from_info(info);
+        docblock::resolve_effective_type_with_template_bounds(
+            native_return_type.as_ref(),
+            parsed_doc_return.as_ref(),
+            &template_bounds_in_scope(
+                class_template_param_bounds,
+                &template_params,
+                &template_param_bounds,
+            ),
+        )
+    };
+    let return_type = finish_return_type(effective, attribute_lists, doc_ctx);
+
     let mut template_bindings: Vec<(Atom, Atom)> = if tpl_names.is_empty() {
         Vec::new()
     } else {
@@ -204,4 +209,36 @@ pub(super) fn extract_signature<'a>(
         template_param_defaults: tpl_param_defaults.into_boxed_slice(),
         template_bindings,
     })
+}
+
+/// The `@template` bounds a method signature sees: the class's, with the
+/// method's own templates shadowing any of the same name, bounded or not.
+pub(super) fn template_bounds_in_scope<'b>(
+    class_bounds: &'b AtomMap<PhpType>,
+    method_params: &[Atom],
+    method_bounds: &'b AtomMap<PhpType>,
+) -> std::borrow::Cow<'b, AtomMap<PhpType>> {
+    if class_bounds.is_empty() {
+        return std::borrow::Cow::Borrowed(method_bounds);
+    }
+    if method_params.is_empty() {
+        return std::borrow::Cow::Borrowed(class_bounds);
+    }
+    let mut merged = class_bounds.clone();
+    merged.retain(|name, _| !method_params.contains(name));
+    merged.extend(method_bounds.iter().map(|(n, b)| (*n, b.clone())));
+    std::borrow::Cow::Owned(merged)
+}
+
+/// The effective return type with a bare `array` (or a nullable or union
+/// containing it) given way to the more specific `#[ArrayShape]` type.
+fn finish_return_type(
+    effective: Option<PhpType>,
+    attribute_lists: &Sequence<'_, attribute::AttributeList<'_>>,
+    doc_ctx: Option<&DocblockCtx<'_>>,
+) -> Option<PhpType> {
+    match doc_ctx {
+        Some(ctx) => effective.map(|ty| apply_array_shape_override(ty, attribute_lists, ctx)),
+        None => effective,
+    }
 }

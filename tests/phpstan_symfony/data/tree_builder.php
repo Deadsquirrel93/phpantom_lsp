@@ -12,11 +12,11 @@ $treeBuilder = new TreeBuilder('my_tree');
 $treeRootNode = $treeBuilder->getRootNode();
 assertType("Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symfony\Component\Config\Definition\Builder\TreeBuilder<'array'>>", $treeRootNode);
 
-assertType("Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symfony\Component\Config\Definition\Builder\TreeBuilder<'array'>>", $treeRootNode // SKIP: a class template in @return gives way to a scalar or nullable native return type
+assertType("Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symfony\Component\Config\Definition\Builder\TreeBuilder<'array'>>", $treeRootNode // SKIP: `static` as a type argument of a return type loses the receiver's own type arguments
 	->children()
 	->end());
 
-assertType("Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symfony\Component\Config\Definition\Builder\TreeBuilder<'array'>>", $treeRootNode // SKIP: a class template in @return gives way to a scalar or nullable native return type
+assertType("Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symfony\Component\Config\Definition\Builder\TreeBuilder<'array'>>", $treeRootNode // SKIP: `static` as a type argument of a return type loses the receiver's own type arguments
 	->children()
 	->scalarNode("protocol")
 	->end()
@@ -40,14 +40,14 @@ assertType("Symfony\Component\Config\Definition\Builder\ScalarNodeDefinition<Sym
 	->children()
 	->scalarNode("protocol"));
 
-assertType("Symfony\Component\Config\Definition\Builder\NodeBuilder<Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symfony\Component\Config\Definition\Builder\NodeBuilder<Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symfony\Component\Config\Definition\Builder\TreeBuilder<'array'>>>>>", $treeRootNode // SKIP: a class template in @return gives way to a scalar or nullable native return type
+assertType("Symfony\Component\Config\Definition\Builder\NodeBuilder<Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symfony\Component\Config\Definition\Builder\NodeBuilder<Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symfony\Component\Config\Definition\Builder\TreeBuilder<'array'>>>>>", $treeRootNode // SKIP: `static` as a type argument of a return type loses the receiver's own type arguments
 	->children()
 	->arrayNode("protocols")
 	->children()
 	->scalarNode("protocol")
 	->end());
 
-assertType("Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symfony\Component\Config\Definition\Builder\NodeBuilder<Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symfony\Component\Config\Definition\Builder\TreeBuilder<'array'>>>>", $treeRootNode // SKIP: a class template in @return gives way to a scalar or nullable native return type
+assertType("Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symfony\Component\Config\Definition\Builder\NodeBuilder<Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symfony\Component\Config\Definition\Builder\TreeBuilder<'array'>>>>", $treeRootNode // SKIP: `static` as a type argument of a return type loses the receiver's own type arguments
 	->children()
 	->arrayNode("protocols")
 	->children()
@@ -55,7 +55,7 @@ assertType("Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symf
 	->end()
 	->end());
 
-assertType("Symfony\Component\Config\Definition\Builder\NodeBuilder<Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symfony\Component\Config\Definition\Builder\TreeBuilder<'array'>>>", $treeRootNode // SKIP: a class template in @return gives way to a scalar or nullable native return type
+assertType("Symfony\Component\Config\Definition\Builder\NodeBuilder<Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symfony\Component\Config\Definition\Builder\TreeBuilder<'array'>>>", $treeRootNode // SKIP: `static` as a type argument of a return type loses the receiver's own type arguments
 	->children()
 	->arrayNode("protocols")
 	->children()
@@ -64,7 +64,7 @@ assertType("Symfony\Component\Config\Definition\Builder\NodeBuilder<Symfony\Comp
 	->end()
 	->end());
 
-assertType("Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symfony\Component\Config\Definition\Builder\TreeBuilder<'array'>>", $treeRootNode // SKIP: a class template in @return gives way to a scalar or nullable native return type
+assertType("Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symfony\Component\Config\Definition\Builder\TreeBuilder<'array'>>", $treeRootNode // SKIP: `static` as a type argument of a return type loses the receiver's own type arguments
 	->children()
 	->arrayNode("protocols")
 	->children()
@@ -74,7 +74,7 @@ assertType("Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symf
 	->end()
 	->end());
 
-assertType("Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symfony\Component\Config\Definition\Builder\TreeBuilder<'array'>>", $treeRootNode // SKIP: a class template in @return gives way to a scalar or nullable native return type
+assertType("Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symfony\Component\Config\Definition\Builder\TreeBuilder<'array'>>", $treeRootNode // SKIP: `static` as a type argument of a return type loses the receiver's own type arguments
 	->children()
 	->arrayNode("protocols")
 	->children()
@@ -101,8 +101,8 @@ $arrayTreeBuilder = new TreeBuilder('my_tree', 'array');
 $arrayRootNode = $arrayTreeBuilder->getRootNode();
 
 assertType("Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symfony\Component\Config\Definition\Builder\TreeBuilder<'array'>>", $arrayRootNode);
-assertType("Symfony\Component\Config\Definition\Builder\TreeBuilder<'array'>", $arrayRootNode->end()); // SKIP: a class template in @return gives way to a scalar or nullable native return type
-assertType("Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symfony\Component\Config\Definition\Builder\TreeBuilder<'array'>>", $arrayRootNode // SKIP: a class template in @return gives way to a scalar or nullable native return type
+assertType("Symfony\Component\Config\Definition\Builder\TreeBuilder<'array'>", $arrayRootNode->end());
+assertType("Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symfony\Component\Config\Definition\Builder\TreeBuilder<'array'>>", $arrayRootNode
 	->children()
 	->arrayNode("methods")
 	->prototype("scalar")
@@ -111,7 +111,7 @@ assertType("Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symf
 	->end()
 	->end());
 
-assertType("Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symfony\Component\Config\Definition\Builder\TreeBuilder<'array'>>", $arrayRootNode // SKIP: a class template in @return gives way to a scalar or nullable native return type
+assertType("Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symfony\Component\Config\Definition\Builder\TreeBuilder<'array'>>", $arrayRootNode // SKIP: `static` as a type argument of a return type loses the receiver's own type arguments
 	->children()
 	->arrayNode("methods")
 	->scalarPrototype()
@@ -120,7 +120,7 @@ assertType("Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symf
 	->end()
 	->end());
 
-assertType("Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symfony\Component\Config\Definition\Builder\TreeBuilder<'array'>>", $arrayRootNode // SKIP: a class template in @return gives way to a scalar or nullable native return type
+assertType("Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symfony\Component\Config\Definition\Builder\TreeBuilder<'array'>>", $arrayRootNode // SKIP: `static` as a type argument of a return type loses the receiver's own type arguments
 	->children()
 	->arrayNode("methods")
 	->prototype("scalar")
@@ -132,7 +132,7 @@ assertType("Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symf
 	->end()
 	->end());
 
-assertType("Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symfony\Component\Config\Definition\Builder\TreeBuilder<'array'>>", $arrayRootNode // SKIP: a class template in @return gives way to a scalar or nullable native return type
+assertType("Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symfony\Component\Config\Definition\Builder\TreeBuilder<'array'>>", $arrayRootNode // SKIP: `static` as a type argument of a return type loses the receiver's own type arguments
 	->children()
 	->arrayNode("methods")
 	->prototype("array")
@@ -150,39 +150,39 @@ $variableTreeBuilder = new TreeBuilder('my_tree', 'variable');
 $variableRootNode = $variableTreeBuilder->getRootNode();
 
 assertType("Symfony\Component\Config\Definition\Builder\VariableNodeDefinition<Symfony\Component\Config\Definition\Builder\TreeBuilder<'variable'>>", $variableRootNode);
-assertType("Symfony\Component\Config\Definition\Builder\TreeBuilder<'variable'>", $variableRootNode->end()); // SKIP: a class template in @return gives way to a scalar or nullable native return type
+assertType("Symfony\Component\Config\Definition\Builder\TreeBuilder<'variable'>", $variableRootNode->end());
 
 $scalarTreeBuilder = new TreeBuilder('my_tree', 'scalar');
 $scalarRootNode = $scalarTreeBuilder->getRootNode();
 
 assertType("Symfony\Component\Config\Definition\Builder\ScalarNodeDefinition<Symfony\Component\Config\Definition\Builder\TreeBuilder<'scalar'>>", $scalarRootNode);
 assertType("Symfony\Component\Config\Definition\Builder\ScalarNodeDefinition<Symfony\Component\Config\Definition\Builder\TreeBuilder<'scalar'>>", $scalarRootNode->defaultValue("default"));
-assertType("Symfony\Component\Config\Definition\Builder\TreeBuilder<'scalar'>", $scalarRootNode->defaultValue("default")->end()); // SKIP: a class template in @return gives way to a scalar or nullable native return type
+assertType("Symfony\Component\Config\Definition\Builder\TreeBuilder<'scalar'>", $scalarRootNode->defaultValue("default")->end());
 
 $booleanTreeBuilder = new TreeBuilder('my_tree', 'boolean');
 $booleanRootNode = $booleanTreeBuilder->getRootNode();
 
 assertType("Symfony\Component\Config\Definition\Builder\BooleanNodeDefinition<Symfony\Component\Config\Definition\Builder\TreeBuilder<'boolean'>>", $booleanRootNode);
 assertType("Symfony\Component\Config\Definition\Builder\BooleanNodeDefinition<Symfony\Component\Config\Definition\Builder\TreeBuilder<'boolean'>>", $booleanRootNode->defaultTrue());
-assertType("Symfony\Component\Config\Definition\Builder\TreeBuilder<'boolean'>", $booleanRootNode->defaultTrue()->end()); // SKIP: a class template in @return gives way to a scalar or nullable native return type
+assertType("Symfony\Component\Config\Definition\Builder\TreeBuilder<'boolean'>", $booleanRootNode->defaultTrue()->end());
 
 $integerTreeBuilder = new TreeBuilder('my_tree', 'integer');
 $integerRootNode = $integerTreeBuilder->getRootNode();
 
 assertType("Symfony\Component\Config\Definition\Builder\IntegerNodeDefinition<Symfony\Component\Config\Definition\Builder\TreeBuilder<'integer'>>", $integerRootNode);
 assertType("Symfony\Component\Config\Definition\Builder\IntegerNodeDefinition<Symfony\Component\Config\Definition\Builder\TreeBuilder<'integer'>>", $integerRootNode->min(0));
-assertType("Symfony\Component\Config\Definition\Builder\TreeBuilder<'integer'>", $integerRootNode->min(0)->end()); // SKIP: a class template in @return gives way to a scalar or nullable native return type
+assertType("Symfony\Component\Config\Definition\Builder\TreeBuilder<'integer'>", $integerRootNode->min(0)->end());
 
 $floatTreeBuilder = new TreeBuilder('my_tree', 'float');
 $floatRootNode = $floatTreeBuilder->getRootNode();
 
 assertType("Symfony\Component\Config\Definition\Builder\FloatNodeDefinition<Symfony\Component\Config\Definition\Builder\TreeBuilder<'float'>>", $floatRootNode);
 assertType("Symfony\Component\Config\Definition\Builder\FloatNodeDefinition<Symfony\Component\Config\Definition\Builder\TreeBuilder<'float'>>", $floatRootNode->max(5E45));
-assertType("Symfony\Component\Config\Definition\Builder\TreeBuilder<'float'>", $floatRootNode->max(5E45)->end()); // SKIP: a class template in @return gives way to a scalar or nullable native return type
+assertType("Symfony\Component\Config\Definition\Builder\TreeBuilder<'float'>", $floatRootNode->max(5E45)->end());
 
 $enumTreeBuilder = new TreeBuilder('my_tree', 'enum');
 $enumRootNode = $enumTreeBuilder->getRootNode();
 
 assertType("Symfony\Component\Config\Definition\Builder\EnumNodeDefinition<Symfony\Component\Config\Definition\Builder\TreeBuilder<'enum'>>", $enumRootNode);
 assertType("Symfony\Component\Config\Definition\Builder\EnumNodeDefinition<Symfony\Component\Config\Definition\Builder\TreeBuilder<'enum'>>", $enumRootNode->values(["standard", "expedited", "priority"]));
-assertType("Symfony\Component\Config\Definition\Builder\TreeBuilder<'enum'>", $enumRootNode->values(["standard", "expedited", "priority"])->end()); // SKIP: a class template in @return gives way to a scalar or nullable native return type
+assertType("Symfony\Component\Config\Definition\Builder\TreeBuilder<'enum'>", $enumRootNode->values(["standard", "expedited", "priority"])->end());

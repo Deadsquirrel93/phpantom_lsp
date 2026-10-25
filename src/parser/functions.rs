@@ -8,7 +8,7 @@ use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
 use crate::Backend;
-use crate::atom::{atom_bytes, bytes_to_str, literal_bytes_to_str};
+use crate::atom::{AtomMap, atom_bytes, bytes_to_str, literal_bytes_to_str};
 use crate::docblock;
 use crate::types::*;
 
@@ -137,6 +137,7 @@ impl Backend {
                         func.return_type_hint.as_ref(),
                         doc_ctx,
                         &[],
+                        &AtomMap::default(),
                     )
                     else {
                         continue;

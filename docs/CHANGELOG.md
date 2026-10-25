@@ -55,6 +55,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Class templates in `@return` beat scalar and nullable return types.** A method whose `@return` names a template of its class now returns what the class is instantiated with even when its native return type is a scalar union or nullable, so `$request->query->get('page')` is `string|null` and a Symfony tree builder's `->end()` returns the parent node without adding `null`.
 - **A property and a method of the same name are told apart.** Find References, rename, document highlight, and the reference count lens on a property like `$email` no longer pick up an `email()` method on the same class, and the method's no longer pick up the property.
 - **`enum-string` and `trait-string` accept enum and trait names.** `SomeEnum::class` passed or returned where an `enum-string` is declared, and `SomeTrait::class` where a `trait-string` is, is no longer reported, while the name of a different kind of class still is. `enum-string<SomeEnum>` and `trait-string<SomeTrait>` check the bound too.
 - **Deprecated classes are marked in type hierarchy.** The deprecation tag on a type hierarchy item is now sent as the list the protocol specifies, so editors that strike through deprecated entries do so.

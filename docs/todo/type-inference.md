@@ -503,7 +503,7 @@ than Symfony does. The extension's fixtures run against Symfony 7.4 in
   their parent, for the Symfony versions that do not declare them as
   generics yet. Symfony 7.4 does, and its fixtures follow those
   declarations; where they fail, the cause is
-  [B679](bugs.md#b679-a-class-template-in-return-gives-way-to-a-scalar-or-nullable-native-return-type).
+  [B681](bugs.md#b681-static-as-a-type-argument-of-a-return-type-loses-the-receivers-own-type-arguments).
 
 Where a rule fits a conditional return type, write it as a declarative
 patch on the vendor class (the way `virtual_members/laravel/patches.rs`
