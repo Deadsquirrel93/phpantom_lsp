@@ -35,6 +35,9 @@ contributor even though it's short.
 | D24  | [A `match` that does not cover every enum case is not reported](todo/diagnostics.md#d24-a-match-that-does-not-cover-every-enum-case-is-not-reported) | Medium | Medium |
 | D32 | [Discarding the result of a `#[\NoDiscard]` call is not reported](todo/diagnostics.md#d32-discarding-the-result-of-a-nodiscard-call-is-not-reported) | Low         | Low         |
 | D26  | [Reading a typed property that nothing initialises is not reported](todo/diagnostics.md#d26-reading-a-typed-property-that-nothing-initialises-is-not-reported) | Low-Medium | Medium-High |
+| D35 | [`clone($object, [...])` does not check the properties it writes](todo/diagnostics.md#d35-cloneobject--does-not-check-the-properties-it-writes) | Low         | Low-Medium  |
+| D36 | [A dynamic member name that cannot be a name is not reported](todo/diagnostics.md#d36-a-dynamic-member-name-that-cannot-be-a-name-is-not-reported) | Low         | Low-Medium  |
+| D37 | [A method only some members of a union declare is not reported](todo/diagnostics.md#d37-a-method-only-some-members-of-a-union-declare-is-not-reported) (depends on D21) | Low         | Medium-High |
 | F60 | [Advertise pull diagnostics to every client](todo/lsp-features.md#f60-advertise-pull-diagnostics-to-every-client) | Low-Medium  | Low-Medium |
 | F21 | [Static `typeHierarchyProvider` advertisement](todo/lsp-features.md#f21-static-typehierarchyprovider-advertisement) | Low-Medium  | Low |
 | X14  | [Ask Zed to expose `file_scan_exclusions` and `file_types` to extensions](todo/indexing.md#x14-ask-zed-to-expose-file_scan_exclusions-and-file_types-to-extensions) (upstream request) | Low | Low |

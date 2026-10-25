@@ -355,15 +355,6 @@ function name(Suit $s): string {
         Suit::Spades => 'spades',
     };
 }
-
-function describe(Suit $s): string {
-    if ($s->value === 'H') {
-        return 'hearts';
-    }
-    return match ($s) {          // must stay silent: only Spades reaches here
-        Suit::Spades => 'spades',
-    };
-}
 ```
 
 A `match` with no `default` arm throws `UnhandledMatchError` for any subject
@@ -372,17 +363,16 @@ union of enum cases, a `bool`, or a union of literals), subtract each arm's
 conditions from it and report what is left. PHPStan (`match.unhandled`),
 Psalm (`UnhandledMatchCondition`), mago and Qodana all do.
 
-The second function is part of the job, not a follow-up. The check can only
-stay quiet there if a comparison on a backed enum's `->value` narrows the
-enum itself, so `$s->value === 'H'` has to remove `Suit::Hearts` from `$s`
-on the fall-through path. Without that narrowing the check would be a new
-false positive. PHPStan and Psalm report the second function too, and the
-suite counts that against them. Each case already has a type of its own,
-and `$s === Suit::Hearts` already removes it from `$s`; what is missing is
-reading the `->value` comparison as the case whose value it names.
+Narrowing that already removes a case from the subject (`$s === Suit::Hearts`,
+`instanceof`, an early return) has to carry into the check. A comparison on
+`->value` (`$s->value === 'H'`) does not narrow the enum in any of those
+tools, and they all report the `match` after it, so doing the same is not a
+false positive by their standard.
 
 Found running the php-typing-conformance suite
-(`regressions_backed_enum_value_narrowing.php`). A quick fix to add the
+(`regressions_backed_enum_value_narrowing.php`). That file only passes the
+other tools through per-tool exemptions on the `->value`-guarded `match`;
+once this check lands, it needs the same exemption for PHPantom. A quick fix to add the
 missing arms is [H16](phpstan-actions.md#h16-matchunhandled-add-missing-match-arms) (`match.unhandled`), which could
 then attach to this diagnostic instead of only PHPStan's.
 
@@ -595,3 +585,86 @@ and `gedmo_property_assign*.fixture` in `tests/fixtures/phpstan_doctrine/`.
 for the read/write bookkeeping, the Doctrine mapping index in
 `src/framework.rs`, and PHPStan's `UnusedPrivatePropertyRule` with the
 Doctrine extension's `PropertiesExtension`s.
+
+---
+
+## D35. `clone($object, [...])` does not check the properties it writes
+
+**Impact: Low · Complexity: Low-Medium**
+
+```php
+final class Point { public function __construct(public int $x) {} }
+
+$p = new Point(1);
+$copy = clone($p, ['x' => 2]);        // fine
+clone($p, ['nope' => 1]);             // Error: Point has no $nope
+clone($p, ['x' => 'str']);            // TypeError: $x is int
+```
+
+PHP 8.5's two-argument `clone` writes each entry of the array onto the
+copy, with the same rules as a property assignment: the property has to
+exist and be writable from the calling scope, and the value has to match
+its type. The result type is already right. Treat each literal key of the
+second argument as a write to that property of the cloned class, and run
+it through the checks an `$copy->x = ...` assignment gets (unknown member,
+visibility, readonly, property type).
+
+Found running the php-typing-conformance suite
+(`objects_clone_with_properties.php`). PHPStan and Psalm report it.
+
+---
+
+## D36. A dynamic member name that cannot be a name is not reported
+
+**Impact: Low · Complexity: Low-Medium**
+
+```php
+function f(\Stringable $s, \stdClass $o, Target $t): void {
+    $t->{$s};      // fine: property names are string-cast
+    $t->{$o};      // Error: object of class stdClass could not be converted to string
+    $t->{$s}();    // Error: method name must be a string
+    $t->{$o}();    // Error: method name must be a string
+}
+```
+
+A dynamic property name goes through string conversion, so a `Stringable`
+object is a valid name and any other object is not. A dynamic method name
+must already be a string: PHP does not call `__toString()` for it. Report
+a selector expression whose resolved type cannot satisfy that rule. Stay
+silent when the selector type is unresolved or `mixed`.
+
+Found running the php-typing-conformance suite
+(`regressions_dynamic_name_stringable.php`). PHPStan (bleeding edge) and
+mago report it.
+
+---
+
+## D37. A method only some members of a union declare is not reported
+
+**Impact: Low · Complexity: Medium-High**
+
+```php
+final class User  { public function name(): string { return 'u'; } }
+final class Guest {}
+
+function f(User|Guest $v): void {
+    echo $v->name();   // Error whenever a Guest arrives
+}
+```
+
+The unknown-member check stays silent as soon as any branch of a union
+declares the member (see the module doc in
+`src/diagnostics/unknown_members/mod.rs`). That keeps it free of false
+positives while the resolver may have lost branches, but it misses a call
+that fails on every runtime path through one branch. PHPStan reports it at
+level 7 (`checkUnionTypes`).
+
+This builds on the per-branch verdicts [D21](#d21-a-union-of-an-unreachable-and-a-missing-member-is-reported-by-neither-check)
+asks for: only a union whose branches all resolved can be judged, and a
+branch with `__call`/`__get` still accepts the name. Consider a separate,
+lower-severity diagnostic so projects can turn it off without losing the
+plain unknown-member check.
+
+Found running the php-typing-conformance suite
+(`unions_partial_member_method_call.php`). PHPStan, Psalm, and mago
+report it; none of the IDE tools do.

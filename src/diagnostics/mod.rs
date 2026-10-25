@@ -267,6 +267,7 @@ mod match_type_errors;
 pub(crate) mod member_lookup;
 pub(crate) mod member_visibility;
 pub(crate) mod namespace_mismatch;
+mod override_attribute;
 mod property_type_errors;
 mod pull;
 mod readonly_writes;

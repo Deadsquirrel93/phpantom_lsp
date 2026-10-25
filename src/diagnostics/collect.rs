@@ -123,6 +123,10 @@ static SLOW_COLLECTORS: &[SlowCollector] = &[
         "incompatible_override",
         Backend::collect_incompatible_override_diagnostics_with_context,
     ),
+    always(
+        "invalid_override_attribute",
+        Backend::collect_override_attribute_diagnostics_with_context,
+    ),
     SlowCollector {
         name: "invalid_string_key",
         collect: Backend::collect_invalid_laravel_string_key_diagnostics,

@@ -653,3 +653,23 @@ class InvalidClassKindDemo
     // These also produce diagnostics but would crash at class-load time,
     // so they are commented out.  See the AGENTS.md hoisting pitfall note.
 }
+
+
+// ── Diagnostic: #[\Override] With Nothing to Override ───────────────────────
+// PHP refuses to load a class whose method (8.3+) or property (8.5+) is
+// marked #[\Override] when no parent class or interface declares it, so the
+// mistake is reported as an error.
+
+abstract class OverrideAttributeDemo extends Scaffolding\Model
+{
+    #[\Override]
+    public function getName(): string // fine: Model declares getName()
+    {
+        return 'demo';
+    }
+
+    // Try: uncomment the method below to see the error (PHP would refuse
+    // to load the class, so it stays commented out):
+    // #[\Override]
+    // public function getNickname(): string { return 'demo'; }
+}
