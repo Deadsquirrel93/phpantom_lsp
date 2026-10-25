@@ -58,6 +58,8 @@ struct ExtractionCtx<'a> {
     template_defs: Vec<TemplateParamDef>,
     /// Call-site records for signature help and conditional return types.
     call_sites: CallSites,
+    /// `(start, args_start)` of each call written as a statement of its own.
+    discarded_calls: Vec<(u32, u32)>,
     /// Ranges where `break` is valid (loops and `switch`).
     breakable_scopes: Vec<(u32, u32)>,
     /// Ranges where `continue` is valid (loops only).
@@ -335,6 +337,7 @@ fn extract_symbol_map_inner(
         assert_narrowing_offsets: Vec::new(),
         template_defs: Vec::new(),
         call_sites: CallSites::default(),
+        discarded_calls: Vec::new(),
         breakable_scopes: Vec::new(),
         loop_scopes: Vec::new(),
         switch_scopes: Vec::new(),
@@ -454,6 +457,9 @@ fn extract_symbol_map_inner(
 
     // Sort call_sites by args_start for reverse-scan lookup.
     ctx.call_sites.finish();
+    ctx.discarded_calls
+        .sort_unstable_by_key(|&(_, args_start)| args_start);
+    ctx.discarded_calls.shrink_to_fit();
     ctx.breakable_scopes.sort_by_key(|s| s.0);
     ctx.loop_scopes.sort_by_key(|s| s.0);
     ctx.switch_scopes.sort_by_key(|s| s.0);
@@ -486,6 +492,7 @@ fn extract_symbol_map_inner(
         assert_narrowing_offsets: ctx.assert_narrowing_offsets,
         template_defs: ctx.template_defs,
         call_sites: ctx.call_sites,
+        discarded_calls: ctx.discarded_calls,
         breakable_scopes: ctx.breakable_scopes,
         loop_scopes: ctx.loop_scopes,
         switch_scopes: ctx.switch_scopes,

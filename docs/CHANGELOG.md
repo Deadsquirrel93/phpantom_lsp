@@ -31,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The other folders of a multi-root workspace resolve.** Classes, functions, and constants declared in another folder of the editor's workspace now complete, resolve, and jump to their declaration from this one. That folder is treated as a library, like `vendor/`, so its own diagnostics and renames stay with the folder itself. Adding or removing a folder takes effect without a restart.
 - **Symfony services and parameters are typed.** In a Symfony project, `$container->get('app.mailer')` is the class the service is declared with, through any aliases, and `getParameter('app.sender')` has the type of the value the parameter is declared with. A query bus's `HandleTrait::handle()` returns what the message's handler returns.
 - **Config key hover shows the value.** Hovering a key in `config('app.name')` now shows what it holds: the value as written in the config file, or for an `env()` read, the environment variable, its default, and what `.env` sets it to. Values of variables whose names look like credentials stay hidden.
+- **Discarded `#[\NoDiscard]` results.** Calling a function or method marked `#[\NoDiscard]` as a statement of its own, without using its result or casting it to `(void)`, is now reported, the same warning PHP 8.5 raises.
 
 ### Changed
 

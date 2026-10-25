@@ -251,6 +251,10 @@ impl Backend {
                             is_pure,
                             is_impure,
                             reads_func_args,
+                            is_no_discard: super::has_no_discard_attribute(
+                                &func.attribute_lists,
+                                doc_ctx,
+                            ),
                             unverified_doc_types: Box::default(),
                         });
                     }

@@ -528,32 +528,6 @@ The extension's fixtures are the `entity_*.fixture` fixtures in
 
 ---
 
-## D32. Discarding the result of a `#[\NoDiscard]` call is not reported
-
-**Impact: Low · Complexity: Low**
-
-```php
-#[\NoDiscard]
-function mintId(): int { return 1; }
-
-mintId();          // PHP 8.5 warning: the return value is discarded
-echo mintId();     // fine
-(void) mintId();   // fine: the documented opt-out
-```
-
-PHP 8.5 warns when a function or method marked `#[\NoDiscard]` is called
-as a bare expression statement. Report a call statement whose resolved
-callee carries the attribute, unless it is cast to `(void)`. Only the
-callee's own attribute counts: PHP does not inherit it onto an
-implementation. A call without the attribute is never reported, so this
-is not a generic unused-result lint.
-
-Found running the php-typing-conformance suite
-(`directives_nodiscard_return.php`). Intelephense, PHPStan, Psalm, Phan
-and mago report it.
-
----
-
 ## D33. Private properties nothing reads or writes are not reported
 
 **Impact: Low-Medium · Complexity: Medium**

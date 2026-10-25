@@ -252,6 +252,11 @@ pub(crate) struct SymbolMap {
     /// Used by signature help to find the innermost call containing the
     /// cursor and to compute the active parameter index from AST data.
     pub call_sites: CallSites,
+    /// `(start, args_start)` of every call written as a statement of its
+    /// own, whose result is therefore thrown away, sorted by `args_start`.
+    /// A call cast to `(void)`, or used in any other way, is not one of
+    /// these.
+    pub discarded_calls: Vec<(u32, u32)>,
     /// Breakable block boundaries `(start_offset, end_offset)` where
     /// `break` is valid (loops and `switch`).
     pub breakable_scopes: Vec<(u32, u32)>,

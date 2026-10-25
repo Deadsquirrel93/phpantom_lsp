@@ -144,6 +144,7 @@ pub(super) fn extract_method<'a>(
         is_pure: info.is_some_and(docblock::declares_pure),
         is_impure: info.is_some_and(docblock::declares_impure),
         reads_func_args,
+        is_no_discard: crate::parser::has_no_discard_attribute(&method.attribute_lists, doc_ctx),
         extras: MethodExtras {
             return_description: info.and_then(docblock::extract_return_description_from_info),
             links: info

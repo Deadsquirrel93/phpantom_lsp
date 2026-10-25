@@ -1361,6 +1361,7 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
             sym.add(sm.assert_narrowing_offsets.capacity() * 4);
             sym.add(sm.template_defs.capacity() * size_of::<crate::symbol_map::TemplateParamDef>());
             sym.add(sm.call_sites.heap_bytes());
+            sym.add(sm.discarded_calls.capacity() * 8);
             sym.add(sm.breakable_scopes.capacity() * 8);
             sym.add(sm.loop_scopes.capacity() * 8);
             sym.add(sm.switch_scopes.capacity() * 8);

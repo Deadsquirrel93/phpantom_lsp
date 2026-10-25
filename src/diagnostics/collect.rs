@@ -72,6 +72,10 @@ static SLOW_COLLECTORS: &[SlowCollector] = &[
         Backend::collect_argument_count_diagnostics_with_context,
     ),
     always(
+        "discarded_return_value",
+        Backend::collect_discarded_result_diagnostics_with_context,
+    ),
+    always(
         "type_mismatch_argument",
         Backend::collect_argument_type_diagnostics_with_context,
     ),

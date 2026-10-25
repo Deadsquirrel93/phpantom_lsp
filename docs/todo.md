@@ -33,7 +33,6 @@ contributor even though it's short.
 | #   | Item                                                                                                                                                            | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 | D24  | [A `match` that does not cover every enum case is not reported](todo/diagnostics.md#d24-a-match-that-does-not-cover-every-enum-case-is-not-reported) | Medium | Medium |
-| D32 | [Discarding the result of a `#[\NoDiscard]` call is not reported](todo/diagnostics.md#d32-discarding-the-result-of-a-nodiscard-call-is-not-reported) | Low         | Low         |
 | D26  | [Reading a typed property that nothing initialises is not reported](todo/diagnostics.md#d26-reading-a-typed-property-that-nothing-initialises-is-not-reported) | Low-Medium | Medium-High |
 | D35 | [`clone($object, [...])` does not check the properties it writes](todo/diagnostics.md#d35-cloneobject--does-not-check-the-properties-it-writes) | Low         | Low-Medium  |
 | D36 | [A dynamic member name that cannot be a name is not reported](todo/diagnostics.md#d36-a-dynamic-member-name-that-cannot-be-a-name-is-not-reported) | Low         | Low-Medium  |

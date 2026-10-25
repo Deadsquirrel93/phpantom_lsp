@@ -422,6 +422,33 @@ class ReadonlyWriteDemo
 }
 
 
+// ── Diagnostic: Discarded #[\NoDiscard] Results ─────────────────────────────
+// PHP 8.5 warns when a function or method marked `#[\NoDiscard]` is called as
+// a statement of its own, throwing its result away.  Cast the call to
+// `(void)` to discard the result on purpose.
+
+class DiscardedResultDemo
+{
+    #[\NoDiscard]
+    public function reserveSlot(): int
+    {
+        return 42;
+    }
+
+    public function demo(): void
+    {
+        // Warning — the reserved slot number is thrown away:
+        $this->reserveSlot();
+
+        // No diagnostic — the result is used:
+        echo $this->reserveSlot();
+
+        // No diagnostic — discarded on purpose:
+        (void) $this->reserveSlot();
+    }
+}
+
+
 // ── Diagnostic: Member Visibility ───────────────────────────────────────────
 // A member that exists is not automatically a member you may touch.  PHP
 // resolves the access to a declaration first and enforces that declaration's

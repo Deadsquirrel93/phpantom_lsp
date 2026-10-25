@@ -257,6 +257,7 @@ impl Backend {
                 parameters: result_method.parameters.clone(),
                 return_type: result_method.return_type.clone(),
                 reads_func_args: result_method.reads_func_args,
+                no_discard: result_method.is_no_discard,
                 owner_class: Some(owner.fqn()),
                 self_bound_params,
                 ..Default::default()
@@ -284,6 +285,7 @@ impl Backend {
                 parameters: m.parameters.clone(),
                 return_type: m.return_type.clone(),
                 reads_func_args: m.reads_func_args,
+                no_discard: m.is_no_discard,
                 owner_class: Some(owner.fqn()),
                 ..Default::default()
             };
@@ -361,6 +363,7 @@ impl Backend {
             parameters: result_method.parameters.clone(),
             return_type: result_method.return_type.clone(),
             reads_func_args: result_method.reads_func_args,
+            no_discard: result_method.is_no_discard,
             owner_class: Some(owner.fqn()),
             self_bound_params,
             ..Default::default()
@@ -373,6 +376,7 @@ impl Backend {
             parameters: func.parameters.clone(),
             return_type: func.return_type.clone(),
             reads_func_args: func.reads_func_args,
+            no_discard: func.is_no_discard,
             overloads: func.overloads.clone(),
             ..Default::default()
         }
@@ -416,6 +420,7 @@ impl Backend {
                 return ResolvedCallableTarget {
                     parameters: parameters.into(),
                     return_type: func.return_type.clone(),
+                    no_discard: func.is_no_discard,
                     self_bound_params: super::template_subs::self_bound_template_params(
                         &func.template_bindings,
                         &func.parameters,
