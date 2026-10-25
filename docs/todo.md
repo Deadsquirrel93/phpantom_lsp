@@ -37,7 +37,6 @@ contributor even though it's short.
 | D35 | [`clone($object, [...])` does not check the properties it writes](todo/diagnostics.md#d35-cloneobject--does-not-check-the-properties-it-writes) | Low         | Low-Medium  |
 | D36 | [A dynamic member name that cannot be a name is not reported](todo/diagnostics.md#d36-a-dynamic-member-name-that-cannot-be-a-name-is-not-reported) | Low         | Low-Medium  |
 | D37 | [A method only some members of a union declare is not reported](todo/diagnostics.md#d37-a-method-only-some-members-of-a-union-declare-is-not-reported) (depends on D21) | Low         | Medium-High |
-| F60 | [Advertise pull diagnostics to every client](todo/lsp-features.md#f60-advertise-pull-diagnostics-to-every-client) | Low-Medium  | Low-Medium |
 | F21 | [Static `typeHierarchyProvider` advertisement](todo/lsp-features.md#f21-static-typehierarchyprovider-advertisement) | Low-Medium  | Low |
 | X14  | [Ask Zed to expose `file_scan_exclusions` and `file_types` to extensions](todo/indexing.md#x14-ask-zed-to-expose-file_scan_exclusions-and-file_types-to-extensions) (upstream request) | Low | Low |
 | E1  | [Project-level phpstorm-stubs for go-to-definition](todo/external-stubs.md#e1-project-level-phpstorm-stubs-for-gtd)                                             | Medium-High | Low         |

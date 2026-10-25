@@ -10,9 +10,11 @@
 //! fallback for older clients; it deliberately does not send the same native
 //! diagnostics through both channels for the same client.
 //!
+//! The `diagnostic_provider` capability is advertised to every client, but
+//! the delivery model follows the client's own declaration.
+//!
 //! - **Pull model** (preferred) — when the client advertises
-//!   `textDocument.diagnostic` support, the server registers a
-//!   `diagnostic_provider` capability.  The editor requests diagnostics
+//!   `textDocument.diagnostic` support.  The editor requests diagnostics
 //!   via `textDocument/diagnostic` for visible files and
 //!   `workspace/diagnostic` for all open files.  Cross-file invalidation
 //!   (e.g. a class signature change) sends `workspace/diagnostic/refresh`
@@ -25,7 +27,8 @@
 //!   server pushes diagnostics via `textDocument/publishDiagnostics`
 //!   from a debounced background worker.  Each `did_change` bumps a
 //!   version counter; the worker waits for a quiet period before
-//!   publishing.
+//!   publishing.  Each published set is also cached with a `resultId`,
+//!   so a pull from such a client answers with what was last published.
 
 use std::sync::Arc;
 use std::sync::atomic::Ordering;

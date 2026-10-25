@@ -1338,6 +1338,12 @@ deduplicate differently. The server therefore treats push as a compatibility
 fallback for older clients rather than mixing both transports for the same
 native diagnostic set.
 
+The `diagnosticProvider` capability itself is advertised to every client,
+so a tool that inspects the server's capabilities without declaring pull
+support sees it. Push delivery still caches each published set with a
+`resultId`, so a pull from a push client answers with what was last
+published instead of an empty set.
+
 Each worker is created during `initialized` via `clone_for_blocking`, which hands it a `Backend` sharing the main one's `BackendState`, so every worker sees all mutations the main `Backend` makes. The PHPStan and PHPCS workers each have their own notify handle, pending-URI slot, and diagnostic cache so they run independently of each other and of the native diagnostic worker.
 
 Non-`Arc` fields are snapshotted at spawn time: `php_version`, `vendor_uri_prefixes`, and `vendor_dir_paths`. These fields are only written during `initialized` (before the workers are spawned) and never change afterwards. If a future feature adds runtime PHP version changes, the workers would need to be notified or re-cloned. This invariant ("init-time fields are write-once") should be verified before adding any post-init mutation to these fields.

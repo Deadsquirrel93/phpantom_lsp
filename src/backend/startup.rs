@@ -166,8 +166,12 @@ impl Backend {
                         full: Some(Full::Bool(true)),
                     },
                 )),
-                diagnostic_provider: if caps.pull_diagnostics {
-                    Some(DiagnosticProvider::DiagnosticOptions(DiagnosticOptions {
+                // Advertised to every client: one that cannot pull ignores
+                // it, and a push client that pulls anyway is answered from
+                // the set last published.  Delivery mode still follows the
+                // client's own `textDocument.diagnostic` declaration.
+                diagnostic_provider: Some(DiagnosticProvider::DiagnosticOptions(
+                    DiagnosticOptions {
                         identifier: Some("phpantom".to_string()),
                         inter_file_dependencies: true,
                         // The workspace/diagnostic handler reports both
@@ -178,10 +182,8 @@ impl Backend {
                         work_done_progress_options: WorkDoneProgressOptions {
                             work_done_progress: None,
                         },
-                    }))
-                } else {
-                    None
-                },
+                    },
+                )),
                 execute_command_provider: Some(ExecuteCommandOptions {
                     commands: vec!["phpantom.navigateToPrototype".to_string()],
                     ..ExecuteCommandOptions::default()

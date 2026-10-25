@@ -199,7 +199,9 @@
 //! `textDocument/publishDiagnostics`.  As each source finishes, its
 //! cache is updated and the full assembled set is pushed.  The user
 //! sees results incrementally: fast diagnostics first, then slow,
-//! then PHPStan/PHPCS/Mago as each completes.
+//! then PHPStan/PHPCS/Mago as each completes.  The pushed set is also
+//! cached with a `resultId` as in pull mode, since pull support is
+//! advertised to every client and a push client may pull anyway.
 //!
 //! **Pull mode:** Nothing is pushed via `publishDiagnostics`.  The
 //! merged set is cached in `diag_last_full` with a bumped `resultId`
@@ -635,6 +637,57 @@ mod tests {
             assert_ne!(result_id(), seen_before_close);
             assert_ne!(result_id(), last_seen_before_close);
         }
+    }
+
+    /// Pull support is advertised to every client, so a push client may
+    /// send `textDocument/diagnostic` too. It must be answered with the
+    /// set last published rather than an empty set, and an unchanged set
+    /// must keep its `resultId` so a repeat pull answers `Unchanged`.
+    #[tokio::test]
+    async fn push_client_pull_returns_last_published_set() {
+        let backend = Backend::new_test();
+        assert!(!backend.caps().pull_diagnostics);
+        let uri = "file:///push.php";
+        backend.diag.last_fast.lock().insert(
+            uri.to_string(),
+            vec![Diagnostic {
+                range: Range::new(Position::new(0, 0), Position::new(0, 1)),
+                severity: Some(DiagnosticSeverity::Error),
+                message: "boom".to_string().into(),
+                ..Default::default()
+            }],
+        );
+
+        // Push mode never asks the client to re-pull.
+        assert!(!backend.assemble_and_push(uri).await);
+
+        let pull = |previous_result_id: Option<String>| {
+            backend
+                .document_pull_diagnostic(DocumentDiagnosticParams {
+                    text_document: TextDocumentIdentifier {
+                        uri: uri.parse().unwrap(),
+                    },
+                    identifier: None,
+                    previous_result_id,
+                    work_done_progress_params: Default::default(),
+                    partial_result_params: Default::default(),
+                })
+                .unwrap()
+        };
+
+        let DocumentDiagnosticReport::RelatedFullDocumentDiagnosticReport(full) = pull(None) else {
+            panic!("first pull must return the full set");
+        };
+        let report = full.full_document_diagnostic_report;
+        assert_eq!(report.items.len(), 1);
+        assert_eq!(report.items[0].message, "boom".to_string().into());
+
+        // Re-publishing the same set leaves the client's result valid.
+        backend.assemble_and_push(uri).await;
+        assert!(matches!(
+            pull(report.result_id),
+            DocumentDiagnosticReport::RelatedUnchangedDocumentDiagnosticReport(_)
+        ));
     }
 
     /// `publish_diagnostics_for_file` must not resurrect a closed file's

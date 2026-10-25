@@ -178,12 +178,13 @@ impl Backend {
     /// analyze) caches its results independently.  This helper merges
     /// them into one set, deduplicates, and filters suppressions.
     ///
-    /// **Push mode:** The merged set is published via
+    /// Both modes cache the full merged set in `diag_last_full` with a
+    /// bumped `resultId` so the next pull response returns it.
+    ///
+    /// **Push mode:** The merged set is also published via
     /// `textDocument/publishDiagnostics`.
     ///
-    /// **Pull mode:** Nothing is pushed.  The full merged set is cached
-    /// in `diag_last_full` with a bumped `resultId` so the next pull
-    /// response returns it; the caller triggers
+    /// **Pull mode:** Nothing is pushed.  The caller triggers
     /// `workspace/diagnostic/refresh` so the editor re-pulls.  Editors
     /// that support pull diagnostics merge pushed and pulled sets
     /// additively, so pushing anything here would duplicate native
@@ -336,45 +337,53 @@ impl Backend {
             cache.insert(uri_str.to_string(), pruned);
         }
 
+        // Cache the merged set in both modes.  Pull-capable clients use
+        // `textDocument/diagnostic` as the single source of truth for
+        // native diagnostics, so in pull mode nothing is pushed and the
+        // caller triggers `workspace/diagnostic/refresh` instead.  Pull
+        // support is advertised to every client, so a push client may
+        // pull too, and it gets what was last published.
+        //
+        // A run that reproduces the cached set leaves both the cache and
+        // the `resultId` alone, so a pull still answers `Unchanged` and
+        // the caller skips the refresh.  A missing cache entry counts as
+        // changed: the client has nothing yet.
+        //
+        // The set and its `resultId` change under one `last_full` guard,
+        // so a racing pull never sees the new set paired with the old id
+        // (which would answer `Unchanged` for a set that just changed).
         let pull_mode = self.caps().pull_diagnostics;
-
-        if pull_mode {
-            // ── Pull mode ───────────────────────────────────────────
-            // Pull-capable clients use `textDocument/diagnostic` as the
-            // single source of truth for native diagnostics.  We only cache
-            // the merged set here; the caller triggers
-            // `workspace/diagnostic/refresh` so the editor re-pulls.  This
-            // avoids duplicate diagnostics in clients that keep pushed and
-            // pulled diagnostics in separate namespaces.
-            //
-            // A run that reproduces the cached set leaves both the cache
-            // and the `resultId` alone, so a pull still answers
-            // `Unchanged` and the caller skips the refresh.  A missing
-            // cache entry counts as changed: the client has nothing yet.
-            //
-            // The set and its `resultId` change under one `last_full`
-            // guard, so a racing pull never sees the new set paired with
-            // the old id (which would answer `Unchanged` for a set that
-            // just changed).
+        let changed = {
             let mut cache = self.diag.last_full.lock();
             if cache.get(uri_str).is_some_and(|prev| *prev == full) {
-                return false;
+                false
+            } else {
+                // Push mode still needs its own copy to publish.
+                let cached = if pull_mode {
+                    std::mem::take(&mut full)
+                } else {
+                    full.clone()
+                };
+                cache.insert(uri_str.to_string(), cached);
+                let id = self.diag.result_id_seq.fetch_add(1, Ordering::Relaxed) + 1;
+                self.diag.result_ids.lock().insert(uri_str.to_string(), id);
+                true
             }
-            cache.insert(uri_str.to_string(), full);
-            let id = self.diag.result_id_seq.fetch_add(1, Ordering::Relaxed) + 1;
-            self.diag.result_ids.lock().insert(uri_str.to_string(), id);
-            true
-        } else {
-            // ── Push mode ───────────────────────────────────────────
-            let Some(client) = &self.client else {
-                return false;
-            };
-            // Nothing left to serialize: push mode caches nothing, it
-            // only publishes the merged set inline.
-            drop(assemble_guard);
-            client.publish_diagnostics(uri, full, None).await;
-            false
+        };
+
+        if pull_mode {
+            return changed;
         }
+
+        // ── Push mode ───────────────────────────────────────────────
+        // Publishing sends exactly one copy; the cache above only serves
+        // a pull the client chooses to make.
+        let Some(client) = &self.client else {
+            return false;
+        };
+        drop(assemble_guard);
+        client.publish_diagnostics(uri, full, None).await;
+        false
     }
 
     /// Ask the editor to re-pull diagnostics.
@@ -509,8 +518,8 @@ impl Backend {
     /// scheduled by the caller).
     ///
     /// Queues those files for the debounced background worker in both
-    /// modes.  In pull mode, the cached full diagnostic set for each
-    /// file is also invalidated up front (its resultId is kept) so a
+    /// modes.  The cached full diagnostic set for each file is also
+    /// invalidated up front (its resultId is kept) so a
     /// pull that lands before the worker finishes triggers a fresh
     /// computation instead of returning diagnostics from before the
     /// save.
@@ -521,14 +530,12 @@ impl Backend {
             return;
         }
 
-        let pull_mode = self.caps().pull_diagnostics;
-
         let uris = self.open_files_affected_by_save(exclude_uri);
         if uris.is_empty() {
             return;
         }
 
-        if pull_mode {
+        {
             // Invalidate cached full diagnostics so the next pull
             // triggers a fresh computation.  Do NOT remove resultIds —
             // see the comment in schedule_diagnostics for why.
