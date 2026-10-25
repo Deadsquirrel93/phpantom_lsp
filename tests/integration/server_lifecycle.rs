@@ -30,6 +30,44 @@ async fn test_initialize_capabilities() {
 }
 
 #[tokio::test]
+async fn test_initialize_advertises_type_hierarchy_statically() {
+    let backend = create_test_backend();
+    let result = backend
+        .initialize(InitializeParams::default())
+        .await
+        .unwrap();
+
+    assert_eq!(
+        result.capabilities.type_hierarchy_provider,
+        Some(TypeHierarchyProvider::Bool(true)),
+        "a client without dynamic registration needs the static capability"
+    );
+}
+
+#[tokio::test]
+async fn test_initialize_leaves_type_hierarchy_to_dynamic_registration() {
+    let backend = create_test_backend();
+    let params = InitializeParams {
+        capabilities: ClientCapabilities {
+            text_document: Some(TextDocumentClientCapabilities {
+                type_hierarchy: Some(TypeHierarchyClientCapabilities {
+                    dynamic_registration: Some(true),
+                }),
+                ..TextDocumentClientCapabilities::default()
+            }),
+            ..ClientCapabilities::default()
+        },
+        ..InitializeParams::default()
+    };
+    let result = backend.initialize(params).await.unwrap();
+
+    assert_eq!(
+        result.capabilities.type_hierarchy_provider, None,
+        "a client that registers type hierarchy dynamically must not also get it statically"
+    );
+}
+
+#[tokio::test]
 async fn test_did_open_stores_file() {
     let backend = create_test_backend();
 

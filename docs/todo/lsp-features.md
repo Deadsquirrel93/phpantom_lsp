@@ -243,37 +243,6 @@ machinery to produce the `WorkspaceEdit`. The companion
 
 ---
 
-## F21. Static `typeHierarchyProvider` advertisement
-
-**Impact: Low-Medium · Complexity: Low**
-
-Type hierarchy (`textDocument/prepareTypeHierarchy`,
-`typeHierarchy/supertypes`, `typeHierarchy/subtypes`) is fully
-implemented (`src/type_hierarchy.rs`) and registered dynamically via
-`client/registerCapability` in `initialized` (`src/backend/startup.rs`,
-using `type_hierarchy_registration()` from `server.rs`), gated on the client declaring
-`textDocument.typeHierarchy.dynamicRegistration: true`. This works for
-every client that supports dynamic registration, but there is no
-static fallback, so a client that supports type hierarchy without
-dynamic registration, or any tool that inspects only the `initialize`
-response's static capabilities (such as a feature-conformance probe),
-sees no type hierarchy support at all, even though the feature works
-end-to-end for a real editor that does the dynamic-registration round
-trip.
-
-`ServerCapabilities` has `type_hierarchy_provider:
-Option<TypeHierarchyProvider>`. Add static advertisement
-(`TypeHierarchyOptions` or the boolean variant) in `initialize`,
-conditional on the client *not* declaring `dynamicRegistration: true`
-for type hierarchy (avoid double-registering: send either the static
-capability or the dynamic registration, not both, per the client's
-declared support).
-
-**Where to look:** `src/backend/startup.rs` (`initialize`, `initialized`),
-`src/server.rs` (`type_hierarchy_registration`), `src/type_hierarchy.rs`.
-
----
-
 ## F22. Merge a namespace onto one that shares a class name
 
 **Impact: Low-Medium · Complexity: Medium-High**

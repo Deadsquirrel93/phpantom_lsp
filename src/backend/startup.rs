@@ -62,6 +62,10 @@ impl Backend {
         }
 
         let caps = ClientCaps::from_capabilities(&params.capabilities);
+        // A client that can register type hierarchy dynamically gets it
+        // from `initialized` instead, so it is never registered twice.
+        let type_hierarchy_provider = (!caps.type_hierarchy_dynamic_registration)
+            .then_some(TypeHierarchyProvider::Bool(true));
         *self.client_caps.write() = caps;
 
         Ok(InitializeResult {
@@ -109,6 +113,7 @@ impl Backend {
                 implementation_provider: Some(ImplementationProvider::Bool(true)),
                 references_provider: Some(ReferencesProvider::Bool(true)),
                 call_hierarchy_provider: Some(CallHierarchyProvider::Bool(true)),
+                type_hierarchy_provider,
                 document_highlight_provider: Some(DocumentHighlightProvider::Bool(true)),
                 code_action_provider: Some(CodeActionProvider::CodeActionOptions(
                     CodeActionOptions {
@@ -430,9 +435,9 @@ impl Backend {
         }
 
         // ── Dynamic capability registration ─────────────────────────
-        // Type hierarchy is advertised only through
-        // `client/registerCapability`, not as a static
-        // `type_hierarchy_provider` capability in `initialize`.
+        // Type hierarchy is registered here only for a client that
+        // supports it; any other client got the static
+        // `type_hierarchy_provider` capability from `initialize`.
         let mut registrations = Vec::new();
 
         if self.caps().type_hierarchy_dynamic_registration {
