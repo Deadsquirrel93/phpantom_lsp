@@ -182,6 +182,15 @@ one listed first wins. A directory holding a checkout of
 [phpstorm-stubs](https://github.com/JetBrains/phpstorm-stubs) is read
 from its `PhpStormStubsMap.php`, so only the files the map names count.
 
+Stub packages installed with Composer need no entry here. A package
+named `jetbrains/phpstorm-stubs`, `php-stubs/*`, or `*-stubs` (such as
+`php-stubs/wordpress-stubs` or `php-stubs/woocommerce-stubs`), or one
+whose `type` is `php-stubs` or `phpstorm-stubs`, is used as a stub path
+automatically, ranked below the paths listed here. Installing,
+updating, or removing one takes effect straight away.
+`phpstan/php-8-stubs` is the exception: PHPantom's own stubs of PHP's
+functions are more precise, so it stays ordinary vendor code.
+
 A stub file is never analysed, renamed into, or searched for references,
 whether it sits inside the workspace or not, and go-to-definition lands
 in it. Editing, adding, or removing a stub path takes effect straight

@@ -6,10 +6,10 @@ code, and core's functions and classes resolve only when the project
 indexes WordPress itself or a stub package for it.
 
 Most WordPress typing lives in `php-stubs/wordpress-stubs`, so the
-external stubs are the foundation for everything here. A project can
-already list the package under `[stubs] paths`; picking it up from
-Composer without configuration is
-[E2](external-stubs.md#e2-project-level-stubs-as-resolution-source). `global $wpdb;` being untyped is
+external stubs are the foundation for everything here. Installed with
+Composer, the package is a stub source with no configuration, as is
+`php-stubs/woocommerce-stubs`; a project without Composer can list
+either under `[stubs] paths`. `global $wpdb;` being untyped is
 a gap in the generic engine, tracked as
 [T57](type-inference.md#t57-a-global-variable-is-untyped-unless-a-var-sits-above-it).
 PHPStan's WordPress extension
@@ -206,7 +206,36 @@ Whatever WP2 finds that PHPStan's WordPress extension types and the
 stubs do not, typically a return type an argument decides:
 `get_posts(['fields' => 'ids'])` returning `int[]`,
 `get_post_meta($id, $key, true)` returning a single value rather than an
-array, `wp_parse_url($url, PHP_URL_HOST)`. Write each as a conditional
+array, `wp_parse_url($url, PHP_URL_HOST)`. Roots' Sage theme shows more:
+`wp_list_comments([..., 'echo' => false])` is declared `void|string`
+whatever `echo` says, and `get_post_time('c')` keeps the `int` only the
+`'U'` and `'G'` formats return. Write each as a conditional
 `@return` in an override stub
 ([E7](external-stubs.md#e7-stub-based-framework-patches)) rather than in
 Rust, and offer the ones that hold upstream to `php-stubs/wordpress-stubs`.
+
+---
+
+## WP8. Sage view composers
+
+**Impact: Medium · Complexity: Medium**
+
+Roots' Sage theme, through its Acorn framework, hands data to Blade views
+with composer classes under `app/View/Composers` that extend
+`Roots\Acorn\View\Composer`. Acorn registers every one itself, for the
+views its `protected static $views` lists (`'*'` for all of them), or a
+view named after the class when it lists none. A view gets the
+composer's public methods and properties as variables, each method
+called, or the keys of `with()` and `override()` when the class returns
+any from them. Nothing registers them through `View::composer()`, so
+in a stock Sage theme `$title`, `$pagination` and `$siteName` are
+reported as undefined in every partial that reads them.
+
+Feed these into the provider-registered variables the Blade declaration
+chain already reads for `View::composer()`, typed from each method's
+return type.
+
+**Where to look:** `src/blade/shared_vars.rs` and
+`src/virtual_members/laravel/view_data.rs`; Acorn's
+`Roots\Acorn\View\Composer` and its `Composers\Concerns\Extractable`
+for exactly which members count.

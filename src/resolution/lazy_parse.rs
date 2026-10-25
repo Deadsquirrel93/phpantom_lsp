@@ -286,10 +286,11 @@ impl Backend {
         }
 
         // Apply class stub patches for phpstorm-stubs deficiencies
-        // (e.g. ArrayIterator missing @template parameters).
-        // Only patch classes loaded from stub URIs to avoid touching
+        // (e.g. ArrayIterator missing @template parameters), to the
+        // embedded copy and to a checkout under a stub path alike.
+        // Only patch classes loaded from phpstorm-stubs to avoid touching
         // user code.
-        if crate::stubs::is_embedded_stub_uri(uri) {
+        if self.is_phpstorm_stubs_uri(uri) {
             for class in &mut classes {
                 crate::stub_patches::apply_class_stub_patches(class);
             }

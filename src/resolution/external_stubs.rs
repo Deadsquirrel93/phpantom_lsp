@@ -9,6 +9,7 @@
 
 use std::sync::Arc;
 
+use super::inflight::InflightGuard;
 use crate::Backend;
 use crate::types::{ClassInfo, DefineInfo, FunctionInfo};
 
@@ -88,9 +89,28 @@ impl Backend {
     /// A file a class lookup parsed counts as not parsed here: that parse
     /// only caches classes, while this one publishes the functions and
     /// constants too, and leaves the file's state behind to say so.
+    ///
+    /// Claimed like any other lazy parse, so the workers of a diagnostic
+    /// pass that all reach for built-ins at once parse each large stub
+    /// file once rather than once per worker.
     fn parse_external_stub_globals(&self, path: &std::path::Path) -> Option<String> {
         let uri = crate::util::path_to_uri(path);
-        if !self.files.read().contains_key(&uri) {
+        let parsed = || self.files.read().contains_key(&uri);
+        if parsed() {
+            return Some(uri);
+        }
+        let _guard = if self.parse_inflight.try_claim(&uri) {
+            Some(InflightGuard {
+                inflight: &self.parse_inflight,
+                uri: uri.clone(),
+            })
+        } else {
+            // The claim may be a class lookup's, which leaves the globals
+            // to this parse.
+            self.parse_inflight.wait_until_released(&uri);
+            None
+        };
+        if !parsed() {
             let content = crate::util::read_php_source(path)?;
             self.update_ast(&uri, &content);
         }

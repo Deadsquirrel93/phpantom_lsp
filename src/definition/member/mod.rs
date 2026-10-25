@@ -459,7 +459,7 @@ impl Backend {
         let (class_uri, class_content) =
             self.find_class_file_content(declaring_fqn, uri, content)?;
         if crate::stubs::is_embedded_stub_uri(&class_uri) {
-            return self.builtin_member_location(declaring_fqn, search_name, member_kind);
+            return None;
         }
         let member_position =
             Self::find_member_position(&class_content, search_name, member_kind, declaring_class)?;

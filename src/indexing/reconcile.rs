@@ -178,9 +178,44 @@ impl Backend {
         &self,
         matches: impl Fn(&Path) -> bool,
     ) -> HashMap<String, PathBuf> {
+        self.indexed_files_where(|_| true, matches)
+    }
+
+    /// [`indexed_files_matching`](Self::indexed_files_matching) for the
+    /// files under `trees`, each a directory or a single file.
+    ///
+    /// Answered from the URIs' prefixes, so the many URIs outside `trees`
+    /// are rejected without being decoded into a path.
+    pub(super) fn indexed_files_under(&self, trees: &[PathBuf]) -> HashMap<String, PathBuf> {
+        let prefixes: Vec<(String, String)> = trees
+            .iter()
+            .map(|tree| {
+                (
+                    crate::util::path_to_uri(tree),
+                    crate::util::dir_uri_prefix(tree),
+                )
+            })
+            .collect();
+        self.indexed_files_where(
+            |uri| {
+                prefixes
+                    .iter()
+                    .any(|(exact, prefix)| uri == exact || uri.starts_with(prefix.as_str()))
+            },
+            |path| trees.iter().any(|tree| path.starts_with(tree)),
+        )
+    }
+
+    /// The indexed files whose URI passes `uri_may_match` and whose path
+    /// then satisfies `matches`, leaving out the open documents.
+    fn indexed_files_where(
+        &self,
+        uri_may_match: impl Fn(&str) -> bool,
+        matches: impl Fn(&Path) -> bool,
+    ) -> HashMap<String, PathBuf> {
         let mut found: HashMap<String, PathBuf> = HashMap::new();
         let mut note = |uri: &str| {
-            if found.contains_key(uri) {
+            if !uri_may_match(uri) || found.contains_key(uri) {
                 return;
             }
             if let Some(path) = crate::util::uri_to_path(uri)
@@ -196,20 +231,29 @@ impl Backend {
         for uri in self.symbols.uri_classes_index.read().keys() {
             note(uri);
         }
-        // A file whose only symbols are functions or constants is in
-        // neither class index, and one that declares nothing at all is
-        // still parsed and still holds a symbol map.
-        for path in self.symbols.autoload_function_index.read().values() {
-            note(&crate::util::path_to_uri(path));
-        }
-        for path in self.symbols.autoload_constant_index.read().values() {
-            note(&crate::util::path_to_uri(path));
-        }
         for uri in self.uris_with_symbol_maps() {
             note(&uri);
         }
         for uri in self.parsed_uris.read().iter() {
             note(uri);
+        }
+        // A file whose only symbols are functions or constants is in
+        // neither class index, and one that declares nothing at all is
+        // still parsed and still holds a symbol map.  These indexes hold
+        // paths, so the path is tested before a URI is built for it.
+        let mut note_path = |path: &Path| {
+            if matches(path) {
+                let uri = crate::util::path_to_uri(path);
+                if uri_may_match(&uri) && !found.contains_key(&uri) {
+                    found.insert(uri, path.to_path_buf());
+                }
+            }
+        };
+        for path in self.symbols.autoload_function_index.read().values() {
+            note_path(path);
+        }
+        for path in self.symbols.autoload_constant_index.read().values() {
+            note_path(path);
         }
 
         // A document open in the editor is served whatever the indexing

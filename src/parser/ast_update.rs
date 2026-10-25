@@ -454,8 +454,9 @@ impl Backend {
         // from the stub-function and stub-class loaders — silently
         // dropping e.g. `array_map`'s template parameters and
         // breaking closure parameter inference for the rest of the
-        // session.
-        if crate::stubs::is_embedded_stub_uri(uri) {
+        // session.  A phpstorm-stubs checkout under a stub path has the
+        // same gaps, so it is corrected the same way.
+        if self.is_phpstorm_stubs_uri(uri) {
             for func in &mut functions {
                 crate::stub_patches::apply_function_stub_patches(func);
             }
@@ -532,17 +533,26 @@ impl Backend {
 
         // Build the precomputed symbol map while the AST is still alive.
         // This must happen before the `Program` (and its arena) are dropped.
-        let mut symbol_map = extract_symbol_map_for_index(
-            program,
-            content,
-            &owned_resolved,
-            self.is_symfony_project(),
-            self.is_twig_project(),
-        );
+        // A stub file is never analysed or searched for references, so the
+        // symbol map only matters once it is opened, which parses it again.
+        // Stub packages can run to megabytes, where the map is a third of
+        // the parse.
+        let is_open = self.open_files.read().contains_key(uri);
+        let mut symbol_map = if from_stub_path && !is_open {
+            SymbolMap::default()
+        } else {
+            extract_symbol_map_for_index(
+                program,
+                content,
+                &owned_resolved,
+                self.is_symfony_project(),
+                self.is_twig_project(),
+            )
+        };
         // An open file's slow diagnostics are built on the previous
         // pass's, which is only sound if that pass read an index built
         // from exactly the text it diagnosed.
-        if self.open_files.read().contains_key(uri) {
+        if is_open {
             symbol_map.source_hash = Some(SymbolMap::hash_source(content));
         }
         let symbol_map = Arc::new(symbol_map);

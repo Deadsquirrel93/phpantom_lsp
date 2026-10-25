@@ -14,19 +14,16 @@ impl Backend {
     /// Resolve a standalone constant to its `define('NAME', …)` call or
     /// `const` declaration, found the way the constant's value is.
     ///
-    /// A built-in constant has no file of its own, so it jumps to the
-    /// project's installed phpstorm-stubs, when there are any.
+    /// A built-in constant from the embedded stubs has no file of its own
+    /// to jump to.
     pub(super) fn resolve_constant_definition(&self, candidates: &[String]) -> Option<Location> {
         let candidates: Vec<&str> = candidates.iter().map(String::as_str).collect();
         let found = self.find_or_load_define(&candidates, DefineSearch::Exhaustive, |info| {
             (info.file_uri.clone(), info.name_offset)
         });
-        match found {
-            Some((file_uri, name_offset)) if !crate::stubs::is_embedded_stub_uri(&file_uri) => {
-                self.stored_offset_location(&file_uri, name_offset)
-            }
-            _ => self.builtin_constant_location(&candidates),
-        }
+        let (file_uri, name_offset) =
+            found.filter(|(file_uri, _)| !crate::stubs::is_embedded_stub_uri(file_uri))?;
+        self.stored_offset_location(&file_uri, name_offset)
     }
 
     /// Try to resolve a standalone function name to its definition.
@@ -38,9 +35,8 @@ impl Backend {
     /// stub lazily and caches it in `global_functions` for future lookups.
     ///
     /// When found, reads the source file and locates the `function name(`
-    /// declaration line.  A stub function (with a `phpantom-stub-fn://`
-    /// URI) has no file of its own, so it jumps to the project's installed
-    /// phpstorm-stubs, when there are any.
+    /// declaration line.  An embedded stub function (with a
+    /// `phpantom-stub-fn://` URI) has no file of its own to jump to.
     pub(crate) fn resolve_function_definition(&self, candidates: &[String]) -> Option<Location> {
         let find_function = || {
             let fmap = self.symbols.global_functions.read();
@@ -51,7 +47,7 @@ impl Backend {
         };
 
         // ── Step 1: Check global_functions (user code + cached stubs) ──
-        let (name, file_uri, name_offset) = match find_function() {
+        let (_, file_uri, name_offset) = match find_function() {
             Some(found) => found,
             None => {
                 // ── Step 2: Try embedded PHP stubs as fallback ──
@@ -64,7 +60,7 @@ impl Backend {
         };
 
         if crate::stubs::is_embedded_stub_uri(&file_uri) {
-            return self.builtin_function_location(name);
+            return None;
         }
 
         self.stored_offset_location(&file_uri, name_offset)

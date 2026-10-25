@@ -1,5 +1,6 @@
-//! The stub paths: the `[stubs]` entries of `.phpantom.toml` and the stub
-//! directory the editor extension forwards.
+//! The stub paths: the `[stubs]` entries of `.phpantom.toml`, the stub
+//! packages Composer installed, and the stub directory the editor
+//! extension forwards.
 //!
 //! What a stub path declares wins over every other declaration of the same
 //! name, PHP's embedded stubs included, which is what sets it apart from an
@@ -22,7 +23,8 @@ use crate::config;
 use crate::workspace_env::LibraryClaimant;
 
 /// Where each name the stub paths declare is declared, in priority order:
-/// the `[stubs]` paths in the order written, then the editor's directory.
+/// the `[stubs]` paths in the order written, then the Composer stub
+/// packages, then the editor's directory.
 #[derive(Default)]
 pub(crate) struct ExternalStubIndex {
     /// The stub paths the index was built from, as resolved.
@@ -32,6 +34,8 @@ pub(crate) struct ExternalStubIndex {
     /// Each tree's own `file://` URI, which a root that is a single file
     /// matches exactly, and its URI as a directory prefix.
     uri_prefixes: Vec<(String, String)>,
+    /// The URI prefixes of the roots that are phpstorm-stubs checkouts.
+    phpstorm_stubs_prefixes: Vec<String>,
     pub(crate) classes: CiMap<PathBuf>,
     pub(crate) functions: CiMap<PathBuf>,
     /// Keyed by name as declared: constants are case-sensitive.
@@ -50,6 +54,12 @@ impl ExternalStubIndex {
                 )
             })
             .collect();
+        let phpstorm_stubs_prefixes = roots
+            .iter()
+            .filter(|root| classmap_scanner::is_phpstorm_stubs_checkout(root))
+            .flat_map(|root| path_aliases(root))
+            .map(|tree| crate::util::dir_uri_prefix(&tree))
+            .collect();
         let mut classes = CiMap::new();
         for (name, path) in &scan.classmap {
             classes.insert(name.as_str(), path.clone());
@@ -62,6 +72,7 @@ impl ExternalStubIndex {
             roots,
             trees,
             uri_prefixes,
+            phpstorm_stubs_prefixes,
             classes,
             functions,
             constants: scan.constant_index.clone(),
@@ -78,6 +89,15 @@ impl ExternalStubIndex {
         self.uri_prefixes
             .iter()
             .any(|(exact, prefix)| uri == exact || uri.starts_with(prefix.as_str()))
+    }
+
+    /// Whether `uri` names a file of a stub path that is a phpstorm-stubs
+    /// checkout, which has the same gaps as the embedded copy and gets the
+    /// same corrections.
+    pub(crate) fn is_phpstorm_stubs_uri(&self, uri: &str) -> bool {
+        self.phpstorm_stubs_prefixes
+            .iter()
+            .any(|prefix| uri.starts_with(prefix.as_str()))
     }
 
     /// Whether `path` is under one of the stub paths.
@@ -103,14 +123,30 @@ impl Backend {
         self.has_external_stubs() && self.external_stubs.read().contains_uri(uri)
     }
 
+    /// Whether `uri` names phpstorm-stubs source, embedded or a stub path
+    /// holding a checkout, whose declarations [`crate::stub_patches`]
+    /// corrects.
+    pub(crate) fn is_phpstorm_stubs_uri(&self, uri: &str) -> bool {
+        crate::stubs::is_embedded_stub_uri(uri)
+            || (self.has_external_stubs() && self.external_stubs.read().is_phpstorm_stubs_uri(uri))
+    }
+
     /// The stub paths in priority order: the `[stubs]` paths that exist,
-    /// then the editor's stub directory if it exists and is not one of
-    /// them.
+    /// then the stub packages each Composer project installed, then the
+    /// editor's stub directory if it exists. A path already listed is not
+    /// listed again.
     pub(crate) fn stub_paths(&self) -> Vec<PathBuf> {
         let mut paths = match self.workspace.workspace_root.read().as_deref() {
             Some(root) => self.config().stubs.resolved_paths(root),
             None => Vec::new(),
         };
+        for project in self.workspace.composer_projects.read().iter() {
+            for package in &project.stub_packages {
+                if !paths.contains(package) {
+                    paths.push(package.clone());
+                }
+            }
+        }
         if let Some(path) = self.workspace.client_stubs.read().path.as_ref()
             && path.exists()
             && !paths.contains(path)
@@ -152,7 +188,7 @@ impl Backend {
         let symbol_count = index.classes.len() + index.functions.len() + index.constants.len();
 
         let trees: Vec<PathBuf> = previous.trees.iter().chain(&index.trees).cloned().collect();
-        let parsed = self.indexed_files_matching(|path| trees.iter().any(|t| path.starts_with(t)));
+        let parsed = self.indexed_files_under(&trees);
         self.evict_indexed_files(parsed);
 
         // The scanned names go into the discovery indexes too, so stub

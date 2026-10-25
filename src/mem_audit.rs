@@ -1854,7 +1854,6 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
         *backend.workspace.vendor_dir_paths.lock() = Default::default();
         *backend.workspace.vendor_package_origin_roots.write() = Default::default();
         *backend.workspace.composer_projects.write() = Default::default();
-        *backend.workspace.installed_stubs_map.write() = Default::default();
     });
     probe("diagnostic state", &mut || {
         *backend.diag.pending_uris.lock() = Default::default();

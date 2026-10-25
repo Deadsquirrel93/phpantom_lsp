@@ -568,13 +568,21 @@ fn drop_removed_declarations(
     }
 }
 
+/// Whether `dir` is a phpstorm-stubs checkout, which the stub-path scan
+/// reads from its `PhpStormStubsMap.php`.
+pub(crate) fn is_phpstorm_stubs_checkout(dir: &Path) -> bool {
+    dir.join(PHPSTORM_STUBS_MAP).is_file()
+}
+
+const PHPSTORM_STUBS_MAP: &str = "PhpStormStubsMap.php";
+
 /// The symbols of the phpstorm-stubs checkout at `dir`, read from its
 /// `PhpStormStubsMap.php`, or `None` when `dir` holds no such map.
 fn read_phpstorm_stubs_map(
     dir: &Path,
     origin: crate::ClassCompletionOrigin,
 ) -> Option<WorkspaceScanResult> {
-    let content = std::fs::read_to_string(dir.join("PhpStormStubsMap.php")).ok()?;
+    let content = std::fs::read_to_string(dir.join(PHPSTORM_STUBS_MAP)).ok()?;
     let section = |name: &str| -> (
         HashMap<String, PathBuf>,
         HashMap<String, crate::ClassCompletionOrigin>,

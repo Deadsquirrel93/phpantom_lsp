@@ -139,6 +139,12 @@ impl Backend {
             }
         }
 
+        // After the rescans above, whose `replace_tree` over the vendor
+        // directory also dropped the discovery entries of the stub
+        // packages inside it, and which re-read which stub packages are
+        // installed.
+        self.refresh_stub_paths();
+
         // Clear all cached class info since vendor classes may have
         // changed versions.  The negative-cache clear comes last of the
         // three: it also retires the memoised class lookups, which must
@@ -203,7 +209,7 @@ impl Backend {
 
     /// Register where a Composer project keeps its code: the PSR-4
     /// mappings from its `composer.json` and from its path repositories,
-    /// and its vendor directory.
+    /// its vendor directory, and the stub packages it installed.
     ///
     /// A subproject's own mappings are made absolute; the workspace root's
     /// stay relative to it.  Returns the vendor directory both as
@@ -233,13 +239,19 @@ impl Backend {
         let vendor_path = project_root.join(&vendor_dir);
         self.add_vendor_dir(&vendor_path);
 
+        let installed = composer::read_installed_packages(project_root, &vendor_dir);
         // Include PSR-4 mappings from path-repository packages (local
         // packages symlinked into vendor/, e.g. internachi/modular modules).
-        mappings.extend(composer::extract_path_repo_psr4_mappings(
-            project_root,
-            &vendor_dir,
-        ));
+        if let Some(installed) = &installed {
+            mappings.extend(composer::path_repo_psr4_mappings(project_root, installed));
+        }
         self.set_project_psr4_mappings(project_root, mappings);
+        let stub_packages = installed
+            .as_ref()
+            .map(composer::stub_package_roots)
+            .unwrap_or_default();
+        composer_project_entry(&mut self.workspace.composer_projects.write(), project_root)
+            .stub_packages = stub_packages;
 
         (vendor_dir, vendor_path)
     }
@@ -272,7 +284,6 @@ impl Backend {
             .iter()
             .flat_map(|project| project.package_roots.iter().cloned())
             .collect();
-        *self.workspace.installed_stubs_map.write() = None;
     }
 
     /// Scan autoload files for a single project root and populate the

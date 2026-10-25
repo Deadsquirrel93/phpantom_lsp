@@ -297,3 +297,209 @@ fn a_declaration_removed_before_the_project_php_version_is_not_a_stub() {
             .contains_key("OLD_CONST")
     );
 }
+
+/// A Composer package to install: its name, its `type`, and its files as
+/// `(relative path, content)`.
+type Package<'a> = (&'a str, &'a str, &'a [(&'a str, &'a str)]);
+
+/// Install Composer packages into `root`: each goes under
+/// `vendor/<name>`, and `installed.json` lists them in order.
+fn install_packages(root: &Path, packages: &[Package]) {
+    write(root, "composer.json", "{}");
+    let mut entries = Vec::new();
+    for (name, kind, files) in packages {
+        for (relative, content) in *files {
+            write(root, &format!("vendor/{name}/{relative}"), content);
+        }
+        entries.push(serde_json::json!({
+            "name": name,
+            "type": kind,
+            "install-path": format!("../{name}"),
+        }));
+    }
+    write(
+        root,
+        "vendor/composer/installed.json",
+        &serde_json::json!({ "packages": entries }).to_string(),
+    );
+}
+
+const WORDPRESS_STUBS: &[(&str, &str)] = &[(
+    "wordpress-stubs.php",
+    "<?php\nclass WP_Post { public function fromWordPressStubs(): void {} }\nfunction add_action(string $hook, callable $callback): true {}\n",
+)];
+
+#[test]
+fn a_composer_stub_package_is_a_stub_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    install_packages(
+        root,
+        &[
+            ("php-stubs/wordpress-stubs", "library", WORDPRESS_STUBS),
+            (
+                "acme/extension-headers",
+                "php-stubs",
+                &[("acme.php", "<?php\nfunction acme_ext(): int {}\n")],
+            ),
+            (
+                "acme/runtime",
+                "library",
+                &[("Plain.php", "<?php\nclass NotAStub {}\n")],
+            ),
+        ],
+    );
+    let backend = Backend::new_test_with_workspace(root.to_path_buf(), Vec::new());
+    backend.rescan_composer_indexes(root, &[]);
+
+    assert_eq!(method_names(&backend, "WP_Post"), ["fromWordPressStubs"]);
+    assert!(backend.find_or_load_function(&["add_action"]).is_some());
+    assert!(backend.find_or_load_function(&["acme_ext"]).is_some());
+    assert!(backend.find_or_load_class("NotAStub").is_none());
+    let stub_uri = crate::util::path_to_uri(
+        &root
+            .join("vendor/php-stubs/wordpress-stubs/wordpress-stubs.php")
+            .canonicalize()
+            .unwrap(),
+    );
+    assert!(backend.is_external_stub_uri(&stub_uri));
+}
+
+#[test]
+fn signature_only_builtin_stubs_are_not_a_stub_package() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    install_packages(
+        root,
+        &[(
+            "phpstan/php-8-stubs",
+            "library",
+            &[(
+                "stubs/ext/standard/strlen.php",
+                "<?php\nfunction strlen(string $string): string {}\n",
+            )],
+        )],
+    );
+    let mut backend = Backend::new_test_with_all_stubs(
+        HashMap::new(),
+        HashMap::from([("strlen", "<?php\nfunction strlen(string $string): int {}\n")]),
+        HashMap::new(),
+    );
+    *backend.state_mut().workspace.workspace_root.write() = Some(root.to_path_buf());
+    backend.rescan_composer_indexes(root, &[]);
+
+    assert!(backend.stub_paths().is_empty());
+    let function = backend.find_or_load_function(&["strlen"]).unwrap();
+    assert_eq!(function.return_type_str().as_deref(), Some("int"));
+}
+
+#[test]
+fn composer_stub_packages_rank_between_the_config_paths_and_the_editor_directory() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write(root, "stubs/Foo.php", STUB_FOO);
+    install_packages(
+        root,
+        &[(
+            "acme/foo-stubs",
+            "library",
+            &[
+                ("Foo.php", PROJECT_FOO),
+                (
+                    "Bar.php",
+                    "<?php\nnamespace App;\nclass Bar { public function fromPackage(): void {} }\n",
+                ),
+            ],
+        )],
+    );
+    let bundled = tempfile::tempdir().unwrap();
+    write(
+        bundled.path(),
+        "Bar.php",
+        "<?php\nnamespace App;\nclass Bar { public function fromEditor(): void {} }\n",
+    );
+    let backend = backend_with_stub_paths(root, &["stubs"]);
+    backend.set_client_stub_options(ClientStubOptions {
+        path: Some(bundled.path().to_path_buf()),
+    });
+    backend.rescan_composer_indexes(root, &[]);
+
+    assert_eq!(method_names(&backend, "App\\Foo"), ["fromStub"]);
+    assert_eq!(method_names(&backend, "App\\Bar"), ["fromPackage"]);
+}
+
+#[test]
+fn a_composer_change_installs_and_removes_stub_packages() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    install_packages(root, &[]);
+    let backend = Backend::new_test_with_workspace(root.to_path_buf(), Vec::new());
+    backend.rescan_composer_indexes(root, &[]);
+    assert!(backend.find_or_load_function(&["add_action"]).is_none());
+
+    install_packages(
+        root,
+        &[("php-stubs/wordpress-stubs", "library", WORDPRESS_STUBS)],
+    );
+    backend.rescan_composer_indexes(root, &[root.join("composer.lock")]);
+    assert!(backend.find_or_load_function(&["add_action"]).is_some());
+    assert_eq!(method_names(&backend, "WP_Post"), ["fromWordPressStubs"]);
+
+    fs::remove_dir_all(root.join("vendor/php-stubs")).unwrap();
+    install_packages(root, &[]);
+    backend.rescan_composer_indexes(root, &[root.join("composer.lock")]);
+    assert!(backend.stub_paths().is_empty());
+    assert!(backend.find_or_load_function(&["add_action"]).is_none());
+    assert!(backend.find_or_load_class("WP_Post").is_none());
+}
+
+const RANGE_STUB: &str = "<?php\nfunction range($start, $end, int|float $step = 1): array {}\n";
+
+#[test]
+fn a_phpstorm_stubs_checkout_gets_the_embedded_corrections() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    install_packages(
+        root,
+        &[(
+            "jetbrains/phpstorm-stubs",
+            "library",
+            &[
+                (
+                    "PhpStormStubsMap.php",
+                    "<?php\nnamespace JetBrains\\PHPStormStub;\nfinal class PhpStormStubsMap\n{\nconst CLASSES = array (\n);\n\nconst FUNCTIONS = array (\n  'range' => 'standard/standard_8.php',\n);\n\nconst CONSTANTS = array (\n);\n}\n",
+                ),
+                ("standard/standard_8.php", RANGE_STUB),
+            ],
+        )],
+    );
+    let backend = Backend::new_test_with_workspace(root.to_path_buf(), Vec::new());
+    backend.rescan_composer_indexes(root, &[]);
+
+    let range = backend.find_or_load_function(&["range"]).unwrap();
+    let uri = backend
+        .symbols
+        .global_functions
+        .read()
+        .get("range")
+        .unwrap()
+        .0
+        .clone();
+    assert!(
+        uri.ends_with("/standard/standard_8.php"),
+        "range comes from the installed checkout, got {uri}"
+    );
+    assert!(range.conditional_return.is_some());
+}
+
+#[test]
+fn a_stub_path_that_is_not_phpstorm_stubs_is_left_as_written() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write(root, "stubs/range.php", RANGE_STUB);
+    let backend = backend_with_stub_paths(root, &["stubs"]);
+    backend.refresh_stub_paths();
+
+    let range = backend.find_or_load_function(&["range"]).unwrap();
+    assert!(range.conditional_return.is_none());
+}

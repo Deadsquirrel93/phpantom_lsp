@@ -2230,6 +2230,22 @@ fn test_declared_signature_wins_over_a_props_default() {
     );
 }
 
+/// A `null` default marks an optional prop the caller supplies, so it is
+/// declared `mixed` like a prop without a default rather than typed
+/// `null`, which would make `match ($type) { 'success' => … }` unreachable.
+#[test]
+fn test_preprocess_props_null_default_is_mixed() {
+    let content = "@props(['type' => null, 'message' => NULL])\n{{ $type }}\n";
+    let (php, _) = preprocess(content);
+    let prologue = prologue_of(&php);
+    assert!(
+        prologue.contains("/** @var mixed $type */")
+            && prologue.contains("/** @var mixed $message */"),
+        "a null-defaulted prop should be declared mixed: {}",
+        php
+    );
+}
+
 /// The array literal in `@props(...)` commonly spans multiple lines;
 /// the whole argument list must be read, not just the closing line, or
 /// every prop declared before the last line is lost.

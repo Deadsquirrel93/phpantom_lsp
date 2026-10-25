@@ -42,8 +42,6 @@
 //!   resolution (`$var` jump-to-definition, assignment / parameter /
 //!   foreach / catch detection, and type-hint resolution at definition
 //!   sites).
-//! - [`installed_stubs`]: Built-in symbols — the jump into the project's
-//!   installed phpstorm-stubs, which the embedded stubs have no file for.
 //! - [`global_symbols`]: Standalone constant and function definitions —
 //!   candidate lookup in the global maps, lazy parsing of autoload files,
 //!   and the jump to the stored name offset.
@@ -64,7 +62,6 @@ use crate::types::ClassInfo;
 mod blade_component;
 mod global_symbols;
 pub(crate) mod implementation;
-pub(crate) mod installed_stubs;
 pub(crate) mod member;
 mod resolve;
 mod type_definition;

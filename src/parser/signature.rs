@@ -20,7 +20,7 @@ use super::{
 
 /// The pieces of a function or method signature computed by
 /// [`extract_signature`].
-pub(super) struct Signature<'a> {
+pub(super) struct Signature {
     pub parameters: Vec<ParameterInfo>,
     /// The native return hint, or the `#[LanguageLevelTypeAware]` type
     /// that replaces it for the target PHP version.
@@ -28,9 +28,7 @@ pub(super) struct Signature<'a> {
     /// The native return type refined by `@return` and `#[ArrayShape]`.
     pub return_type: Option<PhpType>,
     pub conditional_return: Option<PhpType>,
-    /// The docblock text and its parse, for the extraction the caller
-    /// does itself.
-    pub docblock_text: Option<&'a str>,
+    /// The docblock's parse, for the extraction the caller does itself.
     pub docblock: Option<DocblockInfo>,
     pub template_params: Vec<Atom>,
     pub template_param_bounds: AtomMap<PhpType>,
@@ -58,7 +56,7 @@ pub(super) fn extract_signature<'a>(
     doc_ctx: Option<&DocblockCtx<'a>>,
     ctor_class_template_params: &[Atom],
     class_template_param_bounds: &AtomMap<PhpType>,
-) -> Option<Signature<'a>> {
+) -> Option<Signature> {
     let php_version = doc_ctx.and_then(|ctx| ctx.php_version);
     if let Some(ctx) = doc_ctx
         && let Some(ver) = php_version
@@ -103,7 +101,6 @@ pub(super) fn extract_signature<'a>(
             native_return_type,
             return_type,
             conditional_return: None,
-            docblock_text,
             docblock: doc_info,
             template_params: Vec::new(),
             template_param_bounds: AtomMap::default(),
@@ -202,7 +199,6 @@ pub(super) fn extract_signature<'a>(
         native_return_type,
         return_type,
         conditional_return,
-        docblock_text,
         docblock: doc_info,
         template_params,
         template_param_bounds,

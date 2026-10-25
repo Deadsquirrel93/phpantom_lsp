@@ -4,6 +4,8 @@
 //! definitions and `define('NAME', value)` constant declarations from
 //! the PHP AST.
 
+use std::collections::HashMap;
+
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
@@ -106,6 +108,10 @@ fn try_extract_function_exists_guard<'a>(condition: &'a Expression<'a>) -> Optio
     None
 }
 
+/// The indexes in a function list of the declarations of each name, keyed
+/// by the lowercased name and the namespace.
+type OverloadIndex = HashMap<(String, Option<String>), Vec<usize>>;
+
 impl Backend {
     /// Extract standalone function definitions from a sequence of statements.
     ///
@@ -115,6 +121,33 @@ impl Backend {
     pub(crate) fn extract_functions_from_statements<'a>(
         statements: impl Iterator<Item = &'a Statement<'a>>,
         functions: &mut Vec<FunctionInfo>,
+        current_namespace: &Option<String>,
+        doc_ctx: Option<&DocblockCtx<'a>>,
+    ) {
+        let mut by_name = OverloadIndex::default();
+        for (index, func) in functions.iter().enumerate() {
+            by_name
+                .entry((func.name.to_ascii_lowercase(), func.namespace.clone()))
+                .or_default()
+                .push(index);
+        }
+        Self::extract_functions_into(
+            statements,
+            functions,
+            &mut by_name,
+            current_namespace,
+            doc_ctx,
+        );
+    }
+
+    /// [`extract_functions_from_statements`](Self::extract_functions_from_statements)
+    /// with `by_name` indexing what `functions` already holds, so finding
+    /// the declaration an overload merges into does not scan every
+    /// function a stub file of thousands declared before it.
+    fn extract_functions_into<'a>(
+        statements: impl Iterator<Item = &'a Statement<'a>>,
+        functions: &mut Vec<FunctionInfo>,
+        by_name: &mut OverloadIndex,
         current_namespace: &Option<String>,
         doc_ctx: Option<&DocblockCtx<'a>>,
     ) {
@@ -216,18 +249,20 @@ impl Backend {
                     // in phpstorm-stubs for functions like `strtr`,
                     // `implode`, `array_keys`), add the new parameter
                     // list as an overload instead of pushing a duplicate.
-                    if let Some(existing) = functions.iter_mut().find(|f| {
-                        f.name.eq_ignore_ascii_case(&name)
-                                && f.namespace == *current_namespace
-                                // Only merge when parameter counts differ —
-                                // true overloads (strtr, implode) always
-                                // differ in arity.  Same-name functions
-                                // with the same param count are version
-                                // variants, not overloads.
-                                && f.parameters.len() != parameters.len()
-                    }) {
-                        existing.overloads.push(parameters);
+                    let same_name = by_name
+                        .entry((name.to_ascii_lowercase(), current_namespace.clone()))
+                        .or_default();
+                    // Only merge when parameter counts differ — true
+                    // overloads (strtr, implode) always differ in arity.
+                    // Same-name functions with the same param count are
+                    // version variants, not overloads.
+                    if let Some(&existing) = same_name
+                        .iter()
+                        .find(|&&i| functions[i].parameters.len() != parameters.len())
+                    {
+                        functions[existing].overloads.push(parameters);
                     } else {
+                        same_name.push(functions.len());
                         functions.push(FunctionInfo {
                             name,
                             name_offset,
@@ -270,9 +305,10 @@ impl Backend {
                         .map(|ident| bytes_to_str(ident.value()).to_string())
                         .filter(|s| !s.is_empty());
 
-                    Self::extract_functions_from_statements(
+                    Self::extract_functions_into(
                         namespace.statements().iter(),
                         functions,
+                        by_name,
                         &ns_name,
                         doc_ctx,
                     );
@@ -280,9 +316,10 @@ impl Backend {
                 // Recurse into block statements `{ ... }` to find nested
                 // function declarations.
                 Statement::Block(block) => {
-                    Self::extract_functions_from_statements(
+                    Self::extract_functions_into(
                         block.statements.iter(),
                         functions,
+                        by_name,
                         current_namespace,
                         doc_ctx,
                     );
@@ -300,9 +337,10 @@ impl Backend {
                     let guard_name = try_extract_function_exists_guard(if_stmt.condition);
                     let before = functions.len();
                     for_each_nested_statement_list(statement, |nested| {
-                        Self::extract_functions_from_statements(
+                        Self::extract_functions_into(
                             nested.iter(),
                             functions,
+                            by_name,
                             current_namespace,
                             doc_ctx,
                         );

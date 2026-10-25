@@ -527,13 +527,6 @@ impl Backend {
             }
         }
 
-        if let Some(location) = candidates
-            .iter()
-            .find_map(|fqn| self.builtin_class_location(fqn))
-        {
-            return Some(location);
-        }
-
         // ── Template parameter fallback ─────────────────────────────────
         // If no class was found, the name might be a template parameter
         // (e.g. `TKey`, `TModel`) defined in a `@template` tag on the
@@ -599,10 +592,7 @@ impl Backend {
             None => {
                 self.find_or_load_class(fqn);
                 let loaded = self.symbols.fqn_uri_index.read().get(fqn).cloned();
-                match loaded {
-                    Some(uri) => uri,
-                    None => return self.builtin_class_location(fqn),
-                }
+                loaded?
             }
         };
         self.find_definition_in_uri_classes_index_cross_file(fqn, &target_uri)
@@ -620,7 +610,7 @@ impl Backend {
         target_uri: &str,
     ) -> Option<Location> {
         if crate::stubs::is_embedded_stub_uri(target_uri) {
-            return self.builtin_class_location(fqn);
+            return None;
         }
         // Look up classes from uri_classes_index first, then fall back
         // to fqn_class_index and disk.  Each lock is dropped before
@@ -707,10 +697,11 @@ impl Backend {
 /// Matches on the full FQN so two namespaces declaring the same short
 /// name in one file never shadow each other.
 fn find_class_by_fqn<'a>(classes: &'a [Arc<ClassInfo>], fqn: &str) -> Option<&'a ClassInfo> {
+    // Class names are case-insensitive, so `new pdo` names `PDO`.
     let sn = short_name(fqn);
     classes
         .iter()
-        .find(|c| c.name == sn && c.fqn() == fqn)
+        .find(|c| c.name.eq_ignore_ascii_case(sn) && c.fqn().eq_ignore_ascii_case(fqn))
         .map(|c| &**c)
 }
 

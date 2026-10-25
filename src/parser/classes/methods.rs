@@ -53,7 +53,6 @@ pub(super) fn extract_method<'a>(
         native_return_type,
         return_type,
         conditional_return,
-        docblock_text: method_docblock_text,
         docblock: method_docblock_info,
         template_params: method_template_params,
         template_param_bounds: method_template_param_bounds,
@@ -176,7 +175,7 @@ pub(super) fn extract_method<'a>(
             throws: info
                 .map(docblock::extract_throws_tags_from_info)
                 .unwrap_or_default(),
-            if_this_is: method_docblock_text.and_then(crate::docblock::extract_if_this_is_type),
+            if_this_is: info.and_then(docblock::extract_if_this_is_type_from_info),
             // `@psalm-this-out` / `@phpstan-self-out`, so the forward
             // walker can re-bind the receiver's template arguments after a
             // call, the way an assignment re-binds a variable's type.
@@ -200,7 +199,7 @@ fn push_promoted_properties<'a>(
     doc_ctx: Option<&DocblockCtx<'a>>,
     class_template_params: &[Atom],
     class_template_param_bounds: &AtomMap<PhpType>,
-    signature: &mut Signature<'a>,
+    signature: &mut Signature,
     properties: &mut Vec<PropertyInfo>,
 ) {
     for param in method.parameter_list.parameters.iter() {

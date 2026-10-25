@@ -39,7 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Dynamic member names that cannot name a member.** A property name written as an expression that holds an array or an object without `__toString()`, and a method name that is not a string, are now reported, since PHP throws an `Error` for them. A `Stringable` object still names a property, but never a method.
 - **Properties `clone()` writes are checked.** The properties PHP 8.5's `clone($object, [...])` sets on the copy are checked like an assignment: a property the class does not have, one the calling code cannot write, or a value of the wrong type is reported. The keys also jump to their property and follow it through find-references and rename.
 - **Typed properties nothing initializes.** A typed property with no default that only its own class can assign, and that the class never does, is now reported, since reading it throws. Properties a framework fills through an attribute count as initialized, and so do the generated identifiers and version fields of Doctrine entities. A public one is reported where it is read: on an object fresh from `new`, before anything writes it. A readonly property the constructor assigns twice is reported too.
-- **Go-to-definition on PHP's own functions and classes.** In a project that installs `jetbrains/phpstorm-stubs` with Composer, go-to-definition on a built-in function, class, member, or constant opens its declaration in the installed stubs. Updating or removing the package takes effect without a restart.
+- **Stub packages installed with Composer.** A stub package such as `php-stubs/wordpress-stubs` or `php-stubs/woocommerce-stubs` works like a `[stubs]` path with nothing to configure, so WordPress and WooCommerce functions and classes resolve in a theme or plugin that requires them. An installed `jetbrains/phpstorm-stubs` takes over PHP's own functions and classes, and go-to-definition on a built-in opens it there. Installing, updating, or removing a package takes effect without a restart.
 
 ### Changed
 
@@ -68,6 +68,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Helper functions behind a `function_exists()` check.** A function declared inside `if (! function_exists(...))` in a file that Composer does not autoload directly, such as the Laravel helpers Roots' Acorn loads for Sage themes (`app()`, `config()`, `public_path()`), now resolves instead of being reported as unknown.
+- **Blade component props that default to `null`.** A prop declared as `'type' => null` in `@props` now accepts whatever the caller passes, instead of being treated as always `null`, which reported every `match` arm on it as unreachable.
+- **Go-to-definition on a class name written in a different case.** `new myclass()` now jumps to `class MyClass`, as PHP treats the two as the same name.
 - **Constants PHP has removed stay unknown.** A built-in constant removed before the project's PHP version, such as `ASSERT_QUIET_EVAL` on PHP 8, no longer resolves once another constant from the same extension has been used.
 - **Twig, YAML, and XML files keep their own extensions' features.** An editor that sends these files to PHPantom no longer gets its formatting, highlighting, outline, or folding in them in place of the ones the file's own extension provides. PHPantom answers there only for the PHP and framework names it reads.
 - **Type hierarchy in editors without dynamic registration.** Type hierarchy is now announced at startup to editors that cannot register it later, so they offer it too.

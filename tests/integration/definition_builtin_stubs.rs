@@ -1,5 +1,6 @@
 //! Go-to-definition on built-in symbols lands in the project's own copy of
-//! `jetbrains/phpstorm-stubs` when Composer installed one.
+//! `jetbrains/phpstorm-stubs` when Composer installed one, which is a stub
+//! source like any other stub package.
 
 use std::collections::HashMap;
 use std::fs;
@@ -272,31 +273,42 @@ async fn built_ins_have_no_definition_without_the_package() {
 }
 
 #[tokio::test]
-async fn type_resolution_keeps_using_the_embedded_stubs() {
+async fn type_resolution_uses_the_installed_stubs_over_the_embedded_ones() {
     let dir = tempfile::tempdir().unwrap();
     install_stubs(dir.path());
     let backend = backend_for(dir.path()).await;
-    let uri = open_app(&backend, dir.path()).await;
+    let uri = Uri::from_file_path(dir.path().join("enum.php")).unwrap();
+    // Only the installed `BackedEnum` declares `from()`.
+    let text = "<?php\nfunction f(\\BackedEnum $e) {\n    return $e::from(1);\n}\n";
+    open_php(&backend, &uri, text).await;
 
-    // Navigating parses the installed file, which must not make it a
-    // source of declarations.
-    for (line, character) in [(1, 12), (2, 9), (4, 3), (5, 7)] {
-        assert!(
-            goto_definition_at(&backend, &uri, line, character)
-                .await
-                .is_some()
-        );
-    }
-    let pdo_uri = backend
-        .fqn_uri_index()
-        .read()
-        .get("PDO")
-        .cloned()
-        .expect("PDO is indexed");
-    assert!(
-        !pdo_uri.contains("/vendor/"),
-        "the installed stub must not replace the embedded declaration, got: {pdo_uri}"
+    let mut diags = Vec::new();
+    backend.collect_unknown_member_diagnostics(uri.as_str(), text, &mut diags);
+    assert!(diags.is_empty(), "from() is declared: {diags:?}");
+    let core = stubs_root(dir.path()).join("Core/Core_c.php");
+    assert_lands_in(goto_definition_at(&backend, &uri, 2, 16).await, &core, 4);
+}
+
+#[tokio::test]
+async fn a_built_in_the_installed_stubs_lack_still_resolves() {
+    let dir = tempfile::tempdir().unwrap();
+    install_stubs(dir.path());
+    write(&dir.path().join("composer.json"), "{}");
+    let backend = Backend::new_test_with_all_stubs(
+        HashMap::from([("PDO", EMBEDDED_PDO), ("Newer", "<?php\nclass Newer {}\n")]),
+        HashMap::new(),
+        HashMap::new(),
     );
+    *backend.workspace_root().write() = Some(dir.path().to_path_buf());
+    backend.initialized(InitializedParams {}).await;
+    let uri = Uri::from_file_path(dir.path().join("newer.php")).unwrap();
+    let text = "<?php\nnew Newer();\nnew PDO('sqlite::memory:');\n";
+    open_php(&backend, &uri, text).await;
+
+    // An older installed copy has no `Newer`, so the embedded one answers.
+    let mut diags = Vec::new();
+    backend.collect_unknown_class_diagnostics(uri.as_str(), text, &mut diags);
+    assert!(diags.is_empty(), "both classes resolve: {diags:?}");
 }
 
 #[tokio::test]
