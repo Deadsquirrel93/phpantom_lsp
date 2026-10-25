@@ -502,9 +502,7 @@ impl Backend {
         // the merged cache — resolves them correctly.  Clearing here lets
         // the now-complete index rebuild every merge correctly.
         self.clear_resolved_class_cache();
-        self.laravel.auth_user_type_cache.write().clear();
-        *self.laravel.storage_disk_type_cache.write() = None;
-        self.laravel.aliases.invalidate();
+        self.laravel.clear_config_facts();
 
         // Scan project source for the remaining Laravel indexes (macros
         // were already scanned above, before the schema index load, so

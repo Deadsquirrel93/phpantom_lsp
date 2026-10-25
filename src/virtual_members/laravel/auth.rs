@@ -140,6 +140,8 @@ pub(crate) fn resolve_auth_user_type(
         .auth_user_type_cache
         .write()
         .insert(key, result.clone());
+    // A class loaded during the computation saw the seeded `None`.
+    backend.laravel.note_config_facts_change();
     result
 }
 

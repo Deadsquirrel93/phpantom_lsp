@@ -20,23 +20,6 @@ against that bar.
 
 ---
 
-## P84. Class lookups re-apply the Laravel patches on every call
-
-**Impact: Medium-High · Complexity: Medium**
-
-`find_or_load_class_typed` (`resolution/classes.rs`) memoises the indexed
-class but runs the auth, storage, macro and pivot refinements after the
-memo, on every lookup. When one applies, it copies the whole `ClassInfo`
-into a new `Arc`, which also defeats the pointer-identity shortcut in
-`forward_walk/scope_state/merge.rs`.
-
-Measured on the large Laravel app (debug `analyze`, 2026-10-19): 8.4M
-lookups, 400k of them copying, spend 47.7 s of the run's 371 CPU-seconds
-in the refinements (12.9%), 32.7 s of it in the copies alone. Memoise the
-refined class keyed on the indexed class and a generation that moves with
-the auth model, storage driver, macro and pivot registries, so a repeat
-lookup hands back the same `Arc`.
-
 ## P86. A Symfony app's generated `config/reference.php` is slow to parse
 
 **Impact: Medium · Complexity: Medium**

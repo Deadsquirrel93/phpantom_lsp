@@ -365,9 +365,7 @@ impl Backend {
         if self.reindex_files_batch(php_changes) || touches_config {
             self.clear_not_found_caches();
             self.clear_resolved_class_cache();
-            self.laravel.auth_user_type_cache.write().clear();
-            *self.laravel.storage_disk_type_cache.write() = None;
-            self.laravel.aliases.invalidate();
+            self.laravel.clear_config_facts();
             self.member_completion_cache.lock().clear();
         }
     }
