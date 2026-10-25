@@ -37,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Dynamic member names that cannot name a member.** A property name written as an expression that holds an array or an object without `__toString()`, and a method name that is not a string, are now reported, since PHP throws an `Error` for them. A `Stringable` object still names a property, but never a method.
 - **Properties `clone()` writes are checked.** The properties PHP 8.5's `clone($object, [...])` sets on the copy are checked like an assignment: a property the class does not have, one the calling code cannot write, or a value of the wrong type is reported. The keys also jump to their property and follow it through find-references and rename.
 - **Typed properties nothing initializes.** A typed property with no default that only its own class can assign, and that the class never does, is now reported, since reading it throws. Properties a framework fills through an attribute count as initialized, and so do the generated identifiers and version fields of Doctrine entities. A readonly property the constructor assigns twice is reported too.
+- **Go-to-definition on PHP's own functions and classes.** In a project that installs `jetbrains/phpstorm-stubs` with Composer, go-to-definition on a built-in function, class, member, or constant opens its declaration in the installed stubs. Updating or removing the package takes effect without a restart.
 
 ### Changed
 

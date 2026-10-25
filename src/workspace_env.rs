@@ -17,6 +17,7 @@ use parking_lot::{Mutex, RwLock};
 use crate::ClassCompletionOrigin;
 use crate::composer;
 use crate::config;
+use crate::definition::installed_stubs::InstalledStubsMap;
 use crate::types::PhpVersion;
 
 /// Workspace root, PSR-4 mappings, vendor locations, PHP version, and the
@@ -48,6 +49,10 @@ pub(crate) struct WorkspaceEnv {
     /// Kept per project so a `composer update` in one subproject replaces
     /// that subproject's share and leaves the others' alone.
     pub(crate) composer_projects: Arc<RwLock<Vec<ComposerProjectPaths>>>,
+    /// The installed `jetbrains/phpstorm-stubs` map that go-to-definition
+    /// on a built-in reads, parsed on first use and dropped whenever
+    /// `vendor_package_origin_roots` is replaced.
+    pub(crate) installed_stubs_map: Arc<RwLock<Option<Arc<InstalledStubsMap>>>>,
     /// The editor's workspace folders, as `initialize` and
     /// `workspace/didChangeWorkspaceFolders` report them.
     ///
@@ -158,6 +163,7 @@ impl WorkspaceEnv {
             library_claims: Mutex::new(Vec::new()),
             vendor_package_origin_roots: Arc::new(RwLock::new(Vec::new())),
             composer_projects: Arc::new(RwLock::new(Vec::new())),
+            installed_stubs_map: Arc::new(RwLock::new(None)),
             workspace_folders: Arc::new(RwLock::new(Vec::new())),
             php_version: Mutex::new(PhpVersion::default()),
             config: Arc::new(Mutex::new(config::Config::default())),
@@ -180,6 +186,7 @@ impl Clone for WorkspaceEnv {
             library_claims: Mutex::new(self.library_claims.lock().clone()),
             vendor_package_origin_roots: Arc::clone(&self.vendor_package_origin_roots),
             composer_projects: Arc::clone(&self.composer_projects),
+            installed_stubs_map: Arc::clone(&self.installed_stubs_map),
             workspace_folders: Arc::clone(&self.workspace_folders),
             php_version: Mutex::new(*self.php_version.lock()),
             config: Arc::clone(&self.config),

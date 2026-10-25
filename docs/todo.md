@@ -33,13 +33,12 @@ contributor even though it's short.
 | #   | Item                                                                                                                                                            | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 | D38 | [Reading a typed property before anything writes it is not reported](todo/diagnostics.md#d38-reading-a-typed-property-before-anything-writes-it-is-not-reported) | Low-Medium | Medium-High |
-| E1  | [Project-level phpstorm-stubs for go-to-definition](todo/external-stubs.md#e1-project-level-phpstorm-stubs-for-gtd)                                             | Medium-High | Low         |
 | E3  | [IDE-provided and `.phpantom.toml` stub paths](todo/external-stubs.md#e3-ide-provided-and-phpantomtoml-stub-paths) (depends on E2)                              | Low-Medium  | Low         |
 | P84 | [Class lookups re-apply the Laravel patches on every call](todo/performance.md#p84-class-lookups-re-apply-the-laravel-patches-on-every-call) | Medium-High | Medium |
 | F59 | [Send Twig, YAML, and XML documents to the server](todo/lsp-features.md#f59-send-twig-yaml-and-xml-documents-to-the-server) (server, VS Code extension, Zed PR) | Medium-High | Medium |
 | P85 | [One keystroke parses the open file three times](todo/performance.md#p85-one-keystroke-parses-the-open-file-three-times) | Medium | Medium-High |
 | L1  | [Facade completion](todo/laravel.md#l1-facade-completion-upstream-method-generator-improvement) (upstream `facade-documenter` PRs)                              | High        | High        |
-| E2  | [Project-level stubs as type resolution source](todo/external-stubs.md#e2-project-level-stubs-as-resolution-source) (depends on E1)                             | Medium      | High        |
+| E2  | [Project-level stubs as type resolution source](todo/external-stubs.md#e2-project-level-stubs-as-resolution-source)                                             | Medium      | High        |
 | BL1  | [Blade-aware code actions](todo/blade.md#bl1-blade-aware-code-actions)                                                      | Medium     | Medium-High |
 |     | **Release 1.0.0 + IDE extensions**                                                                                                                              |             |             |
 
@@ -113,8 +112,7 @@ ships, remove every row that names it.
 | #   | Item                                                                                                                                                            | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 | WP1 | [WordPress demo project and a real-world baseline](todo/wordpress.md#wp1-wordpress-demo-project-and-a-real-world-baseline) | High        | Low-Medium  |
-| E1  | [Project-level phpstorm-stubs for go-to-definition](todo/external-stubs.md#e1-project-level-phpstorm-stubs-for-gtd)                                             | Medium-High | Low         |
-| E2  | [Project-level stubs as type resolution source](todo/external-stubs.md#e2-project-level-stubs-as-resolution-source) (depends on E1)                             | Medium      | High        |
+| E2  | [Project-level stubs as type resolution source](todo/external-stubs.md#e2-project-level-stubs-as-resolution-source)                                             | Medium      | High        |
 | E3  | [IDE-provided and `.phpantom.toml` stub paths](todo/external-stubs.md#e3-ide-provided-and-phpantomtoml-stub-paths) (depends on E2)                              | Low-Medium  | Low         |
 | WP2 | [Audit what the WordPress stubs declare against the engine](todo/wordpress.md#wp2-audit-what-the-wordpress-stubs-declare-against-the-engine) (depends on E2 or E3) | High        | Low         |
 | WP4 | [Hook names](todo/wordpress.md#wp4-hook-names) | High        | Medium      |

@@ -39,6 +39,15 @@ signature packages pulled in as dependencies). A deliberate stub source
 (E2, E3) is different: it is how a user overrides internals, so it
 wins over the embedded stubs.
 
+Go-to-definition on a built-in lands in the project's installed
+`jetbrains/phpstorm-stubs` when Composer installed it
+(`src/definition/installed_stubs.rs`): its `PhpStormStubsMap.php` is
+read on the first such jump, and the declaration is found by parsing
+the file it names, without caching that parse as a source of
+declarations. The map is dropped whenever the Composer package roots
+are rebuilt, so a `composer update` or `remove` is seen on the next
+jump.
+
 This works well for the PHP standard library but has limitations:
 
 - **Version lag.** The embedded stubs are pinned to whatever version
@@ -53,11 +62,6 @@ This works well for the PHP standard library but has limitations:
   `phpstan/phpstan-extensions`, `php-stubs/wordpress-stubs`,
   `wimg/php-compatibility-stubs`, or hand-written project stubs
   cannot augment or override the built-in definitions.
-- **No GTD for built-in symbols.** Embedded stubs use synthetic
-  `phpantom-stub://` URIs with no on-disk file. Go-to-definition
-  returns nothing for `array_map`, `Iterator`, `PDO`, etc. If the
-  user has phpstorm-stubs (or another stub package) installed locally,
-  GTD could navigate to those real files.
 
 ---
 
@@ -213,8 +217,9 @@ and effectively skipped.
 `jetbrains/phpstorm-stubs` gets special treatment regardless of which
 source provides it. The package ships `PhpStormStubsMap.php`, a
 generated index that maps every class, function, and constant name to
-its file path. PHPantom's `build.rs` already parses this file at
-compile time. The same parsing logic can run at runtime.
+its file path. PHPantom's `build.rs` parses this file at compile time,
+and go-to-definition parses the installed copy at runtime with the
+same `src/stub_map.rs`.
 
 When phpstorm-stubs is found (in any source: `.phpantom.toml`,
 Composer vendor, IDE-provided path), PHPantom checks for the presence
@@ -241,70 +246,6 @@ The processing order at init is:
 This means phpstorm-stubs always provides the fast baseline, and
 other packages layer additional or overriding definitions on top
 according to their source priority.
-
----
-
-## E1. Project-level phpstorm-stubs for GTD
-
-**Goal:** When `jetbrains/phpstorm-stubs` is installed in the
-project's vendor directory, use those on-disk files for
-go-to-definition on built-in symbols. All other resolution (type
-information, completion, hover) continues to use the embedded stubs.
-
-This is the smallest useful increment: no new config, no new scanning,
-no priority changes. It solves the most frequent user complaint ("I
-can't Ctrl+Click on `array_map`").
-
-### Detection
-
-During `initialized`, after parsing `installed.json`, check whether
-the `jetbrains/phpstorm-stubs` package is present. If so, record the
-path to its install directory (e.g.
-`vendor/jetbrains/phpstorm-stubs/`).
-
-The stubs ship with `PhpStormStubsMap.php`, the same file PHPantom's
-`build.rs` reads at compile time. Parse it at runtime using the same
-`parse_section` logic to build class/function/constant name-to-path
-maps pointing at the on-disk files.
-
-### GTD changes
-
-When go-to-definition resolves a symbol to a `phpantom-stub://` or
-`phpantom-stub-fn://` URI (which currently returns `None` because
-there is no real file), check whether the project-level phpstorm-stubs
-path is available. If so, map the symbol name back to the on-disk
-stub file and return a `Location` pointing at the declaration.
-
-Finding the exact line within the stub file can reuse the existing
-member-lookup logic in `definition/member/file_lookup.rs` (read the
-file, parse it, find the symbol by name/offset).
-
-### Keeping the map current
-
-`composer update` can upgrade `jetbrains/phpstorm-stubs` or `composer
-remove` can drop it mid-session, and a map read once at startup would
-keep go-to-definition pointing at the old files, or at files that no
-longer exist. `rescan_composer_indexes` (`src/indexing/scan.rs`) runs on
-a `composer.lock` change; detect the package again there, from the same
-`installed.json` read, and rebuild the map from its current
-`PhpStormStubsMap.php`, or drop it when the package is gone, the way E2's
-"Keeping the indices current" does for its indices.
-
-### What this does NOT change
-
-- Type resolution still uses the embedded stubs. The on-disk stubs
-  are only consulted for navigation.
-- No new config options.
-- No scanning of stub files at init (just parsing the map file, which
-  is a single fast text scan).
-
-### Complexity
-
-Low. The map-parsing logic already exists in `build.rs` and can be
-extracted into a shared helper. The GTD fallback is a small addition
-to `class_declaration_location` / `resolve_function_definition` in
-`src/definition/resolve.rs` (the latter currently returns `None` for
-`phpantom-stub-fn://` URIs).
 
 ---
 
@@ -427,9 +368,10 @@ embedded stub constants.
 
 Since external stubs point at real on-disk files, go-to-definition
 works naturally. The `phpantom-ext-stub://` URI scheme carries the
-real file path, so GTD resolves to a navigable `Location`. This
-supersedes E1's GTD-only approach for any symbol that has
-an external stub (from any source).
+real file path, so GTD resolves to a navigable `Location`. For a
+symbol that has an external stub (from any source), this replaces the
+installed-phpstorm-stubs lookup go-to-definition does for the embedded
+declarations today.
 
 ### Interaction with embedded phpstorm-stubs
 
@@ -682,14 +624,11 @@ embedded stubs, built-in symbols would be invisible.
 
 | #   | Goal                                                      | Complexity  | Dependencies                                       |
 | --- | --------------------------------------------------------- | ----------- | -------------------------------------------------- |
-| E1  | GTD for built-in symbols via project-level phpstorm-stubs | Low         | None                                               |
 | E2  | Project-level stubs as a type resolution source           | High        | None (byte-level scanner already shipped)          |
 | E3  | IDE-provided and `.phpantom.toml` stub paths              | Low         | E2                                                 |
 | E7  | Stub-based framework patches (replace Rust patch system)  | Medium-High | E2 or E3                                           |
 
-E1 can be done immediately and independently. It provides
-immediate value (GTD on `array_map`, `PDO`, `Iterator`, etc.) with
-minimal code. E2 and E3 build on the byte-level scanning infrastructure
+E2 and E3 build on the byte-level scanning infrastructure
 already shipped for the project's own symbol discovery (see
 indexing.md's Current State) and on each other.
 

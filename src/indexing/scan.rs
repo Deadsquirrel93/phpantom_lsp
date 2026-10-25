@@ -272,6 +272,7 @@ impl Backend {
             .iter()
             .flat_map(|project| project.package_roots.iter().cloned())
             .collect();
+        *self.workspace.installed_stubs_map.write() = None;
     }
 
     /// Scan autoload files for a single project root and populate the

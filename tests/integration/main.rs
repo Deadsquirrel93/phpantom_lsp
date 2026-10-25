@@ -124,6 +124,7 @@ mod composer_autoload_edge_cases;
 mod crash_sandbox;
 mod crlf_edits;
 mod definition_blade;
+mod definition_builtin_stubs;
 mod definition_classes;
 mod definition_constants;
 mod definition_laravel;

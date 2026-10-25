@@ -527,6 +527,13 @@ impl Backend {
             }
         }
 
+        if let Some(location) = candidates
+            .iter()
+            .find_map(|fqn| self.builtin_class_location(fqn))
+        {
+            return Some(location);
+        }
+
         // ── Template parameter fallback ─────────────────────────────────
         // If no class was found, the name might be a template parameter
         // (e.g. `TKey`, `TModel`) defined in a `@template` tag on the
@@ -591,7 +598,11 @@ impl Backend {
             Some(uri) => uri,
             None => {
                 self.find_or_load_class(fqn);
-                self.symbols.fqn_uri_index.read().get(fqn).cloned()?
+                let loaded = self.symbols.fqn_uri_index.read().get(fqn).cloned();
+                match loaded {
+                    Some(uri) => uri,
+                    None => return self.builtin_class_location(fqn),
+                }
             }
         };
         self.find_definition_in_uri_classes_index_cross_file(fqn, &target_uri)
@@ -608,6 +619,9 @@ impl Backend {
         fqn: &str,
         target_uri: &str,
     ) -> Option<Location> {
+        if crate::stubs::is_embedded_stub_uri(target_uri) {
+            return self.builtin_class_location(fqn);
+        }
         // Look up classes from uri_classes_index first, then fall back
         // to fqn_class_index and disk.  Each lock is dropped before
         // calling parse_and_cache_file (which takes write locks).

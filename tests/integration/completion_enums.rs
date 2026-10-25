@@ -2207,32 +2207,15 @@ async fn test_goto_definition_backed_enum_value_property_not_function() {
 
     open_php(&backend, &uri, text).await;
 
-    // Click on "value" in `$value->value` on line 6 (character ~33)
+    // Click on "value" in `$value->value` on line 6 (character ~33).
+    // `BackedEnum::$value` is built in, which has no file to jump to
+    // without installed phpstorm-stubs, and the `value()` function in this
+    // file is not it.
     let result = goto_definition_at(&backend, &uri, 6, 33).await;
     assert!(
-        result.is_some(),
-        "Should resolve goto-definition for BackedEnum->value property"
+        result.is_none(),
+        "Should not jump to the value() function, got: {result:?}"
     );
-
-    match result.unwrap() {
-        DefinitionResponse::Definition(Definition::Location(location)) => {
-            // Must point into the BackedEnum stub, not the current file.
-            assert!(
-                location.uri.as_str().contains("phpantom-stub://"),
-                "Should resolve to the BackedEnum stub, not the current file. Got uri: {}",
-                location.uri
-            );
-            // The `$value` property is on line 5 of the stub (after two
-            // method declarations with `$value` parameters on lines 3–4).
-            assert_eq!(
-                location.range.start.line, 5,
-                "Should point to the `$value` property declaration (line 5 of stub), \
-                 not a method parameter. Got line: {}",
-                location.range.start.line
-            );
-        }
-        other => panic!("Expected Scalar location, got: {:?}", other),
-    }
 }
 
 /// Iterating over `Enum::cases()` in a foreach should resolve the value

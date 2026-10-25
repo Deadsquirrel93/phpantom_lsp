@@ -747,6 +747,10 @@ Class stub patches work the same way but are applied by `apply_class_stub_patche
 
 The `stub_constant_index` (`HashMap<&'static str, &'static str>`) is built at construction time from `STUB_CONSTANT_MAP`, mapping constant names like `PHP_EOL`, `PHP_INT_MAX`, `SORT_ASC` to their stub file source. It is consulted by the constant-value loader (`Backend::constant_loader`) during variable type resolution: when a variable is assigned from a global constant (e.g. `$eol = PHP_EOL`), the loader extracts the constant's initializer value from the stub source and the type is inferred from the literal (`string`, `int`, `float`, `bool`, `null`, or `array`). The same lookup chain also serves hover, completion of standalone constant names, and go-to-definition.
 
+### Go-to-Definition on Built-ins
+
+An embedded stub has no file to open, so a jump to a built-in class, member, function, or constant goes to the project's own copy of `jetbrains/phpstorm-stubs` when Composer installed one (`definition/installed_stubs.rs`). The package root comes from the Composer package roots indexing already records; its `PhpStormStubsMap.php` is parsed with the same `stub_map.rs` that `build.rs` uses, on the first such jump, and cached until the package roots are next rebuilt (a `composer.lock` change). The file the map names is parsed only to find the declaration's offset, version-filtered like the embedded stubs, and never cached: types still come from the embedded stubs. Without the package, the jump finds nothing.
+
 ### Version-Aware Filtering
 
 phpstorm-stubs annotate functions, methods, and parameters with `#[PhpStormStubsElementAvailable]` attributes to indicate which PHP versions they apply to. For example, `array_map` has two variants of its second parameter: `array $array` (from PHP 8.0) and an untyped `$arrays` (PHP 5.3 to 7.4). Without filtering, both appear in signatures.

@@ -10,27 +10,23 @@ use super::point_location;
 use crate::Backend;
 use crate::resolution::DefineSearch;
 
-/// The value stored under the first candidate name `lookup` finds.
-fn first_candidate<'m, T>(
-    candidates: &[String],
-    lookup: impl Fn(&str) -> Option<&'m T>,
-) -> Option<&'m T> {
-    candidates.iter().find_map(|c| lookup(c.as_str()))
-}
-
 impl Backend {
     /// Resolve a standalone constant to its `define('NAME', …)` call or
     /// `const` declaration, found the way the constant's value is.
     ///
-    /// Built-in constants from `stub_constant_index` are not navigable
-    /// (they have no real file).
+    /// A built-in constant has no file of its own, so it jumps to the
+    /// project's installed phpstorm-stubs, when there are any.
     pub(super) fn resolve_constant_definition(&self, candidates: &[String]) -> Option<Location> {
         let candidates: Vec<&str> = candidates.iter().map(String::as_str).collect();
-        let (file_uri, name_offset) =
-            self.find_or_load_define(&candidates, DefineSearch::Exhaustive, |info| {
-                (info.file_uri.clone(), info.name_offset)
-            })?;
-        self.stored_offset_location(&file_uri, name_offset)
+        let found = self.find_or_load_define(&candidates, DefineSearch::Exhaustive, |info| {
+            (info.file_uri.clone(), info.name_offset)
+        });
+        match found {
+            Some((file_uri, name_offset)) if !crate::stubs::is_embedded_stub_uri(&file_uri) => {
+                self.stored_offset_location(&file_uri, name_offset)
+            }
+            _ => self.builtin_constant_location(&candidates),
+        }
     }
 
     /// Try to resolve a standalone function name to its definition.
@@ -42,35 +38,33 @@ impl Backend {
     /// stub lazily and caches it in `global_functions` for future lookups.
     ///
     /// When found, reads the source file and locates the `function name(`
-    /// declaration line.  Stub functions (with `phpantom-stub-fn://` URIs)
-    /// are not navigable so they are skipped for go-to-definition but
-    /// still loaded into the cache for return-type resolution.
+    /// declaration line.  A stub function (with a `phpantom-stub-fn://`
+    /// URI) has no file of its own, so it jumps to the project's installed
+    /// phpstorm-stubs, when there are any.
     pub(crate) fn resolve_function_definition(&self, candidates: &[String]) -> Option<Location> {
         let find_function = || {
             let fmap = self.symbols.global_functions.read();
-            first_candidate(candidates, |c| fmap.get(c))
-                .map(|(uri, info)| (uri.clone(), info.name_offset))
+            candidates.iter().find_map(|c| {
+                fmap.get(c.as_str())
+                    .map(|(uri, info)| (c.as_str(), uri.clone(), info.name_offset))
+            })
         };
 
         // ── Step 1: Check global_functions (user code + cached stubs) ──
-        let (file_uri, name_offset) = match find_function() {
+        let (name, file_uri, name_offset) = match find_function() {
             Some(found) => found,
             None => {
                 // ── Step 2: Try embedded PHP stubs as fallback ──
                 let str_candidates: Vec<&str> = candidates.iter().map(|s| s.as_str()).collect();
                 self.find_or_load_function(&str_candidates)?;
                 // After find_or_load_function, the function is cached in
-                // global_functions.  When it isn't, it came from a stub,
-                // which has no location to jump to.
+                // global_functions, a stub under its `phpantom-stub-fn://` URI.
                 find_function()?
             }
         };
 
-        // Stub functions don't have real file locations — skip
-        // go-to-definition for them (they're still useful for return-type
-        // resolution via the function_loader).
-        if file_uri.starts_with(crate::stubs::STUB_FUNCTION_URI_PREFIX) {
-            return None;
+        if crate::stubs::is_embedded_stub_uri(&file_uri) {
+            return self.builtin_function_location(name);
         }
 
         self.stored_offset_location(&file_uri, name_offset)
