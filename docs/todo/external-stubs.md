@@ -237,9 +237,7 @@ reliable combinations:
   (once E2 lands).
 
 Any of these is sufficient. Without any external stubs and without
-embedded stubs, built-in symbols would be invisible. E8 closes the one
-remaining difference between the embedded stubs and a checkout on a
-stub path.
+embedded stubs, built-in symbols would be invisible.
 
 ---
 
@@ -249,7 +247,6 @@ stub path.
 | --- | --------------------------------------------------------- | ----------- | -------------------------------------------------- |
 | E2  | Project-level stubs as a type resolution source           | Medium      | None                                               |
 | E7  | Stub-based framework patches (replace Rust patch system)  | Medium-High | None                                               |
-| E8  | `@removed` filtering for phpstorm-stubs on a stub path    | Low         | None                                               |
 
 The priority order (`.phpantom.toml` > Composer > editor > embedded)
 ensures the user's explicit choices always win. Most users never
@@ -383,20 +380,3 @@ The current `patches.rs` module handles the known cases correctly
 and is well-tested. It stays in place until the partial-class merge
 above is ready. New patches can still be added
 in Rust in the interim.
-
----
-
-## E8. `@removed` filtering for phpstorm-stubs on a stub path
-
-**Impact: Low · Complexity: Low**
-
-`Backend::set_php_version` drops every embedded declaration whose
-docblock marks it `@removed` at or before the project's PHP version
-(`stubs::removed_stub_names`), so `each()` is unknown on PHP 8. A
-phpstorm-stubs checkout on a stub path (an editor extension shipping it
-in place of the embedded stubs) gets no such filtering: its
-`#[PhpStormStubsElementAvailable]` variants are filtered at parse time,
-but a `@removed` function or class still resolves. Filter the stub
-index the same way when it is built, or when a lookup first parses the
-file, so a binary built without embedded stubs behaves the same as one
-built with them.

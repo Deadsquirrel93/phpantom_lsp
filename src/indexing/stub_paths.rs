@@ -147,7 +147,7 @@ impl Backend {
         }
 
         let filters = self.index_filters();
-        let scan = classmap_scanner::scan_stub_paths(&roots, &filters);
+        let scan = classmap_scanner::scan_stub_paths(&roots, &filters, self.php_version());
         let index = ExternalStubIndex::new(roots, &scan);
         let symbol_count = index.classes.len() + index.functions.len() + index.constants.len();
 

@@ -247,3 +247,53 @@ fn client_stub_options_are_read_from_either_shape() {
         None
     );
 }
+
+#[test]
+fn a_declaration_removed_before_the_project_php_version_is_not_a_stub() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let bundled = tempfile::tempdir().unwrap();
+    write(
+        bundled.path(),
+        "PhpStormStubsMap.php",
+        "<?php\nnamespace JetBrains\\PHPStormStub;\nfinal class PhpStormStubsMap\n{\nconst CLASSES = array (\n  'OldClass' => 'standard/standard.php',\n  'Kept' => 'standard/standard.php',\n);\n\nconst FUNCTIONS = array (\n  'each' => 'standard/standard.php',\n  'kept_fn' => 'standard/standard.php',\n);\n\nconst CONSTANTS = array (\n  'OLD_CONST' => 'standard/standard.php',\n  'KEPT_CONST' => 'standard/standard.php',\n);\n}\n",
+    );
+    write(
+        bundled.path(),
+        "standard/standard.php",
+        "<?php\n/**\n * @removed 8.0\n */\nfunction each(array &$array): array {}\nfunction kept_fn(): int {}\n/**\n * @removed 8.0\n */\nclass OldClass {}\nclass Kept {}\n/**\n * @removed 8.0\n */\ndefine('OLD_CONST', 1);\ndefine('KEPT_CONST', 2);\n",
+    );
+    let backend = Backend::new_test_with_workspace(root.to_path_buf(), Vec::new());
+    backend.set_client_stub_options(ClientStubOptions {
+        path: Some(bundled.path().to_path_buf()),
+    });
+    backend.set_php_version(crate::types::PhpVersion { major: 7, minor: 4 });
+    backend.refresh_stub_paths();
+
+    assert!(backend.find_or_load_function(&["each"]).is_some());
+    assert!(backend.find_or_load_class("OldClass").is_some());
+    assert!(backend.lookup_global_constant("OLD_CONST").is_some());
+
+    backend.set_php_version(crate::types::PhpVersion { major: 8, minor: 0 });
+
+    assert!(backend.find_or_load_function(&["kept_fn"]).is_some());
+    assert!(backend.find_or_load_class("Kept").is_some());
+    assert!(backend.lookup_global_constant("KEPT_CONST").is_some());
+    assert!(backend.find_or_load_function(&["each"]).is_none());
+    assert!(backend.find_or_load_class("OldClass").is_none());
+    assert!(backend.lookup_global_constant("OLD_CONST").is_none());
+    assert!(
+        !backend
+            .symbols
+            .autoload_function_index
+            .read()
+            .contains_key("each")
+    );
+    assert!(
+        !backend
+            .symbols
+            .autoload_constant_index
+            .read()
+            .contains_key("OLD_CONST")
+    );
+}

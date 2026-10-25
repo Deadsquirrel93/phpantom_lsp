@@ -13,7 +13,9 @@ use crate::docblock;
 use crate::types::*;
 
 use super::signature::{Signature, extract_signature};
-use super::{DocblockCtx, for_each_nested_statement_list, merge_deprecation_info};
+use super::{
+    DocblockCtx, for_each_nested_statement_list, is_removed_for_version, merge_deprecation_info,
+};
 
 /// Whether a function or method body calls `func_get_args()`,
 /// `func_get_arg()` or `func_num_args()`, which makes it accept more
@@ -340,6 +342,9 @@ impl Backend {
     /// declares is exactly the string it was given, wherever the call
     /// sits.
     ///
+    /// With a target PHP version in `doc_ctx`, a declaration whose
+    /// docblock marks it `@removed` at or before that version is skipped.
+    ///
     /// Uses the parsed AST rather than regex, so it piggybacks on the
     /// parse pass that `update_ast` already performs.
     pub(crate) fn extract_defines_from_statements<'a>(
@@ -347,9 +352,15 @@ impl Backend {
         defines: &mut Vec<(String, u32, Option<String>)>,
         content: &str,
         namespace: Option<&str>,
+        doc_ctx: Option<&DocblockCtx<'_>>,
     ) {
         for statement in statements {
             match statement {
+                Statement::Expression(_) | Statement::Constant(_)
+                    if doc_ctx.is_some_and(|ctx| {
+                        ctx.php_version
+                            .is_some_and(|ver| is_removed_for_version(statement, ctx, ver))
+                    }) => {}
                 Statement::Expression(expr_stmt) => {
                     if let Some(entry) =
                         Self::try_extract_define_info(expr_stmt.expression, content)
@@ -382,6 +393,7 @@ impl Backend {
                         defines,
                         content,
                         inner.or(namespace),
+                        doc_ctx,
                     );
                 }
                 Statement::Block(block) => {
@@ -390,6 +402,7 @@ impl Backend {
                         defines,
                         content,
                         namespace,
+                        doc_ctx,
                     );
                 }
                 Statement::If(_) => {
@@ -399,6 +412,7 @@ impl Backend {
                             defines,
                             content,
                             namespace,
+                            doc_ctx,
                         );
                     });
                 }
@@ -409,6 +423,7 @@ impl Backend {
                             defines,
                             content,
                             namespace,
+                            doc_ctx,
                         );
                     });
                 }
@@ -418,6 +433,7 @@ impl Backend {
                         defines,
                         content,
                         namespace,
+                        doc_ctx,
                     );
                 }
                 _ => {}

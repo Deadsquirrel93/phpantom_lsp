@@ -486,14 +486,19 @@ pub fn scan_include_paths(
 /// the way [`collect_include_files`] lists them. A directory holding
 /// phpstorm-stubs' `PhpStormStubsMap.php` is read from the map instead of
 /// being scanned.
+///
+/// A declaration its docblock marks `@removed` at or before `php_version`
+/// is left out, as it is from the embedded stubs, so a later path's
+/// declaration of the name is the one kept.
 pub(crate) fn scan_stub_paths(
     paths: &[PathBuf],
     filters: &std::sync::Arc<IndexFilters>,
+    php_version: crate::types::PhpVersion,
 ) -> WorkspaceScanResult {
     let origin = crate::ClassCompletionOrigin::VendorExplicit;
     let mut result = WorkspaceScanResult::default();
     for path in paths {
-        let scan = match read_phpstorm_stubs_map(path, origin) {
+        let mut scan = match read_phpstorm_stubs_map(path, origin) {
             Some(scan) => scan,
             None => {
                 let mut files = collect_include_files(std::slice::from_ref(path), filters);
@@ -503,9 +508,64 @@ pub(crate) fn scan_stub_paths(
                 scan_files_parallel_full(&files, None)
             }
         };
+        drop_removed_declarations(&mut scan, php_version);
         result.absorb_missing(scan);
     }
     result
+}
+
+/// Remove from `scan` every declaration whose file marks it `@removed` at
+/// or before `php_version`.
+fn drop_removed_declarations(
+    scan: &mut WorkspaceScanResult,
+    php_version: crate::types::PhpVersion,
+) {
+    use crate::stubs::StubSymbolKind;
+
+    let mut by_file: HashMap<&Path, Vec<(StubSymbolKind, &str)>> = HashMap::new();
+    let indexes = [
+        (StubSymbolKind::Class, &scan.classmap),
+        (StubSymbolKind::Function, &scan.function_index),
+        (StubSymbolKind::Constant, &scan.constant_index),
+    ];
+    for (kind, index) in indexes {
+        for (name, path) in index {
+            by_file
+                .entry(path.as_path())
+                .or_default()
+                .push((kind, name.as_str()));
+        }
+    }
+    let files: Vec<_> = by_file.into_iter().collect();
+    let removed: Vec<(StubSymbolKind, String)> = crate::parallel::map_in_blocks(
+        "drop_removed_declarations",
+        &files,
+        SCAN_BLOCK_FILES,
+        |(path, names)| {
+            let content = crate::util::read_php_source(path)?;
+            let removed = crate::stubs::removed_stub_names(&content, php_version)?;
+            Some(
+                names
+                    .iter()
+                    .filter(|&&(kind, name)| removed.contains(kind, name))
+                    .map(|&(kind, name)| (kind, name.to_owned()))
+                    .collect::<Vec<_>>(),
+            )
+        },
+    )
+    .into_iter()
+    .flatten()
+    .collect();
+
+    for (kind, name) in removed {
+        let (index, origins) = match kind {
+            StubSymbolKind::Class => (&mut scan.classmap, &mut scan.class_origins),
+            StubSymbolKind::Function => (&mut scan.function_index, &mut scan.function_origins),
+            StubSymbolKind::Constant => (&mut scan.constant_index, &mut scan.constant_origins),
+        };
+        index.remove(&name);
+        origins.remove(&name);
+    }
 }
 
 /// The symbols of the phpstorm-stubs checkout at `dir`, read from its

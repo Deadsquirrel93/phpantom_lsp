@@ -838,3 +838,17 @@ fn a_parse_is_only_kept_for_the_text_and_file_it_read() {
         "a pass over newer text does not get the older parse"
     );
 }
+
+#[test]
+fn a_constant_removed_before_the_php_version_is_not_published() {
+    let backend = Backend::new_test();
+    backend.set_php_version(crate::types::PhpVersion::new(8, 0));
+    backend.update_ast(
+        "file:///standard_defines.php",
+        "<?php\ndefine('ASSERT_ACTIVE', 1);\n/**\n * @removed 8.0\n */\ndefine('ASSERT_QUIET_EVAL', 5);\n",
+    );
+
+    let defines = backend.symbols.global_defines.read();
+    assert!(defines.contains_key("ASSERT_ACTIVE"));
+    assert!(!defines.contains_key("ASSERT_QUIET_EVAL"));
+}

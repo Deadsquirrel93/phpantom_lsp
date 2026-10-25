@@ -548,52 +548,38 @@ extra directory `paths:` adds without a namespace is, so reading
 
 ---
 
-## F59. Send Twig, YAML, and XML documents to the server
+## F59. Send Twig, YAML, and XML documents to the server from Zed
 
-**Impact: Medium-High · Complexity: Medium**
+**Impact: Medium · Complexity: Low**
 
-Neither editor extension sends the server anything but PHP and Blade, so
+The Zed extension sends the server nothing but PHP and Blade, so
 everything PHPantom reads inside a Twig template or a YAML or XML file
 (template names, route names, translation keys, service IDs, parameters,
-configuration keys) never reaches a VS Code or Zed user. Those files are
-still indexed from disk, so the PHP side of each name works, but
-completion, go-to-definition, references, and rename started from the
-file itself do not.
+configuration keys) never reaches a Zed user. Those files are still
+indexed from disk, so the PHP side of each name works, but completion,
+go-to-definition, references, and rename started from the file itself do
+not. The server already answers only those requests in such a file, and
+the VS Code extension sends them.
 
 Joining those languages has to add to what the user already has, never
 replace it: the file keeps its language, and the Twig, YAML, and XML
 extensions keep serving it. Taking a file over (mapping `.html` to Twig
 with Zed's `file_types`, say) trades the HTML, CSS, and JS support it had
-for the one syntax PHPantom answers, and is not an option. `.html` stays
-out for the same reason; a project whose templates are `.html` renames
-them to `.html.twig`.
+for the one syntax PHPantom answers, and is not an option.
 
-What is needed:
+Open a pull request to `zed-extensions/php` that adds `Twig`, `YAML`,
+and `XML` to `languages` under `[language_servers.phpantom]` in
+`extension.toml`, with `language_ids` (`twig`, `yaml`, `xml`). Those
+languages come from other extensions, so first confirm that Zed starts
+the server for a language another extension defines, and check that
+Zed does not offer PHPantom as the formatter of those files: the server
+advertises formatting statically and answers nothing there, which Zed
+may still treat as a formatter that applies. A YAML file in a project
+without PHP should not start a server either.
 
-- **Answer only what the server owns in those documents.** The
-  `formatting`, `range_formatting`, and `semantic_tokens_full` handlers
-  in `src/server.rs` do not check the document's kind, so a client that
-  sends a template would be offered PHPantom as its formatter and its
-  highlighter. Semantic tokens are single-winner in VS Code, so they
-  could displace the Twig extension's highlighting. For a resource
-  document, every request but completion, hover, definition, references,
-  rename, and the code actions that name a string key answers nothing:
-  formatting, semantic tokens, folding, document symbols, inlay hints,
-  code lenses, signature help, and highlights included.
-- **The VS Code extension.** Add `twig`, `yaml`, and `xml` to the
-  document selector in `src/client.ts` (both the folder-scoped and the
-  on-disk selectors), with an `onLanguage:` activation event each in
-  `package.json`. Its hover and document-symbol middleware must leave
-  those documents alone.
-- **A pull request to `zed-extensions/php`.** Add `Twig`, `YAML`, and
-  `XML` to `languages` under `[language_servers.phpantom]` in
-  `extension.toml`, with `language_ids` (`twig`, `yaml`, `xml`). Those
-  languages come from other extensions, so confirm that Zed starts the
-  server for a language another extension defines before opening it.
-
-**Where to look:** `src/server.rs`, `Backend::is_resource_uri`
-(`src/twig/mod.rs`), the VS Code extension's `src/client.ts` and
-`package.json`, and the Zed PHP extension's `extension.toml`.
+**Where to look:** the Zed PHP extension's `extension.toml`; the VS Code
+extension's `src/client.ts` for which requests a resource document is
+registered for.
 
 ---
 
