@@ -225,12 +225,14 @@ domain document they link to (e.g. `docs/todo/bugs.md`,
 has shipped" comment. The changelog is the sole record of what was
 completed; the todo files are a backlog of what remains. If a section in
 a domain document becomes empty, replace its content with a short "no
-outstanding items" note rather than deleting the file.
+outstanding items" note rather than deleting the file. An item can be
+listed in more than one sprint or feature set; remove every row that
+names it.
 
 **Sprint structure is not yours to delete.** Only remove rows that have
 a numbered ID (e.g. `PM1`, `D8`, `A36`). Never remove release markers
-(`**Release 0.7.0**`), sprint headings (`## Sprint N — …`), or
-un-numbered process rows such as "Clear refactoring gate" — the
+(`**Release 0.7.0**`), sprint headings (`## Sprint N — …`), feature set
+headings (`## WordPress`), or un-numbered process rows such as "Clear refactoring gate" — the
 maintainer controls those and clears them when cutting a release.
 
 **Deferring sub-steps.** If a task has multiple deliverables and you

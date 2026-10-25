@@ -10,9 +10,6 @@ A fast, lightweight PHP language server written in Rust. Ready in
 seconds, keeps memory use modest even on large codebases, and
 stays responsive throughout. Indexing happens in the background, so you're never left waiting on it.
 
-!!! note
-    PHPantom is in active development. The core editing features are solid and used daily on production codebases.
-
 You may want to jump to:
 
 - Documentation for the [latest released version](https://phpantom-dev.github.io/phpantom_lsp/latest/).

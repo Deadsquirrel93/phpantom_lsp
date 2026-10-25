@@ -12,9 +12,6 @@ A fast, lightweight PHP language server written in Rust. Ready in seconds, keeps
 
 Check out the **[documentation](https://phpantom-dev.github.io/phpantom_lsp/)** to get started.
 
-> [!NOTE]
-> PHPantom is in active development. The core editing features are solid and used daily on production codebases.
-
 ## Features
 
 PHPantom focuses on deep type intelligence. Here's how it compares:
@@ -36,6 +33,7 @@ PHPantom focuses on deep type intelligence. Here's how it compares:
 | Laravel & Blade                          | ✅       | ❌           | 🚧         | ❌          | 🚧🧩          |
 | Symfony & Twig                           | 🚧       | ❌           | ❌         | 🚧          | 🧩         |
 | Drupal                                   | 🚧       | ❌           | ❌         | ❌          | ✅🧩          |
+| PHPUnit & Pest                           | 🚧       | ❌           | 🚧         | 🚧          | ✅          |
 | Other frameworks                         | 🚧       | 🚧           | 🚧         | 🚧          | 🧩        |
 | **Refactoring**                          |          |              |            |             |             |
 | Rename                                   | ✅       | ✅🔒         | ✅🔒       | ✅          | ✅          |
@@ -74,9 +72,10 @@ Independent, re-runnable type-inference conformance results across twelve PHP en
 - **Conditional return types.** PHPStan-style conditional `@return` types resolve to the concrete branch at each call site.
 - **Type aliases and shapes.** `@phpstan-type`, `@phpstan-import-type`, and `object{...}` shapes all resolve through to completions.
 - **The full modern language.** PHP 8.4 and 8.5 features resolve end-to-end: property hooks, asymmetric visibility, and the pipe operator behave like any other code.
-- **Laravel.** Eloquent relationships, scopes, accessors, casts, and Builder chains resolve end-to-end. Macros behave like real methods. Container strings like `app('cache')` resolve to the bound class, `auth()->user()` resolves to your configured model, authorization strings resolve to the gate definition or policy method that declares them, and query string completion on both relation and column names. Blade templates get completion, hover, go-to-definition, and diagnostics through virtual PHP preprocessing. No ide-helper or database access required.
-- **Symfony.** The names Symfony takes as strings complete, navigate, and list their references across PHP, YAML, XML, and Twig, and the ones nothing declares are reported. Form fields and validation mappings resolve to the properties they name. Everything is read from the project's files, without booting the application.
+- **Laravel.** Eloquent relationships, scopes, accessors, casts, and Builder chains resolve end-to-end. Macros behave like real methods. Container strings like `app('cache')` resolve to the bound class, `auth()->user()` resolves to your configured model, authorization strings resolve to the gate definition or policy method that declares them, and query string completion on both relation and column names. Blade templates get completion, hover, go-to-definition, and diagnostics through virtual PHP preprocessing, and Livewire components and Folio pages are understood alongside them. No ide-helper or database access required.
+- **Symfony.** The names Symfony takes as strings complete, navigate, and list their references across PHP, YAML, XML, and Twig, and the ones nothing declares are reported. Form fields and validation mappings resolve to the properties they name. Doctrine entities and repositories link to each other, and renames reach the mapping files. Everything is read from the project's files, without booting the application.
 - **Twig.** Template names complete, navigate, and are checked in any project that uses Twig, Symfony or not. The template directories are found from the templates themselves, with no configuration.
+- **Testing.** PHPUnit's assertions narrow types, in Pest tests too. Test metadata (data providers, dependencies, coverage) navigates and renames, covered classes list the tests that cover them, and mocks keep the mocked class. Inside a Pest test, `$this` is the test case your `Pest.php` binds.
 - **Everything else you'd expect.** Generics, type narrowing, named arguments, destructuring, first-class callables, anonymous classes, `@deprecated` detection, and namespace segment drilling.
 
 ## Project Awareness
