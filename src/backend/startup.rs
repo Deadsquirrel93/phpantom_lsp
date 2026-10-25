@@ -205,6 +205,14 @@ impl Backend {
     }
 
     pub(crate) async fn on_initialized(&self) {
+        if !crate::stubs::has_embedded_stubs()
+            && let Some(client) = &self.client
+        {
+            client
+                .show_message(MessageType::Warning, crate::stubs::MISSING_STUBS_WARNING)
+                .await;
+        }
+
         let workspace_root = self.workspace.workspace_root.read().clone();
 
         if let Some(root) = workspace_root {

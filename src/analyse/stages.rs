@@ -59,6 +59,10 @@ pub(crate) async fn open_project(
     cfg: Config,
     path_filters: &[PathBuf],
 ) -> Option<OpenedProject> {
+    if !crate::stubs::has_embedded_stubs() {
+        eprintln!("Warning: {}", crate::stubs::MISSING_STUBS_WARNING);
+    }
+
     let backend = Backend::new_headless();
     super::open_headless_project(&backend, root, cfg).await;
 
