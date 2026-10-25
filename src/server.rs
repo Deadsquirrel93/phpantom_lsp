@@ -97,6 +97,17 @@ where
 }
 
 impl Backend {
+    /// Whether `uri` is a resource document (a Twig template, a YAML or XML
+    /// file), which the client serves with another extension.  PHPantom
+    /// answers there only for the names it reads (completion, hover,
+    /// definition, references, rename, and the code actions on a string
+    /// key); every other request answers nothing, so the editor keeps that
+    /// extension's formatter, highlighting, outline, and folding rather
+    /// than having PHPantom's PHP features displace them.
+    fn is_foreign_document(&self, uri: &Uri) -> bool {
+        self.is_resource_uri(uri.as_str())
+    }
+
     /// Run a position-based request handler on the blocking pool.
     ///
     /// Wires up the `Backend` clone, URI clone, and cancel-safe dispatch
@@ -183,6 +194,9 @@ impl Backend {
         options: &FormattingOptions,
         range: Option<Range>,
     ) -> Result<Option<Vec<TextEdit>>> {
+        if self.is_foreign_document(uri) {
+            return Ok(None);
+        }
         let uri = uri.to_string();
 
         // External tools discover their config from the file's real path.
@@ -422,6 +436,9 @@ impl LanguageServer for Backend {
         &self,
         params: ImplementationParams,
     ) -> Result<Option<ImplementationResponse>> {
+        if self.is_foreign_document(&params.text_document_position_params.text_document.uri) {
+            return Ok(None);
+        }
         let uri = params
             .text_document_position_params
             .text_document
@@ -460,6 +477,9 @@ impl LanguageServer for Backend {
         &self,
         params: TypeDefinitionParams,
     ) -> Result<Option<TypeDefinitionResponse>> {
+        if self.is_foreign_document(&params.text_document_position_params.text_document.uri) {
+            return Ok(None);
+        }
         let uri = params
             .text_document_position_params
             .text_document
@@ -656,6 +676,9 @@ impl LanguageServer for Backend {
     }
 
     async fn signature_help(&self, params: SignatureHelpParams) -> Result<Option<SignatureHelp>> {
+        if self.is_foreign_document(&params.text_document_position_params.text_document.uri) {
+            return Ok(None);
+        }
         let uri = params
             .text_document_position_params
             .text_document
@@ -675,6 +698,9 @@ impl LanguageServer for Backend {
         &self,
         params: DocumentHighlightParams,
     ) -> Result<Option<Vec<DocumentHighlight>>> {
+        if self.is_foreign_document(&params.text_document_position_params.text_document.uri) {
+            return Ok(None);
+        }
         let uri = params
             .text_document_position_params
             .text_document
@@ -796,6 +822,9 @@ impl LanguageServer for Backend {
         &self,
         params: DocumentSymbolParams,
     ) -> Result<Option<DocumentSymbolResponse>> {
+        if self.is_foreign_document(&params.text_document.uri) {
+            return Ok(None);
+        }
         let uri = params.text_document.uri.to_string();
         let backend = self.clone_for_blocking();
         let u = uri.clone();
@@ -824,6 +853,9 @@ impl LanguageServer for Backend {
     }
 
     async fn folding_range(&self, params: FoldingRangeParams) -> Result<Option<Vec<FoldingRange>>> {
+        if self.is_foreign_document(&params.text_document.uri) {
+            return Ok(None);
+        }
         let uri = params.text_document.uri.to_string();
         let backend = self.clone_for_blocking();
         let u = uri.clone();
@@ -836,6 +868,9 @@ impl LanguageServer for Backend {
     }
 
     async fn code_lens(&self, params: CodeLensParams) -> Result<Option<Vec<CodeLens>>> {
+        if self.is_foreign_document(&params.text_document.uri) {
+            return Ok(None);
+        }
         let uri = params.text_document.uri.to_string();
         let backend = self.clone_for_blocking();
         let u = uri.clone();
@@ -897,6 +932,9 @@ impl LanguageServer for Backend {
     }
 
     async fn document_link(&self, params: DocumentLinkParams) -> Result<Option<Vec<DocumentLink>>> {
+        if self.is_foreign_document(&params.text_document.uri) {
+            return Ok(None);
+        }
         let uri = params.text_document.uri.to_string();
         let backend = self.clone_for_blocking();
         let u = uri.clone();
@@ -912,6 +950,9 @@ impl LanguageServer for Backend {
         &self,
         params: SelectionRangeParams,
     ) -> Result<Option<Vec<SelectionRange>>> {
+        if self.is_foreign_document(&params.text_document.uri) {
+            return Ok(None);
+        }
         let uri = params.text_document.uri.to_string();
         let positions = params.positions;
         // Each request re-parses the whole file. Not coalesced like the other
@@ -932,6 +973,9 @@ impl LanguageServer for Backend {
         &self,
         params: SemanticTokensParams,
     ) -> Result<Option<SemanticTokens>> {
+        if self.is_foreign_document(&params.text_document.uri) {
+            return Ok(None);
+        }
         let uri = params.text_document.uri.to_string();
         // Highlighting is requested on every keystroke, re-serializes the whole
         // token array, and is one of the most expensive whole-file requests.
@@ -948,6 +992,9 @@ impl LanguageServer for Backend {
     }
 
     async fn inlay_hint(&self, params: InlayHintParams) -> Result<Option<Vec<InlayHint>>> {
+        if self.is_foreign_document(&params.text_document.uri) {
+            return Ok(None);
+        }
         self.inlay_hint_request(params).await
     }
 
@@ -955,6 +1002,9 @@ impl LanguageServer for Backend {
         &self,
         params: CallHierarchyPrepareParams,
     ) -> Result<Option<Vec<CallHierarchyItem>>> {
+        if self.is_foreign_document(&params.text_document_position_params.text_document.uri) {
+            return Ok(None);
+        }
         let uri = params
             .text_document_position_params
             .text_document
@@ -1011,6 +1061,9 @@ impl LanguageServer for Backend {
         &self,
         params: TypeHierarchyPrepareParams,
     ) -> Result<Option<Vec<TypeHierarchyItem>>> {
+        if self.is_foreign_document(&params.text_document_position_params.text_document.uri) {
+            return Ok(None);
+        }
         let uri = params
             .text_document_position_params
             .text_document
@@ -1084,7 +1137,7 @@ impl LanguageServer for Backend {
         params: DocumentOnTypeFormattingParams,
     ) -> Result<Option<Vec<TextEdit>>> {
         // Only handle Enter ("\n") for PHPDoc block generation.
-        if params.ch != "\n" {
+        if params.ch != "\n" || self.is_foreign_document(&params.text_document.uri) {
             return Ok(None);
         }
 

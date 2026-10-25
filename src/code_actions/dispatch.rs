@@ -59,12 +59,17 @@ enum TemplatePolicy {
 struct Collector {
     collect: CollectFn,
     template: TemplatePolicy,
+    /// Whether the actions are offered in a resource document (a Twig
+    /// template, a YAML or XML file).  Only the ones about a string key
+    /// it names are; the rest are about PHP code it does not hold.
+    in_resource: bool,
 }
 
 const fn offer(collect: CollectFn) -> Collector {
     Collector {
         collect,
         template: TemplatePolicy::Offer,
+        in_resource: false,
     }
 }
 
@@ -72,6 +77,15 @@ const fn skip_in_template(collect: CollectFn) -> Collector {
     Collector {
         collect,
         template: TemplatePolicy::Skip,
+        in_resource: false,
+    }
+}
+
+const fn offer_in_resource(collect: CollectFn) -> Collector {
+    Collector {
+        collect,
+        template: TemplatePolicy::Offer,
+        in_resource: true,
     }
 }
 
@@ -106,8 +120,8 @@ static COLLECTORS: &[Collector] = &[
     skip_in_template(Backend::collect_fix_class_name_actions),
     offer(Backend::collect_fix_class_case_actions),
     offer(Backend::collect_extract_interface_actions),
-    offer(Backend::collect_create_missing_view_actions),
-    offer(Backend::collect_insert_translation_key_actions),
+    offer_in_resource(Backend::collect_create_missing_view_actions),
+    offer_in_resource(Backend::collect_insert_translation_key_actions),
 ];
 
 impl Backend {
@@ -134,8 +148,11 @@ impl Backend {
         let _scope = self.enter_request_scope_borrowed(content);
 
         let is_template = self.is_blade_file(uri);
+        let is_resource = self.is_resource_uri(uri);
         for collector in COLLECTORS {
-            if is_template && collector.template == TemplatePolicy::Skip {
+            if is_template && collector.template == TemplatePolicy::Skip
+                || is_resource && !collector.in_resource
+            {
                 continue;
             }
             (collector.collect)(self, uri, content, params, &mut actions);

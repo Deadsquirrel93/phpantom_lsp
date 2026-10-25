@@ -65,6 +65,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Twig, YAML, and XML files keep their own extensions' features.** An editor that sends these files to PHPantom no longer gets its formatting, highlighting, outline, or folding in them in place of the ones the file's own extension provides. PHPantom answers there only for the PHP and framework names it reads.
 - **Type hierarchy in editors without dynamic registration.** Type hierarchy is now announced at startup to editors that cannot register it later, so they offer it too.
 - **`self` in a scope called on a query.** A scope parameter typed `self` now accepts the model when the scope is called through a query, such as `Post::query()->relatedTo($post)`, instead of reporting that it expects a `Builder`.
 - **Subclasses may initialize a parent's readonly property on PHP 8.4.** Assigning an inherited readonly property in a subclass is no longer reported as a write from outside the declaring class when the project targets PHP 8.4 or later, which allows it.

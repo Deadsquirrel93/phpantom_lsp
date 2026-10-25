@@ -390,3 +390,182 @@ async fn a_missing_template_can_be_created() {
         );
     }
 }
+
+/// A Twig template or a YAML file belongs to another extension: PHPantom
+/// answers there for the names it reads, and leaves formatting,
+/// highlighting, outline, folding, and the rest to that extension.
+#[tokio::test]
+async fn resource_documents_answer_only_for_the_names_they_hold() {
+    const SERVICES_YAML: &str =
+        "services:\n    app.mailer:\n        class: App\\Controller\\PageController\n";
+    let (backend, dir) = workspace(&page_workspace()).await;
+    let services = uri_for(&dir, "config/services.yaml");
+    open_document(&backend, &services, "yaml", SERVICES_YAML).await;
+    let page = uri_for(&dir, "templates/page.html.twig");
+    let controller = uri_for(&dir, "src/Controller/PageController.php");
+
+    // What the server owns there still answers.
+    let found = definitions(&backend, &page, position_in(PAGE_TWIG, "extends 'base", 10)).await;
+    assert_eq!(found, vec![(uri_for(&dir, "templates/base.html.twig"), 0)]);
+
+    for (uri, content) in [(&page, PAGE_TWIG), (&services, SERVICES_YAML)] {
+        let document = TextDocumentIdentifier { uri: uri.clone() };
+        let at = TextDocumentPositionParams {
+            text_document: document.clone(),
+            position: Position::new(1, 3),
+        };
+        let whole = Range::new(Position::new(0, 0), offset_position(content, content.len()));
+        let options = FormattingOptions {
+            tab_size: 4,
+            insert_spaces: true,
+            ..FormattingOptions::default()
+        };
+
+        let semantic_tokens = backend
+            .semantic_tokens_full(SemanticTokensParams {
+                text_document: document.clone(),
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+            })
+            .await
+            .unwrap();
+        assert!(semantic_tokens.is_none(), "semantic tokens in {uri:?}");
+
+        let formatting = backend
+            .formatting(DocumentFormattingParams {
+                text_document: document.clone(),
+                options,
+                work_done_progress_params: WorkDoneProgressParams::default(),
+            })
+            .await
+            .unwrap();
+        assert!(formatting.is_none(), "formatting in {uri:?}");
+
+        let range_formatting = backend
+            .range_formatting(DocumentRangeFormattingParams {
+                text_document: document.clone(),
+                range: whole,
+                options,
+                work_done_progress_params: WorkDoneProgressParams::default(),
+            })
+            .await
+            .unwrap();
+        assert!(range_formatting.is_none(), "range formatting in {uri:?}");
+
+        let folding = backend
+            .folding_range(FoldingRangeParams {
+                text_document: document.clone(),
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+            })
+            .await
+            .unwrap();
+        assert!(folding.is_none(), "folding in {uri:?}");
+
+        let symbols = backend
+            .document_symbol(DocumentSymbolParams {
+                text_document: document.clone(),
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+            })
+            .await
+            .unwrap();
+        assert!(symbols.is_none(), "document symbols in {uri:?}");
+
+        let hints = backend
+            .inlay_hint(InlayHintParams {
+                text_document: document.clone(),
+                range: whole,
+                work_done_progress_params: WorkDoneProgressParams::default(),
+            })
+            .await
+            .unwrap();
+        assert!(hints.is_none(), "inlay hints in {uri:?}");
+
+        let lenses = backend
+            .code_lens(CodeLensParams {
+                text_document: document.clone(),
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+            })
+            .await
+            .unwrap();
+        assert!(lenses.is_none(), "code lenses in {uri:?}");
+
+        let links = backend
+            .document_link(DocumentLinkParams {
+                text_document: document.clone(),
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+            })
+            .await
+            .unwrap();
+        assert!(links.is_none(), "document links in {uri:?}");
+
+        let selection = backend
+            .selection_range(SelectionRangeParams {
+                text_document: document.clone(),
+                positions: vec![at.position],
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+            })
+            .await
+            .unwrap();
+        assert!(selection.is_none(), "selection ranges in {uri:?}");
+
+        let signature = backend
+            .signature_help(SignatureHelpParams {
+                text_document_position_params: at.clone(),
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                context: None,
+            })
+            .await
+            .unwrap();
+        assert!(signature.is_none(), "signature help in {uri:?}");
+
+        let highlights = backend
+            .document_highlight(DocumentHighlightParams {
+                text_document_position_params: at.clone(),
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+            })
+            .await
+            .unwrap();
+        assert!(highlights.is_none(), "highlights in {uri:?}");
+
+        let actions = backend
+            .code_action(CodeActionParams {
+                text_document: document,
+                range: whole,
+                context: CodeActionContext::default(),
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+            })
+            .await
+            .unwrap();
+        assert!(actions.is_none(), "code actions in {uri:?}: {actions:?}");
+    }
+
+    // A PHP file is still highlighted and folded.
+    let php = TextDocumentIdentifier {
+        uri: controller.clone(),
+    };
+    let semantic_tokens = backend
+        .semantic_tokens_full(SemanticTokensParams {
+            text_document: php.clone(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .unwrap();
+    assert!(semantic_tokens.is_some());
+    let folding = backend
+        .folding_range(FoldingRangeParams {
+            text_document: php,
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .unwrap();
+    assert!(folding.is_some());
+}
