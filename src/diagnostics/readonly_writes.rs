@@ -16,19 +16,21 @@
 //! Two shapes are reported:
 //!
 //! - **Outside the declaring class** — the write happens in a scope
-//!   that is not the declaring class (top-level code, another class, a
-//!   subclass initializing its parent's property).  This is an error
-//!   regardless of whether the property was ever initialized.
+//!   that is not the declaring class (top-level code, another class, or
+//!   before PHP 8.4 a subclass initializing its parent's property).
+//!   This is an error regardless of whether the property was ever
+//!   initialized.
 //! - **After the constructor initialized it** — the write is inside the
 //!   declaring class, but the constructor is known to have initialized
 //!   the property already (it is a promoted parameter, or the
 //!   constructor body assigns it unconditionally), so the write is a
-//!   second initialization.
+//!   second initialization.  That includes a write later in the
+//!   constructor itself.
 //!
-//! Writes inside `__construct`, `__clone` (PHP 8.3 allows readonly
-//! reinitialization while cloning), and `__unserialize` are never
-//! flagged, and neither is a write whose target the constructor may
-//! leave uninitialized: initializing a readonly property lazily from
+//! Other writes inside `__construct`, and writes in `__clone` (PHP 8.3
+//! allows readonly reinitialization while cloning) and `__unserialize`,
+//! are not flagged, and neither is a write whose target the constructor
+//! may leave uninitialized: initializing a readonly property lazily from
 //! another method of the declaring class is legal PHP.
 //!
 //! A key of `clone($obj, ['prop' => …])` writes that property on the copy
@@ -62,13 +64,13 @@ use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::atom::Atom;
-use crate::class_lookup::{Fqn, ResolvedClassLoader, find_class_at_offset};
+use crate::class_lookup::{Fqn, ResolvedClassLoader, find_class_at_offset, is_subtype_of};
 use crate::hover::{MemberKindForOrigin, find_declaring_class};
 use crate::parser::{clone_with_writes, with_parse_cache, with_parsed_program};
 use crate::php_type::{PhpType, TypeKind, is_array_like_name};
 use crate::symbol_map::SymbolKind;
 use crate::type_engine::resolver::{ResolutionCtx, SubjectOutcome, resolve_subject_outcome};
-use crate::types::{AccessKind, ClassInfo, ClassLikeKind, PropertyInfo};
+use crate::types::{AccessKind, ClassInfo, ClassLikeKind, PhpVersion, PropertyInfo};
 use crate::virtual_members::resolve_class_fully_cached;
 
 use super::class_init_facts::{ClassInitFacts, class_init_facts};
@@ -276,6 +278,9 @@ enum Verdict {
     /// The write is in the declaring scope, but the constructor has
     /// already initialized the property.
     AlreadyInitialized(String),
+    /// The write is in the constructor, after the constructor has already
+    /// initialized the property.
+    AssignedTwice(String),
     /// The write goes through the property's value (an array offset or a
     /// reference), which no scope may do.
     Indirect(String),
@@ -444,7 +449,10 @@ impl Backend {
                     writes
                         .classes
                         .get(&class.start_offset)
-                        .is_some_and(|facts| facts.covers_initializer(span.start))
+                        .is_some_and(|facts| {
+                            facts.covers_initializer(span.start)
+                                && !facts.reassigns_in_constructor(member_name, span.start)
+                        })
                         && declares_property(class, member_name, class_loader, &mut Vec::new())
                 })
             {
@@ -489,6 +497,11 @@ impl Backend {
                 ),
                 Some(Verdict::AlreadyInitialized(owner)) => format!(
                     "Cannot {} readonly property {} after the constructor has initialized it",
+                    form.verb(),
+                    owner
+                ),
+                Some(Verdict::AssignedTwice(owner)) => format!(
+                    "Cannot {} readonly property {} after the constructor has already initialized it",
                     form.verb(),
                     owner
                 ),
@@ -581,9 +594,13 @@ impl Backend {
             return Verdict::OutsideDeclaringClass(owner);
         };
 
+        // Since PHP 8.4 a readonly property is `protected(set)`, so a
+        // subclass may initialize it too.
         let in_declaring_scope = current.fqn() == declaring.fqn()
             || (declaring.kind == ClassLikeKind::Trait
-                && declares_property(current, property, class_loader, &mut Vec::new()));
+                && declares_property(current, property, class_loader, &mut Vec::new()))
+            || (self.php_version() >= PhpVersion::new(8, 4)
+                && is_subtype_of(current, &declaring.fqn(), class_loader));
         if !in_declaring_scope {
             return Verdict::OutsideDeclaringClass(owner);
         }
@@ -594,6 +611,9 @@ impl Backend {
         let Some(facts) = writes.classes.get(&current.start_offset) else {
             return Verdict::Ok;
         };
+        if facts.reassigns_in_constructor(property, site.offset) {
+            return Verdict::AssignedTwice(owner);
+        }
         if facts.covers_initializer(site.offset) || !facts.initialized.contains(property) {
             return Verdict::Ok;
         }

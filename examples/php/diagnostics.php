@@ -5,8 +5,9 @@
  *
  * The diagnostics PHPantom reports: unknown classes and members, member
  * access on a scalar, argument counts, writes to readonly properties,
- * the properties clone() writes, docblocks that contradict their type hint,
- * an invalid class-like kind, and deprecation. These files deliberately contain a fixed set of errors,
+ * the properties clone() writes, typed properties nothing initializes,
+ * docblocks that contradict their type hint, an invalid class-like kind,
+ * and deprecation. These files deliberately contain a fixed set of errors,
  * so the squiggles you see here are the demo, not a mistake.
  *
  * One of the demo files listed in README.md. Supporting fixtures live in
@@ -470,6 +471,48 @@ class CloneWithDemo
 
         // Error — `$label` expects a string:
         $copy = clone($coordinate, ['label' => []]);
+    }
+}
+
+
+// ── Diagnostic: Uninitialized Properties ────────────────────────────────────
+// A typed property without a default starts uninitialized, and reading it
+// before anything writes it throws.  PHPantom flags a property that only the
+// class itself may write (private, protected in a final class, or readonly)
+// when nothing in the class ever writes it.  A write from any method counts,
+// and so does a framework that fills the property: an attribute, or a
+// Doctrine generated identifier.
+
+final class UninitializedPropertyDemo
+{
+    // Warning — nothing ever writes `$createdAt`:
+    private \DateTimeImmutable $createdAt;
+
+    // No diagnostic — the constructor initializes `$name`:
+    private string $name;
+
+    // No diagnostic — `setNote()` writes `$note`:
+    private string $note;
+
+    public readonly int $id;
+
+    public function __construct(string $name, int $id)
+    {
+        $this->name = $name;
+        $this->id = $id;
+
+        // Error — the constructor already initialized `$id`:
+        $this->id = $id + 1;
+    }
+
+    public function setNote(string $note): void
+    {
+        $this->note = $note;
+    }
+
+    public function describe(): string
+    {
+        return $this->name . ': ' . $this->note . ' ' . $this->createdAt->format('Y');
     }
 }
 

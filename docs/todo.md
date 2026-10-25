@@ -32,7 +32,7 @@ contributor even though it's short.
 
 | #   | Item                                                                                                                                                            | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
-| D26  | [Reading a typed property that nothing initialises is not reported](todo/diagnostics.md#d26-reading-a-typed-property-that-nothing-initialises-is-not-reported) | Low-Medium | Medium-High |
+| D38 | [Reading a typed property before anything writes it is not reported](todo/diagnostics.md#d38-reading-a-typed-property-before-anything-writes-it-is-not-reported) | Low-Medium | Medium-High |
 | E1  | [Project-level phpstorm-stubs for go-to-definition](todo/external-stubs.md#e1-project-level-phpstorm-stubs-for-gtd)                                             | Medium-High | Low         |
 | E3  | [IDE-provided and `.phpantom.toml` stub paths](todo/external-stubs.md#e3-ide-provided-and-phpantomtoml-stub-paths) (depends on E2)                              | Low-Medium  | Low         |
 | P84 | [Class lookups re-apply the Laravel patches on every call](todo/performance.md#p84-class-lookups-re-apply-the-laravel-patches-on-every-call) | Medium-High | Medium |
@@ -99,6 +99,7 @@ ships, remove every row that names it.
 | F49 | [Symfony security names](todo/lsp-features.md#f49-symfony-security-names) | Low-Medium  | Medium      |
 | F54 | [Symfony form options, constraint options, and serializer groups](todo/lsp-features.md#f54-symfony-form-options-constraint-options-and-serializer-groups) | Low-Medium  | Medium      |
 | D31 | [Doctrine mappings that disagree with the entity are not reported](todo/diagnostics.md#d31-doctrine-mappings-that-disagree-with-the-entity-are-not-reported) | Low-Medium  | Medium-High |
+| D40 | [A Doctrine entity mapped in XML or YAML is not checked for uninitialized properties](todo/diagnostics.md#d40-a-doctrine-entity-mapped-in-xml-or-yaml-is-not-checked-for-uninitialized-properties) | Low         | Medium      |
 | T56 | [A DBAL result's row count ignores the connection's driver](todo/type-inference.md#t56-a-dbal-results-row-count-ignores-the-connections-driver) | Low         | Low-Medium  |
 | F51 | [Class names in Twig's `constant()` and `enum()`](todo/lsp-features.md#f51-class-names-in-twigs-constant-and-enum) | Low         | Low-Medium  |
 | F52 | [Asset paths in Twig](todo/lsp-features.md#f52-asset-paths-in-twig) | Low         | Low-Medium  |
@@ -207,6 +208,7 @@ ships, remove every row that names it.
 | D19 | [`invalid_member_access` cannot tell a property read from a write](todo/diagnostics.md#d19-invalid_member_access-cannot-tell-a-property-read-from-a-write) (includes PHP 8.4 `private(set)`) | Medium      | Medium      |
 | D16 | [`unreachable_match_arm` ignores literal subject types](todo/diagnostics.md#d16-unreachable_match_arm-ignores-literal-subject-types)                                        | Low-Medium  | Medium      |
 | D33 | [Private properties nothing reads or writes are not reported](todo/diagnostics.md#d33-private-properties-nothing-reads-or-writes-are-not-reported) | Low-Medium  | Medium      |
+| D39 | [Writes to a `@readonly` property are not checked](todo/diagnostics.md#d39-writes-to-a-readonly-property-are-not-checked) | Low         | Medium      |
 | D20 | [`Foo::$bar` and `Foo::bar` are the same span](todo/diagnostics.md#d20-foobar-and-foobar-are-the-same-span)                                                                  | Low         | Medium      |
 | D15 | [Unused parameter diagnostic](todo/diagnostics.md#d15-unused-parameter-diagnostic)                                                                                          | Low         | Medium      |
 | D22 | [Member provenance is recomputed instead of recorded](todo/diagnostics.md#d22-member-provenance-is-recomputed-instead-of-recorded)                                        | Medium      | Medium-High |

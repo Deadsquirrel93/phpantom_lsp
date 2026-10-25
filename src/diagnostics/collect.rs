@@ -19,6 +19,12 @@ struct SlowCollector {
     collect: SlowCollectFn,
     /// The projects the collector runs in.
     runs_in: Framework,
+    /// Whether a finding can depend on any function body in the file, so
+    /// that an edit to one body can change a diagnostic outside it.  Such
+    /// a collector reports under its own name as the diagnostic code, and
+    /// a partial pass runs it over the whole file instead of the edited
+    /// region (see [`Backend::collect_slow_diagnostics_reading_every_body`]).
+    reads_every_body: bool,
 }
 
 /// The projects a collector has anything to report in.
@@ -35,6 +41,7 @@ const fn always(name: &'static str, collect: SlowCollectFn) -> SlowCollector {
         name,
         collect,
         runs_in: Framework::Any,
+        reads_every_body: false,
     }
 }
 
@@ -43,6 +50,7 @@ const fn laravel(name: &'static str, collect: SlowCollectFn) -> SlowCollector {
         name,
         collect,
         runs_in: Framework::Laravel,
+        reads_every_body: false,
     }
 }
 
@@ -91,6 +99,13 @@ static SLOW_COLLECTORS: &[SlowCollector] = &[
         "invalid_readonly_write",
         Backend::collect_readonly_write_diagnostics_with_context,
     ),
+    // Whether a property is ever written can be decided by any method.
+    SlowCollector {
+        name: "uninitialized_property",
+        collect: Backend::collect_uninitialized_property_diagnostics_with_context,
+        runs_in: Framework::Any,
+        reads_every_body: true,
+    },
     always(
         "missing_implementation",
         Backend::collect_implementation_error_diagnostics_with_context,
@@ -139,6 +154,7 @@ static SLOW_COLLECTORS: &[SlowCollector] = &[
         name: "invalid_string_key",
         collect: Backend::collect_invalid_laravel_string_key_diagnostics,
         runs_in: Framework::LaravelSymfonyOrTwig,
+        reads_every_body: false,
     },
     laravel(
         "invalid_command_parameter",
@@ -257,6 +273,25 @@ impl Backend {
     ) {
         let _region = incremental::region::restrict_to(spans.to_vec());
         self.collect_slow_diagnostics_scoped(uri_str, content, out, None, Some(targets));
+    }
+
+    /// Run the collectors whose findings can depend on any function body
+    /// over the whole file.  A partial pass skips them in the edited
+    /// region and calls this instead, after dropping what they reported
+    /// last time (see [`reads_every_body`]).
+    pub(crate) fn collect_slow_diagnostics_reading_every_body(
+        &self,
+        uri_str: &str,
+        content: &str,
+        out: &mut Vec<Diagnostic>,
+    ) {
+        let _parse_guard = crate::parser::with_parse_cache(content);
+        let ctx = helpers::FileDiagnosticContext::gather(self, uri_str);
+        for collector in SLOW_COLLECTORS {
+            if collector.reads_every_body && collector.runs_in == Framework::Any {
+                (collector.collect)(self, &ctx, uri_str, content, out);
+            }
+        }
     }
 
     /// The slow pass behind [`Self::collect_slow_diagnostics_observed`] and
@@ -400,7 +435,8 @@ impl Backend {
                 Framework::Laravel => is_laravel,
                 Framework::LaravelSymfonyOrTwig => has_string_keys,
             };
-            if !runs {
+            // A partial pass runs these over the whole file separately.
+            if !runs || (collector.reads_every_body && targets.is_some()) {
                 continue;
             }
             match observe.as_mut() {
@@ -417,4 +453,15 @@ impl Backend {
             }
         }
     }
+}
+
+/// Whether `diagnostic` came from a collector that reads every function
+/// body in the file.
+pub(crate) fn reads_every_body(diagnostic: &Diagnostic) -> bool {
+    let Some(Code::String(code)) = &diagnostic.code else {
+        return false;
+    };
+    SLOW_COLLECTORS
+        .iter()
+        .any(|collector| collector.reads_every_body && collector.name == code)
 }

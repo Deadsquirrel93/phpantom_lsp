@@ -172,6 +172,7 @@ mod diagnostics_trait_property_conflicts;
 mod diagnostics_type_errors;
 mod diagnostics_undefined_variables;
 mod diagnostics_unhandled_match;
+mod diagnostics_uninitialized_property;
 mod diagnostics_unknown_classes;
 mod diagnostics_unknown_functions;
 mod diagnostics_unknown_members;

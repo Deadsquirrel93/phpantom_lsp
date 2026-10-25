@@ -3193,6 +3193,11 @@ class CompoundNegatedNarrowingDemo
 
 class InvokeReturnTypeDemo
 {
+    public function __construct()
+    {
+        $this->formatter = new Scaffolding\ScaffoldingFormatter();
+    }
+
     public function demo(): void
     {
         // Objects with __invoke() can be called like functions.
@@ -4819,6 +4824,11 @@ class PropertyNarrowingDemo
 
     /** @var Scaffolding\Pen|Scaffolding\Pencil|null */
     public $untyped;
+
+    public function __construct(Scaffolding\Pen|Scaffolding\Pencil $tool)
+    {
+        $this->tool = $tool;
+    }
 
     public function demo(): void
     {

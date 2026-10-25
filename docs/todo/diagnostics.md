@@ -343,37 +343,32 @@ it, and let it replace the enclosing class rather than joining it.
 Inferring a binding from the spelling of the subject is guessing at
 something the type engine has already decided.
 
-## D26. Reading a typed property that nothing initialises is not reported
+## D38. Reading a typed property before anything writes it is not reported
 
 **Impact: Low-Medium · Complexity: Medium-High**
 
 ```php
-final class User { public string $name; }
-$user = new User();
-echo $user->name; // Error: must not be accessed before initialization
+final class Options { public string $host; }
+
+$options = new Options();
+echo $options->host; // Error: must not be accessed before initialization
 ```
 
-A typed property without a default starts *uninitialized*, and reading it
-throws. The declaration-side check is the tractable half: flag a typed,
-non-promoted property with no default that no constructor path assigns.
-Psalm's `MissingConstructor` works this way. The read-side check needs
-definite-assignment tracking across the constructor and is the harder half.
+`uninitialized_property` reports a property nothing in its class ever
+writes, but only when no code outside the class can write it either. A
+public property is left alone, because whoever creates the object
+routinely fills it (`$options->host = 'localhost'`), so the class body
+alone cannot tell a bug from a struct. The read is where the bug shows:
+an object created with `new` in the same function, whose property is read
+before anything writes it and before the object escapes (passed to a call,
+returned, stored). Qodana reports it this way
+(`PhpTypedPropertyMightBeUninitializedInspection`), and it is what the
+php-typing-conformance suite's `properties_uninitialized_read.php` checks.
 
-Keep it conservative. Frameworks and ORMs hydrate properties by reflection
-(Doctrine entities, serializers, `#[Inject]`), and a diagnostic that flags
-all of them is a false positive on correct code. Consider exempting classes
-whose properties carry an attribute or an ORM mapping docblock, and put the
-check behind a `[diagnostics]` toggle if a safe default can't be found.
-Symfony writes a property or calls a setter marked `#[Required]` (or
-`@required`) while autowiring, and Doctrine writes a generated identifier
-and a version field, so those count as initialised (PHPStan's Symfony and
-Doctrine extensions model both). A readonly property has the declaration
-check too, along with being assigned twice; the Doctrine extension's
-fixtures for both are `missing_readonly_property_assign*.fixture` in
-`tests/fixtures/phpstan_doctrine/`.
-
-Found running the php-typing-conformance suite
-(`properties_uninitialized_read.php`). Psalm and Qodana report it.
+The facts about which properties the class itself never initializes are
+already collected in `src/diagnostics/uninitialized_properties.rs`; the
+read side needs the forward walker to follow the fresh object from the
+`new` to the read.
 
 ## D28. "Remove unreachable code" is wired to PHPStan only
 
@@ -509,7 +504,10 @@ final class Invoice
 
 A private property nothing outside the class can reach is dead when the
 class never reads it, and holds only its default when the class never
-writes it. Both are a bug or leftover code more often than not, and PHPStan
+writes it. A typed one without a default is already reported by
+`uninitialized_property` when the class never writes it; its write
+bookkeeping in `src/diagnostics/uninitialized_properties.rs` is a starting
+point for the rest. Both are a bug or leftover code more often than not, and PHPStan
 reports them (`property.unused`, `property.onlyRead`, `property.onlyWritten`).
 
 Frameworks read and write properties PHP code does not: Doctrine writes an
@@ -526,3 +524,47 @@ and `gedmo_property_assign*.fixture` in `tests/fixtures/phpstan_doctrine/`.
 for the read/write bookkeeping, the Doctrine mapping index in
 `src/framework.rs`, and PHPStan's `UnusedPrivatePropertyRule` with the
 Doctrine extension's `PropertiesExtension`s.
+
+---
+
+## D39. Writes to a `@readonly` property are not checked
+
+**Impact: Low · Complexity: Medium**
+
+```php
+final class Invoice
+{
+    /** @readonly */
+    public int $total;
+}
+
+$invoice->total = 0; // nothing reported
+```
+
+`@readonly` (and `@psalm-readonly`, `@phpstan-readonly`) marks a property
+that may only be initialized once, from inside its class, the way native
+`readonly` does, for code that predates PHP 8.1. `invalid_readonly_write`
+only knows the native keyword, so a write from outside the class or a
+second assignment in the constructor goes unreported. The check applies
+unchanged once the property counts as readonly. PHPStan's Doctrine
+extension fixture `missing_readonly_property_assign_phpdoc.fixture` in
+`tests/fixtures/phpstan_doctrine/` has the constructor case.
+
+---
+
+## D40. A Doctrine entity mapped in XML or YAML is not checked for uninitialized properties
+
+**Impact: Low · Complexity: Medium**
+
+`uninitialized_property` reads a Doctrine entity's mapping attributes to
+tell the fields Doctrine generates (an identifier, a version field) from
+the ones the class has to initialize. An entity mapped in XML or YAML
+carries none, so the check skips the entities the Doctrine mapping index
+pairs with a repository, and still reports the generated identifier of
+one mapped without a repository class. Reading each mapped entity's
+generated fields into the index would let the check treat both kinds the
+same.
+
+**Where to look:** `src/framework.rs` (the Doctrine mapping index, which
+D31 also needs) and `src/diagnostics/uninitialized_properties.rs`.
+
