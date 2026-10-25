@@ -410,7 +410,10 @@ check behind a `[diagnostics]` toggle if a safe default can't be found.
 Symfony writes a property or calls a setter marked `#[Required]` (or
 `@required`) while autowiring, and Doctrine writes a generated identifier
 and a version field, so those count as initialised (PHPStan's Symfony and
-Doctrine extensions model both).
+Doctrine extensions model both). A readonly property has the declaration
+check too, along with being assigned twice; the Doctrine extension's
+fixtures for both are `missing_readonly_property_assign*.fixture` in
+`tests/fixtures/phpstan_doctrine/`.
 
 Found running the php-typing-conformance suite
 (`properties_uninitialized_read.php`). Psalm and Qodana report it.
@@ -496,6 +499,8 @@ a service locator or a `ServiceSubscriberInterface` subscriber's own
 **Where to look:** `src/symfony/resources.rs` (the declarations),
 `src/diagnostics/laravel_string_keys.rs` (where unknown service IDs are
 judged), and PHPStan's Symfony extension (`ContainerInterfacePrivateServiceRule`).
+The extension's fixture, `tests/fixtures/phpstan_symfony/private_service_in_test.fixture`,
+guards the test container.
 
 ---
 
@@ -516,6 +521,8 @@ PHPStan's Doctrine extension checks an entity's mapping against its PHP:
   a to-many a `Collection` of it);
 - a `final` entity or constructor, which Doctrine cannot proxy unless
   native lazy objects are enabled;
+- a mapping Doctrine itself rejects, such as an entity without an
+  identifier;
 - a Doctrine proxy class named directly.
 
 The column types map to PHP types through a table of Doctrine's built-in
@@ -524,6 +531,10 @@ and from XML, the same mapping the entity and repository CodeLens reads.
 
 **Where to look:** `src/framework.rs` (the Doctrine mapping index), and
 PHPStan's Doctrine extension (`Rules/Doctrine/ORM/`, `Type/Doctrine/Descriptors/`).
+The extension's fixtures are the `entity_*.fixture` fixtures in
+`tests/fixtures/phpstan_doctrine/`, on the entities under
+`tests/phpstan_doctrine/rules/Doctrine/ORM/`, whose custom column types
+`entity-manager.php` registers.
 
 ---
 
@@ -550,3 +561,37 @@ is not a generic unused-result lint.
 Found running the php-typing-conformance suite
 (`directives_nodiscard_return.php`). Intelephense, PHPStan, Psalm, Phan
 and mago report it.
+
+---
+
+## D33. Private properties nothing reads or writes are not reported
+
+**Impact: Low-Medium · Complexity: Medium**
+
+```php
+final class Invoice
+{
+    private string $legacyNumber; // never read
+    private int $total;           // read, never written
+}
+```
+
+A private property nothing outside the class can reach is dead when the
+class never reads it, and holds only its default when the class never
+writes it. Both are a bug or leftover code more often than not, and PHPStan
+reports them (`property.unused`, `property.onlyRead`, `property.onlyWritten`).
+
+Frameworks read and write properties PHP code does not: Doctrine writes an
+entity's generated identifier and every mapped field when it hydrates, and
+reads them when it flushes; Gedmo writes the fields its attributes mark;
+Symfony writes a `#[Required]` property while autowiring. Those count as
+read and written (PHPStan's Doctrine extension models Doctrine's and
+Gedmo's), or the check flags correct entities.
+
+The Doctrine extension's fixtures are `unused_private_property*.fixture`
+and `gedmo_property_assign*.fixture` in `tests/fixtures/phpstan_doctrine/`.
+
+**Where to look:** the unused-variable check (`src/diagnostics/unused_variables.rs`)
+for the read/write bookkeeping, the Doctrine mapping index in
+`src/framework.rs`, and PHPStan's `UnusedPrivatePropertyRule` with the
+Doctrine extension's `PropertiesExtension`s.

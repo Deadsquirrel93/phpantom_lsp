@@ -134,6 +134,8 @@ tests/
 ├── unit/                   # Unit tests (composer, docblock, named args, …)
 ├── fixtures/               # Fixtures driven by fixture_runner.rs
 ├── psalm_assertions/, phpstan_nsrt/, phpstan_data/   # `$var => 'ExpectedType'` assertion suites ported from Psalm / PHPStan
+├── phpstan_symfony/, phpstan_doctrine/   # Projects the PHPStan Symfony and Doctrine extensions' type and rule tests run in
+├── support/                # Code both runners share (the fixture projects' backend)
 └── assert_type_runner.rs, fixture_runner.rs
 ```
 

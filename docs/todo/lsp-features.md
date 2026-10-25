@@ -941,6 +941,10 @@ This is Laravel's Artisan signature support over again (`CommandOwnParam`
 spans), so share the span kinds and the completion with it rather than
 building a second set.
 
+The extension's fixtures are `tests/phpstan_symfony/data/Example*Command.php`
+for the types and the `tests/fixtures/phpstan_symfony/` fixtures on
+`rules/Symfony/ExampleCommand.php` for the checks.
+
 **Where to look:** `src/symbol_map/` (`CommandOwnParam`),
 `src/virtual_members/laravel/` (the Artisan signature parsing), and
 PHPStan's Symfony extension (`Rules/Symfony/Undefined*Rule`,
@@ -972,6 +976,9 @@ The fields come from the entity's mapping: `#[ORM\Column]`,
 `#[ORM\Id]`, and the relation attributes, or the XML mapping the CodeLens
 already reads.
 
+The extension's fixtures are `magic_repository_method_call.fixture` and
+`repository_method_call.fixture` in `tests/fixtures/phpstan_doctrine/`.
+
 **Where to look:** `src/virtual_members/`, `src/framework.rs` (the
 Doctrine mapping index), and PHPStan's Doctrine extension
 (`Reflection/Doctrine/EntityRepositoryClassReflectionExtension`,
@@ -998,7 +1005,15 @@ a DQL reader of its own over the static mapping, with the query builder's
 chain followed the way T45's repository is.
 
 Navigation and completion of the entity and field names are the cheaper
-half and the one an editor user notices; result types follow.
+half and the one an editor user notices; result types follow. The extension
+also types a query as `Query<TKey, TResult>`, so `getResult()` and its
+siblings follow from a `Query` passed in with its result type, and reads
+the expression builder's methods (`expr()->isNull('u.email')`) as the DQL
+fragment they build.
+
+The extension's fixtures are `tests/phpstan_doctrine/data/QueryResult/`
+for the types and the `dql*.fixture` and `query_builder_dql*.fixture`
+fixtures in `tests/fixtures/phpstan_doctrine/` for the checks.
 
 **Where to look:** `src/framework.rs` (the Doctrine mapping index), and
 PHPStan's Doctrine extension (`Rules/Doctrine/ORM/DqlRule`,

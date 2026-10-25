@@ -76,7 +76,10 @@ impl Backend {
     /// via the fqn_uri_index.  The vendor directory (read from
     /// `composer.json`'s `config.vendor-dir`, defaulting to `vendor`) is
     /// skipped during the filesystem walk.
-    pub(crate) fn ensure_workspace_indexed(&self) {
+    ///
+    /// Public so the test runners can index a fixture project the way the
+    /// server's background index does.
+    pub fn ensure_workspace_indexed(&self) {
         self.ensure_workspace_indexed_with_progress(None);
     }
 

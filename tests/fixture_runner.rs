@@ -13,6 +13,9 @@ use phpantom_lsp::Backend;
 use tower_lsp_server::LanguageServer;
 use tower_lsp_server::gen_lsp_types::*;
 
+#[path = "support/fixture_project.rs"]
+mod fixture_project;
+
 // ─── Embedded stubs ─────────────────────────────────────────────────────────
 // Minimal PHP stubs so that fixture tests mirror real LSP behaviour.
 // Enums implicitly implement UnitEnum / BackedEnum, and the inheritance
@@ -127,6 +130,27 @@ struct TestMeta {
     expect_sig_params: Vec<String>,
     /// If set, the test should be ignored with this reason.
     ignore: Option<String>,
+    /// The fixture project the files are analysed in, relative to `tests/`
+    /// (from `// project:`).
+    project: Option<String>,
+    /// The project's files to analyse, relative to the project (from
+    /// `// file:`).
+    project_files: Vec<String>,
+    /// The diagnostic codes the comparison covers (from `// codes:`).
+    codes: Vec<String>,
+    /// The diagnostics the files must report (from `// expect_diagnostic:`).
+    expect_diagnostics: Vec<ExpectedDiagnostic>,
+}
+
+/// One `// expect_diagnostic: [FILE:]LINE: message` line.
+struct ExpectedDiagnostic {
+    /// The analysed file it is in, when the fixture names more than one.
+    file: Option<String>,
+    /// 1-based line.
+    line: u32,
+    message: String,
+    /// Why PHPantom does not report it yet (a trailing `// SKIP: reason`).
+    skip: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -135,6 +159,7 @@ enum Feature {
     Hover,
     Definition,
     SignatureHelp,
+    Diagnostics,
 }
 
 /// A single file within a fixture (path + content).
@@ -167,7 +192,13 @@ fn parse_fixture(content: &str) -> Result<ParsedFixture, String> {
         .ok_or("Fixture missing `---` separator between header and body")?;
 
     let meta = parse_header(header)?;
-    let (files, cursor_file, cursor_line, cursor_char) = parse_body(body.trim_start())?;
+    // A diagnostics fixture analyses files of its project; it has no
+    // cursor and no body.
+    let (files, cursor_file, cursor_line, cursor_char) = if meta.feature == Feature::Diagnostics {
+        (Vec::new(), 0, 0, 0)
+    } else {
+        parse_body(body.trim_start())?
+    };
 
     Ok(ParsedFixture {
         meta,
@@ -189,6 +220,10 @@ fn parse_header(header: &str) -> Result<TestMeta, String> {
     let mut expect_sig_active = None;
     let mut expect_sig_params = Vec::new();
     let mut ignore = None;
+    let mut project = None;
+    let mut project_files = Vec::new();
+    let mut codes = Vec::new();
+    let mut expect_diagnostics = Vec::new();
 
     for line in header.lines() {
         let line = line.trim();
@@ -200,6 +235,7 @@ fn parse_header(header: &str) -> Result<TestMeta, String> {
                 "hover" => Feature::Hover,
                 "definition" => Feature::Definition,
                 "signature_help" => Feature::SignatureHelp,
+                "diagnostics" => Feature::Diagnostics,
                 other => return Err(format!("Unknown feature: {other}")),
             });
         } else if let Some(val) = line.strip_prefix("// expect:") {
@@ -227,6 +263,19 @@ fn parse_header(header: &str) -> Result<TestMeta, String> {
             expect_sig_params.push(val.trim().to_string());
         } else if let Some(val) = line.strip_prefix("// ignore:") {
             ignore = Some(val.trim().to_string());
+        } else if let Some(val) = line.strip_prefix("// project:") {
+            project = Some(val.trim().to_string());
+        } else if let Some(val) = line.strip_prefix("// file:") {
+            project_files.push(val.trim().to_string());
+        } else if let Some(val) = line.strip_prefix("// codes:") {
+            codes.extend(
+                val.split(',')
+                    .map(str::trim)
+                    .filter(|code| !code.is_empty())
+                    .map(str::to_string),
+            );
+        } else if let Some(val) = line.strip_prefix("// expect_diagnostic:") {
+            expect_diagnostics.push(parse_expected_diagnostic(val)?);
         }
         // Lines that don't match any prefix are silently ignored (comments).
     }
@@ -234,6 +283,9 @@ fn parse_header(header: &str) -> Result<TestMeta, String> {
     let feature = feature.ok_or("Fixture missing `// feature:` header")?;
     if description.is_empty() {
         return Err("Fixture missing `// test:` header".to_string());
+    }
+    if feature == Feature::Diagnostics && (project.is_none() || project_files.is_empty()) {
+        return Err("Diagnostics fixture needs a `// project:` and a `// file:`".to_string());
     }
 
     Ok(TestMeta {
@@ -247,6 +299,39 @@ fn parse_header(header: &str) -> Result<TestMeta, String> {
         expect_sig_active,
         expect_sig_params,
         ignore,
+        project,
+        project_files,
+        codes,
+        expect_diagnostics,
+    })
+}
+
+/// Parse the value of an `// expect_diagnostic:` line:
+/// `[FILE:]LINE: message`, optionally followed by `// SKIP: reason`.
+/// `FILE` is one of the fixture's `// file:` paths, and defaults to the
+/// first.
+fn parse_expected_diagnostic(val: &str) -> Result<ExpectedDiagnostic, String> {
+    let (val, skip) = match val.split_once("// SKIP:") {
+        Some((val, reason)) => (val, Some(reason.trim().to_string())),
+        None => (val, None),
+    };
+    let (location, message) = val
+        .trim()
+        .split_once(": ")
+        .ok_or_else(|| format!("Invalid expect_diagnostic format: {val}"))?;
+    let (file, line) = match location.rsplit_once(':') {
+        Some((file, line)) => (Some(file.to_string()), line),
+        None => (None, location),
+    };
+    let line = line
+        .parse()
+        .map_err(|e| format!("Invalid line in expect_diagnostic `{val}`: {e}"))?;
+    Ok(ExpectedDiagnostic {
+        file,
+        line,
+        // A message spanning lines is written with `\n`.
+        message: message.trim().replace("\\n", "\n"),
+        skip,
     })
 }
 
@@ -368,6 +453,12 @@ fn run_fixture(path: &Path, content: String) -> datatest_stable::Result<()> {
         return Ok(());
     }
 
+    // The project backend runs its own startup, so this one runs outside
+    // the runtime below.
+    if fixture.meta.feature == Feature::Diagnostics {
+        return run_diagnostics(&fixture).map_err(|e| format!("{} — {e}", path.display()).into());
+    }
+
     // Use a single-threaded tokio runtime for async LSP calls.
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -380,6 +471,7 @@ fn run_fixture(path: &Path, content: String) -> datatest_stable::Result<()> {
             Feature::Hover => run_hover(&fixture).await,
             Feature::Definition => run_definition(&fixture).await,
             Feature::SignatureHelp => run_signature_help(&fixture).await,
+            Feature::Diagnostics => unreachable!("run above"),
         }
     })
     .map_err(|e| format!("{} — {e}", path.display()))?;
@@ -782,6 +874,80 @@ async fn run_signature_help(fixture: &ParsedFixture) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+/// Analyse the fixture's project files and compare the diagnostics whose
+/// code the fixture names with the ones it expects, line and message.
+///
+/// An expectation marked `// SKIP` is one PHPantom does not report yet: it
+/// is not required, and a diagnostic on its line is not held against the
+/// fixture.
+fn run_diagnostics(fixture: &ParsedFixture) -> Result<(), String> {
+    let meta = &fixture.meta;
+    let project = meta.project.as_deref().expect("checked when parsed");
+    let root = fixture_project::absolute_path(&Path::new("tests").join(project));
+    let backend = fixture_project::project_backend(&root);
+
+    let mut reported: Vec<(String, u32, String)> = Vec::new();
+    for file in &meta.project_files {
+        let path = root.join(file);
+        let content = std::fs::read_to_string(&path)
+            .map_err(|e| format!("Cannot read {}: {e}", path.display()))?;
+        let uri = Uri::from_file_path(&path)
+            .map_err(|_| format!("{} has no file URI", path.display()))?
+            .to_string();
+        backend.update_ast(&uri, &content);
+        let mut diagnostics = Vec::new();
+        backend.collect_slow_diagnostics(&uri, &content, &mut diagnostics);
+        for diagnostic in diagnostics {
+            let code = match &diagnostic.code {
+                Some(Code::String(code)) => code.as_str(),
+                _ => continue,
+            };
+            if !meta.codes.iter().any(|wanted| wanted == code) {
+                continue;
+            }
+            let message = match &diagnostic.message {
+                Message::String(text) => text.clone(),
+                Message::MarkupContent(markup) => markup.value.clone(),
+            };
+            reported.push((file.clone(), diagnostic.range.start.line + 1, message));
+        }
+    }
+
+    // An expectation without a file is in the first one the fixture names.
+    let file_of = |expected: &ExpectedDiagnostic| -> String {
+        expected
+            .file
+            .clone()
+            .unwrap_or_else(|| meta.project_files[0].clone())
+    };
+    let mut failures = Vec::new();
+    for expected in meta.expect_diagnostics.iter().filter(|e| e.skip.is_none()) {
+        let file = file_of(expected);
+        let found = reported.iter().any(|(f, line, message)| {
+            *f == file && *line == expected.line && *message == expected.message
+        });
+        if !found {
+            failures.push(format!(
+                "missing {file}:{}: {}",
+                expected.line, expected.message
+            ));
+        }
+    }
+    for (file, line, message) in &reported {
+        let expected = meta.expect_diagnostics.iter().any(|e| {
+            file_of(e) == *file && e.line == *line && (e.skip.is_some() || e.message == *message)
+        });
+        if !expected {
+            failures.push(format!("unexpected {file}:{line}: {message}"));
+        }
+    }
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(failures.join("\n"))
+    }
 }
 
 // ─── Harness ────────────────────────────────────────────────────────────────
