@@ -3778,6 +3778,33 @@ function returnsClass() { return SomeClass::class; }
 }
 
 #[test]
+fn enum_and_trait_names_returned_where_their_strings_are_declared() {
+    let php = r#"<?php
+namespace App;
+
+enum SomeEnum { case A; }
+trait SomeTrait {}
+final class SomeClass {}
+
+/** @return enum-string */
+function returnsEnum() { return SomeEnum::class; }
+
+/** @return trait-string */
+function returnsTrait() { return SomeTrait::class; }
+
+/** @return enum-string */
+function returnsClassAsEnum() { return SomeClass::class; }
+
+/** @return trait-string */
+function returnsClassAsTrait() { return SomeClass::class; }
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_return");
+    assert_eq!(messages.len(), 2, "got {messages:?}");
+    assert!(messages[0].contains("enum-string"), "{messages:?}");
+    assert!(messages[1].contains("trait-string"), "{messages:?}");
+}
+
+#[test]
 fn accumulating_a_refined_int_return_type_stays_int() {
     let php = r#"<?php
 /** @return int<0,max> */

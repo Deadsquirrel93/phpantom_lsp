@@ -25,47 +25,7 @@ No outstanding items.
 
 ## Type comparison
 
-### B676. `enum-string` and `trait-string` reject the name of an enum or a trait
-
-**Impact: Medium · Complexity: Low-Medium**
-
-```php
-enum SomeEnum { case A; }
-trait SomeTrait {}
-
-/** @return enum-string */
-function e() { return SomeEnum::class; }   // reported: class-string<SomeEnum> is incompatible with enum-string
-
-/** @param trait-string $t */
-function t($t): void {}
-t(SomeTrait::class);                        // reported: expects trait-string, got class-string<SomeTrait>
-```
-
-Every `X::class` is rejected where an `enum-string` or `trait-string` is
-declared, so both spellings are unusable: the valid argument and the
-valid return are both errors. Rejecting an ordinary class name there is
-right, so the narrowing half works. The problem is that nothing ever
-accepts.
-
-`interface-string` has its own `TypeKind` and a class-loader-aware rule
-in `class_lookup/subtyping.rs` that loads the inner class of a
-`class-string<X>` and accepts it when `X` is an interface. `enum-string`
-and `trait-string` are bare named atoms, so `class-string<X>` against
-them falls through to `PhpType::subtype_of_symbol_name`, which asks the
-name-only lattice `is_named_subtype("class-string", "enum-string")` and
-gets a definite `false`. The fix is to give both the same treatment as
-`interface-string`: load `X` and compare its `ClassLikeKind` (enum,
-trait), stay silent when it cannot be loaded, and accept a bare
-`enum-string`/`trait-string` value wherever `class-string`/`string` is
-expected as today. A string literal naming an enum or trait needs the
-same kind check the literal-to-`interface-string` rule does.
-
-Both rows passed on the run at `5d50cf4cf` and are red again: found
-running the php-typing-conformance suite
-(`phpdoc_advanced_fallback_enum_string.php`,
-`phpdoc_advanced_fallback_trait_string.php`). Every peer LSP measured
-(Phpactor, Intelephense, devsense, and for the trait row Qodana) passes
-them.
+No outstanding items.
 
 ## Standard-library return types
 

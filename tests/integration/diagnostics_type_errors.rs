@@ -10671,6 +10671,98 @@ acceptsClassString(returnsInterfaceString());
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
+// ── enum-string / trait-string ──────────────────────────────────────
+
+#[test]
+fn only_an_enum_name_is_an_enum_string() {
+    let php = r#"<?php
+namespace App;
+
+interface SomeInterface {}
+final class SomeClass {}
+enum SomeEnum { case A; }
+trait SomeTrait {}
+
+/** @param enum-string $value */
+function acceptsEnumString($value): void {}
+
+acceptsEnumString(SomeEnum::class);
+acceptsEnumString('App\SomeEnum');
+acceptsEnumString('App\Unindexed');
+acceptsEnumString(SomeClass::class);
+acceptsEnumString(SomeInterface::class);
+acceptsEnumString(SomeTrait::class);
+acceptsEnumString('App\SomeClass');
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 4, "got {messages:?}");
+    assert!(
+        messages.iter().all(|m| m.contains("enum-string")),
+        "each message should name the expected type, got {messages:?}"
+    );
+}
+
+#[test]
+fn only_a_trait_name_is_a_trait_string() {
+    let php = r#"<?php
+namespace App;
+
+interface SomeInterface {}
+final class SomeClass {}
+enum SomeEnum { case A; }
+trait SomeTrait {}
+
+/** @param trait-string $value */
+function acceptsTraitString($value): void {}
+
+acceptsTraitString(SomeTrait::class);
+acceptsTraitString('App\SomeTrait');
+acceptsTraitString('App\Unindexed');
+acceptsTraitString(SomeClass::class);
+acceptsTraitString(SomeInterface::class);
+acceptsTraitString(SomeEnum::class);
+acceptsTraitString('App\SomeClass');
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 4, "got {messages:?}");
+    assert!(
+        messages.iter().all(|m| m.contains("trait-string")),
+        "each message should name the expected type, got {messages:?}"
+    );
+}
+
+#[test]
+fn enum_and_trait_strings_satisfy_class_string_and_string_parameters() {
+    let php = r#"<?php
+namespace App;
+
+/** @return enum-string */
+function returnsEnumString(): string { return \UnitEnum::class; }
+
+/** @return trait-string */
+function returnsTraitString(): string { return 'App\T'; }
+
+function acceptsString(string $value): void {}
+
+/** @param class-string $name */
+function acceptsClassString(string $name): void {}
+
+/** @param enum-string $name */
+function acceptsEnumString(string $name): void {}
+
+/** @param trait-string $name */
+function acceptsTraitString(string $name): void {}
+
+acceptsString(returnsEnumString());
+acceptsString(returnsTraitString());
+acceptsClassString(returnsEnumString());
+acceptsEnumString(returnsEnumString());
+acceptsTraitString(returnsTraitString());
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
 /// A closure whose declared return type contradicts the one the parameter's
 /// `callable(...)` spelling promises is a mismatch the callee will hit on the
 /// first call, not a signature we merely failed to verify.

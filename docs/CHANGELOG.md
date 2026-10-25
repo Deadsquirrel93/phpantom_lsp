@@ -55,6 +55,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`enum-string` and `trait-string` accept enum and trait names.** `SomeEnum::class` passed or returned where an `enum-string` is declared, or `SomeTrait::class` where a `trait-string` is, is no longer reported. The name of a class of another kind is still reported.
 - **Deprecated classes are marked in type hierarchy.** The deprecation tag on a type hierarchy item is now sent as the list the protocol specifies, so editors that strike through deprecated entries do so.
 - **Writing a key into a `string[]` keeps its keys open.** `$args['--admin'] = 1` on an array declared as `string[]` or `array<string>` no longer pins its keys to `int|string`, so passing it on to an `array<string, …>` parameter is no longer reported.
 - **Config keys with no config file are reported.** In a Laravel application, `config('gate.missing')` is now reported as an unknown config key when no config file declares `gate`, not only when the key is a typo inside a file that exists. Keys under a config file a package registers in a way that can't be read are still left alone.

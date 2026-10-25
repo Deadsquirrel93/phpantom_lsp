@@ -495,6 +495,30 @@ pub(crate) fn is_subtype_of_typed(
             .is_none_or(|cls| cls.kind == ClassLikeKind::Interface);
     }
 
+    // ── class-string / string literal <: enum-string / trait-string ─
+    // The same rule as `interface-string`, for the other two kinds of
+    // name: only a class-like we can load and see is of another kind is
+    // rejected.
+    if let TypeKind::Named(sup) = supertype.kind()
+        && let Some(kind) = named_class_like_string_kind(sup)
+    {
+        let is_kind = |name: &str| class_loader(Fqn::new(name)).is_none_or(|cls| cls.kind == kind);
+        match subtype.kind() {
+            TypeKind::ClassString(inner) => {
+                return inner
+                    .as_ref()
+                    .and_then(|inner| inner.base_name())
+                    .is_none_or(is_kind);
+            }
+            TypeKind::Literal(lit) => {
+                if let Some(name) = lit.string_content() {
+                    return is_kind(&name);
+                }
+            }
+            _ => {}
+        }
+    }
+
     // ── interface-string <: class-string / interface-string ─────
     // The value names a class-like either way, so only the bounds are
     // left to line up.  A missing bound is `object`, which anything
@@ -615,6 +639,17 @@ pub(crate) fn is_subtype_of_typed(
     }
 
     false
+}
+
+/// The kind of class-like an `enum-string` or `trait-string` names.
+fn named_class_like_string_kind(name: &str) -> Option<ClassLikeKind> {
+    if name.eq_ignore_ascii_case("enum-string") {
+        Some(ClassLikeKind::Enum)
+    } else if name.eq_ignore_ascii_case("trait-string") {
+        Some(ClassLikeKind::Trait)
+    } else {
+        None
+    }
 }
 
 /// The runtime array key a shape key spelled `Foo::CONSTANT` evaluates to,

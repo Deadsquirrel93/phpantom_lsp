@@ -494,6 +494,12 @@ impl PhpType {
             (TypeKind::InterfaceString(_), TypeKind::Named(sup)) => {
                 Some(is_named_subtype("interface-string", sup))
             }
+            // A bare `enum-string` names a class-like just the same.
+            (TypeKind::Named(sub), TypeKind::ClassString(None))
+                if is_named_subtype(sub, "class-string") =>
+            {
+                Some(true)
+            }
             _ => None,
         }
     }
