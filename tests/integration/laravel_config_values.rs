@@ -294,6 +294,104 @@ async fn a_list_value_is_not_an_empty_array() {
     );
 }
 
+// ─── What a key's hover shows ───────────────────────────────────────────────
+
+/// An `env()` read shows the variable, the default the config file gives
+/// it, and what `.env` sets it to.
+#[tokio::test]
+async fn hover_on_an_env_backed_key_shows_the_variable_its_default_and_the_dotenv_value() {
+    let config = "<?php\nreturn [\n    'name' => env('APP_NAME', 'Laravel'),\n];\n";
+    let consumer = demo("        config('app.name');");
+    let (backend, _dir, uri) = create_initialized_psr4_workspace(
+        LARAVEL_APP_COMPOSER,
+        &[
+            ("config/app.php", config),
+            (".env", "APP_NAME=Acme\n"),
+            ("app/Demo.php", &consumer),
+        ],
+        "app/Demo.php",
+    )
+    .await;
+
+    let text = hover_on(&backend, &uri, &consumer, "app.name").await;
+    assert!(
+        text.contains("Environment variable `APP_NAME`, defaulting to `'Laravel'`"),
+        "got {text}"
+    );
+    assert!(
+        text.contains("In `.env`, it is set to `Acme`"),
+        "got {text}"
+    );
+    assert!(text.contains("Defined in `config/app.php`"), "got {text}");
+}
+
+/// A variable whose name reads as a credential keeps its `.env` value off
+/// screen, the same as hovering the variable itself does.
+#[tokio::test]
+async fn hover_on_an_env_backed_key_hides_a_credentials_dotenv_value() {
+    let config = "<?php\nreturn [\n    'password' => env('DB_PASSWORD', ''),\n];\n";
+    let consumer = demo("        config('database.password');");
+    let (backend, _dir, uri) = create_initialized_psr4_workspace(
+        LARAVEL_APP_COMPOSER,
+        &[
+            ("config/database.php", config),
+            (".env", "DB_PASSWORD=hunter2\n"),
+            ("app/Demo.php", &consumer),
+        ],
+        "app/Demo.php",
+    )
+    .await;
+
+    let text = hover_on(&backend, &uri, &consumer, "database.password").await;
+    assert!(text.contains("its value is hidden"), "got {text}");
+    assert!(!text.contains("hunter2"), "got {text}");
+}
+
+/// A literal shows as PHP spells it, a `::class` as the class, a ternary
+/// as its arms, and a group by how many keys it holds.  A value that is not
+/// statically known shows only where it is defined.
+#[tokio::test]
+async fn hover_on_a_key_shows_a_static_value() {
+    let config = "\
+<?php
+return [
+    'name' => 'Acme',
+    'port' => 3306,
+    'debug' => false,
+    'model' => App\\Models\\User::class,
+    'channel' => PHP_SAPI === 'cli' ? 'console' : 'web',
+    'mail' => ['from' => 'a', 'to' => 'b'],
+    'path' => base_path('x'),
+];
+";
+    let consumer = demo(
+        "        config('site.name');\n        config('site.port');\n        config('site.debug');\n        config('site.model');\n        config('site.channel');\n        config('site.mail');\n        config('site.path');",
+    );
+    let (backend, _dir, uri) = create_initialized_psr4_workspace(
+        LARAVEL_APP_COMPOSER,
+        &[("config/site.php", config), ("app/Demo.php", &consumer)],
+        "app/Demo.php",
+    )
+    .await;
+
+    for (key, expected) in [
+        ("site.name", "Value: `'Acme'`"),
+        ("site.port", "Value: `3306`"),
+        ("site.debug", "Value: `false`"),
+        ("site.model", "Value: `App\\Models\\User::class`"),
+        ("site.channel", "Value: one of `'console'` or `'web'`"),
+        ("site.mail", "An array of 2 keys"),
+    ] {
+        let text = hover_on(&backend, &uri, &consumer, key).await;
+        assert!(text.contains(expected), "{key}: got {text}");
+    }
+    let text = hover_on(&backend, &uri, &consumer, "site.path").await;
+    assert!(
+        !text.contains("Value") && text.contains("Defined in `config/site.php`"),
+        "got {text}"
+    );
+}
+
 // ─── Completion ─────────────────────────────────────────────────────────────
 
 /// Completion offers every group and every leaf by its full dotted path,

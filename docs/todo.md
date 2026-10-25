@@ -34,17 +34,19 @@ contributor even though it's short.
 
 | #   | Item                                                                                                                                                            | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
+| D24  | [A `match` that does not cover every enum case is not reported](todo/diagnostics.md#d24-a-match-that-does-not-cover-every-enum-case-is-not-reported) | Medium | Medium |
+| D32 | [Discarding the result of a `#[\NoDiscard]` call is not reported](todo/diagnostics.md#d32-discarding-the-result-of-a-nodiscard-call-is-not-reported) | Low         | Low         |
+| D26  | [Reading a typed property that nothing initialises is not reported](todo/diagnostics.md#d26-reading-a-typed-property-that-nothing-initialises-is-not-reported) | Low-Medium | Medium-High |
+| F60 | [Advertise pull diagnostics to every client](todo/lsp-features.md#f60-advertise-pull-diagnostics-to-every-client) | Low-Medium  | Low-Medium |
+| F21 | [Static `typeHierarchyProvider` advertisement](todo/lsp-features.md#f21-static-typehierarchyprovider-advertisement) | Low-Medium  | Low |
 | X14  | [Ask Zed to expose `file_scan_exclusions` and `file_types` to extensions](todo/indexing.md#x14-ask-zed-to-expose-file_scan_exclusions-and-file_types-to-extensions) (upstream request) | Low | Low |
 | E1  | [Project-level phpstorm-stubs for go-to-definition](todo/external-stubs.md#e1-project-level-phpstorm-stubs-for-gtd)                                             | Medium-High | Low         |
 | E3  | [IDE-provided and `.phpantom.toml` stub paths](todo/external-stubs.md#e3-ide-provided-and-phpantomtoml-stub-paths) (depends on E2)                              | Low-Medium  | Low         |
-| D24  | [A `match` that does not cover every enum case is not reported](todo/diagnostics.md#d24-a-match-that-does-not-cover-every-enum-case-is-not-reported) | Medium | Medium |
 | P84 | [Class lookups re-apply the Laravel patches on every call](todo/performance.md#p84-class-lookups-re-apply-the-laravel-patches-on-every-call) | Medium-High | Medium |
 | F59 | [Send Twig, YAML, and XML documents to the server](todo/lsp-features.md#f59-send-twig-yaml-and-xml-documents-to-the-server) (server, VS Code extension, Zed PR) | Medium-High | Medium |
 | P85 | [One keystroke parses the open file three times](todo/performance.md#p85-one-keystroke-parses-the-open-file-three-times) | Medium | Medium-High |
-| D26  | [Reading a typed property that nothing initialises is not reported](todo/diagnostics.md#d26-reading-a-typed-property-that-nothing-initialises-is-not-reported) | Low-Medium | Medium-High |
 | L1  | [Facade completion](todo/laravel.md#l1-facade-completion-upstream-method-generator-improvement) (upstream `facade-documenter` PRs)                              | High        | High        |
 | E2  | [Project-level stubs as type resolution source](todo/external-stubs.md#e2-project-level-stubs-as-resolution-source) (depends on E1)                             | Medium      | High        |
-| F21 | [Static `typeHierarchyProvider` advertisement](todo/lsp-features.md#f21-static-typehierarchyprovider-advertisement) | Low-Medium  | Low |
 | BL1  | [Blade-aware code actions](todo/blade.md#bl1-blade-aware-code-actions)                                                      | Medium     | Medium-High |
 |     | **Release 1.0.0 + IDE extensions**                                                                                                                              |             |             |
 

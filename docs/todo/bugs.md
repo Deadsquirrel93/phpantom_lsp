@@ -25,7 +25,47 @@ No outstanding items.
 
 ## Type comparison
 
-No outstanding items.
+### B676. `enum-string` and `trait-string` reject the name of an enum or a trait
+
+**Impact: Medium · Complexity: Low-Medium**
+
+```php
+enum SomeEnum { case A; }
+trait SomeTrait {}
+
+/** @return enum-string */
+function e() { return SomeEnum::class; }   // reported: class-string<SomeEnum> is incompatible with enum-string
+
+/** @param trait-string $t */
+function t($t): void {}
+t(SomeTrait::class);                        // reported: expects trait-string, got class-string<SomeTrait>
+```
+
+Every `X::class` is rejected where an `enum-string` or `trait-string` is
+declared, so both spellings are unusable: the valid argument and the
+valid return are both errors. Rejecting an ordinary class name there is
+right, so the narrowing half works. The problem is that nothing ever
+accepts.
+
+`interface-string` has its own `TypeKind` and a class-loader-aware rule
+in `class_lookup/subtyping.rs` that loads the inner class of a
+`class-string<X>` and accepts it when `X` is an interface. `enum-string`
+and `trait-string` are bare named atoms, so `class-string<X>` against
+them falls through to `PhpType::subtype_of_symbol_name`, which asks the
+name-only lattice `is_named_subtype("class-string", "enum-string")` and
+gets a definite `false`. The fix is to give both the same treatment as
+`interface-string`: load `X` and compare its `ClassLikeKind` (enum,
+trait), stay silent when it cannot be loaded, and accept a bare
+`enum-string`/`trait-string` value wherever `class-string`/`string` is
+expected as today. A string literal naming an enum or trait needs the
+same kind check the literal-to-`interface-string` rule does.
+
+Both rows passed on the run at `5d50cf4cf` and are red again: found
+running the php-typing-conformance suite
+(`phpdoc_advanced_fallback_enum_string.php`,
+`phpdoc_advanced_fallback_trait_string.php`). Every peer LSP measured
+(Phpactor, Intelephense, devsense, and for the trait row Qodana) passes
+them.
 
 ## Standard-library return types
 
@@ -57,13 +97,79 @@ No outstanding items.
 
 ## Name resolution
 
-No outstanding items.
+### B677. `unset` in a `@var` union is resolved as a class name
+
+**Impact: Medium · Complexity: Low-Medium**
+
+```php
+/** @var \DateTime|unset $guarded */          // reported: Class 'App\unset' not found
+if (isset($guarded)) {
+    echo date_format($guarded, 'Y-m-d');      // reported: App\unset does not satisfy DateTimeInterface
+}
+```
+
+`unset` in a docblock union is the Blade-view idiom for "this variable
+may not be defined at all" (issue #366). We resolve the spelling against
+the current namespace like any class name, so every such `@var` is an
+`unknown_class`, and the phantom class then rides along in the variable's
+type: `isset()` does not remove it, so the guarded call still reports an
+argument mismatch.
+
+`unset` has to be a docblock keyword (`php_type/keywords.rs`) rather than
+a class name, and the type it stands for has to be something `isset()`
+narrows away. The simplest honest reading is `null`: `\DateTime|unset`
+becomes `?\DateTime`, which the existing `isset()`/`!== null` narrowing
+already handles. A true possibly-undefined state would be more precise,
+but nothing downstream needs it to make the guarded reads correct.
+
+Found running the php-typing-conformance suite
+(`regressions_unset_pseudo_type.php`). Phpactor, Intelephense, devsense
+and Qodana all pass it.
 
 ## Code actions
 
 No outstanding items.
 
 ## Miscellaneous
+
+### B678. An inline `{@see Class::$prop}` in a docblock's prose is not a reference
+
+**Impact: Low-Medium · Complexity: Low-Medium**
+
+```php
+class Docblock {
+    public static $vectors = [];
+
+    /**
+     * The tags defined in the docblock.
+     *
+     * The array has keys which are the tag names (excluding the @) and values
+     * that are arrays, each of which is an entry for the tag.
+     *
+     * In the case where the tag name is defined in {@see DocBlock::$vectors} the
+     * value within the tag-value array is an array in itself with keys as
+     * described by {@see DocBlock::$vectors}.
+     *
+     * @var array
+     */
+    public $tags;
+}
+```
+
+Find References on `$vectors` returns a standalone `@see DocBlock::$vectors`
+tag in another file, but neither inline `{@see DocBlock::$vectors}` above,
+so renaming the property leaves both behind. `scan_text_for_inline_see` in
+`src/symbol_map/docblock.rs` is meant to cover free text ahead of the first
+tag and the description of any tag. Not yet confirmed: the bare `@` in
+"(excluding the @)" may start a tag as far as the PHPDoc grammar is
+concerned, so the following prose would land in a tag value that is never
+scanned. A reproduction with and without that `@` will tell.
+
+Found re-measuring the php-typing-conformance LSP probes (psysh navigation
+corpus, `Psy\Util\Docblock::$vectors`). That table counts code references
+only, so it scores the `@see` tag we do return as an extra. Docblock
+references are deliberate (rename has to update them), so the fix here is
+to find the inline ones too, not to drop the tag.
 
 ### B675. Member references mix up a property and a method of the same name
 

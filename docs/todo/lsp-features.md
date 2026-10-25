@@ -274,6 +274,38 @@ declared support).
 
 ---
 
+## F60. Advertise pull diagnostics to every client
+
+**Impact: Low-Medium · Complexity: Low-Medium**
+
+`diagnosticProvider` is only sent in the `initialize` response when the
+client declares `textDocument.diagnostic` (`ClientCaps::pull_diagnostics`
+in `src/backend/client_caps.rs`, read in `src/backend/startup.rs`). A
+client or tool that checks the server's capabilities without declaring
+pull support of its own, such as a feature-conformance probe, concludes
+we have no pull diagnostics at all. The php-typing-conformance LSP table
+records `pull-diagnostics` as not advertised for us, and because the
+probe only sends requests a server advertises, the handler is never even
+exercised.
+
+Advertising the capability unconditionally is allowed by the protocol (a
+client that cannot pull ignores it), but it is not enough on its own:
+the delivery mode is chosen from the same flag, and push mode caches
+nothing (`assemble_and_push` in `src/diagnostics/delivery.rs`), so a
+`textDocument/diagnostic` from a push client would find no `last_full`
+entry, queue a recompute, and answer with an empty set every time. Keep
+choosing push or pull delivery from the client's declaration, so a push
+client still gets exactly one copy, but also record the pushed set and
+its `resultId` in `last_full`, so a pull from that client answers with
+what was last published. The cache only holds open files, so the memory
+cost is small.
+
+**Where to look:** `src/backend/startup.rs` (`initialize`),
+`src/backend/client_caps.rs`, `src/diagnostics/delivery.rs`
+(`assemble_and_push`), `src/diagnostics/pull.rs`.
+
+---
+
 ## F22. Merge a namespace onto one that shares a class name
 
 **Impact: Low-Medium · Complexity: Medium-High**

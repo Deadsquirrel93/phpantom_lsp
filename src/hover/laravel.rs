@@ -9,6 +9,7 @@ use tower_lsp_server::gen_lsp_types::*;
 use crate::Backend;
 use crate::class_lookup::Fqn;
 use crate::php_type::{PhpType, TypeKind};
+use crate::virtual_members::laravel::config_values::{ConfigNode, ConfigValue};
 
 use super::formatting::{inline_code, make_hover};
 
@@ -77,9 +78,14 @@ impl Backend {
                 ("Route", detail)
             }
             StringKeyKind::Config => {
-                let detail = match self.resolved_key_location(kind, key, uri, "config") {
+                let location = match self.resolved_key_location(kind, key, uri, "config") {
                     Some((_, short_path)) => format!("Defined in `{short_path}`"),
                     None => "Config key".to_string(),
+                };
+                let detail = match self.with_config_node(key, |node| self.config_value_detail(node))
+                {
+                    Some(Some(value)) => format!("{value}\n\n{location}"),
+                    _ => location,
                 };
                 ("Config", detail)
             }
@@ -283,6 +289,43 @@ impl Backend {
         )))
     }
 
+    /// What a config key holds, for its hover: the value as written, or for
+    /// an `env()` read, the variable with its default and what `.env` sets
+    /// it to.  `None` when the value is not one that can be read statically.
+    fn config_value_detail(&self, node: &ConfigNode) -> Option<String> {
+        let value = match node {
+            ConfigNode::Array(entries) => {
+                return Some(count_phrase("An array", entries.len(), "key", "keys"));
+            }
+            ConfigNode::List(items) => {
+                return Some(count_phrase("A list", items.len(), "item", "items"));
+            }
+            ConfigNode::Leaf(value) => value,
+        };
+        let ConfigValue::Env {
+            name: Some(name),
+            default,
+        } = value
+        else {
+            return describe_config_value(value).map(|value| format!("Value: {value}"));
+        };
+        let mut detail = format!("Environment variable {}", inline_code(name));
+        if let Some(default) = default.as_deref().and_then(describe_config_value) {
+            detail.push_str(&format!(", defaulting to {default}"));
+        }
+        if let Some(decl) = crate::virtual_members::laravel::env_declaration(self, name) {
+            let set_to = if crate::virtual_members::laravel::env_name_is_sensitive(name) {
+                "its value is hidden".to_string()
+            } else if decl.value.is_empty() {
+                "it is set to an empty value".to_string()
+            } else {
+                format!("it is set to {}", inline_code(&decl.value))
+            };
+            detail.push_str(&format!("\n\nIn `{}`, {set_to}", decl.file));
+        }
+        Some(detail)
+    }
+
     /// Describe where the other half of a Blade section or stack name is:
     /// what renders the name a template fills, or what fills the name a
     /// layout renders.
@@ -449,6 +492,52 @@ impl Backend {
 
         Some(self.hover_for_property(property, &resolved_model, &class_loader))
     }
+}
+
+/// "An array of 3 keys", with the noun agreeing with the count.
+fn count_phrase(container: &str, count: usize, one: &str, many: &str) -> String {
+    let noun = if count == 1 { one } else { many };
+    format!("{container} of {count} {noun}")
+}
+
+/// A config value as an inline phrase: a literal as PHP spells it, a
+/// `::class` as the class, and a ternary as its arms.  `None` when any part
+/// of it is not statically known.
+fn describe_config_value(value: &ConfigValue) -> Option<String> {
+    Some(match value {
+        ConfigValue::Str(text) => inline_code(&format!(
+            "'{}'",
+            text.replace('\\', "\\\\").replace('\'', "\\'")
+        )),
+        ConfigValue::Int(text) | ConfigValue::Float(text) => inline_code(text),
+        ConfigValue::Bool(true) => "`true`".to_string(),
+        ConfigValue::Bool(false) => "`false`".to_string(),
+        ConfigValue::Null => "`null`".to_string(),
+        ConfigValue::ClassString(name) => inline_code(&format!("{name}::class")),
+        ConfigValue::OneOf(arms) => {
+            let arms = arms
+                .iter()
+                .map(describe_config_value)
+                .collect::<Option<Vec<_>>>()?;
+            match arms.split_last() {
+                Some((last, rest)) if !rest.is_empty() => {
+                    format!("one of {} or {last}", rest.join(", "))
+                }
+                _ => return None,
+            }
+        }
+        ConfigValue::Env {
+            name: Some(name),
+            default,
+        } => {
+            let mut phrase = format!("the {} environment variable", inline_code(name));
+            if let Some(default) = default.as_deref().and_then(describe_config_value) {
+                phrase.push_str(&format!(" (default {default})"));
+            }
+            phrase
+        }
+        ConfigValue::Env { name: None, .. } | ConfigValue::Dynamic => return None,
+    })
 }
 
 /// Hover for `$this->argument('user')` / `$this->option('queue')`: resolve
