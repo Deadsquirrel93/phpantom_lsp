@@ -37,6 +37,15 @@ impl Backend {
             return;
         }
 
+        // Switched off: compute nothing, and deliver the empty set so
+        // whatever the editor was shown before a reload goes away.
+        if !self.diagnostics_enabled() {
+            self.diag.last_fast.lock().remove(uri_str);
+            self.diag.last_slow.lock().remove(uri_str);
+            self.assemble_and_refresh(uri_str).await;
+            return;
+        }
+
         // The native collectors are expensive (a full-file forward walk and
         // type resolution — hundreds of ms to several seconds on a large
         // file). They are pure CPU work and must never run inline on an async
@@ -288,6 +297,7 @@ impl Backend {
 
         // ── Read all per-source caches ──────────────────────────────
         let mut full = Vec::new();
+        let enabled = self.diagnostics_enabled();
 
         {
             let cache = self.diag.last_fast.lock();
@@ -302,9 +312,13 @@ impl Backend {
             }
         }
 
-        let phpstan_before: Vec<Diagnostic> = {
+        // Left out while diagnostics are off, so the pruning below keeps
+        // PHPStan's results for when they are switched back on.
+        let phpstan_before: Vec<Diagnostic> = if enabled {
             let cache = self.phpstan_tool.last_diags.lock();
             cache.get(uri_str).cloned().unwrap_or_default()
+        } else {
+            Vec::new()
         };
 
         // Eagerly prune stale PHPStan diagnostics against current file
@@ -356,6 +370,13 @@ impl Backend {
             if let Some(mago_diags) = cache.get(uri_str) {
                 full.extend(mago_diags.iter().cloned());
             }
+        }
+
+        // The caches keep what was found before diagnostics were switched
+        // off, and an external run already in flight still lands in its
+        // own; none of it is shown.
+        if !enabled {
+            full.clear();
         }
 
         // ── Suppress imprecise overlaps and filter ──────────────────
@@ -549,7 +570,7 @@ impl Backend {
     /// process runs at a time per tool, so triggering them on every
     /// keystroke would block save-triggered runs.
     pub(crate) fn schedule_external_diagnostics(&self, uri: String) {
-        if !self.init_complete.load(Ordering::Acquire) {
+        if !self.init_complete.load(Ordering::Acquire) || !self.diagnostics_enabled() {
             return;
         }
         self.schedule_phpstan(uri.clone());

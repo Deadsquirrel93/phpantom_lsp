@@ -808,6 +808,27 @@ fn phpcs_defaults() {
 }
 
 #[test]
+fn diagnostics_default_to_on() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join(CONFIG_FILE_NAME), "[diagnostics]\n").unwrap();
+    let config = load_config(dir.path()).unwrap();
+    assert!(config.diagnostics.enabled());
+}
+
+#[test]
+fn switching_diagnostics_off_switches_the_workspace_pass_off() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join(CONFIG_FILE_NAME),
+        "[diagnostics]\nenabled = false\nworkspace = true\n",
+    )
+    .unwrap();
+    let config = load_config(dir.path()).unwrap();
+    assert!(!config.diagnostics.enabled());
+    assert!(!config.diagnostics.workspace_enabled());
+}
+
+#[test]
 fn workspace_diagnostics_default_to_off() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join(CONFIG_FILE_NAME), "[diagnostics]\n").unwrap();

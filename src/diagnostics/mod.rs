@@ -716,4 +716,52 @@ mod tests {
         assert!(backend.diag.last_slow.lock().get(uri).is_none());
         assert!(backend.diag.last_full.lock().get(uri).is_none());
     }
+
+    /// With `[diagnostics] enabled = false` an open file is shown nothing,
+    /// neither what the native passes would find nor what an external tool
+    /// already reported, and switching it back on brings both back.
+    #[tokio::test]
+    async fn switching_diagnostics_off_shows_nothing() {
+        let backend = Backend::new_test();
+        let uri = "file:///broken.php";
+        let content = Arc::new("<?php\n$a = ;\n".to_string());
+        backend
+            .open_files
+            .write()
+            .insert(uri.to_string(), Arc::clone(&content));
+        backend.update_ast(uri, &content);
+        backend.phpstan_tool.last_diags.lock().insert(
+            uri.to_string(),
+            vec![Diagnostic {
+                range: Range::new(Position::new(0, 0), Position::new(0, 1)),
+                message: "from phpstan".to_string().into(),
+                ..Default::default()
+            }],
+        );
+        let shown = || backend.diag.last_full.lock().get(uri).cloned();
+
+        let set_enabled = |enabled: bool| {
+            let mut config = backend.config();
+            config.diagnostics.enabled = Some(enabled);
+            backend.set_config(config);
+        };
+
+        set_enabled(false);
+        backend.publish_diagnostics_for_file(uri, &content).await;
+        assert_eq!(shown(), Some(Vec::new()));
+
+        set_enabled(true);
+        backend.publish_diagnostics_for_file(uri, &content).await;
+        let shown = shown().unwrap();
+        assert!(
+            shown
+                .iter()
+                .any(|d| d.code == Some(Code::String("syntax_error".to_string())))
+        );
+        assert!(
+            shown
+                .iter()
+                .any(|d| d.message == "from phpstan".to_string().into())
+        );
+    }
 }

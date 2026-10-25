@@ -415,6 +415,45 @@ fn reload_config_is_visible_on_every_clone() {
     );
 }
 
+/// Switching diagnostics off in the config clears what open files were
+/// shown, and switching them back on fills it in again, both without
+/// waiting for the next edit: the reload queues every open file for the
+/// diagnostic worker, with a full pass owed.
+#[test]
+fn reload_config_rediagnoses_open_files_when_diagnostics_are_toggled() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join(crate::config::CONFIG_FILE_NAME);
+    let backend = Backend::new_test();
+    backend.init_complete.store(true, Ordering::Release);
+    let uri = "file:///project/src/Open.php";
+    backend
+        .open_files
+        .write()
+        .insert(uri.to_string(), std::sync::Arc::new("<?php\n".to_string()));
+
+    std::fs::write(&config_path, "[diagnostics]\nenabled = false\n").unwrap();
+    backend.reload_config(dir.path());
+    assert!(backend.diag.pending_uris.lock().contains(uri));
+    assert!(backend.diag.full_slow_pass_requested.lock().contains(uri));
+
+    backend.diag.pending_uris.lock().clear();
+    backend.diag.full_slow_pass_requested.lock().clear();
+    std::fs::write(
+        &config_path,
+        "[diagnostics]\nenabled = false\nworkspace = true\n",
+    )
+    .unwrap();
+    backend.reload_config(dir.path());
+    assert!(
+        backend.diag.pending_uris.lock().is_empty(),
+        "a reload that leaves diagnostics off has nothing to redo"
+    );
+
+    std::fs::write(&config_path, "[diagnostics]\n").unwrap();
+    backend.reload_config(dir.path());
+    assert!(backend.diag.pending_uris.lock().contains(uri));
+}
+
 /// A reload merges the configured global config file, not the one
 /// belonging to whoever runs the process: point a backend at a global
 /// file of our own and its settings must show up, while the default

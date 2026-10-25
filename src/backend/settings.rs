@@ -15,6 +15,13 @@ impl Backend {
         self.workspace.config.lock().clone()
     }
 
+    /// Whether the editor is shown any diagnostics at all; see
+    /// [`DiagnosticsConfig::enabled`](config::DiagnosticsConfig::enabled).
+    /// Reads the one flag without cloning the whole config.
+    pub(crate) fn diagnostics_enabled(&self) -> bool {
+        self.workspace.config.lock().diagnostics.enabled()
+    }
+
     /// The directory symlinks the workspace walks have indexed through.
     ///
     /// Walks report into it as they discover links; the watcher

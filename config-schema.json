@@ -20,6 +20,11 @@
       "type": "object",
       "description": "Toggle individual diagnostic providers.",
       "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Show diagnostics in the editor at all. Set to false to report nothing: no native diagnostics (syntax errors included), no external tool runs, and no workspace pass. The analyze command ignores this setting.",
+          "default": true
+        },
         "unresolved-member-access": {
           "type": "boolean",
           "description": "Report member access (->, ?->, ::) on subjects whose type could not be resolved. Useful for discovering gaps in type coverage but produces too many diagnostics on codebases without comprehensive type annotations.",

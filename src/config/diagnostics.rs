@@ -6,6 +6,15 @@ use serde::Deserialize;
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct DiagnosticsConfig {
+    /// Show diagnostics in the editor at all.
+    ///
+    /// On by default. Set to `false` and PHPantom reports nothing: no
+    /// native diagnostics (syntax errors included), no external tool
+    /// runs, and no workspace pass. Every other key in this section is
+    /// then moot. The `analyze` CLI ignores it, since running it is an
+    /// explicit request for diagnostics.
+    pub enabled: Option<bool>,
+
     /// Report member access on a subject whose type cannot answer for it.
     ///
     /// Off by default. When enabled, PHPantom emits a hint-level
@@ -127,6 +136,13 @@ pub struct IgnoreRule {
 }
 
 impl DiagnosticsConfig {
+    /// Whether the editor is shown any diagnostics.
+    ///
+    /// Defaults to `true` (on) when not explicitly set.
+    pub fn enabled(&self) -> bool {
+        self.enabled.unwrap_or(true)
+    }
+
     /// Whether the unresolved-member-access diagnostic is enabled.
     ///
     /// Defaults to `false` (off) when not explicitly set.
@@ -157,9 +173,10 @@ impl DiagnosticsConfig {
 
     /// Whether background workspace diagnostics are enabled.
     ///
-    /// Defaults to `false` (off) when not explicitly set.
+    /// Defaults to `false` (off) when not explicitly set, and is off
+    /// whenever diagnostics as a whole are switched off.
     pub fn workspace_enabled(&self) -> bool {
-        self.workspace.unwrap_or(false)
+        self.enabled() && self.workspace.unwrap_or(false)
     }
 
     /// Whether project-wide external tool runs are enabled.

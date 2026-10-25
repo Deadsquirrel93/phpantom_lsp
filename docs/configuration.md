@@ -65,6 +65,7 @@ The full schema is at [`config-schema.json`](https://github.com/PHPantom-dev/php
 
 | Key                        | Type   | Default | Description |
 | -------------------------- | ------ | ------- | ----------- |
+| `enabled`                  | bool   | `true`  | Show diagnostics in the editor at all. Set to `false` to report nothing: no native diagnostics (syntax errors included), no external tool runs, and no workspace pass. Every other key in this section is then moot. `analyze` ignores it. |
 | `unresolved-member-access` | bool   | `false` | Report `->`, `?->`, `::` where the subject is `mixed` or its type could not be worked out. Useful for type coverage, noisy on untyped codebases. |
 | `extra-arguments`          | bool   | `false` | Report calls that pass more arguments than the function accepts. |
 | `report-magic-properties`  | bool   | `false` | Report unknown property access on classes with `__get` when virtual properties are defined. Matches PHPStan's `reportMagicProperties`. |

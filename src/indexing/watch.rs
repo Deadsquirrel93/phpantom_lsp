@@ -408,6 +408,7 @@ impl Backend {
         // Captured before the reload replaces them, so the reconciliation
         // below can tell which way the discovery inputs moved.
         let previous_inputs = self.discovery_inputs();
+        let was_diagnosing = self.diagnostics_enabled();
 
         match crate::config::load_config_from(root, self.workspace.global_config_path.as_deref()) {
             Ok(cfg) => self.set_config(cfg),
@@ -432,6 +433,17 @@ impl Backend {
         // rather than merely being read the next time something asks.
         self.start_workspace_diagnostics_on_reload();
         self.stop_workspace_diagnostics_on_reload();
+
+        // Open files keep what they were last shown until something
+        // re-diagnoses them, so switching diagnostics off has to clear
+        // them now and switching them back on has to fill them in.
+        if self.diagnostics_enabled() != was_diagnosing {
+            let open: Vec<String> = self.open_files.read().keys().cloned().collect();
+            self.request_full_slow_pass(&open);
+            for uri in open {
+                self.schedule_diagnostics(uri);
+            }
+        }
 
         // An `[indexing] extensions` entry (e.g. Drupal's `.module`)
         // added to the config after startup needs its own watcher
