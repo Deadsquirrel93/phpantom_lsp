@@ -155,6 +155,56 @@ inside another one, or inside the project, is already covered and is not
 indexed twice. Adding a folder to the workspace indexes it straight away,
 and removing one drops its symbols straight away.
 
+### `[stubs]`
+
+| Key     | Type     | Default | Description |
+| ------- | -------- | ------- | ----------- |
+| `paths` | string[] | `[]`    | Stub files and directories whose declarations win over every other declaration of the same name, relative to the workspace root unless absolute. |
+
+```toml
+[stubs]
+paths = ["stubs", "/opt/company/php-stubs"]
+```
+
+A class, function, or constant a stub path declares is what that name
+means, whatever the project, its dependencies, or PHP's own built-in
+stubs declare under it. That makes a stub path the place for
+hand-written stubs of a PHP extension, type information for code that
+only exists at runtime, or a corrected signature for a function whose
+built-in declaration you disagree with.
+
+Paths are read the way `include` paths are: a named file directly, a
+named directory recursively with hidden and gitignored entries included,
+and `exclude` patterns still pruning what is below it. Entries that do
+not exist are ignored. Where two stub paths declare the same name, the
+one listed first wins. A directory holding a checkout of
+[phpstorm-stubs](https://github.com/JetBrains/phpstorm-stubs) is read
+from its `PhpStormStubsMap.php`, so only the files the map names count.
+
+A stub file is never analysed, renamed into, or searched for references,
+whether it sits inside the workspace or not, and go-to-definition lands
+in it. Editing, adding, or removing a stub path takes effect straight
+away, as does a change to a stub file inside the workspace. A stub
+directory outside the workspace is not watched, so an edit inside it is
+seen after a restart.
+
+#### Which key do I want?
+
+| You want | Key |
+| -------- | --- |
+| PHPantom to skip a path | `[indexing] exclude` |
+| PHP the workspace scan skips (hidden, gitignored, or outside the workspace) to resolve where nothing else declares the name | `[indexing] include` |
+| A declaration to win over every other declaration of the same name | `[stubs] paths` |
+
+The difference between `include` and `[stubs]` only shows when
+something else declares the same name: an included path fills gaps, a
+stub path overrides. So a generated stub such as Castor's
+`.castor.stub.php` works under either key, but belongs under `[stubs]`,
+which also keeps `analyze` from reporting on it. Listing the
+`_ide_helper.php` laravel-ide-helper generates under `[stubs]` is how you
+deliberately make its stand-in classes win, where `include` only lets
+them fill gaps.
+
 ### `[semantic_tokens]`
 
 PHPantom defaults to `contextual` semantic tokens so editor syntax
@@ -267,6 +317,16 @@ Editor settings and `.phpantom.toml` are two layers of one filter set rather tha
 - A `!` re-include in `.phpantom.toml` still wins over an exclude the editor sent, following the usual gitignore rule that the last matching pattern decides. This is how a project keeps one generated file indexed that its contributors happen to hide in their editors.
 
 The interface is deliberately generic (a list of globs and a list of extensions, never an editor's own setting names), so any client can translate its native settings into it. See [Editor Setup](editor-setup.md) for what each editor does with it.
+
+## Editor-supplied stubs
+
+An editor extension that ships stubs alongside the server (phpstorm-stubs as plain files, for instance) passes their directory the same way:
+
+```json
+{ "stubs": { "path": "/path/to/bundled/stubs" } }
+```
+
+It is read from `initializationOptions` and `workspace/didChangeConfiguration`, also under a `phpantom` key, and a notification without a `stubs` block leaves it as it is. The directory is treated exactly like a [`[stubs]`](#stubs) path listed after the project's own, so the project's choices win where both declare a name. This is meant for extensions, not users: to add stubs yourself, use `[stubs] paths`.
 
 ## Code Formatting
 

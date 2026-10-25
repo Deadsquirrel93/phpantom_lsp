@@ -334,7 +334,7 @@ What follows it:
 - **Drop the manual step** from the Zed section of `editor-setup.md`
   once that extension release is out.
 
-## X18. Watch `[indexing] include` paths outside the workspace
+## X18. Watch `[indexing] include` and stub paths outside the workspace
 
 **Impact: Low-Medium · Complexity: Medium**
 
@@ -355,6 +355,11 @@ outside the workspace actually delivers events
 ([vscode-languageserver-node#1783](https://github.com/microsoft/vscode-languageserver-node/issues/1783)
 reports that it does not). If it does not, fall back to a server-side
 `notify` watcher for these few named paths.
+
+Stub paths outside the workspace (`[stubs] paths` and the editor's stub
+directory) have the same gap and take the same watchers. An event under
+one already sets `stubs_changed` in `classify_watched_changes`, which
+rebuilds the stub index, so only the registration is missing.
 
 ## X13. Decide how workspace-wide edits treat excluded files
 

@@ -313,18 +313,21 @@ impl LanguageServer for Backend {
 
     async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
         // Clients re-push settings for reasons of their own, so a
-        // notification that carries no file filters is not a request to
-        // drop the ones already in force, and one that repeats the
-        // current filters is not a change.
-        let Some(options) =
-            crate::config::ClientIndexingOptions::from_client_settings(&params.settings)
-        else {
+        // notification that carries no file filters or stub directory is
+        // not a request to drop the ones already in force, and one that
+        // repeats the current settings is not a change.
+        let indexing = crate::config::ClientIndexingOptions::from_client_settings(&params.settings);
+        let stubs = crate::config::ClientStubOptions::from_client_settings(&params.settings);
+        if indexing.is_none() && stubs.is_none() {
             return;
-        };
+        }
         // Captured before the change, so the reconciliation below can
-        // tell which way the filters moved.
+        // tell which way the inputs moved.
         let previous_inputs = self.discovery_inputs();
-        if !self.set_client_indexing_options(options) {
+        let filters_changed =
+            indexing.is_some_and(|options| self.set_client_indexing_options(options));
+        let stubs_changed = stubs.is_some_and(|options| self.set_client_stub_options(options));
+        if !filters_changed && !stubs_changed {
             return;
         }
 
@@ -332,11 +335,13 @@ impl LanguageServer for Backend {
         // never reports events for those files and the index keeps
         // serving the last full scan. Same follow-up a live
         // `.phpantom.toml` edit performs.
-        self.reregister_watched_files_if_changed();
+        if filters_changed {
+            self.reregister_watched_files_if_changed();
+        }
 
-        // The index was built under the filters the user just changed
-        // away from: drop what they now exclude, and walk for what they
-        // now admit.
+        // The index was built under the settings the user just changed
+        // away from: drop what the filters now exclude, walk for what they
+        // now admit, and rebuild the stub index if its paths moved.
         self.reconcile_index_for_input_change(&previous_inputs);
 
         // A narrowed exclude list makes classes resolvable that were

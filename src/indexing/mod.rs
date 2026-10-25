@@ -12,6 +12,8 @@
 //!   file loads.
 //! - [`library_paths`] — the `[indexing] include` paths every pipeline
 //!   indexes last.
+//! - [`stub_paths`] — the `[stubs]` paths and the editor's stub
+//!   directory, whose declarations win over every other.
 //! - [`extra_roots`] — the editor's other workspace folders, indexed
 //!   beside the project as library code.
 //! - [`preload`] — autoload preloading and the `ensure_workspace_indexed*`
@@ -32,6 +34,7 @@ pub(crate) mod preload;
 mod reconcile;
 mod reindex;
 mod scan;
+pub(crate) mod stub_paths;
 mod watch;
 
 /// Return the path as supplied plus its canonical spelling when the

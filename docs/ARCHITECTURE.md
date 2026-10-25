@@ -523,14 +523,25 @@ file that declares it.
 
 ## Symbol Resolution: `find_or_load_class`
 
-When the LSP needs to resolve a class name (e.g. during completion on `Iterator::` or when following a type hint), it calls `find_or_load_class`. This method tries four phases in order, returning as soon as one succeeds:
+When the LSP needs to resolve a class name (e.g. during completion on `Iterator::` or when following a type hint), it calls `find_or_load_class`. This method tries these phases in order, returning as soon as one succeeds:
 
 ```
 find_or_load_class("Iterator")
 │
+├── Stub paths: ExternalStubIndex (FQN → stub file)
+│   The `[stubs]` paths and the editor's stub directory. A name
+│   one of them declares means that declaration, over every other
+│   (see "Stub Paths" below).
+│   ↓ miss
+│
 ├── Phase 0: fqn_class_index (O(1) hash hit)
 │   Direct lookup by FQN. This is where cached results from
 │   previous phases are found on subsequent lookups.
+│   ↓ miss
+│
+├── Phase 0.5: built-in global names → embedded stubs
+│   A global name the embedded stubs know is a PHP built-in, so a
+│   conditional polyfill in vendor cannot shadow it.
 │   ↓ miss
 │
 ├── Phase 1: fqn_uri_index (FQN → file URI)
@@ -661,6 +672,13 @@ Built-in PHP functions (e.g. `array_map`, `date_create`, `str_contains`) are res
 ```
 find_or_load_function(["str_contains", "App\\str_contains"])
 │
+├── Stub paths: ExternalStubIndex (FQN → stub file)
+│   Parses the stub file with update_ast the first time, then
+│   returns the declaration that file makes, even where another
+│   file's declaration of the name is the one global_functions
+│   resolves to.
+│   ↓ miss
+│
 ├── Phase 1: global_functions (user code + cached stubs)
 │   Checks all candidate names against the global_functions map.
 │   Keys are always FQNs: "array_map" for global functions,
@@ -712,6 +730,14 @@ The `function_loader` closures in both `server.rs` (completion) and `definition/
 - **Nested call resolution**: `simplexml_load_string(...)->xpath(...)` works
 
 User-defined functions in `global_functions` always take precedence over stubs because Phase 1 is checked first — stubs use `entry().or_insert()` to avoid overwriting existing entries.
+
+### Stub Paths
+
+The `[stubs] paths` of `.phpantom.toml` and the directory an editor extension passes as `initializationOptions.stubs.path` (`indexing/stub_paths.rs`) are the one place a declaration is meant to win over every other: project code, vendor code, and the embedded stubs. Discovery scans them into an `ExternalStubIndex` (the `[stubs]` paths in order, then the editor's directory, first declaration wins; a phpstorm-stubs checkout is read from its `PhpStormStubsMap.php`), and the class, function and constant lookups each consult it before any other phase (`resolution/external_stubs.rs`). Embedded-stub loading checks it too, so the embedded copy of an overridden built-in is never read.
+
+A stub file is an ordinary `file://` file in every other respect: it is parsed and cached like any other, so go-to-definition lands in it and the watcher's re-parse covers it, and its scanned names are merged into the discovery indexes so they complete before anything loads them. What keeps it out of analysis, rename and find-references is its registration as library code, inside the workspace or not. The parse-time skip of a redeclared built-in function, the constant publisher's last-writer-wins, and the third-party class patches all exempt a stub file.
+
+The index is rebuilt whole by `refresh_stub_paths` at the end of discovery, when the paths change (`DiscoveryInputs`), and when a watched file under one changes. A rebuild first drops everything parsed from a file under the old or new paths, so a removed path stops overriding at once and an added one is re-parsed in its new role.
 
 #### Function Completion: Namespace Awareness
 

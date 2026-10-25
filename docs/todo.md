@@ -32,11 +32,11 @@ contributor even though it's short.
 
 | #   | Item                                                                                                                                                            | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
-| E3  | [IDE-provided and `.phpantom.toml` stub paths](todo/external-stubs.md#e3-ide-provided-and-phpantomtoml-stub-paths) (depends on E2)                              | Low-Medium  | Low         |
+| E8  | [`@removed` filtering for phpstorm-stubs on a stub path](todo/external-stubs.md#e8-removed-filtering-for-phpstorm-stubs-on-a-stub-path) | Low | Low |
 | P84 | [Class lookups re-apply the Laravel patches on every call](todo/performance.md#p84-class-lookups-re-apply-the-laravel-patches-on-every-call) | Medium-High | Medium |
 | F59 | [Send Twig, YAML, and XML documents to the server](todo/lsp-features.md#f59-send-twig-yaml-and-xml-documents-to-the-server) (server, VS Code extension, Zed PR) | Medium-High | Medium |
+| E2  | [Project-level stubs as type resolution source](todo/external-stubs.md#e2-project-level-stubs-as-resolution-source)                                             | Medium      | Medium      |
 | L1  | [Facade completion](todo/laravel.md#l1-facade-completion-upstream-method-generator-improvement) (upstream `facade-documenter` PRs)                              | High        | High        |
-| E2  | [Project-level stubs as type resolution source](todo/external-stubs.md#e2-project-level-stubs-as-resolution-source)                                             | Medium      | High        |
 | BL1  | [Blade-aware code actions](todo/blade.md#bl1-blade-aware-code-actions)                                                      | Medium     | Medium-High |
 |     | **Release 1.0.0 + IDE extensions**                                                                                                                              |             |             |
 
@@ -110,9 +110,8 @@ ships, remove every row that names it.
 | #   | Item                                                                                                                                                            | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 | WP1 | [WordPress demo project and a real-world baseline](todo/wordpress.md#wp1-wordpress-demo-project-and-a-real-world-baseline) | High        | Low-Medium  |
-| E2  | [Project-level stubs as type resolution source](todo/external-stubs.md#e2-project-level-stubs-as-resolution-source)                                             | Medium      | High        |
-| E3  | [IDE-provided and `.phpantom.toml` stub paths](todo/external-stubs.md#e3-ide-provided-and-phpantomtoml-stub-paths) (depends on E2)                              | Low-Medium  | Low         |
-| WP2 | [Audit what the WordPress stubs declare against the engine](todo/wordpress.md#wp2-audit-what-the-wordpress-stubs-declare-against-the-engine) (depends on E2 or E3) | High        | Low         |
+| E2  | [Project-level stubs as type resolution source](todo/external-stubs.md#e2-project-level-stubs-as-resolution-source)                                             | Medium      | Medium      |
+| WP2 | [Audit what the WordPress stubs declare against the engine](todo/wordpress.md#wp2-audit-what-the-wordpress-stubs-declare-against-the-engine) | High        | Low         |
 | WP4 | [Hook names](todo/wordpress.md#wp4-hook-names) | High        | Medium      |
 | WP3 | [WordPress core for a plugin or theme opened on its own](todo/wordpress.md#wp3-wordpress-core-for-a-plugin-or-theme-opened-on-its-own) | Medium-High | Medium      |
 | T57 | [A `global` variable is untyped unless a `@var` sits above it](todo/type-inference.md#t57-a-global-variable-is-untyped-unless-a-var-sits-above-it) | Medium      | Medium      |
@@ -286,7 +285,7 @@ ships, remove every row that names it.
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 | X16 | [Composer's own class lists bypass `[indexing] exclude`](todo/indexing.md#x16-composers-own-class-lists-bypass-indexing-exclude)                                            | Low-Medium  | Low         |
 | X14 | [Forward Zed's `file_scan_exclusions` and `file_types`](todo/indexing.md#x14-forward-zeds-file_scan_exclusions-and-file_types) (waiting on [zed#66121](https://github.com/zed-industries/zed/pull/66121)) | Low         | Low         |
-| X18 | [Watch `[indexing] include` paths outside the workspace](todo/indexing.md#x18-watch-indexing-include-paths-outside-the-workspace)                                         | Low-Medium  | Medium      |
+| X18 | [Watch `[indexing] include` and stub paths outside the workspace](todo/indexing.md#x18-watch-indexing-include-and-stub-paths-outside-the-workspace)                                         | Low-Medium  | Medium      |
 | X13 | [Decide how workspace-wide edits treat excluded files](todo/indexing.md#x13-decide-how-workspace-wide-edits-treat-excluded-files)                                           | Low-Medium  | Medium      |
 | X2  | Parallel file processing — remaining work                                                                                                                                   | Low-Medium  | Medium-High |
 | X12 | [Say when an exclude hid the class a diagnostic names](todo/indexing.md#x12-say-when-an-exclude-hid-the-class-a-diagnostic-names)                                           | Low-Medium  | Medium-High |

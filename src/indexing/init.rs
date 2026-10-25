@@ -533,8 +533,9 @@ impl Backend {
 
     /// End a discovery pass the way every pipeline does: walk the
     /// workspace folders the pipeline's own walk did not take in
-    /// (`unwalked_roots`), index the `[indexing] include` paths, then log
-    /// what the pass found, with `source` saying where it came from.
+    /// (`unwalked_roots`), index the `[indexing] include` paths and the
+    /// stub paths, then log what the pass found, with `source` saying
+    /// where it came from.
     async fn finish_discovery(
         &self,
         root: &Path,
@@ -560,6 +561,10 @@ impl Backend {
         // Runs for every pipeline and strategy, including `none`: an
         // explicit `include` entry is a direct instruction, not a fallback.
         self.scan_configured_include_paths(root, progress);
+
+        // Last, so the stub entries it merges are what the discovery
+        // indexes hold for a stub file the walks above also found.
+        self.refresh_stub_paths();
 
         let symbol_count = self.symbols.fqn_uri_index.read().len()
             + self.symbols.autoload_function_index.read().len()

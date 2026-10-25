@@ -40,6 +40,8 @@ struct WatchedChangeBatch {
     resource_changes: Vec<(String, PathBuf, FileChangeType)>,
     /// The directories whose cached `Pest.php` lookup the batch made stale.
     pest_dirs: Vec<String>,
+    /// Whether a file under a stub path changed.
+    stubs_changed: bool,
 }
 
 impl WatchedChangeBatch {
@@ -53,6 +55,7 @@ impl WatchedChangeBatch {
             && !self.schema_full_rebuild
             && self.migration_changes.is_empty()
             && self.pest_dirs.is_empty()
+            && !self.stubs_changed
     }
 }
 
@@ -114,6 +117,11 @@ impl Backend {
             self.reindex_watched_php_files(&batch.php_changes);
         }
 
+        if batch.stubs_changed {
+            tracing::info!("PHPantom: stub files changed, rebuilding the stub index");
+            self.refresh_stub_paths();
+        }
+
         if !batch.composer_changes.is_empty() {
             tracing::info!("PHPantom: composer files changed, rescanning vendor");
             self.rescan_composer_indexes(root, &batch.composer_changes);
@@ -157,6 +165,7 @@ impl Backend {
         let laravel_config = self.config().laravel;
         let filters = self.index_filters();
         let translations = self.laravel.string_key_cache.read().translations.clone();
+        let stubs = self.external_stubs();
         for change in changes {
             let path_str = change.uri.path();
             if path_str.ends_with("/composer.json") || path_str.ends_with("/composer.lock") {
@@ -284,13 +293,22 @@ impl Backend {
                 continue;
             }
 
+            let Some(file_path) = crate::util::url_to_path(&change.uri) else {
+                continue;
+            };
+
+            // Any change under a stub path can add or remove a name the
+            // stub index holds, parsed or not, open or not.  Rebuilding the
+            // index drops what was parsed from the stub files as well.
+            if stubs.contains_path(&file_path) {
+                batch.stubs_changed = true;
+                continue;
+            }
+
             // Open files are already tracked via did_open/did_change.
             if is_open(&uri_str) {
                 continue;
             }
-            let Some(file_path) = crate::util::url_to_path(&change.uri) else {
-                continue;
-            };
 
             // Excluded paths are invisible to indexing; skip their
             // events the way the workspace scanners skip the files.

@@ -48,6 +48,9 @@ pub(crate) struct DiscoveryInputs {
     /// in [`Backend::extra_roots`], so a folder that was hidden inside a
     /// removed parent counts as added.
     pub(super) extra_roots: Vec<PathBuf>,
+    /// The stub paths in priority order, as
+    /// [`Backend::stub_paths`] resolves them.
+    stub_paths: Vec<PathBuf>,
 }
 
 impl DiscoveryInputs {
@@ -63,6 +66,12 @@ impl DiscoveryInputs {
                 .extra_roots
                 .iter()
                 .any(|root| !previous.extra_roots.contains(root))
+            // A path that stops being a stub path is code the walks skipped
+            // while it was one.
+            || previous
+                .stub_paths
+                .iter()
+                .any(|path| !self.stub_paths.contains(path))
     }
 }
 
@@ -75,6 +84,7 @@ impl Backend {
             filters: self.index_filters(),
             include: self.config().indexing.include.unwrap_or_default(),
             extra_roots: self.extra_roots(),
+            stub_paths: self.stub_paths(),
         }
     }
 
@@ -119,6 +129,15 @@ impl Backend {
                 self.clear_resolved_class_cache();
                 self.member_completion_cache.lock().clear();
             }
+        }
+
+        // The stub index is rebuilt whole rather than grown the way an
+        // `include` entry is: a removed stub path that kept overriding the
+        // declaration the user went back to would be worse than one that
+        // merely kept filling gaps.  The order matters too, so a
+        // reordering is a change.
+        if current.stub_paths != previous.stub_paths {
+            self.refresh_stub_paths();
         }
 
         if rediscover {
@@ -446,11 +465,28 @@ mod tests {
             filters: IndexFilters::empty(),
             include: include.iter().map(|s| s.to_string()).collect(),
             extra_roots: Vec::new(),
+            stub_paths: Vec::new(),
         };
 
         assert!(inputs(&[".castor", "stub.php"]).may_admit_more_than(&inputs(&[".castor"])));
         assert!(!inputs(&[".castor"]).may_admit_more_than(&inputs(&[".castor", "stub.php"])));
         assert!(!inputs(&[".castor"]).may_admit_more_than(&inputs(&[".castor"])));
+    }
+
+    /// A path that stops being a stub path holds code the walks skipped
+    /// while it was one. A new stub path takes no walk: the stub index
+    /// scans it itself.
+    #[test]
+    fn a_dropped_stub_path_asks_for_a_walk() {
+        let inputs = |stub_paths: &[&str]| DiscoveryInputs {
+            filters: IndexFilters::empty(),
+            include: Vec::new(),
+            extra_roots: Vec::new(),
+            stub_paths: stub_paths.iter().map(PathBuf::from).collect(),
+        };
+
+        assert!(inputs(&[]).may_admit_more_than(&inputs(&["/stubs"])));
+        assert!(!inputs(&["/stubs"]).may_admit_more_than(&inputs(&[])));
     }
 
     /// Discovery re-run over a populated index has to find the files the

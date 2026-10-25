@@ -187,15 +187,18 @@ pub(crate) type SlowDiagnosticObserver<'a> =
 
 impl Backend {
     /// Returns `true` if the URI should be skipped for diagnostics: stub
-    /// files, and resource documents (Twig templates, YAML and XML files),
-    /// which are not PHP.  Vendor files are not skipped here: users
+    /// files (embedded or under a stub path), and resource documents (Twig
+    /// templates, YAML and XML files), which are not PHP.  Vendor files are
+    /// not skipped here: users
     /// working in monorepos or with `--prefer-source` packages
     /// legitimately edit vendor files, so the live per-file pass
     /// diagnoses them like any other open file.  The workspace-wide
     /// background pass excludes vendor files separately, via its own
     /// `vendor_uri_prefixes` filter.
     pub(super) fn should_skip_diagnostics(&self, uri_str: &str) -> bool {
-        crate::stubs::is_stub_uri(uri_str) || self.is_resource_uri(uri_str)
+        crate::stubs::is_stub_uri(uri_str)
+            || self.is_external_stub_uri(uri_str)
+            || self.is_resource_uri(uri_str)
     }
 
     /// Collect Phase 1 (fast) diagnostics: syntax errors, unused

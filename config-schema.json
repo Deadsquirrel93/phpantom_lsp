@@ -120,6 +120,20 @@
         }
       }
     },
+    "stubs": {
+      "type": "object",
+      "description": "Stub files whose declarations win over every other declaration of the same name.",
+      "properties": {
+        "paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Stub files and directories, relative to the workspace root unless absolute. A class, function, or constant declared here is what the name means, whatever the project, its dependencies, or PHP's built-in stubs declare under it. Directories are walked recursively, hidden and gitignored entries included, and entries that do not exist are ignored. Earlier entries win over later ones. Stub files are never analysed or edited. Use indexing.include instead for code that should only fill gaps.",
+          "default": []
+        }
+      }
+    },
     "semantic_tokens": {
       "type": "object",
       "description": "Controls LSP semantic token highlighting.",

@@ -547,6 +547,16 @@ pub struct BackendState {
     /// remove stubs that do not exist in the target PHP version.
     /// Can be consulted when resolving standalone constant references.
     pub(crate) stub_constant_index: Arc<RwLock<HashMap<&'static str, &'static str>>>,
+    /// Where the stub paths (`[stubs]` in `.phpantom.toml` and the editor's
+    /// stub directory) declare each name.  Consulted by the class,
+    /// function and constant lookups ahead of everything else, since a stub
+    /// path's declaration wins over every other.  Rebuilt whole when the
+    /// paths change; see [`refresh_stub_paths`](Self::refresh_stub_paths).
+    pub(crate) external_stubs: Arc<RwLock<Arc<indexing::stub_paths::ExternalStubIndex>>>,
+    /// Whether `external_stubs` holds any stub path, read before its lock
+    /// so the class and function lookups, which run millions of times in
+    /// a diagnostic pass, pay one atomic load when there are none.
+    pub(crate) has_external_stubs: Arc<std::sync::atomic::AtomicBool>,
     /// Diagnostic debouncing state and the pull-model diagnostic caches.
     pub(crate) diag: crate::diagnostics::state::DiagnosticState,
     /// PHPStan's dedicated background worker state (extremely slow and

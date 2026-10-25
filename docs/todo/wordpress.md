@@ -6,9 +6,10 @@ code, and core's functions and classes resolve only when the project
 indexes WordPress itself or a stub package for it.
 
 Most WordPress typing lives in `php-stubs/wordpress-stubs`, so the
-external-stub work ([E2](external-stubs.md#e2-project-level-stubs-as-resolution-source)
-and [E3](external-stubs.md#e3-ide-provided-and-phpantomtoml-stub-paths))
-is the foundation for everything here. `global $wpdb;` being untyped is
+external stubs are the foundation for everything here. A project can
+already list the package under `[stubs] paths`; picking it up from
+Composer without configuration is
+[E2](external-stubs.md#e2-project-level-stubs-as-resolution-source). `global $wpdb;` being untyped is
 a gap in the generic engine, tracked as
 [T57](type-inference.md#t57-a-global-variable-is-untyped-unless-a-var-sits-above-it).
 PHPStan's WordPress extension
@@ -53,7 +54,7 @@ untested and could regress silently.
 
 ## WP2. Audit what the WordPress stubs declare against the engine
 
-**Impact: High · Complexity: Low** (depends on E2 or a configured stub path)
+**Impact: High · Complexity: Low**
 
 `php-stubs/wordpress-stubs` carries more than signatures. Recent
 versions declare argument-dependent return types, `@phpstan-assert`

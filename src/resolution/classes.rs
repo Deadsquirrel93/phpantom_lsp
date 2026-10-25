@@ -222,6 +222,11 @@ impl Backend {
             return None;
         }
 
+        // ── Stub paths: a declaration there wins over every other ──
+        if let Some(cls) = self.load_external_stub_class(class_name) {
+            return Some(cls);
+        }
+
         // ── Phase 0: Search all already-parsed files ────────────
         // O(1) lookup via `fqn_index` (populated by `update_ast` and
         // `parse_and_cache_content`), with a linear `uri_classes_index` fallback

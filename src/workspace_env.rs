@@ -95,6 +95,10 @@ pub(crate) struct WorkspaceEnv {
     /// reason `config` is, since a `didChangeConfiguration` handled on
     /// one clone has to be visible to every other.
     pub(crate) client_indexing: Arc<RwLock<config::ClientIndexingOptions>>,
+    /// The stub directory the editor extension forwarded, beside the
+    /// `[stubs]` paths of `config`. Shared by `Arc` for the same reason
+    /// `client_indexing` is.
+    pub(crate) client_stubs: Arc<RwLock<config::ClientStubOptions>>,
     /// Directory symlinks the workspace walks have indexed through.
     ///
     /// Shared by `Arc` because the walk that discovers a link runs on a
@@ -121,6 +125,9 @@ pub(crate) enum LibraryClaimant {
     /// Another folder of the editor's workspace, by the spelling it was
     /// registered under.
     ExtraRoot(PathBuf),
+    /// A `[stubs]` path or the editor's stub directory, inside the
+    /// workspace or not: a stub is never analysed or edited.
+    Stubs,
 }
 
 /// One registration of library locations: the path spellings that mark a
@@ -170,6 +177,7 @@ impl WorkspaceEnv {
             global_config_path,
             index_filters: Arc::new(RwLock::new(None)),
             client_indexing: Arc::new(RwLock::new(config::ClientIndexingOptions::default())),
+            client_stubs: Arc::new(RwLock::new(config::ClientStubOptions::default())),
             followed_links: crate::classmap_scanner::FollowedLinks::default(),
             filter_rediscovery_generation: Arc::new(AtomicU64::new(0)),
         }
@@ -193,6 +201,7 @@ impl Clone for WorkspaceEnv {
             global_config_path: self.global_config_path.clone(),
             index_filters: Arc::clone(&self.index_filters),
             client_indexing: Arc::clone(&self.client_indexing),
+            client_stubs: Arc::clone(&self.client_stubs),
             followed_links: self.followed_links.clone(),
             filter_rediscovery_generation: Arc::clone(&self.filter_rediscovery_generation),
         }

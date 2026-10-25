@@ -478,6 +478,66 @@ pub fn scan_include_paths(
     scan_files_parallel_full(&php_files, progress)
 }
 
+/// Scan the stub paths for symbols, in priority order.
+///
+/// A name two paths declare is kept from the earlier one, and within one
+/// path from the first file in path order, so the result does not depend
+/// on how the walk or the scan workers were scheduled. Files are listed
+/// the way [`collect_include_files`] lists them. A directory holding
+/// phpstorm-stubs' `PhpStormStubsMap.php` is read from the map instead of
+/// being scanned.
+pub(crate) fn scan_stub_paths(
+    paths: &[PathBuf],
+    filters: &std::sync::Arc<IndexFilters>,
+) -> WorkspaceScanResult {
+    let origin = crate::ClassCompletionOrigin::VendorExplicit;
+    let mut result = WorkspaceScanResult::default();
+    for path in paths {
+        let scan = match read_phpstorm_stubs_map(path, origin) {
+            Some(scan) => scan,
+            None => {
+                let mut files = collect_include_files(std::slice::from_ref(path), filters);
+                files.sort();
+                let files: Vec<(PathBuf, crate::ClassCompletionOrigin)> =
+                    files.into_iter().map(|file| (file, origin)).collect();
+                scan_files_parallel_full(&files, None)
+            }
+        };
+        result.absorb_missing(scan);
+    }
+    result
+}
+
+/// The symbols of the phpstorm-stubs checkout at `dir`, read from its
+/// `PhpStormStubsMap.php`, or `None` when `dir` holds no such map.
+fn read_phpstorm_stubs_map(
+    dir: &Path,
+    origin: crate::ClassCompletionOrigin,
+) -> Option<WorkspaceScanResult> {
+    let content = std::fs::read_to_string(dir.join("PhpStormStubsMap.php")).ok()?;
+    let section = |name: &str| -> (
+        HashMap<String, PathBuf>,
+        HashMap<String, crate::ClassCompletionOrigin>,
+    ) {
+        crate::stub_map::parse_section(&content, name)
+            .into_iter()
+            .map(|(symbol, file)| ((symbol.clone(), dir.join(file)), (symbol, origin)))
+            .unzip()
+    };
+    let (classmap, class_origins) = section("CLASSES");
+    let (function_index, function_origins) = section("FUNCTIONS");
+    let (constant_index, constant_origins) = section("CONSTANTS");
+    Some(WorkspaceScanResult {
+        classmap,
+        class_origins,
+        function_index,
+        function_origins,
+        constant_index,
+        constant_origins,
+        package_roots: Vec::new(),
+    })
+}
+
 /// Scan Drupal-specific directories for PHP symbols, bypassing `.gitignore`.
 ///
 /// Drupal projects typically exclude their web root directories

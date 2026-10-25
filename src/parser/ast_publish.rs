@@ -150,6 +150,15 @@ fn withdraw_function(
 }
 
 impl Backend {
+    /// The declaration of the function `fqn` that the file at `uri` makes,
+    /// even where another file's declaration of the name is the one
+    /// lookups resolve to.
+    pub(crate) fn function_declared_by(&self, fqn: &str, uri: &str) -> Option<FunctionInfo> {
+        let fmap = self.symbols.global_functions.read();
+        let dupes = self.symbols.duplicate_functions.read();
+        declared_function(&fmap, &dupes, fqn, uri).cloned()
+    }
+
     /// Whether the workspace declares the symbol that keeps a dormant Laravel
     /// span from meaning what Laravel would make of it.
     fn string_key_dependency_exists(&self, dependency: StringKeyDependency) -> bool {
@@ -591,6 +600,7 @@ impl Backend {
         // The common case — a class file with no standalone functions that
         // never had any — skips the snapshot scan below entirely.
         let mut any_function_changed = false;
+        let stubs = self.external_stubs();
         {
             let mut fmap = self.symbols.global_functions.write();
             let mut dupes = self.symbols.duplicate_functions.write();
@@ -651,8 +661,12 @@ impl Backend {
                     // (`Brotli\compress`) can be a real implementation, so
                     // there it still takes a `function_exists` guard to
                     // stand down.
+                    //
+                    // A stub path is exempt: what it declares is meant to
+                    // win over the embedded stubs.
                     if (func_info.is_polyfill || !fqn.contains('\\'))
                         && self.stub_function_index.read().contains_key(fqn.as_str())
+                        && !stubs.contains_uri(&update.uri)
                     {
                         continue;
                     }
@@ -729,7 +743,18 @@ impl Backend {
                     continue;
                 }
 
+                let from_stub = !stubs.is_empty() && stubs.contains_uri(&update.uri);
                 for (name, define) in std::mem::take(&mut update.defines) {
+                    // A constant a stub path declares keeps the stub's
+                    // declaration: that is the one its lookup reads back.
+                    if !from_stub
+                        && !stubs.is_empty()
+                        && dmap.get(&name).is_some_and(|held| {
+                            held.file_uri != update.uri && stubs.contains_uri(&held.file_uri)
+                        })
+                    {
+                        continue;
+                    }
                     // Overwrite rather than `or_insert_with` so edits to an
                     // existing `define`/`const` propagate: changing the value
                     // updates hover, and inserting lines above it updates the
