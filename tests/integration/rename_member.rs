@@ -177,6 +177,65 @@ async fn rename_promoted_property_from_parameter() {
     );
 }
 
+const EMAIL_PROPERTY_AND_METHOD: &str = concat!(
+    "<?php\n",
+    "class User {\n",
+    "    public function __construct(private string $email) {}\n",
+    "    public function email(): string { return $this->email; }\n",
+    "}\n",
+    "function show(User $user): string { return $user->email(); }\n",
+);
+
+#[tokio::test]
+async fn rename_property_leaves_the_method_of_the_same_name() {
+    let backend = create_test_backend();
+    let uri = Uri::parse("file:///test.php").unwrap();
+    let text = EMAIL_PROPERTY_AND_METHOD;
+    open_php(&backend, &uri, text).await;
+
+    let (line, character) = line_char_of(text, "$email)");
+    let edit = rename(&backend, &uri, line, character + 1, "address")
+        .await
+        .expect("Expected a workspace edit for property rename");
+    let updated = apply_edits(text, &edits_for_uri(&edit, &uri));
+    assert_eq!(
+        updated,
+        concat!(
+            "<?php\n",
+            "class User {\n",
+            "    public function __construct(private string $address) {}\n",
+            "    public function email(): string { return $this->address; }\n",
+            "}\n",
+            "function show(User $user): string { return $user->email(); }\n",
+        )
+    );
+}
+
+#[tokio::test]
+async fn rename_method_leaves_the_property_of_the_same_name() {
+    let backend = create_test_backend();
+    let uri = Uri::parse("file:///test.php").unwrap();
+    let text = EMAIL_PROPERTY_AND_METHOD;
+    open_php(&backend, &uri, text).await;
+
+    let (line, character) = line_char_of(text, "email()");
+    let edit = rename(&backend, &uri, line, character, "address")
+        .await
+        .expect("Expected a workspace edit for method rename");
+    let updated = apply_edits(text, &edits_for_uri(&edit, &uri));
+    assert_eq!(
+        updated,
+        concat!(
+            "<?php\n",
+            "class User {\n",
+            "    public function __construct(private string $email) {}\n",
+            "    public function address(): string { return $this->email; }\n",
+            "}\n",
+            "function show(User $user): string { return $user->address(); }\n",
+        )
+    );
+}
+
 // ─── Class-Aware Member Rename ──────────────────────────────────────────────
 
 #[tokio::test]
@@ -943,6 +1002,7 @@ namespace App {
     class Author extends Model {
         public function scopeActive($query): void {}
         public function getDisplayNameAttribute(): string { return ''; }
+        public function posts(): \Illuminate\Database\Eloquent\Relations\HasMany {}
     }
 }
 "#;
@@ -952,6 +1012,8 @@ namespace App;
 function show(Author $author): void {
     Author::active();
     echo $author->display_name;
+    $author->posts()->count();
+    echo count($author->posts);
 }
 "#;
 
@@ -995,6 +1057,22 @@ async fn renaming_an_accessor_renames_its_property_reads() {
     );
     let usage = apply_edits(ELOQUENT_USAGE, &edits_for_uri(&edit, &usage_uri));
     assert!(usage.contains("$author->full_name;"), "{usage}");
+}
+
+#[tokio::test]
+async fn renaming_a_relationship_renames_its_calls_and_property_reads() {
+    let backend = create_test_backend();
+    let (uri, usage_uri) = open_eloquent_files(&backend).await;
+
+    let (line, character) = line_char_of(ELOQUENT_MODEL, "posts()");
+    let edit = rename(&backend, &uri, line, character + 1, "articles")
+        .await
+        .expect("expected a relationship rename");
+    let result = apply_edits(ELOQUENT_MODEL, &edits_for_uri(&edit, &uri));
+    assert!(result.contains("function articles()"), "{result}");
+    let usage = apply_edits(ELOQUENT_USAGE, &edits_for_uri(&edit, &usage_uri));
+    assert!(usage.contains("$author->articles()->count();"), "{usage}");
+    assert!(usage.contains("count($author->articles);"), "{usage}");
 }
 
 #[tokio::test]

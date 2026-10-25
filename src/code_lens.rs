@@ -14,6 +14,7 @@ use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::definition::implementation::member_implementation_providers;
 use crate::definition::member::MemberKind;
 use crate::inheritance::find_declaring_ancestor;
+use crate::reference_counts::MemberSlot;
 use crate::reference_index::ReferenceIndexKey;
 use crate::symbol_map::{SymbolKind, SymbolMap};
 use crate::text_position::{LineIndex, offset_to_position};
@@ -155,7 +156,10 @@ impl Backend {
                         method.name_offset,
                         class_fqn,
                         method.name,
-                        method.is_static,
+                        MemberSlot {
+                            is_static: method.is_static,
+                            is_method: true,
+                        },
                     )
                 {
                     lenses.push(lens);
@@ -213,7 +217,10 @@ impl Backend {
                     property.name_offset,
                     class_fqn,
                     crate::atom::atom(member_name),
-                    property.is_static,
+                    MemberSlot {
+                        is_static: property.is_static,
+                        is_method: false,
+                    },
                 ) {
                     lenses.push(lens);
                 }
@@ -229,7 +236,10 @@ impl Backend {
                     constant.name_offset,
                     class_fqn,
                     constant.name,
-                    true,
+                    MemberSlot {
+                        is_static: true,
+                        is_method: false,
+                    },
                 ) {
                     lenses.push(lens);
                 }
@@ -318,7 +328,7 @@ impl Backend {
         declaration_offset: u32,
         class_fqn: Atom,
         member: Atom,
-        is_static: bool,
+        slot: MemberSlot,
     ) -> Option<CodeLens> {
         if declaration_offset == 0 {
             return None;
@@ -355,16 +365,10 @@ impl Backend {
                 declaration_offset,
                 class_fqn,
                 member,
-                is_static,
+                slot,
             )
         } else {
-            self.member_ref_locations_ready(
-                origin_uri,
-                declaration_offset,
-                class_fqn,
-                member,
-                is_static,
-            )
+            self.member_ref_locations_ready(origin_uri, declaration_offset, class_fqn, member, slot)
         };
         if let Some(locations) = cached_locations {
             return Some(CodeLens {
@@ -406,7 +410,8 @@ impl Backend {
                 "offset": declaration_offset,
                 "classFqn": class_fqn.as_str(),
                 "member": member.as_str(),
-                "isStatic": is_static,
+                "isStatic": slot.is_static,
+                "isMethod": slot.is_method,
             })),
         })
     }
@@ -596,13 +601,16 @@ impl Backend {
                         .and_then(|offset| u32::try_from(offset).ok())?;
                     let class_fqn = data.get("classFqn").and_then(serde_json::Value::as_str)?;
                     let member = data.get("member").and_then(serde_json::Value::as_str)?;
-                    let is_static = data.get("isStatic").and_then(serde_json::Value::as_bool)?;
+                    let slot = MemberSlot {
+                        is_static: data.get("isStatic").and_then(serde_json::Value::as_bool)?,
+                        is_method: data.get("isMethod").and_then(serde_json::Value::as_bool)?,
+                    };
                     Some(self.resolve_member_ref_locations(
                         uri,
                         offset,
                         crate::atom::atom(class_fqn),
                         crate::atom::atom(member),
-                        is_static,
+                        slot,
                     ))
                 }
                 "phpImplementations" => {

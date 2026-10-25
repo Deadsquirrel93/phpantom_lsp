@@ -39,7 +39,7 @@ mod members;
 mod receivers;
 mod variables;
 
-pub(crate) use members::MemberDeclarationReferenceQuery;
+pub(crate) use members::{MemberDeclarationReferenceQuery, MemberRefKind};
 use std::collections::HashSet;
 use std::sync::Arc;
 

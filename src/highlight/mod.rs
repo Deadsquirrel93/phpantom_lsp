@@ -20,6 +20,7 @@ use crate::types::FileContext;
 use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
+use crate::references::MemberRefKind;
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind, SymbolMap, SymbolSpan, VarDefKind};
 use crate::text_position::byte_range_to_lsp_range;
 use crate::util::build_fqn;
@@ -55,7 +56,7 @@ impl Backend {
                     Some(VarDefKind::Property)
                 ) || self.is_promoted_property_param(uri, span.start);
                 if is_property {
-                    self.highlight_member_name(symbol_map, content, name)
+                    self.highlight_member_name(uri, symbol_map, content, name, MemberRefKind::Value)
                 } else {
                     self.highlight_variable(symbol_map, content, name, span.start)
                 }
@@ -65,12 +66,22 @@ impl Backend {
                 let fqn = class_span_fqn(kind, span.start, &ctx)?;
                 self.highlight_class(symbol_map, content, &fqn, &ctx)
             }
-            SymbolKind::MemberAccess { member_name, .. } => {
-                self.highlight_member_name(symbol_map, content, member_name)
-            }
-            SymbolKind::MemberDeclaration { name, .. } => {
-                self.highlight_member_name(symbol_map, content, name)
-            }
+            kind @ SymbolKind::MemberAccess { member_name, .. } => self.highlight_member_name(
+                uri,
+                symbol_map,
+                content,
+                member_name,
+                MemberRefKind::of_access(kind).unwrap_or(MemberRefKind::Either),
+            ),
+            SymbolKind::MemberDeclaration {
+                name, is_method, ..
+            } => self.highlight_member_name(
+                uri,
+                symbol_map,
+                content,
+                name,
+                MemberRefKind::of_method(*is_method),
+            ),
             SymbolKind::FunctionCall { name, .. } => {
                 self.highlight_function(symbol_map, content, name)
             }
@@ -161,30 +172,56 @@ impl Backend {
         })
     }
 
-    /// Highlight all member accesses and declarations with the same name.
+    /// Highlight all member accesses and declarations with the same name
+    /// that can be a member of `target_kind`, so a property does not light
+    /// up the method of its name.
     ///
     /// This is a name-only match (no subject type resolution) which is
     /// acceptable for v1. It may produce false positives across unrelated
     /// classes in the same file, but that is a rare scenario.
     fn highlight_member_name(
         &self,
+        uri: &str,
         symbol_map: &SymbolMap,
         content: &str,
         target_name: &str,
+        target_kind: MemberRefKind,
     ) -> Vec<DocumentHighlight> {
+        // A constructor-promoted property is declared by a parameter, so its
+        // Variable span is tagged as a parameter rather than a property; the
+        // class's property offsets are what pick it out.
+        let property_offsets: Vec<u32> = if target_kind.admits(MemberRefKind::Value) {
+            self.shared_classes_for_uri(uri)
+                .iter()
+                .flat_map(|classes| classes.iter())
+                .flat_map(|class| class.properties.iter())
+                .filter(|prop| prop.name_offset != 0 && prop.name == target_name)
+                .map(|prop| prop.name_offset)
+                .collect()
+        } else {
+            Vec::new()
+        };
         collect_highlights(symbol_map, content, |span| match &span.kind {
-            SymbolKind::MemberAccess { member_name, .. } if member_name == target_name => {
+            kind @ SymbolKind::MemberAccess { member_name, .. }
+                if member_name == target_name && target_kind.admits_access(kind) =>
+            {
                 Some(DocumentHighlightKind::Read)
             }
-            SymbolKind::MemberDeclaration { name, .. } if name == target_name => {
+            SymbolKind::MemberDeclaration {
+                name, is_method, ..
+            } if name == target_name
+                && target_kind.admits(MemberRefKind::of_method(*is_method)) =>
+            {
                 Some(DocumentHighlightKind::Write)
             }
             // Also match property declarations that appear as Variable spans.
             SymbolKind::Variable { name }
                 if name == target_name
-                    && symbol_map
-                        .var_def_kind_at(name, span.start)
-                        .is_some_and(|k| *k == VarDefKind::Property) =>
+                    && target_kind.admits(MemberRefKind::Value)
+                    && (property_offsets.contains(&span.start)
+                        || symbol_map
+                            .var_def_kind_at(name, span.start)
+                            .is_some_and(|k| *k == VarDefKind::Property)) =>
             {
                 Some(DocumentHighlightKind::Write)
             }

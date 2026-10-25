@@ -857,6 +857,7 @@ impl Backend {
             | SymbolKind::MemberDeclaration {
                 name: member_name,
                 is_static,
+                ..
             } => {
                 vec![(
                     ReferenceIndexKey::Member {

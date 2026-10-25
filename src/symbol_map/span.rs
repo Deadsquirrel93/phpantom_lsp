@@ -357,6 +357,10 @@ pub(crate) enum SymbolKind {
         /// Whether this is a static member (`static function`, `static $prop`,
         /// or class constant — constants are always accessed statically).
         is_static: bool,
+        /// Whether this declares a method (a real one or an `@method` tag)
+        /// rather than a property, constant, or enum case.  A method and a
+        /// property can share a name, and references must not mix them up.
+        is_method: bool,
     },
 
     /// A namespace name at its declaration site (`namespace App\Models;`).

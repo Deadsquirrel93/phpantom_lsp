@@ -1695,6 +1695,32 @@ function persist(Order $order): void {
 }
 
 #[test]
+fn a_property_and_a_method_of_the_same_name_are_counted_apart() {
+    let backend = create_test_backend();
+    let content = r#"<?php
+class User {
+    public string $email = '';
+    public function email(): string { return $this->email; }
+}
+function show(User $user): string {
+    $user->email();
+    return $user->email();
+}
+"#;
+
+    let lenses = declaration_lenses(&backend, "file:///test.php", content);
+
+    assert_eq!(
+        title_on_line(&backend, &lenses, 2).as_deref(),
+        Some("1 reference")
+    );
+    assert_eq!(
+        title_on_line(&backend, &lenses, 3).as_deref(),
+        Some("2 references")
+    );
+}
+
+#[test]
 fn a_member_lens_counts_references_through_a_subclass() {
     let backend = create_test_backend();
     let content = r#"<?php

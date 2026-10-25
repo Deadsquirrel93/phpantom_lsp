@@ -604,8 +604,10 @@ fn enum_case_produces_member_declaration() {
     if let SymbolKind::MemberDeclaration {
         ref name,
         is_static,
+        is_method,
     } = hit.unwrap().kind
     {
+        assert!(!is_method, "An enum case is not a method");
         assert_eq!(name, "Red");
         assert!(is_static, "Enum cases are accessed statically");
     } else {
@@ -622,8 +624,10 @@ fn enum_case_produces_member_declaration() {
     if let SymbolKind::MemberDeclaration {
         ref name,
         is_static,
+        is_method,
     } = hit.unwrap().kind
     {
+        assert!(!is_method, "An enum case is not a method");
         assert_eq!(name, "Blue");
         assert!(is_static, "Enum cases are accessed statically");
     } else {
@@ -648,8 +652,10 @@ fn backed_enum_case_produces_member_declaration() {
     if let SymbolKind::MemberDeclaration {
         ref name,
         is_static,
+        is_method,
     } = hit.unwrap().kind
     {
+        assert!(!is_method, "An enum case is not a method");
         assert_eq!(name, "Issue");
         assert!(is_static, "Enum cases are accessed statically");
     } else {
@@ -1210,10 +1216,16 @@ fn static_method_tag_with_parenthesised_return_type() {
     let offset = php.find("getArray").unwrap() as u32;
     match map.lookup(offset) {
         Some(SymbolSpan {
-            kind: SymbolKind::MemberDeclaration { name, is_static },
+            kind:
+                SymbolKind::MemberDeclaration {
+                    name,
+                    is_static,
+                    is_method,
+                },
             ..
         }) => {
             assert_eq!(name, "getArray");
+            assert!(is_method, "an `@method` tag declares a method");
             assert!(is_static, "the `static` modifier must be recorded");
         }
         other => panic!("expected a static MemberDeclaration, got {other:?}"),

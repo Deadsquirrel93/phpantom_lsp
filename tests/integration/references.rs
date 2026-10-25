@@ -591,6 +591,75 @@ class SomeService {
     assert_eq!(access.range.start.character, 22);
 }
 
+const EMAIL_PROPERTY_AND_METHOD: &str = r#"<?php
+
+class User {
+    public function __construct(private string $email) {}
+
+    public function email(): string {
+        return $this->email;
+    }
+}
+
+function show(User $user): string {
+    return $user->email();
+}
+"#;
+
+fn reference_lines(results: &[Location]) -> Vec<u32> {
+    let mut lines: Vec<u32> = results.iter().map(|loc| loc.range.start.line).collect();
+    lines.sort_unstable();
+    lines
+}
+
+#[test]
+fn property_references_skip_the_method_of_the_same_name() {
+    let backend = create_test_backend();
+    let uri = "file:///tmp/test_refs_property_vs_method.php";
+    let content = EMAIL_PROPERTY_AND_METHOD;
+    open_file(&backend, uri, content);
+
+    // From the promoted property declaration.
+    let results = backend
+        .find_references(uri, content, Position::new(3, 48), true)
+        .expect("should find references");
+    assert_eq!(
+        reference_lines(&results),
+        vec![3, 6],
+        "the property's references are its declaration and `$this->email`: {results:#?}"
+    );
+
+    // From the property access.
+    let results = backend
+        .find_references(uri, content, Position::new(6, 23), true)
+        .expect("should find references");
+    assert_eq!(reference_lines(&results), vec![3, 6], "{results:#?}");
+}
+
+#[test]
+fn method_references_skip_the_property_of_the_same_name() {
+    let backend = create_test_backend();
+    let uri = "file:///tmp/test_refs_method_vs_property.php";
+    let content = EMAIL_PROPERTY_AND_METHOD;
+    open_file(&backend, uri, content);
+
+    // From the method declaration.
+    let results = backend
+        .find_references(uri, content, Position::new(5, 22), true)
+        .expect("should find references");
+    assert_eq!(
+        reference_lines(&results),
+        vec![5, 11],
+        "the method's references are its declaration and `$user->email()`: {results:#?}"
+    );
+
+    // From the call.
+    let results = backend
+        .find_references(uri, content, Position::new(11, 19), true)
+        .expect("should find references");
+    assert_eq!(reference_lines(&results), vec![5, 11], "{results:#?}");
+}
+
 // ─── Variable references ────────────────────────────────────────────────────
 
 #[test]

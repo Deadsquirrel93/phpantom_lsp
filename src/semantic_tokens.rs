@@ -362,7 +362,9 @@ impl Backend {
                     }
                 }
 
-                SymbolKind::MemberDeclaration { name, is_static } => {
+                SymbolKind::MemberDeclaration {
+                    name, is_static, ..
+                } => {
                     if mode == SemanticTokensMode::Contextual {
                         continue;
                     }

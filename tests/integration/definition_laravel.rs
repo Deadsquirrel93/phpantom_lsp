@@ -4594,6 +4594,71 @@ class Consumer {
 }
 
 #[tokio::test]
+async fn references_on_a_relationship_property_read_find_the_method() {
+    let author = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+use Illuminate\\Database\\Eloquent\\Relations\\HasMany;
+class BlogAuthor extends Model {
+    /** @return HasMany<BlogPost, $this> */
+    public function posts(): HasMany { return new HasMany(); }
+}
+";
+    let consumer = "\
+<?php
+namespace App\\Models;
+class Consumer {
+    public function run(BlogAuthor $author): void {
+        $author->posts;
+        $author->posts();
+    }
+}
+";
+    let (backend, dir) = make_workspace(&[
+        (
+            "vendor/illuminate/Eloquent/Relations/HasMany.php",
+            HAS_MANY_PHP,
+        ),
+        ("src/Models/BlogAuthor.php", author),
+        ("src/Models/BlogPost.php", MAGIC_POST_PHP),
+        ("src/Models/Consumer.php", consumer),
+    ]);
+    let author_uri = Uri::from_file_path(dir.path().join("src/Models/BlogAuthor.php")).unwrap();
+    open_php(&backend, &author_uri, author).await;
+    let (line, character) = crate::common::line_char_of(consumer, "posts;");
+    let found = find_references_at(
+        &backend,
+        &dir,
+        "src/Models/Consumer.php",
+        consumer,
+        line,
+        character + 1,
+        true,
+    )
+    .await
+    .unwrap_or_default();
+    let mut sites: Vec<(bool, (u32, u32))> = found
+        .iter()
+        .map(|l| {
+            (
+                l.uri == author_uri,
+                (l.range.start.line, l.range.start.character),
+            )
+        })
+        .collect();
+    sites.sort();
+    assert_eq!(
+        sites,
+        vec![
+            (false, crate::common::line_char_of(consumer, "posts;")),
+            (false, crate::common::line_char_of(consumer, "posts()")),
+            (true, crate::common::line_char_of(author, "posts()")),
+        ]
+    );
+}
+
+#[tokio::test]
 async fn test_relation_argument_callback_navigates_to_custom_builder() {
     let fixture = include_str!("../phpstan_nsrt/laravel-builder-relations.php");
     let backend = crate::common::create_test_backend();

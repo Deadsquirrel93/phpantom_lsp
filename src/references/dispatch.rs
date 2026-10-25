@@ -222,6 +222,7 @@ impl Backend {
                     return self.find_member_references(
                         name,
                         is_static,
+                        MemberRefKind::Value,
                         include_declaration,
                         hierarchy.as_ref(),
                         declaration_scope.flatten().as_ref(),
@@ -286,9 +287,18 @@ impl Backend {
                     return self.find_constructor_references(&seeds, include_declaration);
                 }
 
+                // A relationship is the same member whether it is called
+                // (`$author->posts()`) or read (`$author->posts`).
+                let target_kind = match &declaration_scope {
+                    Some(scope) if self.is_eloquent_relationship_in(scope, member_name) => {
+                        MemberRefKind::Either
+                    }
+                    _ => MemberRefKind::of_access(kind).unwrap_or(MemberRefKind::Either),
+                };
                 let mut locations = self.find_member_references(
                     member_name,
                     *is_static,
+                    target_kind,
                     include_declaration,
                     hierarchy.as_ref(),
                     declaration_scope.as_ref(),
@@ -347,7 +357,11 @@ impl Backend {
                     include_declaration,
                 )
             }
-            SymbolKind::MemberDeclaration { name, is_static } => {
+            SymbolKind::MemberDeclaration {
+                name,
+                is_static,
+                is_method,
+            } => {
                 // A constructor declaration's "references" are the
                 // `new ClassName(...)` instantiation sites (and `#[...]`
                 // attribute usages), not `->__construct()` member accesses
@@ -368,6 +382,7 @@ impl Backend {
                 let mut locations = self.find_member_references(
                     name,
                     *is_static,
+                    MemberRefKind::of_method(*is_method),
                     include_declaration,
                     hierarchy.as_ref(),
                     declaration_scope.flatten().as_ref(),

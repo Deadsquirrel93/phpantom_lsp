@@ -218,6 +218,32 @@ class Dog {
     );
 }
 
+#[test]
+fn highlight_property_and_method_of_the_same_name_apart() {
+    let backend = create_test_backend();
+    let php = r#"<?php
+class User {
+    public function __construct(private string $email) {}
+    public function email(): string { return $this->email; }
+}
+function show(User $user): string { return $user->email(); }
+"#;
+
+    let lines = |highlights: Vec<DocumentHighlight>| {
+        let mut lines: Vec<u32> = highlights.iter().map(|h| h.range.start.line).collect();
+        lines.sort_unstable();
+        lines
+    };
+
+    // Cursor on the property access `$this->email`.
+    let property = highlight_at(&backend, "file:///test.php", php, 3, 53);
+    assert_eq!(lines(property), vec![2, 3]);
+
+    // Cursor on the method declaration `email()`.
+    let method = highlight_at(&backend, "file:///test.php", php, 3, 22);
+    assert_eq!(lines(method), vec![3, 5]);
+}
+
 // ─── Function highlighting ──────────────────────────────────────────────────
 
 #[test]

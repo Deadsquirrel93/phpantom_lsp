@@ -439,6 +439,7 @@ pub(super) fn extract_from_class_member<'a>(
                 kind: SymbolKind::MemberDeclaration {
                     name: crate::atom::atom_bytes(case_name_ident.value),
                     is_static: true,
+                    is_method: false,
                 },
             });
 
@@ -567,6 +568,7 @@ pub(super) fn extract_from_method<'a>(method: &'a Method<'a>, ctx: &mut Extracti
         kind: SymbolKind::MemberDeclaration {
             name: crate::atom::atom_bytes(method.name.value),
             is_static,
+            is_method: true,
         },
     });
 
@@ -839,6 +841,7 @@ pub(super) fn extract_from_class_constant<'a>(
             kind: SymbolKind::MemberDeclaration {
                 name: crate::atom::atom_bytes(item.name.value),
                 is_static: true,
+                is_method: false,
             },
         });
     }
