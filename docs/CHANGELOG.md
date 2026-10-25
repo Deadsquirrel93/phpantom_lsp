@@ -41,6 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Faster diagnostics after each edit.** The diagnostics for an edited file reuse the parse the edit already made, instead of parsing the file twice more.
 - **Faster diagnostics in Blade templates.** A template is parsed once per diagnostic pass instead of once per check.
 - **Faster diagnostics while editing.** After an edit inside a function or method, only that function is type-checked again, and the rest of the file keeps its diagnostics, moved along with the text. In a 1,500-line class the type checking after such an edit is around 70 times cheaper. Saving still checks the whole file.
 - **Faster analysis of methods that check many properties.** Narrowing a property or a call's result no longer walks the method again from its first line.
