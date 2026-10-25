@@ -12,11 +12,11 @@ $treeBuilder = new TreeBuilder('my_tree');
 $treeRootNode = $treeBuilder->getRootNode();
 assertType("Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symfony\Component\Config\Definition\Builder\TreeBuilder<'array'>>", $treeRootNode);
 
-assertType("Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symfony\Component\Config\Definition\Builder\TreeBuilder<'array'>>", $treeRootNode // SKIP: `static` as a type argument of a return type loses the receiver's own type arguments
+assertType("Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symfony\Component\Config\Definition\Builder\TreeBuilder<'array'>>", $treeRootNode
 	->children()
 	->end());
 
-assertType("Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symfony\Component\Config\Definition\Builder\TreeBuilder<'array'>>", $treeRootNode // SKIP: `static` as a type argument of a return type loses the receiver's own type arguments
+assertType("Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symfony\Component\Config\Definition\Builder\TreeBuilder<'array'>>", $treeRootNode
 	->children()
 	->scalarNode("protocol")
 	->end()
@@ -40,14 +40,14 @@ assertType("Symfony\Component\Config\Definition\Builder\ScalarNodeDefinition<Sym
 	->children()
 	->scalarNode("protocol"));
 
-assertType("Symfony\Component\Config\Definition\Builder\NodeBuilder<Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symfony\Component\Config\Definition\Builder\NodeBuilder<Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symfony\Component\Config\Definition\Builder\TreeBuilder<'array'>>>>>", $treeRootNode // SKIP: `static` as a type argument of a return type loses the receiver's own type arguments
+assertType("Symfony\Component\Config\Definition\Builder\NodeBuilder<Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symfony\Component\Config\Definition\Builder\NodeBuilder<Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symfony\Component\Config\Definition\Builder\TreeBuilder<'array'>>>>>", $treeRootNode
 	->children()
 	->arrayNode("protocols")
 	->children()
 	->scalarNode("protocol")
 	->end());
 
-assertType("Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symfony\Component\Config\Definition\Builder\NodeBuilder<Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symfony\Component\Config\Definition\Builder\TreeBuilder<'array'>>>>", $treeRootNode // SKIP: `static` as a type argument of a return type loses the receiver's own type arguments
+assertType("Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symfony\Component\Config\Definition\Builder\NodeBuilder<Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symfony\Component\Config\Definition\Builder\TreeBuilder<'array'>>>>", $treeRootNode
 	->children()
 	->arrayNode("protocols")
 	->children()
@@ -55,7 +55,7 @@ assertType("Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symf
 	->end()
 	->end());
 
-assertType("Symfony\Component\Config\Definition\Builder\NodeBuilder<Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symfony\Component\Config\Definition\Builder\TreeBuilder<'array'>>>", $treeRootNode // SKIP: `static` as a type argument of a return type loses the receiver's own type arguments
+assertType("Symfony\Component\Config\Definition\Builder\NodeBuilder<Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symfony\Component\Config\Definition\Builder\TreeBuilder<'array'>>>", $treeRootNode
 	->children()
 	->arrayNode("protocols")
 	->children()
@@ -64,7 +64,7 @@ assertType("Symfony\Component\Config\Definition\Builder\NodeBuilder<Symfony\Comp
 	->end()
 	->end());
 
-assertType("Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symfony\Component\Config\Definition\Builder\TreeBuilder<'array'>>", $treeRootNode // SKIP: `static` as a type argument of a return type loses the receiver's own type arguments
+assertType("Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symfony\Component\Config\Definition\Builder\TreeBuilder<'array'>>", $treeRootNode
 	->children()
 	->arrayNode("protocols")
 	->children()
@@ -74,7 +74,7 @@ assertType("Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symf
 	->end()
 	->end());
 
-assertType("Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symfony\Component\Config\Definition\Builder\TreeBuilder<'array'>>", $treeRootNode // SKIP: `static` as a type argument of a return type loses the receiver's own type arguments
+assertType("Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symfony\Component\Config\Definition\Builder\TreeBuilder<'array'>>", $treeRootNode
 	->children()
 	->arrayNode("protocols")
 	->children()
@@ -111,7 +111,7 @@ assertType("Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symf
 	->end()
 	->end());
 
-assertType("Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symfony\Component\Config\Definition\Builder\TreeBuilder<'array'>>", $arrayRootNode // SKIP: `static` as a type argument of a return type loses the receiver's own type arguments
+assertType("Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symfony\Component\Config\Definition\Builder\TreeBuilder<'array'>>", $arrayRootNode
 	->children()
 	->arrayNode("methods")
 	->scalarPrototype()
@@ -120,7 +120,7 @@ assertType("Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symf
 	->end()
 	->end());
 
-assertType("Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symfony\Component\Config\Definition\Builder\TreeBuilder<'array'>>", $arrayRootNode // SKIP: `static` as a type argument of a return type loses the receiver's own type arguments
+assertType("Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symfony\Component\Config\Definition\Builder\TreeBuilder<'array'>>", $arrayRootNode
 	->children()
 	->arrayNode("methods")
 	->prototype("scalar")
@@ -132,7 +132,7 @@ assertType("Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symf
 	->end()
 	->end());
 
-assertType("Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symfony\Component\Config\Definition\Builder\TreeBuilder<'array'>>", $arrayRootNode // SKIP: `static` as a type argument of a return type loses the receiver's own type arguments
+assertType("Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition<Symfony\Component\Config\Definition\Builder\TreeBuilder<'array'>>", $arrayRootNode
 	->children()
 	->arrayNode("methods")
 	->prototype("array")

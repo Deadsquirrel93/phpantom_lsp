@@ -53,44 +53,7 @@ No outstanding items.
 
 ## Templates
 
-### B681. `static` as a type argument of a return type loses the receiver's own type arguments
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-/** @template TParent */
-class NodeBuilder
-{
-    /** @return TParent */
-    public function end() {}
-}
-
-/** @template TParent */
-class ArrayNodeDefinition
-{
-    /** @return NodeBuilder<static> */
-    public function children(): NodeBuilder {}
-}
-
-/** @var ArrayNodeDefinition<TreeBuilder> $root */
-$builder = $root->children(); // NodeBuilder<ArrayNodeDefinition<TreeBuilder>>, correct
-$builder->end();              // ArrayNodeDefinition, should be ArrayNodeDefinition<TreeBuilder>
-```
-
-The call's type is right, but the class it carries for the next call in the
-chain is built by `resolve_method_return_types_with_args`, which hands
-`type_hint_to_classes_typed_returned` the owner's bare FQN for `static`. So
-the `NodeBuilder` the chain continues on is specialised with
-`TParent = ArrayNodeDefinition`, and its members no longer name `TParent`
-for the receiver's arguments to substitute. The receiver's full type (the
-one `self_replace` uses for the type string in `owner_method_call.rs`)
-should stand in for `static` here too.
-
-Symfony 7.4's config tree builder declares `children()` this way, so every
-`->children()->…->end()` chain loses the parent's type arguments. The
-fixtures marked ``// SKIP: `static` as a type argument of a return type
-loses the receiver's own type arguments`` in
-`tests/phpstan_symfony/data/tree_builder.php` show each case.
+No outstanding items.
 
 ## Name resolution
 
