@@ -241,3 +241,26 @@ every request that maps symbol-map offsets onto the current buffer answers
 Document highlight has no refresh, so it needs either the same decline (the
 client re-requests on the next cursor move) or to wait for the pending
 parse.
+
+### B688. Go-to-definition and hover on a class constant pick a same-named property
+
+**Impact: Low · Complexity: Low**
+
+```php
+class Config {
+    const path = '/etc';
+    public static string $path = '/tmp';
+}
+echo Config::path; // jumps to and hovers `$path`, not the constant
+```
+
+The same happens with `self::name` in a class that has both `const name`
+and a `$name` property.
+
+**Where to change:** `classify_member` in `src/definition/member/mod.rs`
+gets `MemberAccessHint::PropertyAccess` for every non-call access and
+prefers a property over a constant. A `Foo::BAR` access can only read a
+constant (or enum case), so the hint has to carry that, and hover's
+member lookup needs the same distinction. Find References and rename
+already tell the two apart (`MemberRefKind::of_access` in
+`src/references/members.rs`).
