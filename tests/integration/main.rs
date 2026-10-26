@@ -1,5 +1,6 @@
 mod common;
 
+mod analyze_composer_layout;
 mod array_func_generics;
 mod array_key_types;
 mod blade;

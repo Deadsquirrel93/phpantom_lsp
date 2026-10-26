@@ -39,6 +39,36 @@ pub(crate) fn note_plain_php_project(root: &Path, consequence: &str) {
     }
 }
 
+/// [`note_plain_php_project`] for the commands that index the workspace
+/// the way the language server does: a root without a `composer.json`
+/// whose subdirectories hold Composer projects is indexed as those
+/// projects, so the note names them instead.
+pub(crate) fn note_workspace_layout(root: &Path, consequence: &str) {
+    if root.join("composer.json").is_file() {
+        return;
+    }
+    let subprojects = crate::composer::discover_subproject_roots(root);
+    if subprojects.is_empty() {
+        note_plain_php_project(root, consequence);
+        return;
+    }
+    let names: Vec<String> = subprojects
+        .iter()
+        .map(|(sub_root, _)| {
+            sub_root
+                .strip_prefix(root)
+                .unwrap_or(sub_root)
+                .display()
+                .to_string()
+        })
+        .collect();
+    eprintln!(
+        "Note: no composer.json found in {} - using the Composer projects in {}.",
+        root.display(),
+        names.join(", ")
+    );
+}
+
 /// A project indexed on a headless `Backend`, with the user files the
 /// command works on already discovered.
 pub(crate) struct OpenedProject {

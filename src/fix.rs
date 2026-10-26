@@ -40,7 +40,7 @@ use tower_lsp_server::gen_lsp_types::*;
 use crate::Backend;
 use crate::analyse::{
     Colour, OpenedProject, OutputFormat, TableRow, dispatch_report, github_annotation,
-    note_plain_php_project, open_project, print_box, print_success_box, print_table, progress_bar,
+    note_workspace_layout, open_project, print_box, print_success_box, print_table, progress_bar,
 };
 use crate::code_actions::{build_line_deletion_edit, build_use_directive_deletion_edit};
 use crate::parser::with_parse_cache;
@@ -222,7 +222,7 @@ pub fn fix_unused_imports(
 pub async fn run(options: FixOptions) -> i32 {
     let root = &options.workspace_root;
 
-    note_plain_php_project(root, "treating it as a plain PHP project.");
+    note_workspace_layout(root, "treating it as a plain PHP project.");
 
     // ── Validate rules ──────────────────────────────────────────────
     let rule_errors = validate_rules(&options.rules, options.with_phpstan);

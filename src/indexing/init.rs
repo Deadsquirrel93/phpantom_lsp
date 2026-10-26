@@ -80,13 +80,34 @@ impl Backend {
             p.set_percentage(10, "Reading composer.json");
         }
 
+        // Composer projects nested below this one with their own installed
+        // dependencies, which the root's autoloader knows nothing about.
+        // They are indexed the way a monorepo's subprojects are, and
+        // classify the workspace alongside the root the same way too.
+        let root_vendor = root.join(
+            composer_json
+                .as_ref()
+                .map(composer::get_vendor_dir)
+                .unwrap_or_else(|| "vendor".to_string()),
+        );
+        let subprojects: Vec<(PathBuf, Option<composer::ComposerPackage>)> =
+            composer::discover_installed_subprojects(root, &root_vendor)
+                .into_iter()
+                .map(|(sub_root, _)| {
+                    let package = composer::read_composer_package(&sub_root);
+                    (sub_root, package)
+                })
+                .collect();
+        let packages = || {
+            composer_json
+                .iter()
+                .chain(subprojects.iter().filter_map(|(_, pkg)| pkg.as_ref()))
+        };
+
         // Classify the project so Laravel-specific resolution (Eloquent
         // members, config/view/route keys, contract bindings, patches) is
         // skipped when no Laravel/Illuminate dependency is present.
-        let is_laravel = composer_json
-            .as_ref()
-            .map(composer::is_laravel_project)
-            .unwrap_or(false);
+        let is_laravel = packages().any(composer::is_laravel_project);
         self.resolved_class_cache
             .write()
             .laravel_mut()
@@ -97,35 +118,20 @@ impl Backend {
         // file settles it for an application whose `composer.json` says
         // neither way.
         self.set_is_application(
-            composer_json
-                .as_ref()
-                .is_some_and(composer::is_application_project)
-                || root.join("artisan").is_file(),
+            packages().any(composer::is_application_project)
+                || std::iter::once(root)
+                    .chain(subprojects.iter().map(|(sub_root, _)| sub_root.as_path()))
+                    .any(|dir| dir.join("artisan").is_file()),
         );
 
-        self.set_is_doctrine(
-            composer_json
-                .as_ref()
-                .is_some_and(composer::is_doctrine_project),
-        );
-        self.set_is_symfony(
-            composer_json
-                .as_ref()
-                .is_some_and(composer::is_symfony_project),
-        );
-        self.set_is_twig(
-            composer_json
-                .as_ref()
-                .is_some_and(composer::is_twig_project),
-        );
+        self.set_is_doctrine(packages().any(composer::is_doctrine_project));
+        self.set_is_symfony(packages().any(composer::is_symfony_project));
+        self.set_is_twig(packages().any(composer::is_twig_project));
 
         // A permission package answers authorization checks from the database,
         // so the abilities this project uses are not written in its source and
         // the unknown-ability diagnostic has nothing to judge them against.
-        let runtime_permissions = composer_json
-            .as_ref()
-            .map(composer::has_runtime_permission_package)
-            .unwrap_or(false);
+        let runtime_permissions = packages().any(composer::has_runtime_permission_package);
         self.laravel
             .gates
             .write()
@@ -145,14 +151,40 @@ impl Backend {
             (&[][..], extra_roots.as_slice())
         };
 
+        let root_hi = if subprojects.is_empty() { 85 } else { 50 };
         let source_label = self.index_composer_project(
             root,
             composer_json.as_ref(),
             false,
             walked,
-            (15, 85),
+            (15, root_hi),
             progress,
         );
+
+        // The subprojects share what is left of the range, each reporting
+        // under its own label the way a monorepo's do.
+        let sub_count = subprojects.len() as u32;
+        for (sub_idx, (sub_root, package)) in subprojects.iter().enumerate() {
+            let sub_lo = root_hi + (sub_idx as u32 * (85 - root_hi)) / sub_count;
+            let sub_hi = root_hi + ((sub_idx as u32 + 1) * (85 - root_hi)) / sub_count;
+            if let Some(p) = progress {
+                let label = sub_root.strip_prefix(root).unwrap_or(sub_root).display();
+                p.set_label_prefix(format!("Subproject {label}"));
+            }
+            self.index_composer_project(
+                sub_root,
+                package.as_ref(),
+                true,
+                &[],
+                (sub_lo, sub_hi),
+                progress,
+            );
+        }
+        if !subprojects.is_empty()
+            && let Some(p) = progress
+        {
+            p.set_label_prefix("");
+        }
 
         self.finish_discovery(root, php_version, source_label, unwalked, progress)
             .await;
@@ -167,7 +199,7 @@ impl Backend {
     /// when the strategy walks it.  The work reports progress within
     /// `percent_range`.  Returns where the classmap came from, for the
     /// discovery log.
-    fn index_composer_project(
+    pub(super) fn index_composer_project(
         &self,
         root: &Path,
         composer_json: Option<&composer::ComposerPackage>,

@@ -204,11 +204,45 @@ pub(crate) fn get_bin_dir(package: &ComposerPackage) -> String {
 ///
 /// returns `[(monorepo/project-a, "vendor"), (monorepo/packages/project-b, "vendor")]`.
 pub fn discover_subproject_roots(workspace_root: &Path) -> Vec<(PathBuf, String)> {
+    outermost_with_vendor_dirs(composer_json_dirs(workspace_root, None))
+}
+
+/// The Composer projects nested inside a workspace that has a
+/// `composer.json` of its own: directories below `workspace_root` whose
+/// `composer.json` has its own dependencies installed, paired with their
+/// vendor directory name.
+///
+/// A nested project with its own `vendor/` is one the root's autoloader
+/// knows nothing about, which is what makes it a project to index rather
+/// than a package the root installs from a path repository or a fixture
+/// a test suite keeps beside its sources: those have no `vendor/` of their
+/// own.  `root_vendor` is the root project's vendor directory, which is
+/// not walked: every installed package carries a `composer.json`.
+pub fn discover_installed_subprojects(
+    workspace_root: &Path,
+    root_vendor: &Path,
+) -> Vec<(PathBuf, String)> {
+    let installed = composer_json_dirs(workspace_root, Some(root_vendor))
+        .into_iter()
+        .filter(|dir| {
+            let vendor_dir = read_composer_package(dir)
+                .map(|pkg| get_vendor_dir(&pkg))
+                .unwrap_or_else(|| "vendor".to_string());
+            dir.join(vendor_dir)
+                .join("composer/installed.json")
+                .is_file()
+        })
+        .collect();
+    outermost_with_vendor_dirs(installed)
+}
+
+/// The directories below `workspace_root` holding a `composer.json`,
+/// shallowest first, found by a gitignore-aware walk that skips hidden
+/// directories and `skip`.
+fn composer_json_dirs(workspace_root: &Path, skip: Option<&Path>) -> Vec<PathBuf> {
     use ignore::WalkBuilder;
-    use std::collections::HashSet;
 
-    let mut candidates: Vec<PathBuf> = Vec::new();
-
+    let skip = skip.map(Path::to_path_buf);
     let walker = WalkBuilder::new(workspace_root)
         .git_ignore(true)
         .git_global(true)
@@ -218,8 +252,10 @@ pub fn discover_subproject_roots(workspace_root: &Path) -> Vec<(PathBuf, String)
         .ignore(true)
         // Sort to get deterministic output
         .sort_by_file_name(|a, b| a.cmp(b))
+        .filter_entry(move |entry| skip.as_deref() != Some(entry.path()))
         .build();
 
+    let mut candidates: Vec<PathBuf> = Vec::new();
     for entry in walker.flatten() {
         let path = entry.path();
         // We only care about files named "composer.json"
@@ -241,31 +277,27 @@ pub fn discover_subproject_roots(workspace_root: &Path) -> Vec<(PathBuf, String)
         }
     }
 
-    // Filter out nested roots: if both `packages/foo` and
-    // `packages/foo/subdir` contain composer.json, only keep the
-    // outermost one.  Sort by path length so we process shorter
-    // (shallower) paths first.
+    // Sort by path length so shallower paths come first, which is what
+    // lets the caller keep only the outermost of two nested roots.
     candidates.sort_by_key(|p| p.as_os_str().len());
+    candidates
+}
 
+/// Keep only the outermost of `candidates` (shallowest first): if both
+/// `packages/foo` and `packages/foo/subdir` contain composer.json, the
+/// inner one belongs to the outer project's source tree.  Each kept root
+/// is paired with the vendor dir name its `composer.json` configures.
+fn outermost_with_vendor_dirs(candidates: Vec<PathBuf>) -> Vec<(PathBuf, String)> {
     let mut roots: Vec<(PathBuf, String)> = Vec::new();
-    let mut root_set: HashSet<PathBuf> = HashSet::new();
-
-    for candidate in &candidates {
-        // Check if this candidate is inside an already-accepted root
-        let is_nested = root_set.iter().any(|root| candidate.starts_with(root));
-        if is_nested {
+    for candidate in candidates {
+        if roots.iter().any(|(root, _)| candidate.starts_with(root)) {
             continue;
         }
-
-        // Read the vendor dir name from this subproject's composer.json
-        let vendor_dir = read_composer_package(candidate)
+        let vendor_dir = read_composer_package(&candidate)
             .map(|pkg| get_vendor_dir(&pkg))
             .unwrap_or_else(|| "vendor".to_string());
-
-        root_set.insert(candidate.clone());
-        roots.push((candidate.clone(), vendor_dir));
+        roots.push((candidate, vendor_dir));
     }
-
     roots
 }
 

@@ -61,7 +61,39 @@ Found in a WordPress theme returning `wp_list_comments([...]) ?: null`
 
 ## Array types
 
-No outstanding items.
+### B683. A conditional append drops the alternatives where only a later append ran
+
+**Impact: Medium · Complexity: High**
+
+```php
+function f(bool $a, bool $b): void {
+    $c = [];
+    if ($a) { $c[] = 1; }
+    if ($b) { $c[] = 2; }
+    // inferred: array{}|array{1}|array{1, 2}, missing array{2}
+    if (count($c) === 1) {
+        // narrowed to array{1}, but $c can be [2] here
+    }
+}
+```
+
+Appending to a union of shapes extends only one alternative, so the
+`array{2}` path (first `if` skipped, second taken) is lost. With
+distinct shapes per append (`$menu[] = ['name' => 'n0', …]`, the
+OpenCart admin menu pattern) the result is even narrower:
+`array{}|array{a0, a1}` after two conditional appends, dropping both
+single-entry arrays.
+
+Appending to every alternative is the sound fix, but it doubles the
+union at each conditional append, so it has to come with a
+generalisation of unions of constant arrays the way PHPStan's
+`TypeCombinator::union` does it: merge them into one shape with
+optional trailing entries (`array{}|array{0: A|B, 1?: B}`), or into
+`list<…>` once the shapes stop being worth keeping apart.
+
+**Where to look:** the array-append handling in
+`src/type_engine/variable/forward_walk/array_assignment.rs`, and union
+normalisation of shapes in `src/php_type/normalize.rs`.
 
 ## Laravel
 
@@ -113,7 +145,37 @@ as missing on `Htmlable` and `Closure`.
 
 ## Name resolution
 
-No outstanding items.
+### B684. A class one Composer project installs resolves in every other project of the workspace
+
+**Impact: Medium · Complexity: High**
+
+```text
+repo/
+├── composer.json
+├── platform/            ← requires guzzlehttp/guzzle
+│   ├── composer.json
+│   └── vendor/
+└── mobile/              ← does not
+    ├── composer.json
+    └── vendor/
+```
+
+A file under `mobile/` that names `GuzzleHttp\Client` gets completion,
+hover and no `unknown_class`, although running it would fail: the
+class only exists in `platform/vendor/`. Every Composer project of a
+workspace (a monorepo's subprojects, or projects nested below a root
+`composer.json`) feeds one shared class index, so a lookup does not
+know which project the file asking belongs to. Two projects installing
+different versions of one package also share whichever copy was
+indexed first.
+
+Lookups from a file need to go through the index of the project that
+holds it, falling back to the shared one only for the project's own
+sources and the workspace's loose files.
+
+**Where to look:** `ComposerProjectPaths` in `src/workspace_env.rs`
+(each project's vendor and PSR-4 mappings are already recorded), and
+the class lookup in `src/resolution/`.
 
 ## Code actions
 
