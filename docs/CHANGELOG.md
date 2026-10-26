@@ -71,6 +71,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Truthiness checks on `void` results.** A truthiness check such as `maybe() ?: null` or `if (!$r)` on a value typed `void|string` now drops the `void`, since it is `null` at runtime, so returning the result where `?string` is declared is no longer reported.
 - **Composer projects in subdirectories resolve their dependencies.** A Composer project with its own `vendor/` inside a workspace that has a root `composer.json` now has its installed packages indexed, including ones installed mid-session. `analyze` and `fix` find the Composer projects of a workspace without a root `composer.json` the same way the editor does, instead of treating it as plain PHP.
 - **Helper functions behind a `function_exists()` check.** A function declared inside `if (! function_exists(...))` in a file that Composer does not autoload directly, such as the Laravel helpers Roots' Acorn loads for Sage themes (`app()`, `config()`, `public_path()`), now resolves instead of being reported as unknown.
 - **Blade component props that default to `null`.** A prop declared as `'type' => null` in `@props` now accepts whatever the caller passes, instead of being treated as always `null`, which reported every `match` arm on it as unreachable.
