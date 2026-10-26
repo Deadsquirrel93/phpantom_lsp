@@ -30,6 +30,7 @@ use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::class_lookup::find_class_at_offset;
+use crate::references::MemberRefKind;
 use crate::resolution::FileLoaders;
 use crate::symbol_map::{SymbolKind, SymbolSpan};
 use crate::types::*;
@@ -232,14 +233,13 @@ impl Backend {
                 subject_text,
                 member_name,
                 is_static,
-                is_method_call,
                 ..
             } => self.hover_member_access(
                 &site,
                 subject_text,
                 member_name,
                 *is_static,
-                *is_method_call,
+                MemberRefKind::of_access(symbol)?,
             ),
             SymbolKind::ClassReference {
                 name,

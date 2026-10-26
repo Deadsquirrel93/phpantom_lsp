@@ -13,6 +13,7 @@ use super::*;
 use tower_lsp_server::gen_lsp_types::{Location, Range};
 
 use crate::atom::{Atom, AtomMap};
+use crate::definition::member::MemberKind;
 use crate::references::eloquent::EloquentMagicMember;
 use crate::references::member_scope::MemberScope;
 use crate::references::push_location;
@@ -40,6 +41,16 @@ pub(crate) enum MemberRefKind {
     /// hook), or a Symfony property path (which the property accessor
     /// reaches through a getter as readily as through the property).
     Either,
+}
+
+impl From<MemberKind> for MemberRefKind {
+    fn from(kind: MemberKind) -> Self {
+        match kind {
+            MemberKind::Method => Self::Method,
+            MemberKind::Property => Self::Property,
+            MemberKind::Constant => Self::Constant,
+        }
+    }
 }
 
 impl MemberRefKind {

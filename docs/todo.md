@@ -32,6 +32,7 @@ contributor even though it's short.
 
 | #   | Item                                                                                                                                                            | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
+| T58 | [A backed enum is not narrowed by comparing its `->value`](todo/type-inference.md#t58-a-backed-enum-is-not-narrowed-by-comparing-its--value) | Medium      | Medium      |
 |     | **Release 1.0.0 + IDE extensions**                                                                                                                              |             |             |
 
 # Feature Sets

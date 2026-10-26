@@ -106,6 +106,38 @@ function configure(?callable $callback): void {
     );
 }
 
+/// `Foo::path` can only read a constant, so hover shows the constant and
+/// not a static property of the same name, while `Foo::$path` shows the
+/// property.
+#[test]
+fn hover_class_constant_beside_same_named_property() {
+    let backend = create_test_backend();
+    let content = r#"<?php
+class Config {
+    public static string $path = '/tmp';
+    const path = '/etc';
+    public function own(): void {
+        echo self::path;
+    }
+}
+echo Config::path;
+echo Config::$path;
+"#;
+
+    for (line, character, what) in [(5, 21, "self::path"), (8, 14, "Config::path")] {
+        let hover = hover_at(&backend, "file:///test.php", content, line, character)
+            .unwrap_or_else(|| panic!("expected hover on {what}"));
+        let text = hover_text(&hover);
+        assert!(text.contains("const path"), "{what}: {text}");
+        assert!(!text.contains("$path"), "{what}: {text}");
+    }
+
+    let hover =
+        hover_at(&backend, "file:///test.php", content, 9, 15).expect("hover on Config::$path");
+    let text = hover_text(&hover);
+    assert!(text.contains("$path"), "{text}");
+}
+
 #[test]
 fn hover_this_variable() {
     let backend = create_test_backend();
