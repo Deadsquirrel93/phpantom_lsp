@@ -41,39 +41,7 @@ No outstanding items.
 
 ## Array types
 
-### B683. A conditional append drops the alternatives where only a later append ran
-
-**Impact: Medium · Complexity: High**
-
-```php
-function f(bool $a, bool $b): void {
-    $c = [];
-    if ($a) { $c[] = 1; }
-    if ($b) { $c[] = 2; }
-    // inferred: array{}|array{1}|array{1, 2}, missing array{2}
-    if (count($c) === 1) {
-        // narrowed to array{1}, but $c can be [2] here
-    }
-}
-```
-
-Appending to a union of shapes extends only one alternative, so the
-`array{2}` path (first `if` skipped, second taken) is lost. With
-distinct shapes per append (`$menu[] = ['name' => 'n0', …]`, the
-OpenCart admin menu pattern) the result is even narrower:
-`array{}|array{a0, a1}` after two conditional appends, dropping both
-single-entry arrays.
-
-Appending to every alternative is the sound fix, but it doubles the
-union at each conditional append, so it has to come with a
-generalisation of unions of constant arrays the way PHPStan's
-`TypeCombinator::union` does it: merge them into one shape with
-optional trailing entries (`array{}|array{0: A|B, 1?: B}`), or into
-`list<…>` once the shapes stop being worth keeping apart.
-
-**Where to look:** the array-append handling in
-`src/type_engine/variable/forward_walk/array_assignment.rs`, and union
-normalisation of shapes in `src/php_type/normalize.rs`.
+No outstanding items.
 
 ## Laravel
 

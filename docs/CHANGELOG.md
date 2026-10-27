@@ -71,6 +71,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Conditional appends keep every path.** After `if ($a) { $c[] = 1; } if ($b) { $c[] = 2; }`, `$c` can now be `[2]` as well as `[]`, `[1]` and `[1, 2]`, so a `count()` check no longer narrows it to the wrong array. `array_key_exists()` on a union of array shapes now keeps only the shapes that can pass the check.
 - **Class constants beside a same-named property.** Go-to-definition and hover on `Config::path` or `self::path` now land on the constant, not on a `$path` property the class also declares.
 - **Truthiness checks on `void` results.** A truthiness check such as `maybe() ?: null` or `if (!$r)` on a value typed `void|string` now drops the `void`, since it is `null` at runtime, so returning the result where `?string` is declared is no longer reported.
 - **Composer projects in subdirectories resolve their dependencies.** A Composer project with its own `vendor/` inside a workspace that has a root `composer.json` now has its installed packages indexed, including ones installed mid-session. `analyze` and `fix` find the Composer projects of a workspace without a root `composer.json` the same way the editor does, instead of treating it as plain PHP.
