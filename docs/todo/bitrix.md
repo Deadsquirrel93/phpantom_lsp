@@ -30,10 +30,10 @@ Two `analyze` runs ranked this document:
 
 - **A legacy online store** (main 18.0, core committed, 2,400 files
   of its own under `local/`): 6,711 diagnostics, of which about 1,280
-  are the same-named-stub bug
-  ([B685](bugs.md#b685-a-same-named-class-in-a-parsed-file-hides-what-the-real-class-inherits))
-  and about 480 an unused `catch` variable reported because the
-  project's PHP version (7.4) was not detected. Of the 4,221 left, more
+  came from test doubles of core classes hiding what the real classes
+  inherit (an engine bug, fixed separately) and about 480 from an
+  unused `catch` variable reported because the project's PHP version
+  (7.4) was not detected. Of the 4,221 left, more
   than half sit in vendored libraries.
 - **A current core** (main 26.150, Business edition trial), analysing
   the components its modules ship (3,858 files): 12,624 diagnostics.
