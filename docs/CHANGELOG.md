@@ -71,6 +71,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **No highlighting flicker while typing.** Semantic highlighting, CodeLens, and document highlights no longer blank out or land a few characters away from their symbol when a request arrives before an edit has been parsed. The editor keeps what it shows until the update is ready.
 - **Conditional appends keep every path.** After `if ($a) { $c[] = 1; } if ($b) { $c[] = 2; }`, `$c` can now be `[2]` as well as `[]`, `[1]` and `[1, 2]`, so a `count()` check no longer narrows it to the wrong array. `array_key_exists()` on a union of array shapes now keeps only the shapes that can pass the check.
 - **Class constants beside a same-named property.** Go-to-definition and hover on `Config::path` or `self::path` now land on the constant, not on a `$path` property the class also declares.
 - **Truthiness checks on `void` results.** A truthiness check such as `maybe() ?: null` or `if (!$r)` on a value typed `void|string` now drops the `void`, since it is `null` at runtime, so returning the result where `?string` is declared is no longer reported.

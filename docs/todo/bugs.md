@@ -161,31 +161,3 @@ the completion reading that index before the work it waits for has
 finished, or at state leaking in from another test on the same thread.
 Find which, and make the test (or the code under it) wait for what it
 needs.
-
-### B685. Range features answer from a symbol map that lags the buffer
-
-**Impact: Low · Complexity: Medium**
-
-`did_change` rebuilds a file's symbol map on a background task, so a
-request that arrives between a keystroke and that rebuild sees a map built
-from the previous text. Inlay hints detect this with
-`SymbolMap::matches_source` and answer `ContentModified`, which keeps the
-client's current hints until the `inlayHint/refresh` sent after the commit.
-The other features that read offsets out of the map each handle it their
-own way or not at all:
-
-- Semantic tokens (`collect_tokens`) answer an empty token set, so the
-  editor drops all highlighting until the refresh repaints it (a flicker on
-  every edit that outruns the parse).
-- Code lens (`class_declaration_name_offset` and the class offsets from
-  `uri_classes_index`) and document highlight (`lookup_symbol_at_position`)
-  convert the old offsets against the new content without checking, so a
-  lens or highlight can land a keystroke's worth away from its symbol.
-
-The decline should be one shared decision rather than a per-feature one:
-every request that maps symbol-map offsets onto the current buffer answers
-`ContentModified` when the map does not match it, and relies on the refresh
-`did_change` already sends for semantic tokens, inlay hints, and code lens.
-Document highlight has no refresh, so it needs either the same decline (the
-client re-requests on the next cursor move) or to wait for the pending
-parse.

@@ -711,19 +711,25 @@ impl LanguageServer for Backend {
             uri,
             position,
             |backend, uri, position| {
-                backend.handle_with_position("document_highlight", uri, position, |content, pos| {
-                    backend
-                        .handle_document_highlight(uri, content, pos)
-                        .map(|highlights| {
-                            highlights
-                                .into_iter()
-                                .filter_map(|mut h| {
-                                    h.range = backend.try_translate_blade_range(uri, h.range)?;
-                                    Some(h)
-                                })
-                                .collect()
-                        })
-                })
+                backend.with_current_symbol_map(
+                    "document_highlight",
+                    uri,
+                    Some(position),
+                    |content, pos| {
+                        backend
+                            .handle_document_highlight(uri, content, pos?)
+                            .map(|highlights| {
+                                highlights
+                                    .into_iter()
+                                    .filter_map(|mut h| {
+                                        h.range =
+                                            backend.try_translate_blade_range(uri, h.range)?;
+                                        Some(h)
+                                    })
+                                    .collect()
+                            })
+                    },
+                )
             },
         )
         .await
@@ -883,7 +889,7 @@ impl LanguageServer for Backend {
         let u = uri.clone();
         let lenses = self
             .coalesced_whole_file("code_lens", &uri, move || {
-                backend.handle_with_uri("code_lens", &u, |content| {
+                backend.with_current_symbol_map("code_lens", &u, None, |content, _| {
                     backend.handle_code_lens(&u, content)
                 })
             })
@@ -991,7 +997,7 @@ impl LanguageServer for Backend {
         let backend = self.clone_for_blocking();
         let u = uri.clone();
         self.coalesced_whole_file("semantic_tokens_full", &uri, move || {
-            backend.handle_with_uri("semantic_tokens_full", &u, |content| {
+            backend.with_current_symbol_map("semantic_tokens_full", &u, None, |content, _| {
                 backend.handle_semantic_tokens_full(&u, content)
             })
         })
