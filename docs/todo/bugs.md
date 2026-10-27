@@ -131,17 +131,4 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B682. `test_pivot_attached_when_relation_file_was_never_opened` fails intermittently
-
-**Impact: Low · Complexity: Low-Medium**
-
-The Laravel completion test in `tests/integration/completion_laravel.rs`
-failed once in a full `cargo nextest run` and passed on every run on its
-own and in the suite runs before and after. The test calls
-`initialized()` and then completes on a model whose relationship lives in
-a file nothing opened, so its answer depends on the workspace index that
-`initialized()` builds. A result that changes with machine load points at
-the completion reading that index before the work it waits for has
-finished, or at state leaking in from another test on the same thread.
-Find which, and make the test (or the code under it) wait for what it
-needs.
+No outstanding items.
