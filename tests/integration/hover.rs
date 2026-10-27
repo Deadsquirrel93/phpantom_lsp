@@ -16980,3 +16980,40 @@ function run(): void {
     let text = markup_hover_at(&backend, &uri, 4, 13).await;
     assert!(text.contains("`Pen` *(inferred)*"), "{text}");
 }
+
+/// An override with a native return type and no docblock of its own
+/// returns its native type, not the parent's wider `@return`, whether or
+/// not its class declares a template.
+#[test]
+fn hover_override_native_return_drops_wider_inherited_classes() {
+    for template in ["", "/** @template TModel */"] {
+        let backend = create_test_backend_with_closure_stub();
+        let content = format!(
+            r#"<?php
+interface View {{ public function name(): string; }}
+interface Htmlable {{}}
+
+abstract class Component {{
+    /** @return View|Htmlable|\Closure|string */
+    abstract public function render();
+}}
+
+{template}
+final class PerPage extends Component {{
+    public function render(): View {{ throw new Exception(); }}
+}}
+
+function f(PerPage $p): void {{
+    $v = $p->render();
+    $v;
+}}
+"#
+        );
+        let hover = hover_at(&backend, "file:///test.php", &content, 16, 5)
+            .unwrap_or_else(|| panic!("expected hover on $v ({template:?})"));
+        let text = hover_text(&hover);
+        assert!(text.contains("$v = View"), "{template:?}: {text}");
+        assert!(!text.contains("Htmlable"), "{template:?}: {text}");
+        assert!(!text.contains("Closure"), "{template:?}: {text}");
+    }
+}
