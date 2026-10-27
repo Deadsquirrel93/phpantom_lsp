@@ -25,7 +25,25 @@ No outstanding items.
 
 ## Type comparison
 
-No outstanding items.
+### B686. A scalar passed to a `bool` parameter is reported outside `strict_types`
+
+**Impact: Low-Medium · Complexity: Low**
+
+```php
+function flag(bool $on): void {}
+
+flag(1);           // Argument 1 ($on) expects bool, got 1
+flag(0.5);
+flag('yes');
+microtime(1);
+```
+
+Without `declare(strict_types=1)`, PHP converts an `int`, `float`, or
+`string` argument to `bool`, so all four calls run. The non-strict
+coercions in `src/class_lookup/compatibility.rs` cover int/float to
+string, numeric string to int/float, and float to int, but not
+scalar to bool. Found in a legacy codebase where `microtime(1)` alone
+accounted for 47 reports.
 
 ## Standard-library return types
 
@@ -88,6 +106,38 @@ sources and the workspace's loose files.
 **Where to look:** `ComposerProjectPaths` in `src/workspace_env.rs`
 (each project's vendor and PSR-4 mappings are already recorded), and
 the class lookup in `src/resolution/`.
+
+### B685. A same-named class in a parsed file hides what the real class inherits
+
+**Impact: High · Complexity: Medium**
+
+```text
+core/base.php        namespace Lib; abstract class Base { public static function getList(): array { return []; } }
+core/store.php       namespace Lib; class Store extends Base {}
+local/tests/stub.php namespace Lib; class Store {}
+local/app/use.php    \Lib\Store::getList();
+```
+
+`analyze local/` reports `Method 'getList' not found on class
+'Lib\Store'`. `analyze local/app/` and `analyze .` report nothing, and
+neither does the same layout when `getList()` is declared on `Store`
+itself rather than inherited. So when the stub is parsed and the real
+declaration is known only from the scan, the name resolves to a class
+that has the real one's own members but not its parent chain, and which
+declaration wins depends on which files happen to be parsed rather than
+on the "lowest-sorting URI wins" rule the parse phase applies between
+two parsed declarations. In an editor, opening the stub's file is
+enough.
+
+Test bootstraps that declare empty doubles of framework classes behind
+`if (!class_exists(...))` are where this shows up: one Bitrix project
+lost `getList()`, `add()`, and `update()` on every core entity a test
+doubled, about 1,280 diagnostics.
+
+**Where to look:** the duplicate-declaration handling in
+`src/parser/ast_publish.rs` (`decls.declare`) and how a class known
+only from the scan is loaded against an already-parsed one of the same
+FQN.
 
 ## Code actions
 

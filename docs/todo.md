@@ -129,6 +129,26 @@ ships, remove every row that names it.
 | DR7 | [Render arrays, theme hooks, and libraries](todo/drupal.md#dr7-render-arrays-theme-hooks-and-libraries) | Medium      | Medium-High |
 | DR4 | [Entity field access](todo/drupal.md#dr4-entity-field-access) (depends on DR3) | Medium-High | High        |
 
+## 1C-Bitrix
+
+| #   | Item                                                                                                                                                            | Impact      | Complexity  |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
+| BX1 | [Bitrix demo project](todo/bitrix.md#bx1-bitrix-demo-project) | High        | Low-Medium  |
+| BX9 | [Class name case under the Bitrix loader](todo/bitrix.md#bx9-class-name-case-under-the-bitrix-loader) | Medium      | Low         |
+| BX2 | [Project discovery](todo/bitrix.md#bx2-project-discovery) | High        | Medium      |
+| T57 | [A `global` variable is untyped unless a `@var` sits above it](todo/type-inference.md#t57-a-global-variable-is-untyped-unless-a-var-sits-above-it) | Medium      | Medium      |
+| BX3 | [The globals the core creates](todo/bitrix.md#bx3-the-globals-the-core-creates) (depends on T57) | High        | Medium      |
+| BX4 | [Variables a component or template file receives](todo/bitrix.md#bx4-variables-a-component-or-template-file-receives) | High        | Medium      |
+| BX6 | [Localization messages](todo/bitrix.md#bx6-localization-messages) | High        | Medium      |
+| BX7 | [Component names, templates, and parameters](todo/bitrix.md#bx7-component-names-templates-and-parameters) | High        | Medium      |
+| BX10 | [Return types the core does not narrow](todo/bitrix.md#bx10-return-types-the-core-does-not-narrow) | Medium      | Medium      |
+| BX11 | [Module IDs, options, and events](todo/bitrix.md#bx11-module-ids-options-and-events) | Medium      | Medium      |
+| BX12 | [Include paths and agent strings](todo/bitrix.md#bx12-include-paths-and-agent-strings) (depends on BX2) | Low         | Low-Medium  |
+| C7  | [`class_alias()` support](todo/completion.md#c7-class_alias-support) | Low-Medium  | Medium-High |
+| BX5 | [Class aliases the loader registers](todo/bitrix.md#bx5-class-aliases-the-loader-registers) (depends on C7) | High        | Medium      |
+| E7  | [Stub-based framework patches](todo/external-stubs.md#e7-stub-based-framework-patches) | Medium      | Medium-High |
+| BX8 | [ORM entity objects](todo/bitrix.md#bx8-orm-entity-objects) (depends on BX5) | Medium-High | Medium-High |
+
 ## PHPUnit & Pest
 
 | #   | Item                                                                                                                                                            | Impact      | Complexity  |
